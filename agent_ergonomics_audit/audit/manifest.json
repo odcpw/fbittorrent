@@ -1,0 +1,24 @@
+{
+  "tool_name": "fbittorrent",
+  "tool_repo": ".",
+  "audit_workspace": "agent_ergonomics_audit",
+  "target_branch": "main",
+  "current_pass": 1,
+  "rubric_version": "1.0",
+  "contract_version": "1.0.0",
+  "mode": "full",
+  "tier": "solo",
+  "passes": [
+    {
+      "pass": 1,
+      "date": "2026-09-03",
+      "pre_sha": "287bf1d",
+      "applied_changes_count": 12,
+      "dimensions_touched": ["agent_intuitiveness", "agent_ergonomics", "agent_ease_of_use", "output_parseability", "error_pedagogy", "intent_inference", "safety_with_recovery", "self_documentation", "regression_resistance"],
+      "median_pre": 330,
+      "median_post": 875,
+      "regressions": 0,
+      "artifacts": ["audit/scorecard.md", "audit/applied_changes.jsonl", "audit/HANDOFF.md", "audit/regression_tests/run.sh"]
+    }
+  ]
+}

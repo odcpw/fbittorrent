@@ -50,26 +50,47 @@ Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 
 ## CLI
 
+Every command takes `--json` and prints one JSON object; errors become
+`{"ok":false,"code":N,"code_name":"…","error":"…","hint":"<runnable command>"}` with
+the same exit code. Torrents are selected by hash prefix, a unique part of the
+name, or `all`.
+
 ```
-fbittorrent                          open the TUI (starts the backend if needed)
-fbittorrent tui [--search|--rss]     same, starting on a given screen
-fbittorrent add <magnet|url>         add with default flags, desktop notification
-fbittorrent add-clipboard            add whatever magnet/URL is on the clipboard
-fbittorrent status [--json]          rates and counts; never starts the backend
-fbittorrent list [--active]          torrents with hash prefix, %, speed, eta, S/F flags
-fbittorrent start|stop|delete <hash-prefix>...   (delete --files removes data)
-fbittorrent seq|first-last <hash>    toggle flags
-fbittorrent seed|noseed <hash>...    allow / forbid uploading for a torrent (cap = 32 KiB/s)
-fbittorrent reconcile [--recent N]   enforce default flags on torrents added elsewhere
+fbittorrent                          TUI on a terminal; `triage --json` when stdout is not a TTY
+fbittorrent triage --json            backend, rates, torrents, warnings, next commands (one call)
+fbittorrent capabilities             machine-readable contract: commands, exit codes, conventions
+fbittorrent robot-docs               agent handbook
+fbittorrent search <query> --json    best-seeded results with magnet links (--limit, --wait)
+fbittorrent add <magnet|url> --json  returns the hash; --wait [--timeout S] blocks until complete
+fbittorrent wait <sel>... --timeout S   progress on stderr; exit 0 done, 8 timeout
+fbittorrent show <sel> --json        one torrent with files and open_target
+fbittorrent list | ls                all torrents (hash, %, speed, eta, S/F/U flags)
+fbittorrent start|stop|seed|noseed|seq|first-last <sel>...
+fbittorrent delete <sel> [--files --yes] [--dry-run]   data kept unless --files
+fbittorrent open <sel>               the file, or the folder
 fbittorrent rss list|add|remove|refresh|items|grab
-fbittorrent search <query> [--wait S]
-fbittorrent search --install         official + curated community providers (17 total)
-fbittorrent search --install-url <url>   any qBittorrent search plugin (.py) from a URL
-fbittorrent search --plugins         list installed providers
+fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
 fbittorrent up | down                start / stop qbittorrent-nox
-fbittorrent config                   effective config (~/.config/fbittorrent/config.toml)
+fbittorrent status                   rates and counts; never starts the backend
+fbittorrent config | setup [--magnet] | register-magnet
 ```
+
+Exit codes: 0 ok · 1 failure · 2 usage · 3 safety (needs `--yes`) · 4 backend down ·
+5 upstream · 6 not found · 7 ambiguous · 8 timeout.
+
+### For agents
+
+```
+fbittorrent robot-docs                                   # read once
+fbittorrent triage --json                                # what is the state?
+fbittorrent search "Sintel 2010" --json | jq '.results[0].fileUrl'
+fbittorrent add "<magnet>" --wait --timeout 3600 --json  # {"ok":true,"complete":true,"torrents":[{open_target…}]}
+fbittorrent show <hash> --json | jq -r .open_target
+```
+
+The audit that produced this surface lives in `agent_ergonomics_audit/` (scorecard,
+applied changes, handoff, and `regression_tests/run.sh`).
 
 ## Config
 
