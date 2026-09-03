@@ -29,6 +29,9 @@ FrankenTUI app, and a CLI that doubles as the `magnet:` handler.
   and an IMDB column with the rating: instant for sources that carry IMDb ids
   (browse lists), filled in for others once their title lookup completes.
   Duplicate torrents from several providers are collapsed by info hash.
+- **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
+  desktop handler owns both), the clipboard, the TUI (`a`, with F2/F3/F4 to flip
+  sequential, first/last and upload for that one add), or the CLI.
 - **File selection.** Enter on a torrent opens its file list: Space toggles a
   file, `1`/`2`/`3` set normal/high/max priority, `a`/`n` select all or none.
 - **Themed** from the active Omarchy theme, live, no template needed.
@@ -61,7 +64,7 @@ fbittorrent triage --json            backend, rates, torrents, warnings, next co
 fbittorrent capabilities             machine-readable contract: commands, exit codes, conventions
 fbittorrent robot-docs               agent handbook
 fbittorrent search <query> --json    best-seeded results with magnet links (--limit, --wait)
-fbittorrent add <magnet|url> --json  returns the hash; --wait [--timeout S] blocks until complete
+fbittorrent add <magnet|url|.torrent> --json   returns the hash; --wait [--timeout S] blocks until complete
 fbittorrent wait <sel>... --timeout S   progress on stderr; exit 0 done, 8 timeout
 fbittorrent show <sel> --json        one torrent with files and open_target
 fbittorrent list | ls                all torrents (hash, %, speed, eta, S/F/U flags)
@@ -139,6 +142,28 @@ official `jackett.py` plugin works once you have one of those running.
 domain does not resolve from this network (its mirrors redirect back to it), so
 those entries open the site in your browser instead of loading a list. The
 Pirate Bay (`apibay.org`) and EZTV publish plain JSON and work in the TUI.
+
+## Security
+
+The WebUI listens on 127.0.0.1 only and skips authentication for localhost, which
+is what makes the CLI and widget instant. Two qBittorrent protections stay ON and
+`setup` enforces them on every run: CSRF protection and host-header validation.
+Without them any web page you visit could POST to `localhost:8080` and add or
+delete torrents. fbittorrent sends no `Origin` header and talks to the loopback
+host, so both checks pass for it while a browser-originated request gets 401.
+
+## Tests
+
+```
+agent_ergonomics_audit/audit/regression_tests/all.sh   # everything below
+cargo test --release                                   # client against a mock WebUI, release-name parser
+…/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
+…/regression_tests/tui_smoke.sh                        # drives the TUI in tmux: list, files modal, prompt toggles, screens, help, quit
+…/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
+```
+
+The last three need a startable qbittorrent-nox; the widget test also needs the
+Omarchy shell running with the plugin enabled.
 
 ## Notes
 

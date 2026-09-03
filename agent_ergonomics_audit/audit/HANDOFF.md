@@ -16,9 +16,19 @@ exit-code dictionary + typed errors + JSON error envelope, `--json` on every com
 `add` returns the hash and can `--wait`, new `wait` and `show`, `delete --files` gated
 by `--yes` with `--dry-run`, name-substring selectors with ambiguity reporting, aliases.
 
+## Reality-check follow-up (same day)
+
+Six gaps found by the reality check were fixed directly, no beads: secure WebUI
+defaults in `setup` (CSRF + host-header validation on), `.torrent` file input for
+`add` (multipart upload, `file://` accepted), a lock around the ratings-dataset
+refresh, JSON-only stdout for `setup --json`, per-add F2/F3/F4 toggles in the TUI
+prompt, and three test layers (`cargo test` with a mock WebUI, `tui_smoke.sh`,
+`widget_keys.sh`; `all.sh` runs them all). Two widget nits surfaced by the keyboard
+test were fixed too: the cursor parks on the rows once they arrive, and the header
+index resets on open.
+
 ## Deferred to pass 2
 
-- `.torrent` file input for `add` (today: magnet or URL only; the error says so and points at `search`).
 - `search` in the CLI still runs synchronously up to `--wait` seconds; a `--stream` NDJSON mode would let agents act on early results.
 - A `doctor` command (backend health, plugin health, dataset freshness) — `triage.warnings` covers the basics.
 - Per-command JSON schema export (`capabilities --schema`) if a consumer needs strict typing.
