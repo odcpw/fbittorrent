@@ -302,7 +302,7 @@ pub fn resolve_id(release_name: &str) -> Option<String> {
     }
     let r = crate::release::parse(release_name);
     if r.title.is_empty() { return None; }
-    let mut cands = search(&r.title, r.year).ok()?;
+    let mut cands = candidates(&r).ok()?;
     if cands.is_empty() {
         cache_write("by-name", release_name, &serde_json::json!({"missing": true}));
         return None;
@@ -310,6 +310,17 @@ pub fn resolve_id(release_name: &str) -> Option<String> {
     let t = cands.remove(0);
     cache_write("by-name", release_name, &serde_json::json!({"id": t.id}));
     Some(t.id)
+}
+
+/// IMDb suggestions for a parsed release. An episode number means a show, so TV
+/// titles go first: "The Ghost in the Shell S01E09" must not land on a film.
+fn candidates(r: &crate::release::Release) -> Result<Vec<Title>> {
+    let mut out = search(&r.title, r.year)?;
+    if r.episode.is_some() {
+        let (tv, rest): (Vec<_>, Vec<_>) = out.into_iter().partition(|t| t.kind.to_ascii_lowercase().starts_with("tv"));
+        out = tv; out.extend(rest);
+    }
+    Ok(out)
 }
 
 /// Best-effort full lookup for a release name: title + rating + blurb.
@@ -325,7 +336,7 @@ pub fn lookup(release_name: &str) -> Result<Option<Title>> {
     }
     let r = crate::release::parse(release_name);
     if r.title.is_empty() { return Ok(None); }
-    let mut cands = search(&r.title, r.year)?;
+    let mut cands = candidates(&r)?;
     if cands.is_empty() {
         cache_write("by-name", release_name, &serde_json::json!({"missing": true}));
         return Ok(None);

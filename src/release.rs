@@ -16,11 +16,26 @@ const STOP: &[&str] = &[
 ];
 
 pub fn parse(name: &str) -> Release {
-    // Split on the usual separators, keep apostrophes inside words.
-    let cleaned = name.replace(['.', '_', '[', ']', '(', ')', '{', '}'], " ");
+    // Anime releases lead with the group tag: "[Ironclad] Title - S01E09", "[SubsPlease] Title - 1176".
+    let mut name = name.trim();
+    while name.starts_with('[') {
+        match name.find(']') { Some(end) => name = name[end + 1..].trim_start(), None => break }
+    }
     let mut title = Vec::new();
     let mut year = None;
     let mut episode = None;
+    // "Title - 1176 (1080p)": a bare number after " - " is an absolute episode number.
+    if let Some(i) = name.find(" - ") {
+        let tail = &name[i + 3..];
+        let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let ends = tail[digits.len()..].chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(true);
+        if !digits.is_empty() && ends && as_year(&digits).is_none() {
+            episode = Some(digits);
+            name = &name[..i];
+        }
+    }
+    // Split on the usual separators, keep apostrophes inside words.
+    let cleaned = name.replace(['.', '_', '[', ']', '(', ')', '{', '}'], " ");
     let toks: Vec<&str> = cleaned.split_whitespace()
         .map(|raw| raw.trim_matches(|c: char| c == '-' || c == ','))
         .filter(|t| !t.is_empty())
@@ -34,6 +49,10 @@ pub fn parse(name: &str) -> Release {
             if next_is_year { title.push(tok.to_string()); continue; }
         }
         if is_episode(&low) { episode = Some(low.to_uppercase()); break; }
+        // "0001-1071+Movies", "1176": an episode range or a 4+ digit non-year number ends the
+        // title. Short numbers stay ("District 9", "Apollo 13").
+        if !title.is_empty() && low.starts_with(|c: char| c.is_ascii_digit()) && as_year(&low).is_none()
+            && (low.contains('-') || low.contains('+') || low.chars().all(|c| c.is_ascii_digit()) && low.len() >= 4) { break; }
         if STOP.contains(&low.as_str()) { break; }
         if low.starts_with("s0") || low.starts_with("s1") || low.starts_with("s2") {
             if low.len() == 3 && low[1..].chars().all(|c| c.is_ascii_digit()) { break; } // "S01"
@@ -78,8 +97,17 @@ mod tests {
         let r = parse("The.Bear.S03E04.1080p.WEB.h264-ETHEL[TGx]");
         assert_eq!(r.title, "The Bear"); assert_eq!(r.episode.as_deref(), Some("S03E04"));
         let r = parse("ubuntu-24.04.2-desktop-amd64.iso");
-        assert_eq!(r.title, "ubuntu-24 04 2-desktop-amd64 iso");
+        assert_eq!(r.title, "ubuntu-24 04"); // not media; only matters that it does not panic
         let r = parse("Blade Runner 2049 (2017) [1080p] [YTS]");
         assert_eq!(r.title, "Blade Runner 2049"); assert_eq!(r.year, Some(2017));
+    }
+    #[test]
+    fn anime_group_tags_and_absolute_episodes() {
+        let r = parse("[Ironclad] THE GHOST IN THE SHELL - S01E09 [WEB.1080p.AV1] [Multi-Audio, Multi-Subs] (Weekly)");
+        assert_eq!(r.title, "THE GHOST IN THE SHELL"); assert_eq!(r.episode.as_deref(), Some("S01E09"));
+        let r = parse("[SubsPlease] One Piece - 1176 (1080p) [8855DEBC].mkv");
+        assert_eq!(r.title, "One Piece"); assert_eq!(r.episode.as_deref(), Some("1176"));
+        let r = parse("[Anime Time] One Piece (0001-1071+Movies+Specials) [BD+CR]");
+        assert_eq!(r.title, "One Piece");
     }
 }
