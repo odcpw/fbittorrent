@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run every fbittorrent test layer. Exit non-zero if any layer fails.
-set -u
+set -u -o pipefail
 cd "$(dirname "$0")/../../.." || exit 1
 export PATH="$HOME/.rustup/toolchains/1.98.0-x86_64-unknown-linux-gnu/bin:$PATH"
 rc=0

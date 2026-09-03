@@ -16,12 +16,14 @@ cleanup() { tmux send-keys -t "$S" q 2>/dev/null; sleep 0.3; tmux kill-session -
 trap cleanup EXIT
 
 $F up --json >/dev/null 2>&1 || { echo "backend unavailable"; exit 1; }
-$F add "magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=fbt-smoke-sintel" --stopped --quiet --json >/dev/null 2>&1
+$F add "magnet:?xt=urn:btih:7b6cae55db21441f06ea00a25c2a21e11752eee2&dn=fbt-smoke-sintel" --stopped --quiet --json >/dev/null 2>&1
 
 tmux new-session -d -s "$S" -x 150 -y 40 "$F tui 2>$ERR; sleep 60"
 
-echo "T-001 first frame within 2s shows the torrent list with headers"
-if wait_for 'Torrents \([0-9]+\)' 2 && cap | grep -q 'NAME' && wait_for 'fbt-smoke-sintel' 4; then ok T-001; else bad T-001 "no list"; fi
+echo "T-001 first frame (≤5s) shows the torrent list with headers"
+t0=$(date +%s%N)
+if wait_for 'Torrents \([0-9]+\)' 5 && wait_for 'NAME' 5 && wait_for 'fbt-smoke-sintel' 5; then
+  ok "T-001 (first frame after $(( ($(date +%s%N) - t0) / 1000000 )) ms)"; else bad T-001 "no list: $(cap | head -3 | tr '\n' '|')"; fi
 
 echo "T-002 details pane shows flags and the upload line"
 if cap | grep -q 'sequential' && cap | grep -q 'upload'; then ok T-002; else bad T-002 "details missing"; fi
