@@ -178,3 +178,16 @@ fn rfc2822_dates_parse_and_sort_newest_first() {
     assert_eq!(ymd(a), "2026-09-02");
     assert_eq!(parse_rfc2822("garbage"), 0);
 }
+
+#[test]
+fn community_plugin_list_is_clean() {
+    // qBittorrent installs by URL and names the engine after the file stem, so duplicates
+    // or non-.py entries would silently shadow or fail. Every entry must be https and unique.
+    let mut stems = std::collections::HashSet::new();
+    for url in COMMUNITY_SEARCH_PLUGINS {
+        assert!(url.starts_with("https://") && url.ends_with(".py"), "{url}");
+        let stem = url.rsplit('/').next().unwrap().trim_end_matches(".py");
+        assert!(stems.insert(stem), "duplicate engine {stem}");
+    }
+    assert!(stems.contains("nyaasi") && !stems.contains("nyaa"), "nyaa.si engine expected, Sukebei one not");
+}

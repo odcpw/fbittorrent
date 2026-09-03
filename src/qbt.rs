@@ -223,7 +223,8 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
     "https://raw.githubusercontent.com/LightDestory/qBittorrent-Search-Plugins/master/src/engines/snowfl.py",
     "https://raw.githubusercontent.com/444995/qbit-search-plugins/main/engines/zooqle.py",
     "https://raw.githubusercontent.com/DrPurp/eztvx-qbittorrent-plugin/main/eztvx.py",
-    "https://raw.githubusercontent.com/phuongtailtranminh/qBittorrent-Nyaa-Search-Plugin/master/nyaa.py",
+    // nyaa.si proper. Not phuongtailtranminh/nyaa.py: that one scrapes Sukebei and imports bs4, which qBittorrent's Python lacks.
+    "https://raw.githubusercontent.com/MadeOfMagicAndWires/qBit-plugins/main/engines/nyaasi.py",
 ];
 
 pub struct AddOptions {

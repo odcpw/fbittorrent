@@ -131,7 +131,7 @@ plugin/oliver.torrents/   Omarchy shell bar widget (Quickshell/QML)
 `fbittorrent search --install` installs the official engines (eztv, limetorrents,
 piratebay, solidtorrents, torlock, torrentproject, torrentscsv) plus a curated set
 from the community wiki (yts, torrentgalaxy, magnetdl, therarbg, bitsearch,
-torrentdownloads, kickasstorrents, snowfl, zooqle, eztvx, nyaa). Add any other
+torrentdownloads, kickasstorrents, snowfl, zooqle, eztvx, nyaasi). Add any other
 plugin from <https://github.com/qbittorrent/search-plugins/wiki/Unofficial-search-plugins>
 with `--install-url`. Private trackers usually need Jackett or Prowlarr; the
 official `jackett.py` plugin works once you have one of those running.
