@@ -4,6 +4,8 @@ mod browse;
 mod config;
 mod imdb;
 mod qbt;
+#[cfg(test)]
+mod qbt_tests;
 mod release;
 mod setup;
 mod tui;
@@ -68,7 +70,7 @@ enum Cmd {
     /// Add a magnet link or URL. Sequential + first/last piece on, upload off, by default.
     #[command(alias = "download", alias = "get")]
     Add {
-        /// magnet:?… or http(s) URL of a .torrent
+        /// magnet:?…, http(s) URL, or a local .torrent file (file:// accepted)
         source: String,
         /// Do not enable sequential download
         #[arg(long)]
@@ -398,9 +400,34 @@ fn run(cli: Cli) -> Result<Code> {
                 save_path: save.or(cfg.save_path.clone()),
                 category: category.or(cfg.category.clone()),
             };
-            if std::path::Path::new(&source).is_file() {
-                return Err(AppError::new(Code::Usage, ".torrent files are not accepted yet; pass a magnet link or an http(s) URL")
-                    .hint("fbittorrent search \"<title>\" --json   # results carry magnet links").into());
+            // Local .torrent file: the desktop handler passes file:// URLs, users pass paths.
+            let local = source.strip_prefix("file://").map(|p| percent_decode(p)).unwrap_or_else(|| source.clone());
+            if std::path::Path::new(&local).is_file() {
+                let bytes = std::fs::read(&local)?;
+                if !bytes.starts_with(b"d") {
+                    return Err(AppError::new(Code::Usage, format!("'{}' is not a .torrent file (bencoded data expected)", short(&local, 60)))
+                        .hint("fbittorrent add \"<magnet or URL>\"").into());
+                }
+                let filename = std::path::Path::new(&local).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| "file.torrent".into());
+                let before: std::collections::HashSet<String> = c.torrents()?.into_iter().map(|t| t.hash).collect();
+                if let Err(e) = c.add_file(&filename, &bytes, &opts) {
+                    if cfg.notify && !quiet { notify("Torrent add failed", &e.to_string(), true); }
+                    return Err(e);
+                }
+                std::thread::sleep(Duration::from_millis(400));
+                let added = c.torrents()?.into_iter().find(|t| !before.contains(&t.hash));
+                let (hash, name) = match &added { Some(t) => (Some(t.hash.clone()), t.name.clone()), None => (None, filename.clone()) };
+                if cfg.notify && !quiet { notify("Torrent added", &name, false); }
+                if wait {
+                    let Some(h) = hash.clone() else {
+                        return Err(AppError::new(Code::Failure, "added, but could not determine the torrent hash to wait for")
+                            .hint("fbittorrent list --json   # find it by name, then `fbittorrent wait <hash>`").into());
+                    };
+                    return wait_for(&c, vec![h], timeout, 2, json);
+                }
+                emit(json, serde_json::json!({"ok": true, "action": "add", "hash": hash, "name": name, "source": "file", "sequential": opts.sequential, "first_last": opts.first_last, "seed": opts.seed, "stopped": stopped}),
+                    || println!("added: {name}{}", hash.as_deref().map(|h| format!("  ({})", &h[..8.min(h.len())])).unwrap_or_default()));
+                return Ok(Code::Ok);
             }
             if !(source.starts_with("magnet:") || source.starts_with("http://") || source.starts_with("https://")) {
                 return Err(AppError::new(Code::Usage, format!("'{}' is not a magnet link or URL", short(&source, 60)))

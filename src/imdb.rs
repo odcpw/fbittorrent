@@ -124,7 +124,13 @@ pub fn ratings_stale() -> bool {
 }
 
 /// Download and unpack the official ratings dataset (about 9 MB gzipped).
+static REFRESH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn refresh_ratings() -> Result<()> {
+    // Several background tasks may notice staleness at once (index loader, hover
+    // lookups); only one downloads, the others find a fresh file when they get the lock.
+    let _guard = REFRESH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if !ratings_stale() { return Ok(()); }
     std::fs::create_dir_all(cache_dir())?;
     let mut resp = agent(120).get(RATINGS_URL).call().context("ratings dataset download")?;
     if resp.status().as_u16() != 200 { return Err(anyhow!("ratings dataset HTTP {}", resp.status())); }

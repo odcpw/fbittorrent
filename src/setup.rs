@@ -34,22 +34,22 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     if !qcfg.exists() {
         std::fs::create_dir_all(&qcfg_dir)?;
         let body = format!(
-            "[LegalNotice]\nAccepted=true\n\n[BitTorrent]\nSession\\DefaultSavePath={save}\nSession\\Port=6881\n\n[Preferences]\nWebUI\\Enabled=true\nWebUI\\Address=127.0.0.1\nWebUI\\Port={port}\nWebUI\\LocalHostAuth=false\nWebUI\\CSRFProtection=false\nWebUI\\HostHeaderValidation=false\nGeneral\\Locale=en\n"
+            "[LegalNotice]\nAccepted=true\n\n[BitTorrent]\nSession\\DefaultSavePath={save}\nSession\\Port=6881\n\n[Preferences]\nWebUI\\Enabled=true\nWebUI\\Address=127.0.0.1\nWebUI\\Port={port}\nWebUI\\LocalHostAuth=false\nWebUI\\CSRFProtection=true\nWebUI\\HostHeaderValidation=true\nGeneral\\Locale=en\n"
         );
         std::fs::write(&qcfg, body)?;
-        println!("wrote {}", qcfg.display());
+        eprintln!("wrote {}", qcfg.display());
     } else {
-        println!("kept existing {}", qcfg.display());
+        eprintln!("kept existing {}", qcfg.display());
     }
 
     let unit_dir = home.join(".config/systemd/user");
     std::fs::create_dir_all(&unit_dir)?;
     let unit = unit_dir.join("qbittorrent-nox.service");
     std::fs::write(&unit, UNIT)?;
-    println!("wrote {}", unit.display());
+    eprintln!("wrote {}", unit.display());
 
     let fcfg = crate::config::Config::write_default_if_missing()?;
-    println!("config at {}", fcfg.display());
+    eprintln!("config at {}", fcfg.display());
 
     // On-demand only: never enabled at login. `fbittorrent` starts it when needed.
     for args in [
@@ -65,9 +65,17 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     let client = crate::qbt::Client::from_config(&cfg);
     if crate::backend::ensure_running(&cfg, &client).is_ok() {
         let _ = client.login();
-        let _ = client.set_preferences(&serde_json::json!({ "save_path": save }));
+        // Local auth stays off (the WebUI only listens on 127.0.0.1), but CSRF and
+        // host-header checks must stay ON: without them any web page you visit could
+        // POST to localhost and add or delete torrents. fbittorrent sends no Origin
+        // header and uses the loopback host, so both checks pass for it.
+        let _ = client.set_preferences(&serde_json::json!({
+            "save_path": save,
+            "web_ui_csrf_protection_enabled": true,
+            "web_ui_host_header_validation_enabled": true,
+        }));
     }
-    println!("qbittorrent-nox is running on http://127.0.0.1:{port} (on demand; `fbittorrent down` stops it)");
+    eprintln!("qbittorrent-nox is running on http://127.0.0.1:{port} (on demand; `fbittorrent down` stops it)");
     Ok(())
 }
 
@@ -86,6 +94,6 @@ pub fn register_magnet_handler() -> Result<()> {
         if !st.success() { bail!("xdg-mime default failed for {mime}"); }
     }
     let _ = Command::new("update-desktop-database").arg(&apps).status();
-    println!("magnet: and .torrent links now open with {}", exe.display());
+    eprintln!("magnet: and .torrent links now open with {}", exe.display());
     Ok(())
 }

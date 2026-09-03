@@ -103,12 +103,18 @@ Panel {
       cursorActive = false
       focusSection = rows.length > 0 ? "rows" : "header"
       rowIndex = 0
+      headerIndex = 0
       if (panelFlick) panelFlick.contentY = 0
       svc.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     }
   }
-  onRowsChanged: ensureCursor()
+  onRowsChanged: {
+    // Rows usually land a moment after the popup opens; until the user has moved
+    // the cursor, keep it parked on the list so the first j goes down the torrents.
+    if (!cursorActive && rows.length > 0 && focusSection === "header") focusSection = "rows"
+    ensureCursor()
+  }
 
   Service {
     id: svc
@@ -125,6 +131,11 @@ Panel {
     function refresh(): string { svc.refresh(); return "ok" }
     function addClipboard(): string { svc.addFromClipboard(); return "ok" }
     function tui(): string { root.openTui(); return "ok" }
+    // Test hook: where the keyboard cursor is. Lets a script verify key handling
+    // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
+    function cursor(): string {
+      return JSON.stringify({ section: root.focusSection, row: root.rowIndex, header: root.headerIndex, active: root.cursorActive, rows: root.rows.length, opened: root.opened })
+    }
   }
 
   BarIconButton {

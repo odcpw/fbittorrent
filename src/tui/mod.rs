@@ -58,6 +58,18 @@ struct Prompt {
     label: String,
     input: TextInput,
     yes_no: bool,
+    /// Per-add overrides for the magnet prompt: (sequential, first/last, allow upload).
+    add_flags: (bool, bool, bool),
+}
+
+impl Prompt {
+    /// Title with the live flag state, so the toggles are discoverable while typing.
+    fn title(&self) -> String {
+        if self.kind != PromptKind::AddMagnet { return self.label.clone(); }
+        let (s, f, u) = self.add_flags;
+        format!("{}  ·  F2 sequential:{}  F3 first/last:{}  F4 upload:{} ", self.label,
+            if s { "on" } else { "off" }, if f { "on" } else { "off" }, if u { "on" } else { "off" })
+    }
 }
 
 struct ProvidersModal {
@@ -550,7 +562,8 @@ impl TuiApp {
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no });
+        let add_flags = (self.cfg.sequential, self.cfg.first_last, self.cfg.seed_by_default);
+        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 
     fn close_prompt(&mut self) {
@@ -662,15 +675,22 @@ impl TuiApp {
         }
         match k.code {
             KeyCode::Escape => { self.close_prompt(); Cmd::none() }
+            KeyCode::F(2) if p.kind == PromptKind::AddMagnet => { p.add_flags.0 = !p.add_flags.0; Cmd::none() }
+            KeyCode::F(3) if p.kind == PromptKind::AddMagnet => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
+            KeyCode::F(4) if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             KeyCode::Enter => {
                 let value = p.input.value().trim().to_string();
                 let kind = p.kind.clone();
+                let (seq, fl, seed) = p.add_flags;
                 self.close_prompt();
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {
                         let label = crate::magnet_name(&value).unwrap_or_else(|| value.chars().take(40).collect());
-                        self.add_url(value, label)
+                        let mut opts = self.add_opts();
+                        opts.sequential = seq; opts.first_last = fl; opts.seed = seed;
+                        let flags = format!("{}{}{}", if seq { "S" } else { "" }, if fl { "F" } else { "" }, if seed { "U" } else { "" });
+                        self.action(format!("added {label} [{flags}]"), move |c| c.add_url(&value, &opts))
                     }
                     PromptKind::AddFeed => {
                         let name = crate::host_of(&value);
@@ -1079,7 +1099,8 @@ impl Model for TuiApp {
             Screen::Rss => self.view_rss(root[1], frame),
         }
         if let Some(p) = &self.prompt {
-            let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&p.label).padding(Sides::horizontal(1));
+            let title = p.title();
+            let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title).padding(Sides::horizontal(1));
             let inner = block.inner(root[2]);
             block.render(root[2], frame);
             if p.yes_no {
@@ -1521,7 +1542,8 @@ impl TuiApp {
         block.render(area, frame);
         let text = "\
 GLOBAL      1/2/3, Tab  switch screen        q quit   Q quit + stop qBittorrent
-            a add magnet/URL   c add from clipboard   r refresh   ? this help
+            a add magnet/URL (F2/F3/F4 toggle sequential / first-last / upload)
+            c add from clipboard   r refresh   ? this help
 
 TORRENTS    j/k move   Enter choose files + priorities   p pause/resume
             d remove   D delete with files   u allow/forbid upload (seeding)

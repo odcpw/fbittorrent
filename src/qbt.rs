@@ -299,6 +299,35 @@ impl Client {
         Ok(body)
     }
 
+    /// multipart/form-data POST with one file part (for `torrents/add` with a .torrent).
+    fn post_multipart(&self, path: &str, fields: &[(&str, &str)], file_field: &str, filename: &str, bytes: &[u8]) -> Result<String> {
+        let boundary = format!("----fbittorrent{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        let mut body: Vec<u8> = Vec::with_capacity(bytes.len() + 1024);
+        for (k, v) in fields {
+            body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+        }
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{}\"\r\nContent-Type: application/x-bittorrent\r\n\r\n", filename.replace('"', "_")).as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let url = self.url(path);
+        let do_post = |body: &[u8]| -> Result<(u16, String)> {
+            let mut resp = self.agent.post(&url)
+                .header("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+                .send(body)
+                .context("connecting to qBittorrent")?;
+            let status = resp.status().as_u16();
+            let text = resp.body_mut().read_to_string()?;
+            Ok((status, text))
+        };
+        let (mut status, mut text) = do_post(&body)?;
+        if status == 403 && self.username.is_some() {
+            self.login()?;
+            (status, text) = do_post(&body)?;
+        }
+        check(status, &text, path)?;
+        Ok(text)
+    }
+
     fn post(&self, path: &str, form: &[(&str, &str)]) -> Result<String> {
         let url = self.url(path);
         let do_post = || -> Result<(u16, String)> {
@@ -355,18 +384,29 @@ impl Client {
             form.push(("tags", SEED_TAG));
         }
         let body = self.post("torrents/add", &form)?;
-        let b = body.trim();
-        if b == "Ok." { return Ok(()); }
-        // qBittorrent >= 5.1 answers with a JSON summary instead of "Ok.".
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(b) {
-            let ok = v.get("success_count").and_then(|n| n.as_i64()).unwrap_or(0)
-                + v.get("pending_count").and_then(|n| n.as_i64()).unwrap_or(0);
-            let failed = v.get("failure_count").and_then(|n| n.as_i64()).unwrap_or(0);
-            if ok > 0 && failed == 0 { return Ok(()); }
-            if failed > 0 { bail!("qBittorrent could not add the torrent (already present or invalid)"); }
-        }
-        bail!("qBittorrent rejected the torrent: {b}")
+        add_response_ok(&body)
     }
+    /// Add a .torrent file (bytes). Same defaults as `add_url`.
+    pub fn add_file(&self, filename: &str, bytes: &[u8], o: &AddOptions) -> Result<()> {
+        let no_up = NO_UPLOAD_LIMIT.to_string();
+        let mut fields: Vec<(&str, &str)> = vec![
+            ("sequentialDownload", bool_s(o.sequential)),
+            ("firstLastPiecePrio", bool_s(o.first_last)),
+            ("stopped", bool_s(o.stopped)),
+        ];
+        if let Some(p) = &o.save_path { fields.push(("savepath", p)); }
+        if let Some(c) = &o.category { fields.push(("category", c)); }
+        if !o.seed {
+            fields.push(("upLimit", &no_up));
+            fields.push(("ratioLimit", "0"));
+            fields.push(("shareLimitAction", "Stop"));
+        } else {
+            fields.push(("tags", SEED_TAG));
+        }
+        let body = self.post_multipart("torrents/add", &fields, "torrents", filename, bytes)?;
+        add_response_ok(&body)
+    }
+
     pub fn start(&self, hashes: &[String]) -> Result<()> {
         self.post("torrents/start", &[("hashes", &hashes.join("|"))])?;
         Ok(())
@@ -553,6 +593,20 @@ fn walk_rss(node: &serde_json::Value, prefix: &str, out: &mut Vec<RssFeed>) {
             walk_rss(v, &path, out);
         }
     }
+}
+
+/// qBittorrent < 5.1 answers "Ok."; newer versions return a JSON summary.
+fn add_response_ok(body: &str) -> Result<()> {
+    let b = body.trim();
+    if b == "Ok." { return Ok(()); }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(b) {
+        let ok = v.get("success_count").and_then(|n| n.as_i64()).unwrap_or(0)
+            + v.get("pending_count").and_then(|n| n.as_i64()).unwrap_or(0);
+        let failed = v.get("failure_count").and_then(|n| n.as_i64()).unwrap_or(0);
+        if ok > 0 && failed == 0 { return Ok(()); }
+        if failed > 0 { bail!("qBittorrent could not add the torrent (already present or invalid)"); }
+    }
+    bail!("qBittorrent rejected the torrent: {b}")
 }
 
 fn check(status: u16, body: &str, path: &str) -> Result<()> {
