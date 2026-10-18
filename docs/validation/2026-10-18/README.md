@@ -136,3 +136,7 @@ Receipt: [P0-05.md](P0-05.md) (branch ntm/fbittorrent/cod_4, commit d4eb8fa; mer
 ## P0-02
 
 Receipt: [P0-02.md](P0-02.md) (branch ntm/fbittorrent/cod_3, commit cf92a57; merged by the orchestrator after re-running the 63 timer-wheel tests in the prepared upstream checkout).
+
+## Incident: swarm killed by systemd-oomd
+
+Report: [incident-tmux-death.md](incident-tmux-death.md) (orchestrator investigation, 2026-10-18).
