@@ -83,6 +83,8 @@ struct Inner {
     max_active_downloads: AtomicUsize,
     network_blocked: AtomicBool,
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
+    // Removing/retrying an intent does not end the previous task's cleanup.
+    retired_restores: std::sync::Mutex<Vec<task::JoinHandle<()>>>,
     // Initializing.paused is transfer intent, not check activity. Only a
     // successfully drained pause cancels an initial check. Track the handle
     // identity so rebuilding the same hash cannot inherit an old cancellation.
@@ -176,6 +178,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
         network_blocked: AtomicBool::new(false),
         restores: std::sync::Mutex::new(HashMap::new()),
+        retired_restores: std::sync::Mutex::new(Vec::new()),
         cancelled_checks: std::sync::Mutex::new(HashMap::new()),
     });
     let records = runtime.block_on(async {
@@ -252,8 +255,9 @@ fn drain_failure(message: &str, detail: Option<String>) -> String {
     }
 }
 
-impl Drop for AppEngine {
-    fn drop(&mut self) {
+impl AppEngine {
+    // Drop uses the production budget; tests exercise the same path with a short fuse.
+    fn drain(&mut self, bound: Duration) -> bool {
         let began = std::time::Instant::now();
         self.dispatcher
             .inner
@@ -265,26 +269,85 @@ impl Drop for AppEngine {
         if let Some(server) = self.server.as_mut() {
             server.stop_accepting();
         }
+        let mut drained = true;
         if let Some(runtime) = self.runtime.take() {
-            let bound = Duration::from_secs(4);
             let cx = runtime.cx();
-            let mut drained = false;
+            // Resolve the protocol stop and observe every restore's completion
+            // while its application context and the session are still alive.
+            // Cancelling their regions first races the resolver's close epilogue.
+            match runtime.block_on(time::timeout(
+                cx,
+                bound.saturating_sub(began.elapsed()),
+                self.dispatcher.inner.drain_restores(),
+            )) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    drained = false;
+                    eprintln!(
+                        "{}",
+                        drain_failure(
+                            "closing native torrent session:",
+                            Some(format!("joining restore tasks: {error:#}"))
+                        )
+                    );
+                }
+                Err(_) => {
+                    drained = false;
+                    eprintln!(
+                        "{}",
+                        drain_failure(
+                            "native torrent session did not drain before its deadline",
+                            Some("joining restore tasks".into())
+                        )
+                    );
+                }
+            }
             match runtime.block_on(time::timeout(
                 cx,
                 bound.saturating_sub(began.elapsed()),
                 self.dispatcher.inner.session.stop(cx),
             )) {
-                Ok(Ok(())) => drained = true,
-                Ok(Err(error)) => eprintln!("{}", drain_failure("closing native torrent session:", Some(format!("{error:#}")))),
-                Err(_) => eprintln!("{}", drain_failure("native torrent session did not drain before its deadline", None)),
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    drained = false;
+                    eprintln!(
+                        "{}",
+                        drain_failure(
+                            "closing native torrent session:",
+                            Some(format!("{error:#}"))
+                        )
+                    );
+                }
+                Err(_) => {
+                    drained = false;
+                    eprintln!(
+                        "{}",
+                        drain_failure(
+                            "native torrent session did not drain before its deadline",
+                            None
+                        )
+                    );
+                }
             }
             self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
                 drained = false;
-                eprintln!("{}", drain_failure("closing native runtime:", Some(format!("{error:#}"))));
+                eprintln!(
+                    "{}",
+                    drain_failure("closing native runtime:", Some(format!("{error:#}")))
+                );
             }
-            if drained { eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis()); }
+            if drained {
+                eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis());
+            }
         }
+        drained
+    }
+}
+
+impl Drop for AppEngine {
+    fn drop(&mut self) {
+        self.drain(Duration::from_secs(4));
     }
 }
 

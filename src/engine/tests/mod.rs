@@ -85,6 +85,7 @@
             max_active_downloads: AtomicUsize::new(3),
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
+            retired_restores: std::sync::Mutex::new(Vec::new()),
             cancelled_checks: std::sync::Mutex::new(HashMap::new()),
         });
         runtime.block_on(async {

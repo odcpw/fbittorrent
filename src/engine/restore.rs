@@ -2,6 +2,55 @@
 use super::*;
 
 impl Inner {
+    fn retire_restore(&self, mut restore: RestoreTask) {
+        restore.cancel.cancel();
+        let mut retired = self.retired_restores.lock().unwrap();
+        retired.retain(|task| !task.is_finished());
+        if let Some(task) = restore.task.take().filter(|task| !task.is_finished()) {
+            retired.push(task);
+        }
+    }
+
+    pub(super) async fn drain_restores(&self) -> Result<()> {
+        // stopping is set before this snapshot. Spawn checks it under the same
+        // map lock, so no attempt can arrive after the snapshot. Never hold a
+        // bookkeeping lock across a join: the task needs it to publish its end.
+        let mut tasks = {
+            let mut restores = self.restores.lock().unwrap();
+            restores
+                .iter_mut()
+                .filter_map(|(hash, restore)| {
+                    restore.cancel.cancel();
+                    restore
+                        .task
+                        .take()
+                        .map(|task| (Some((hash.clone(), restore.generation)), task))
+                })
+                .collect::<Vec<_>>()
+        };
+        tasks.extend(
+            std::mem::take(&mut *self.retired_restores.lock().unwrap())
+                .into_iter()
+                .map(|task| (None, task)),
+        );
+        let mut failure = None;
+        for (slot, mut task) in tasks {
+            let result = (&mut task).await;
+            // Keep the completed handle as evidence for retained dispatchers
+            // (and the existing post-drop is_finished assertions).
+            if let Some((hash, generation)) = slot {
+                if let Some(restore) = self.restores.lock().unwrap().get_mut(&hash) {
+                    if restore.generation == generation {
+                        restore.task = Some(task);
+                    }
+                }
+            }
+            if let Err(error) = result {
+                failure.get_or_insert_with(|| anyhow!(error).context("joining torrent restore"));
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
     pub(super) fn handle(&self, hash: &str) -> Result<Arc<ManagedTorrent>> {
         self.session
             .with_torrents(|torrents| {
@@ -84,7 +133,9 @@ impl Inner {
             restore.outcome = RestoreOutcome::Stopped;
         }
         if remove {
-            restores.remove(hash);
+            if let Some(restore) = restores.remove(hash) {
+                self.retire_restore(restore);
+            }
             drop(restores);
             self.cancelled_checks.lock().unwrap().remove(hash);
         }
@@ -115,6 +166,9 @@ impl Inner {
     pub(super) fn spawn_restore(self: &Arc<Self>, cx: &Cx, record: Record) -> Result<()> {
         cx.checkpoint()?;
         let mut restores = self.restores.lock().unwrap();
+        if self.stopping.load(Ordering::Acquire) {
+            bail!("native engine is closing");
+        }
         if restores.get(&record.hash).is_some_and(|restore|
             matches!(restore.outcome, RestoreOutcome::Checking | RestoreOutcome::Metadata) &&
             restore.task.as_ref().is_some_and(|task| !task.is_finished())) {
@@ -134,8 +188,8 @@ impl Inner {
                 // Metadata lookup never owns the ledger. A single unresolved
                 // magnet cannot block reads, mutations, or another restore.
                 let metadata = rqbit_runtime::select! {
-                    result = inner.resolve_record(&cx, &record) => result?,
                     _ = task_cancel.cancelled() => bail!("torrent restore cancelled"),
+                    result = inner.resolve_record(&cx, &record) => result?,
                 };
                 let mut ledger = OwnedMutexGuard::lock(inner.ledger.clone(), &cx).await?;
                 cx.checkpoint()?;
@@ -167,7 +221,9 @@ impl Inner {
                 }
             }
         })?;
-        restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel });
+        if let Some(previous) = restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel }) {
+            self.retire_restore(previous);
+        }
         Ok(())
     }
 

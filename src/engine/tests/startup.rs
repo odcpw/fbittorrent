@@ -260,3 +260,166 @@
         server.join().unwrap();
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    // The tracker is reachable at the socket layer but never answers its UDP
+    // connect request, so no metadata or peers can arrive during shutdown.
+    fn assert_peerless_resolver_drains(retire: Option<bool>) {
+        use std::net::UdpSocket;
+        use std::time::Instant;
+
+        let directory = review_directory("resolver-teardown");
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&directory).unwrap();
+        let tracker = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        tracker
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut record = review_record(hash, &downloads);
+        record.source = format!(
+            "magnet:?xt=urn:btih:{hash}&tr=udp%3A%2F%2F127.0.0.1%3A{}%2Fannounce",
+            tracker.local_addr().unwrap().port()
+        );
+        std::fs::write(
+            directory.join("torrents.json"),
+            serde_json::to_vec(&Ledger {
+                generation: Default::default(),
+                migrated_legacy: true,
+                records: vec![record.clone()],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let cfg = Config {
+            save_path: Some(downloads.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+        let mut app = start_in(
+            &cfg,
+            Lifecycle::default(),
+            directory.clone(),
+            instance,
+            SessionOptions {
+                dht: None,
+                disable_local_service_discovery: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let dispatcher = app.dispatcher();
+        let mut packet = [0; 2048];
+        let (length, _) = tracker.recv_from(&mut packet).unwrap();
+        assert_eq!(
+            length, 16,
+            "the real resolver sent a UDP tracker connect request"
+        );
+        assert_eq!(&packet[8..12], &0_u32.to_be_bytes());
+        let cancel = dispatcher.inner.restores.lock().unwrap()[hash]
+            .cancel
+            .clone();
+        assert!(!cancel.is_cancelled());
+        assert_eq!(
+            dispatcher.restore_outcomes()[hash],
+            RestoreOutcome::Metadata
+        );
+
+        // Keep the real resolver's join under a native task with a short cleanup
+        // epilogue. This widens the former race deterministically: starting app
+        // region cancellation before joining this task cancels its epilogue.
+        // No resolver, tracker response or runtime is mocked.
+        let resolver = dispatcher
+            .inner
+            .restores
+            .lock()
+            .unwrap()
+            .get_mut(hash)
+            .unwrap()
+            .task
+            .take()
+            .unwrap();
+        let phase = Arc::new(AtomicUsize::new(0));
+        let cleanup_phase = phase.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |cx| async move {
+            started_tx.send(()).unwrap();
+            let joined = resolver.await;
+            cleanup_phase.store(1, Ordering::Release);
+            time::sleep(&cx, Duration::from_millis(25)).await;
+            cleanup_phase.store(
+                if joined.is_ok() && cx.checkpoint().is_ok() {
+                    2
+                } else {
+                    3
+                },
+                Ordering::Release,
+            );
+        })
+        .unwrap();
+        dispatcher
+            .inner
+            .restores
+            .lock()
+            .unwrap()
+            .get_mut(hash)
+            .unwrap()
+            .task = Some(task);
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if let Some(remove) = retire {
+            dispatcher.inner.cancel_restore(hash, remove);
+            if !remove {
+                dispatcher
+                    .inner
+                    .spawn_restore(dispatcher.runtime.cx(), record)
+                    .unwrap();
+            }
+        }
+        println!("resolver before drain: tracker=unanswered_udp_connect restore={:?} cleanup_phase={} retired={retire:?}",
+                dispatcher.restore_outcomes().get(hash), phase.load(Ordering::Acquire));
+        let budget = Duration::from_millis(250);
+        let began = Instant::now();
+        let drained = app.drain(budget);
+        let elapsed = began.elapsed();
+        println!("resolver after drain: cancelled={} restore={:?} cleanup_phase={} elapsed={elapsed:?} drained={drained}",
+                cancel.is_cancelled(), dispatcher.restore_outcomes().get(hash), phase.load(Ordering::Acquire));
+        assert!(
+            drained,
+            "session and runtime must drain without their teardown deadline"
+        );
+        assert!(
+            elapsed < budget,
+            "resolver shutdown exceeded the short drain budget: {elapsed:?}"
+        );
+        assert!(
+            cancel.is_cancelled(),
+            "drop must cancel the in-flight resolver"
+        );
+        assert_eq!(
+            phase.load(Ordering::Acquire),
+            2,
+            "the real resolver and its cleanup must join before application-region cancellation"
+        );
+        assert!(
+            dispatcher
+                .inner
+                .restores
+                .lock()
+                .unwrap()
+                .values()
+                .all(|restore| restore.task.as_ref().is_some_and(|task| task.is_finished())),
+            "retained restores keep their finished join handles"
+        );
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn peerless_resolver_drains_before_runtime_deadline() {
+        assert_peerless_resolver_drains(None);
+    }
+
+    #[test]
+    fn removed_and_retried_resolvers_are_joined() {
+        assert_peerless_resolver_drains(Some(true));
+        assert_peerless_resolver_drains(Some(false));
+    }
