@@ -144,3 +144,7 @@ Report: [incident-tmux-death.md](incident-tmux-death.md) (orchestrator investiga
 ## P0-17
 
 Receipt: [P0-17.md](P0-17.md) (branch ntm/fbittorrent/cod_4, commit da37f93; merged by the orchestrator after five full-suite runs and an Astra review).
+
+## P0-15
+
+Receipt: [P0-15.md](P0-15.md) (branch ntm/fbittorrent/cod_1, commits 28f1244..acb0953; merged by the orchestrator after a green full gate and an Astra review).
