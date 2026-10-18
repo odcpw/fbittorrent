@@ -232,3 +232,7 @@ Receipt: [P1-04.md](P1-04.md) (branch ntm/fbittorrent/cod_1, commits 5a2fba2, f8
 ## P1-02b
 
 Receipt: [P1-02b.md](P1-02b.md) (branch ntm/fbittorrent/cod_3-p1-02b, commit efe36ca; test-only fix of a pre-existing fixture readiness race in the transfer tests, merged by the orchestrator after an Astra review that recomputed the retained timelines and re-ran the transfer tests; batch gate on main follows).
+
+## P1-03c
+
+Receipt: [P1-03c.md](P1-03c.md) (branch ntm/fbittorrent/cod_3-p1-03c, commits 64bd004 by cod_3 and 34b9cee, fdd1298 by cod_4; merged by the orchestrator after three Astra reviews, the first two returning one P2 each (unbounded diagnostic collection on the shutdown thread; short socket writes truncating the record) and the third verifying both closed with 36/36 independent runs; includes an additive try-lock snapshot API in the vendored Asupersync inspector recorded in vendor/asupersync/FBITTORRENT_PATCH.md; batch gate on main follows).
