@@ -22,7 +22,7 @@
         );
     }
 
-    fn test_app(
+    pub(super) fn test_app(
         directory: &Path,
         downloads: &Path,
         ledger: Ledger,
@@ -74,6 +74,7 @@
                 },
             ))
             .unwrap();
+        let generation = ledger.generation.clone();
         let inner = Arc::new(Inner {
             session,
             ledger: Arc::new(Mutex::new(ledger)),
@@ -101,6 +102,7 @@
             inner.maintain(&test_cx()).await.unwrap();
         });
         let dispatcher = EngineDispatcher {
+            generation,
             lifecycle: Lifecycle::default(),
             inner,
             runtime: runtime.handle(),
@@ -113,7 +115,7 @@
         }
     }
 
-    fn request(path: &str, args: &[(&str, &str)]) -> Request {
+    pub(super) fn request(path: &str, args: &[(&str, &str)]) -> Request {
         Request {
             method: "POST".into(),
             path: path.into(),
@@ -125,7 +127,7 @@
         }
     }
 
-    fn review_directory(label: &str) -> PathBuf {
+    pub(super) fn review_directory(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "fbittorrent-{label}-{}-{}",
             std::process::id(),
@@ -142,3 +144,5 @@ include!("startup.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");
+include!("legacy_wire.rs");
+include!("wire_probe.rs");

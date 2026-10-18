@@ -19,7 +19,7 @@
         let mut record = review_record(&hash, &downloads);
         record.paused = saved_paused;
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
-        std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger {
+        std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger { generation: Default::default(),
             migrated_legacy: true, records: vec![record],
         }).unwrap()).unwrap();
         let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
@@ -154,7 +154,7 @@
         let mut magnet = review_record("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &downloads);
         magnet.source = format!("magnet:?xt=urn:btih:{}&tr=http%3A%2F%2F127.0.0.1%3A{}%2Fannounce", magnet.hash, tracker.port());
         let records = vec![magnet.clone(), bad.clone(), valid.clone()]; // Worst ledger order.
-        std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger { migrated_legacy: true, records }).unwrap()).unwrap();
+        std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger { generation: Default::default(), migrated_legacy: true, records }).unwrap()).unwrap();
         let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
         let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
         let began = Instant::now();
