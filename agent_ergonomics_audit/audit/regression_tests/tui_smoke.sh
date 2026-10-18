@@ -41,10 +41,10 @@ if wait_for 'F2 sequential:on' 1; then
 else bad T-004 "prompt missing"; fi
 tmux send-keys -t "$S" Escape; sleep 0.2
 
-echo "T-005 screen switching: 2 = Search with input, 3 = RSS, 1 = back"
+echo "T-005 screen switching: 2 = Search with input, 4 = RSS, 1 = back"
 tmux send-keys -t "$S" 2; sleep 0.3
 tmux send-keys -t "$S" Escape; sleep 0.2   # leave the search box so digits switch screens
-tmux send-keys -t "$S" 3; sleep 0.3
+tmux send-keys -t "$S" 4; sleep 0.3
 r=$(cap | grep -c 'Feeds (')
 tmux send-keys -t "$S" 1; sleep 0.3
 t=$(cap | grep -c 'Torrents (')
