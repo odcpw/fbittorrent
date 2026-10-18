@@ -77,6 +77,21 @@ def manager_environment(sandbox):
     return environment
 
 
+
+def allow_manager_reads(harness):
+    """Foreground fixtures must establish absence instead of hiding query errors."""
+    systemctl = shutil.which("systemctl", path=os.defpath)
+    if systemctl is None:
+        return  # The product verifies local manager absence without a controller.
+    fixtures.path_shim("systemctl", 'case " $* " in *" show "*) exec ' +
+                       shlex.quote(systemctl) + ' "$@";; *) exit 99;; esac', harness.sandbox.root)
+    def retain_calls():
+        log = harness.sandbox.root / "shims/systemctl.log"
+        if log.exists():
+            shutil.copyfile(log, harness.case.path.with_suffix(".systemctl.log"))
+    harness.resources.callback(retain_calls)
+
+
 class ControlResult(NamedTuple):
     code: int | None
     output: str
@@ -532,8 +547,8 @@ def cap_observations(case, engines, hash_):
 
 
 def cap_change_no_check(binary, systemd):
-    with Case("daemon", "cap_change_no_check") as case, fixtures.Sandbox() as seedbox, \
-            fixtures.Sandbox() as leechbox, Harness(case, binary, seedbox, systemd) as seedh, \
+    with Case("daemon", "cap_change_no_check") as case, Sandbox() as seedbox, \
+            Sandbox() as leechbox, Harness(case, binary, seedbox, systemd) as seedh, \
             Harness(case, binary, leechbox, systemd) as leechh:
         # A real local tracker advertises only the isolated seed's port. Payload
         # then travels between two real fbittorrent engines, never through HTTP.
@@ -584,7 +599,7 @@ def cap_change_no_check(binary, systemd):
 
 
 def seed_toggle_no_check(binary, systemd):
-    with Case("daemon", "seed_toggle_no_check") as case, fixtures.Sandbox() as sandbox, \
+    with Case("daemon", "seed_toggle_no_check") as case, Sandbox() as sandbox, \
             Harness(case, binary, sandbox, systemd) as harness:
         payload = sandbox.downloads / "daemon-fixture.bin"
         payload.write_bytes(os.urandom(1024 * 1024))
@@ -819,6 +834,7 @@ def interim_engine_socket(binary, systemd):
     with Case("daemon", "interim_engine_socket") as case, Sandbox() as sandbox, \
             fixtures.magnet_fixture() as fixture, \
             Harness(case, binary, sandbox, systemd) as harness:
+        allow_manager_reads(harness)
         status = harness.cli("status")
         case.check(status.get("backend") == "stopped" and status.get("app_open") is False,
                    "fresh isolated engine is closed before launch", f"Status={status!r}.")
@@ -1253,8 +1269,8 @@ def add_starts_unit_no_launcher(binary, systemd):
             if not (seed.receive_ready() and seed.wait_engine()):
                 return
             seed.cli("add", str(fixture.torrent), "--seed", "--save", str(fixture.files[0].parent))
-            seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True,
-                                  f"Seed state={row.get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture")
+            seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True and row.get("state") == "uploading",
+                                  f"Seed state={row.get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture and starts serving")
             config = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
             port = int(re.search(r"peer_port = (\d+)", config.read_text()).group(1))
             step = case.step("connect real seed peer", "loopback seed accepts a BitTorrent handshake for the fixture hash")
@@ -1338,6 +1354,63 @@ def down_cancels_restart(binary, systemd):
         h.lock_free()
 
 
+
+def manager_query_restart_case(binary, name, malformed=False, remove_unit=False):
+    with Case("daemon", name) as case, Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        h.cli("up", start=True)
+        pid = unit.pid()
+        if not case.check(pid > 1 and h.daemon_pid() == pid, "query-failure kill target is the verified isolated owner", str(pid)):
+            return
+        marker = sandbox.root / "initial-show-failed"
+        program = sandbox.root / "fail-initial-show.py"
+        reply = "LoadState=loaded\nActiveState=inactive\nMainPID=0\nJob=\n" if malformed else ""
+        program.write_text(f'''import os,sys
+from pathlib import Path
+if "show" in sys.argv and not Path({str(marker)!r}).exists():
+ Path({str(marker)!r}).write_text("initial show intercepted")
+ sys.stdout.write({reply!r})
+ if not {malformed!r}: print("injected initial manager query failure", file=sys.stderr)
+ sys.exit({0 if malformed else 1})
+os.execv({unit.systemctl!r},[{unit.systemctl!r},*sys.argv[1:]])
+''')
+        compile(program.read_text(), str(program), 'exec')
+        os.kill(pid, signal.SIGKILL)
+        if not h.wait_for(lambda: ((state := unit.control("show", sandbox.unit, "--property=SubState", "--value").output) == "auto-restart",
+                                   f"SubState={state}"), "owned unit schedules restart before failed query", timeout=1):
+            return
+        fixtures.path_shim("systemctl", "exec /usr/bin/python3 " + shlex.quote(str(program)) + ' "$@"', sandbox.root)
+        previous = unit.path.read_bytes()
+        if remove_unit:
+            unit.path.unlink()
+        try:
+            result = h.cli("down", code=4, start=True)
+        finally:
+            if remove_unit:
+                unit.path.write_bytes(previous)
+        case.check(marker.exists() and result.get("ok") is False and result.get("code_name") == "backend" and
+                   result.get("hint") == "systemctl --user stop " + sandbox.unit,
+                   "failed or malformed initial manager query returns typed nonzero with the selected-unit stop hint",
+                   f"intercepted={marker.exists()}; removed unit file={remove_unit}; result={result}")
+        h.wait_for(lambda: ((after := unit.pid()) > 1 and after != pid and h.engine_call("app/version").get("error") is None,
+                            f"before={pid}; after={after}; state={unit.state()}"),
+                   "restart remains possible so down must not have acknowledged success", timeout=3)
+        h.cli("down", start=True)
+        case.check(unit.stopped("")[0], "retry with a healthy manager query stops the owned unit")
+        h.lock_free()
+
+
+def down_failed_manager_query(binary, systemd):
+    manager_query_restart_case(binary, "down_failed_manager_query")
+
+
+def down_malformed_manager_query(binary, systemd):
+    manager_query_restart_case(binary, "down_malformed_manager_query", malformed=True)
+
+
+def down_failed_query_without_unit_file(binary, systemd):
+    manager_query_restart_case(binary, "down_failed_query_without_unit_file", remove_unit=True)
+
+
 def cleanup_failed_stop(binary, systemd, timed_out=False):
     name = "cleanup_stop_timeout" if timed_out else "cleanup_failed_stop"
     with Case("daemon", name) as case, Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
@@ -1375,6 +1448,7 @@ def cleanup_stop_timeout(binary, systemd):
 
 def foreground_down(binary, systemd):
     with Case("daemon", "foreground_down") as case, Sandbox() as sandbox, Harness(case, binary, sandbox) as h:
+        allow_manager_reads(h)
         process = h.start_serve()
         if not h.receive_ready():
             return
@@ -1604,11 +1678,13 @@ CASES = {function.__name__: function for function in
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
           killmode_mixed, start_limit_not_hit, start_while_deactivating, down_cancels_restart,
+          down_failed_manager_query, down_malformed_manager_query, down_failed_query_without_unit_file,
           cleanup_failed_stop, cleanup_stop_timeout, foreground_down, unit_install_unwritable, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic, startup_failure_hint, unit_exec_path,
           cap_change_no_check, seed_toggle_no_check)}
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",
+                 "down_failed_manager_query", "down_malformed_manager_query", "down_failed_query_without_unit_file",
                  "cleanup_failed_stop", "cleanup_stop_timeout", "dashboard_routes", "install_atomic", "startup_failure_hint", "unit_exec_path"}
 
 

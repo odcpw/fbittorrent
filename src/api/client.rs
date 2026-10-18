@@ -91,35 +91,97 @@ pub fn manager_status(args: &[&str], bound: Duration) -> Result<bool> {
     }
 }
 
-/// Small property replies only; keep manager control bounded even on a lost bus.
-pub fn manager_properties(unit: &str) -> Result<Option<std::collections::HashMap<String, String>>> {
+fn manager_query_error(unit: &str, detail: impl std::fmt::Display) -> anyhow::Error {
+    AppError::new(Code::Backend, format!("cannot verify manager state for {unit}: {detail}; shutdown is unconfirmed"))
+        .hint(format!("systemctl --user stop {unit}")).into()
+}
+
+fn parse_manager_properties(unit: &str, output: &str) -> Result<std::collections::HashMap<String, String>> {
+    let mut state = std::collections::HashMap::new();
+    for line in output.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(manager_query_error(unit, "malformed property line"));
+        };
+        if !["LoadState", "ActiveState", "SubState", "MainPID", "Job"].contains(&key)
+            || state.insert(key.to_owned(), value.to_owned()).is_some() {
+            return Err(manager_query_error(unit, "unexpected or duplicate manager property"));
+        }
+    }
+    let value = |key: &str| state.get(key).map(String::as_str).unwrap_or("");
+    let decimal = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()) && text.parse::<u32>().is_ok();
+    if state.len() != 5
+        || !matches!(value("LoadState"), "loaded" | "not-found")
+        || !matches!(value("ActiveState"), "active" | "reloading" | "inactive" | "failed" | "activating" | "deactivating" | "maintenance" | "refreshing")
+        || value("SubState").is_empty()
+        || !value("SubState").bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        || !decimal(value("MainPID"))
+        || !(value("Job").is_empty() || decimal(value("Job")))
+        || (value("LoadState") == "not-found" &&
+            !(value("ActiveState") == "inactive" && value("SubState") == "dead" && value("MainPID") == "0" && value("Job").is_empty())) {
+        return Err(manager_query_error(unit, "missing, invalid or inconsistent manager properties"));
+    }
+    Ok(state)
+}
+
+/// A failed query is uncertainty, never evidence that a managed owner is absent.
+/// Replies must include every requested property before shutdown can use them.
+pub fn manager_properties(unit: &str) -> Result<std::collections::HashMap<String, String>> {
     let mut child = manager_command()
         .args(["show", unit, "--property=LoadState,ActiveState,SubState,MainPID,Job"])
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+        .map_err(|error| manager_query_error(unit, error))?;
     let deadline = Instant::now() + Duration::from_secs(2);
     let status = loop {
-        if let Some(status) = child.try_wait()? { break status; }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {},
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(manager_query_error(unit, error));
+            },
+        }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("systemctl show {unit} timed out");
+            return Err(AppError::new(Code::Timeout, format!("systemctl show {unit} timed out; shutdown is unconfirmed"))
+                .hint(format!("systemctl --user stop {unit}")).into());
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    if !status.success() { return Ok(None); }
+    if !status.success() { return Err(manager_query_error(unit, format!("systemctl show exited {status}"))); }
     let mut output = String::new();
-    child.stdout.take().unwrap().take(4096).read_to_string(&mut output)?;
-    Ok(Some(output.lines().filter_map(|line| line.split_once('='))
-        .map(|(key, value)| (key.to_owned(), value.to_owned())).collect()))
+    child.stdout.take().unwrap().take(4097).read_to_string(&mut output)
+        .map_err(|error| manager_query_error(unit, error))?;
+    if output.len() > 4096 { return Err(manager_query_error(unit, "manager reply exceeds 4096 bytes")); }
+    parse_manager_properties(unit, &output)
 }
 
-/// Cancel scheduled restarts as well as a currently running manager-owned daemon.
-/// No installed unit means a foreground owner; its socket shutdown remains valid.
+/// No local manager endpoints and no remote bus configuration establish the
+/// non-systemd case. Transport/query failures with a possible manager do not.
+fn local_manager_absent(unit: &str) -> Result<bool> {
+    let runtime = PathBuf::from(format!("/run/user/{}", unsafe { libc::geteuid() }));
+    let default_bus = format!("unix:path={}/bus", runtime.display());
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some_and(|address| !address.is_empty() && address != default_bus.as_str()) {
+        return Ok(false);
+    }
+    for endpoint in [runtime.join("systemd"), runtime.join("bus")] {
+        match std::fs::symlink_metadata(endpoint) {
+            Ok(_) => return Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(manager_query_error(unit, error)),
+        }
+    }
+    Ok(true)
+}
+
+/// Cancel scheduled restarts as well as a running manager-owned daemon. Even a
+/// removed unit file can leave a loaded unit with a pending restart in systemd.
 pub fn stop_managed_daemon() -> Result<bool> {
-    if !unit_path()?.is_file() { return Ok(false); }
     let unit = unit_name()?;
-    let Some(before) = manager_properties(&unit)? else { return Ok(false); };
-    if before.get("LoadState").map(String::as_str) != Some("loaded") { return Ok(false); }
+    if local_manager_absent(&unit)? { return Ok(false); }
+    let before = manager_properties(&unit)?;
+    if before["LoadState"] == "not-found" { return Ok(false); }
     let was_running = !manager_stopped(&before);
     if !manager_status(&["stop", &unit], Duration::from_secs(25))? {
         return Err(backend_error(format!("systemctl --user stop {unit} failed"), "fbittorrent status --json"));
@@ -127,7 +189,7 @@ pub fn stop_managed_daemon() -> Result<bool> {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         let after = manager_properties(&unit)?;
-        if after.as_ref().is_some_and(manager_stopped) { return Ok(was_running); }
+        if manager_stopped(&after) { return Ok(was_running); }
         if Instant::now() >= deadline {
             return Err(AppError::new(Code::Timeout, format!("{unit} has not stopped; observed {after:?}"))
                 .hint("fbittorrent status --json").into());
@@ -368,6 +430,25 @@ pub fn ensure_daemon(cfg: &Config, no_start: bool) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn manager_replies_require_complete_consistent_properties() {
+        let absent = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nJob=\n";
+        assert!(manager_stopped(&parse_manager_properties("fixture.service", absent).unwrap()));
+        let restarting = "LoadState=loaded\nActiveState=activating\nSubState=auto-restart\nMainPID=0\nJob=\n";
+        assert!(!manager_stopped(&parse_manager_properties("fixture.service", restarting).unwrap()));
+        for malformed in [String::new(), absent.replace("SubState=dead\n", ""),
+            absent.replace("MainPID=0", "MainPID=unknown"), absent.replace("Job=", "Job=bad"),
+            absent.replace("LoadState=not-found", "LoadState=error"),
+            absent.replace("MainPID=0", "MainPID=42"), format!("{absent}MainPID=0\n")] {
+            let error = parse_manager_properties("fixture.service", &malformed).unwrap_err();
+            let (code, message, hint) = crate::agent::classify(&error);
+            assert_eq!(code, Code::Backend);
+            assert!(message.contains("shutdown is unconfirmed"));
+            assert_eq!(hint.as_deref(), Some("systemctl --user stop fixture.service"));
+        }
+        println!("absent/restarting properties distinguished; malformed replies fail with backend/4 and selected-unit stop hint");
+    }
+
     #[test]
     fn probe_connect_refuses_missing_or_overlong_socket() {
         let deadline = Instant::now() + Duration::from_millis(200);

@@ -1,4 +1,3 @@
-mod api { pub mod client; }
 mod agent;
 mod api;
 mod backend;
