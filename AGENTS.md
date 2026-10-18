@@ -23,6 +23,11 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 - Build cadence: do not build after every small edit. Finish a whole step or a coherent group of
   changes, then `cargo check` once; run `cargo test --locked` and the e2e scripts when a feature is
   complete. A handful of builds per bead, not dozens; the build path is shared.
+- Memory: a release build of this crate peaks above 11 GB and systemd-oomd kills whole scopes when
+  the desktop slice is under pressure (it killed the first swarm on 2026-10-18). Run every release
+  build or `all.sh` as
+  `flock -w 7200 /tmp/fbittorrent-release.lock systemd-run --user --scope -p MemoryHigh=10G -p MemoryMax=14G --quiet -- <command>`
+  (one at a time on this box, memory-capped). Debug `cargo check`/`cargo test` need no wrapper.
 - The TUI has no TTY in agent shells: drive it through tmux as the regression scripts do
   (`agent_ergonomics_audit/audit/regression_tests/tui_smoke.sh`). Always `tmux send-keys -l`
   for literal text. Use a unique tmux session name per bead (`fbt-<bead-id>`).

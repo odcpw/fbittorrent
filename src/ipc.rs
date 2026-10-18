@@ -163,6 +163,17 @@ impl InstanceLock {
     }
 }
 
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        // flock belongs to the open file description, which fork inherits even
+        // with CLOEXEC. A parallel provider spawn may not have reached exec yet
+        // when the engine closes and reopens this directory. Release ownership
+        // explicitly instead of waiting for every inherited descriptor to close.
+        // The stable lock file remains in place for the next owner.
+        unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 pub struct Server {
     path: PathBuf,
     stopping: Arc<AtomicBool>,
