@@ -36,7 +36,171 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::{Arc, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Work and output ceilings for deadline diagnostics. Existing inspector queries
+/// retain their complete, blocking semantics; only `bounded_snapshot` uses these.
+#[derive(Debug, Clone, Copy)]
+pub struct SnapshotLimits {
+    /// Maximum active task records copied (also capped at 128).
+    pub max_tasks: usize,
+    /// Maximum requested/owning regions and ancestors copied (also capped at 64).
+    pub max_regions: usize,
+    /// Maximum encoded JSON bytes (also capped at 64 KiB).
+    pub max_bytes: usize,
+    /// Collection time ceiling (also capped at 5 ms).
+    pub time_cap: Duration,
+    /// Time sampled by the caller in this runtime's clock domain; otherwise
+    /// use RuntimeState's logical time. Never call a user clock under locks.
+    pub observed_at: Option<Time>,
+}
+
+/// A bounded, best-effort observation, never a quiescence receipt.
+#[derive(Debug)]
+pub struct BoundedSnapshot {
+    /// JSON containing tasks, regions, `partial`, and explicit omission reasons.
+    /// Empty when even the fixed metadata cannot fit `max_bytes`.
+    pub json: String,
+    /// Some data was unavailable, contended, or excluded by a ceiling.
+    pub partial: bool,
+}
+
+struct SnapshotCollector {
+    limits: SnapshotLimits,
+    began: Instant,
+    bytes: usize,
+    tasks: Vec<serde_json::Value>,
+    regions: Vec<serde_json::Value>,
+    region_ids: Vec<RegionId>,
+    reasons: Vec<&'static str>,
+}
+
+impl SnapshotCollector {
+    fn omit(&mut self, reason: &'static str) {
+        if !self.reasons.contains(&reason) {
+            self.reasons.push(reason);
+        }
+    }
+
+    fn in_time(&mut self) -> bool {
+        if self.began.elapsed() >= self.limits.time_cap {
+            self.omit("time_limit");
+            false
+        } else {
+            true
+        }
+    }
+
+    fn fits(&mut self, value: &serde_json::Value) -> bool {
+        let size = serde_json::to_vec(value).expect("snapshot value").len() + 1;
+        if size > self.limits.max_bytes.saturating_sub(self.bytes) {
+            self.omit("byte_limit");
+            false
+        } else {
+            self.bytes += size;
+            true
+        }
+    }
+
+    fn region(&mut self, view: &RuntimeStateView<'_>, mut id: RegionId) {
+        loop {
+            if self.region_ids.contains(&id) || !self.in_time() {
+                return;
+            }
+            if self.regions.len() >= self.limits.max_regions {
+                self.omit("region_limit");
+                return;
+            }
+            let Some(region) = view.region(id) else {
+                return;
+            };
+            // Parent/id are immutable, state is atomic. Do not call child_ids,
+            // task_ids, or other accessors that acquire RegionInner's lock.
+            let value = serde_json::json!({
+                "id": format!("{id:?}"),
+                "parent": region.parent.map(|parent| format!("{parent:?}")),
+                "state": format!("{:?}", region.state()),
+            });
+            if !self.fits(&value) {
+                return;
+            }
+            self.region_ids.push(id);
+            self.regions.push(value);
+            let Some(parent) = region.parent else { return };
+            id = parent;
+        }
+    }
+
+    fn collect(&mut self, view: &RuntimeStateView<'_>, requested: &[RegionId]) {
+        for &id in requested.iter().take(self.limits.max_regions) {
+            self.region(view, id);
+        }
+        if requested.len() > self.limits.max_regions {
+            self.omit("region_limit");
+        }
+        // Arena::iter can scan vacant slots inside one next(). Bound that work
+        // before entering it; a sparse, oversized arena is explicitly omitted.
+        let capacity = view.state.tasks_arena().capacity().saturating_add(
+            view.shard_tasks
+                .map_or(0, |table| table.tasks_arena().capacity()),
+        );
+        if capacity > 4096 {
+            self.omit("arena_limit");
+            return;
+        }
+        let now = self.limits.observed_at.unwrap_or(view.state.now);
+        for task in view.tasks() {
+            if !self.in_time() {
+                break;
+            }
+            if task.state.is_terminal() {
+                continue;
+            }
+            if self.tasks.len() >= self.limits.max_tasks {
+                self.omit("task_limit");
+                break;
+            }
+            let inner = task
+                .cx_inner
+                .as_ref()
+                .or_else(|| task.cx.as_ref().map(|cx| &cx.inner));
+            let checkpoint = inner.and_then(|inner| {
+                let Some(inner) = inner.try_read() else {
+                    self.omit("checkpoint_contention");
+                    return None;
+                };
+                inner
+                    .checkpoint_state
+                    .last_message
+                    .as_deref()
+                    .map(|message| {
+                        let mut end = message.len().min(256);
+                        while !message.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        if end < message.len() {
+                            self.omit("checkpoint_limit");
+                        }
+                        message[..end].to_owned()
+                    })
+            });
+            let value = serde_json::json!({
+                "id": format!("{:?}", task.id), "region": format!("{:?}", task.owner),
+                "state": task.state_name(), "phase": format!("{:?}", task.phase()),
+                "age_ms": Duration::from_nanos(now.duration_since(task.created_at)).as_millis(),
+                "polls": task.total_polls, "checkpoint": checkpoint,
+            });
+            if !self.fits(&value) {
+                break;
+            }
+            self.tasks.push(value);
+            self.region(view, task.owner);
+        }
+        if self.regions.len() < view.state.regions_len() {
+            self.omit("regions_omitted");
+        }
+    }
+}
 
 /// Where an inspector or diagnostics engine reads runtime state from.
 ///
@@ -606,6 +770,93 @@ pub struct TaskInspector {
 }
 
 impl TaskInspector {
+    /// Deadline-safe alternative to the complete inspector queries.
+    ///
+    /// Uses try-locks in B -> A -> C order, including try-read for task
+    /// checkpoints. A held/poisoned lock yields a flagged partial observation,
+    /// never a wait. Copies active tasks, requested regions, their owning
+    /// regions and ancestors. Other regions are explicitly marked omitted.
+    /// Task/region counts, encoded bytes, arena scanning and elapsed collection
+    /// time are bounded. No tracing, callbacks, region-inner or obligation scans.
+    #[must_use]
+    pub fn bounded_snapshot(
+        &self,
+        limits: SnapshotLimits,
+        requested: &[RegionId],
+    ) -> BoundedSnapshot {
+        let began = Instant::now();
+        let limits = SnapshotLimits {
+            max_tasks: limits.max_tasks.min(128),
+            max_regions: limits.max_regions.min(64),
+            max_bytes: limits.max_bytes.min(64 * 1024),
+            time_cap: limits.time_cap.min(Duration::from_millis(5)),
+            observed_at: limits.observed_at,
+        };
+        if limits.max_bytes < 512 {
+            return BoundedSnapshot {
+                json: String::new(),
+                partial: true,
+            };
+        }
+        let mut collector = SnapshotCollector {
+            limits,
+            began,
+            bytes: 512,
+            tasks: Vec::new(),
+            regions: Vec::new(),
+            region_ids: Vec::new(),
+            reasons: Vec::new(),
+        };
+        let mut collect = || -> Option<()> {
+            if !collector.in_time() {
+                return Some(());
+            }
+            match &self.state {
+                RuntimeStateSource::Owned(state) => collector.collect(
+                    &RuntimeStateView {
+                        state,
+                        shard_tasks: None,
+                        shard_obligations: None,
+                    },
+                    requested,
+                ),
+                RuntimeStateSource::Shared {
+                    state,
+                    tasks,
+                    obligations,
+                } => {
+                    let state = state.try_lock().ok()?;
+                    let tasks = match tasks {
+                        Some(table) => Some(table.try_lock().ok()?),
+                        None => None,
+                    };
+                    let obligations = match obligations {
+                        Some(table) => Some(table.try_lock().ok()?),
+                        None => None,
+                    };
+                    collector.collect(
+                        &RuntimeStateView {
+                            state: &state,
+                            shard_tasks: tasks.as_deref(),
+                            shard_obligations: obligations.as_deref(),
+                        },
+                        requested,
+                    );
+                }
+            }
+            Some(())
+        };
+        if collect().is_none() {
+            collector.omit("runtime_lock_contention");
+        }
+        let partial = !collector.reasons.is_empty();
+        let json = serde_json::json!({ "tasks": collector.tasks, "regions": collector.regions,
+            "partial": partial, "truncated": partial, "reasons": collector.reasons })
+        .to_string();
+        debug_assert!(json.len() <= limits.max_bytes);
+        BoundedSnapshot { json, partial }
+    }
+
     /// Create a new task inspector.
     #[must_use]
     pub fn new(state: Arc<RuntimeState>, console: Option<Console>) -> Self {
@@ -1012,6 +1263,52 @@ mod tests {
     use super::*;
     use crate::Budget;
     use crate::time::{TimerDriverHandle, VirtualClock};
+
+    #[test]
+    fn bounded_snapshot_never_waits_for_runtime_or_shard_locks() {
+        let state = Arc::new(ContendedMutex::new("snapshot_state", RuntimeState::new()));
+        let tasks = Arc::new(ContendedMutex::new("snapshot_tasks", TaskTable::new()));
+        let obligations = Arc::new(ContendedMutex::new(
+            "snapshot_obligations",
+            ObligationTable::new(),
+        ));
+        let inspector = TaskInspector::from_source(
+            RuntimeStateSource::Shared {
+                state: state.clone(),
+                tasks: Some(tasks.clone()),
+                obligations: Some(obligations.clone()),
+            },
+            None,
+            TaskInspectorConfig::default(),
+        );
+        let limits = SnapshotLimits {
+            max_tasks: 8,
+            max_regions: 8,
+            max_bytes: 2048,
+            time_cap: Duration::from_millis(5),
+            observed_at: None,
+        };
+        let check = || {
+            let began = Instant::now();
+            let result = inspector.bounded_snapshot(limits, &[]);
+            assert!(began.elapsed() < limits.time_cap);
+            assert!(result.partial && result.json.contains("runtime_lock_contention"));
+            assert!(result.json.len() <= limits.max_bytes);
+        };
+        {
+            let _held = state.lock().unwrap();
+            check();
+        }
+        {
+            let _held = tasks.lock().unwrap();
+            check();
+        }
+        {
+            let _held = obligations.lock().unwrap();
+            check();
+        }
+        assert!(!inspector.bounded_snapshot(limits, &[]).partial);
+    }
 
     #[test]
     fn test_task_state_info_name() {

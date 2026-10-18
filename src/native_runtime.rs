@@ -1,17 +1,23 @@
 //! App-owned Asupersync runtime. Cloned dispatch handles borrow this owner's
 //! runtime; shutdown closes admissions and drains the application child region.
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use asupersync::{
-    Cx,
     cx::{ChildRegion, ChildRegionSpec},
     runtime::{Runtime, RuntimeBuilder},
     types::{Budget, CancelReason},
+    Cx,
 };
 use std::{
     future::Future,
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
+
+/// Teardown logging must not wait on stderr's process lock or output device.
+pub(crate) fn log_teardown(line: String) {
+    let fallback = format!("{}\n", line.split(" error=").next().unwrap_or(&line));
+    shutdown_diagnostics::emit(format!("{line}\n"), fallback);
+}
 
 #[derive(Clone)]
 pub struct Handle {
@@ -38,9 +44,11 @@ impl Handle {
 pub struct NativeRuntime {
     handle: Handle,
     region: Option<ChildRegion>,
+    diagnostics: shutdown_diagnostics::ShutdownDiagnostics,
 }
 impl NativeRuntime {
     pub fn new() -> Result<Self> {
+        shutdown_diagnostics::prepare_output();
         let runtime = RuntimeBuilder::new()
             .worker_threads(1)
             .thread_name_prefix("fbittorrent-engine")
@@ -50,12 +58,14 @@ impl NativeRuntime {
         let root = runtime.request_cx_with_budget(Budget::INFINITE);
         let region = runtime.block_on(root.open_child_region(ChildRegionSpec::inherit()))?;
         let cx = region.cx().clone();
+        let diagnostics = shutdown_diagnostics::ShutdownDiagnostics::new(&runtime, cx.region_id())?;
         Ok(Self {
             handle: Handle {
                 shared: Arc::new(RwLock::new(Some(runtime))),
                 cx,
             },
             region: Some(region),
+            diagnostics,
         })
     }
     pub fn handle(&self) -> Handle {
@@ -71,15 +81,22 @@ impl NativeRuntime {
         self.drain_and_shutdown(timeout)
     }
     fn drain_and_shutdown(&mut self, timeout: Duration) -> Result<()> {
+        let began = Instant::now();
+        if self.handle.shared.read().unwrap().is_none() {
+            return Ok(());
+        }
+        let diagnostics = &self.diagnostics;
         #[cfg(feature = "chunk-diagnostics")]
         let emit_chunk_diagnostics = self.region.is_some();
         #[cfg(feature = "epoch-diagnostics")]
         let before_close = epoch_receipt::capture(&self.handle.shared, "before_app_region_close");
-        let began = Instant::now();
-        let mut failure = None;
+        let mut failures = Vec::new();
         if let Some(region) = self.region.take() {
             if let Err(error) = region.cancel(CancelReason::user("application stopped")) {
-                failure = Some(anyhow!(error));
+                failures.push(diagnostics.failure(
+                    &format!("cancelling native application region: error={error:?}"),
+                    began,
+                ));
             }
             // A close receipt proves quiescence. The timeout is the liveness
             // fuse; expiry is an explicit failure, not a successful drain.
@@ -91,17 +108,21 @@ impl NativeRuntime {
                 // principal is cancelled and its Sleep cannot enforce a fuse.
                 runtime.block_on(rqbit_runtime::time::timeout(
                     &cleanup,
-                    timeout,
+                    timeout.saturating_sub(began.elapsed()),
                     region.close(),
                 ))
             };
             match drained {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => failure = Some(anyhow!(error)),
+                Ok(Err(error)) => failures.push(diagnostics.failure(
+                    &format!("closing native application region: error={error:?}"),
+                    began,
+                )),
                 Err(_) => {
-                    failure = Some(anyhow!(
-                        "native application region did not drain before its deadline"
-                    ))
+                    failures.push(diagnostics.failure(
+                        "native application region did not drain before its deadline",
+                        began,
+                    ));
                 }
             }
         }
@@ -114,7 +135,8 @@ impl NativeRuntime {
         if runtime.is_some_and(|runtime| {
             !runtime.shutdown_timeout(timeout.saturating_sub(began.elapsed()))
         }) {
-            failure = Some(anyhow!("native runtime teardown exceeded its deadline"));
+            failures
+                .push(diagnostics.failure("native runtime teardown exceeded its deadline", began));
         }
         #[cfg(feature = "epoch-diagnostics")]
         if let Some(before_close) = before_close {
@@ -131,18 +153,25 @@ impl NativeRuntime {
                     "schema": "fbittorrent.chunk_attribution.v1",
                     "pid": std::process::id(),
                     "scope": "process_cumulative",
-                    "teardown_succeeded": failure.is_none(),
+                    "teardown_succeeded": failures.is_empty(),
                     "counters": librqbit::chunk_diagnostic_snapshot()
                 })
             );
         }
-        failure.map_or(Ok(()), Err)
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(failures.join("; ")))
+        }
     }
 }
 impl Drop for NativeRuntime {
     fn drop(&mut self) {
         if let Err(error) = self.drain_and_shutdown(Duration::from_secs(2)) {
-            eprintln!("closing native runtime: {error:#}");
+            shutdown_diagnostics::emit(
+                format!("ERROR engine closing native runtime: error={:?}\n", format!("{error:#}")),
+                "ERROR engine closing native runtime: teardown failed; diagnostic output unavailable\n".into(),
+            );
         }
     }
 }
@@ -221,6 +250,13 @@ mod tests {
 #[cfg(test)]
 #[path = "native_runtime/storage_ownership_tests.rs"]
 mod storage_ownership_tests;
+
+#[cfg(test)]
+#[path = "native_runtime/shutdown_tests.rs"]
+mod shutdown_tests;
+
+#[path = "native_runtime_diagnostics.rs"]
+mod shutdown_diagnostics;
 
 #[cfg(feature = "epoch-diagnostics")]
 #[path = "native_runtime/epoch_receipt.rs"]
