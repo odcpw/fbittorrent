@@ -5,8 +5,10 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) fbittorrent/0.1";
@@ -33,6 +35,53 @@ impl Title {
 
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("fbittorrent")
+}
+
+fn private_cache_dir(root: &Path, directory: &Path) -> Result<()> {
+    let relative = directory.strip_prefix(root).context("cache directory outside cache root")?;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(directory)?;
+    let mut path = root.to_path_buf();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+    for component in relative.components() {
+        path.push(component);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn private_cached_file(root: &Path, path: &Path) -> Result<()> {
+    private_cache_dir(root, path.parent().context("cache file has no parent")?)?;
+    let file = std::fs::File::open(path)?;
+    if file.metadata()?.permissions().mode() & 0o7777 != 0o600 {
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.sync_all()?;
+    }
+    Ok(())
+}
+
+/// Ratings retain their existing temporary name; other cache writers use an
+/// exclusive temporary so concurrent title/poster requests cannot share it.
+fn write_cache_file(root: &Path, path: &Path, bytes: &[u8], reused: Option<&Path>) -> Result<()> {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let directory = path.parent().context("cache file has no parent")?;
+    private_cache_dir(root, directory)?;
+    let temporary = reused.map(Path::to_path_buf).unwrap_or_else(|| path.with_extension(format!(
+        "{}-{}.tmp", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed))));
+    let mut created = false;
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new().write(true).mode(0o600)
+            .create(reused.is_some()).truncate(reused.is_some()).create_new(reused.is_none()).open(&temporary)?;
+        created = true;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)?;
+        std::fs::File::open(directory)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() && created { let _ = std::fs::remove_file(&temporary); }
+    result.with_context(|| format!("saving private cache {}", path.display()))
 }
 
 fn agent(timeout: u64) -> ureq::Agent {
@@ -99,16 +148,23 @@ pub fn poster_url_sized(url: &str, width: u32) -> String {
 }
 
 pub fn fetch_poster(url: &str, width: u32) -> Result<PathBuf> {
-    let dir = cache_dir().join("posters");
-    std::fs::create_dir_all(&dir)?;
+    fetch_poster_in(&cache_dir(), url, width)
+}
+
+fn fetch_poster_in(root: &Path, url: &str, width: u32) -> Result<PathBuf> {
+    let dir = root.join("posters");
+    private_cache_dir(root, &dir)?;
     let key = url.rsplit('/').next().unwrap_or("poster").split('.').next().unwrap_or("poster");
     let path = dir.join(format!("{key}_{width}.jpg"));
-    if path.exists() { return Ok(path); }
+    if path.exists() {
+        private_cached_file(root, &path)?;
+        return Ok(path);
+    }
     let sized = poster_url_sized(url, width);
     let mut resp = agent(10).get(&sized).call().context("poster download")?;
     if resp.status().as_u16() != 200 { return Err(anyhow!("poster HTTP {}", resp.status())); }
     let bytes = resp.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec()?;
-    std::fs::write(&path, bytes)?;
+    write_cache_file(root, &path, &bytes, None)?;
     Ok(path)
 }
 
@@ -117,7 +173,9 @@ pub fn fetch_poster(url: &str, width: u32) -> Result<PathBuf> {
 pub fn ratings_path() -> PathBuf { cache_dir().join("title.ratings.tsv") }
 
 pub fn ratings_stale() -> bool {
-    match std::fs::metadata(ratings_path()).and_then(|m| m.modified()) {
+    let path = ratings_path();
+    if private_cached_file(&cache_dir(), &path).is_err() { return true; }
+    match std::fs::metadata(path).and_then(|m| m.modified()) {
         Ok(t) => SystemTime::now().duration_since(t).map(|d| d > RATINGS_MAX_AGE).unwrap_or(true),
         Err(_) => true,
     }
@@ -131,16 +189,17 @@ pub fn refresh_ratings() -> Result<()> {
     // lookups); only one downloads, the others find a fresh file when they get the lock.
     let _guard = REFRESH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !ratings_stale() { return Ok(()); }
-    std::fs::create_dir_all(cache_dir())?;
-    let mut resp = agent(120).get(RATINGS_URL).call().context("ratings dataset download")?;
+    download_ratings_to(&cache_dir(), RATINGS_URL)
+}
+
+fn download_ratings_to(root: &Path, url: &str) -> Result<()> {
+    let mut resp = agent(120).get(url).call().context("ratings dataset download")?;
     if resp.status().as_u16() != 200 { return Err(anyhow!("ratings dataset HTTP {}", resp.status())); }
     let gz = resp.body_mut().with_config().limit(64 * 1024 * 1024).read_to_vec()?;
     let mut tsv = Vec::with_capacity(gz.len() * 3);
     flate2::read::GzDecoder::new(&gz[..]).read_to_end(&mut tsv)?;
-    let tmp = ratings_path().with_extension("tmp");
-    std::fs::write(&tmp, &tsv)?;
-    std::fs::rename(&tmp, ratings_path())?;
-    Ok(())
+    let path = root.join("title.ratings.tsv");
+    write_cache_file(root, &path, &tsv, Some(&path.with_extension("tmp")))
 }
 
 /// Whole ratings dataset in memory: ~1.6M titles, 10 bytes each, binary-searched.
@@ -152,6 +211,7 @@ pub struct RatingsIndex {
 
 impl RatingsIndex {
     pub fn load() -> Result<Self> {
+        private_cached_file(&cache_dir(), &ratings_path()).context("ratings dataset not downloaded yet")?;
         let data = std::fs::read(ratings_path()).context("ratings dataset not downloaded yet")?;
         let mut rows: Vec<(u32, u16, u32)> = Vec::with_capacity(1_700_000);
         for line in data.split(|&b| b == b'\n').skip(1) {
@@ -181,6 +241,8 @@ impl RatingsIndex {
 
 /// Look one title up in the cached dataset. Ok(None) when unknown or no cache yet.
 pub fn rating_for(id: &str) -> Result<Option<(f32, u32)>> {
+    if !ratings_path().exists() { return Ok(None); }
+    private_cached_file(&cache_dir(), &ratings_path())?;
     let Ok(data) = std::fs::read(ratings_path()) else { return Ok(None) };
     Ok(find_rating(&data, id))
 }
@@ -258,13 +320,18 @@ const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 // Leave those files alone and resolve each name once with the matching rule below.
 const NAME_CACHE_KIND: &str = "by-name-v2";
 
-fn cache_file(kind: &str, key: &str) -> PathBuf {
+fn cache_file_in(root: &Path, kind: &str, key: &str) -> PathBuf {
     let safe: String = key.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).take(120).collect();
-    cache_dir().join("imdb").join(kind).join(format!("{safe}.json"))
+    root.join("imdb").join(kind).join(format!("{safe}.json"))
 }
 
 fn cache_read(kind: &str, key: &str) -> Option<serde_json::Value> {
-    let path = cache_file(kind, key);
+    cache_read_in(&cache_dir(), kind, key)
+}
+
+fn cache_read_in(root: &Path, kind: &str, key: &str) -> Option<serde_json::Value> {
+    let path = cache_file_in(root, kind, key);
+    private_cached_file(root, &path).ok()?;
     let meta = std::fs::metadata(&path).ok()?;
     let age = SystemTime::now().duration_since(meta.modified().ok()?).ok()?;
     if age > CACHE_TTL { return None; }
@@ -272,9 +339,11 @@ fn cache_read(kind: &str, key: &str) -> Option<serde_json::Value> {
 }
 
 fn cache_write(kind: &str, key: &str, v: &serde_json::Value) {
-    let path = cache_file(kind, key);
-    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
-    let _ = std::fs::write(path, v.to_string());
+    let _ = cache_write_in(&cache_dir(), kind, key, v);
+}
+
+fn cache_write_in(root: &Path, kind: &str, key: &str, v: &serde_json::Value) -> Result<()> {
+    write_cache_file(root, &cache_file_in(root, kind, key), v.to_string().as_bytes(), None)
 }
 
 fn cached_title(id: &str) -> Option<Title> {
@@ -389,6 +458,112 @@ pub fn enrich(t: &mut Title) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(kind: &str) -> Self {
+            Self(std::env::temp_dir().join(format!("fbittorrent-imdb-private-{kind}-{}-{}",
+                std::process::id(), SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos())))
+        }
+        fn cache(&self) -> PathBuf { self.0.join("cache") }
+    }
+    impl Drop for Scratch { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+
+    fn private_tree(path: &Path) {
+        let metadata = std::fs::metadata(path).unwrap();
+        let expected = if metadata.is_dir() { 0o700 } else { 0o600 };
+        let mode = metadata.permissions().mode() & 0o7777;
+        assert_eq!(mode, expected, "{}", path.display());
+        println!("{}: {mode:o} after IMDb cache operation", path.display());
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() { private_tree(&entry.unwrap().path()); }
+        }
+    }
+
+    fn public_tree(path: &Path) {
+        let directory = path.is_dir();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(if directory { 0o777 } else { 0o644 })).unwrap();
+        if directory {
+            for entry in std::fs::read_dir(path).unwrap() { public_tree(&entry.unwrap().path()); }
+        }
+    }
+
+    fn http_fixture(body: Vec<u8>, requests: usize) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/fixture.jpg", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for _ in 0..requests {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut chunk = [0; 1024];
+                    let count = socket.read(&mut chunk).unwrap();
+                    assert!(count > 0 && request.len() + count <= 8192);
+                    request.extend_from_slice(&chunk[..count]);
+                }
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                socket.write_all(&body).unwrap();
+            }
+        });
+        (url, server)
+    }
+
+    #[test]
+    fn poster_download_and_existing_cache_hit_are_private() {
+        let scratch = Scratch::new("poster");
+        let root = scratch.cache();
+        let (url, server) = http_fixture(b"local poster bytes".to_vec(), 1);
+        let path = fetch_poster_in(&root, &url, 300).unwrap();
+        server.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"local poster bytes");
+        private_tree(&root);
+        public_tree(&root);
+        // The HTTP listener has closed: this must repair the cache hit locally.
+        assert_eq!(fetch_poster_in(&root, &url, 300).unwrap(), path);
+        assert_eq!(std::fs::read(path).unwrap(), b"local poster bytes");
+        private_tree(&root);
+    }
+
+    #[test]
+    fn ratings_download_replacement_and_reused_temporary_are_private() {
+        let scratch = Scratch::new("ratings");
+        let root = scratch.cache();
+        let tsv = b"tconst\taverageRating\tnumVotes\ntt1234567\t8.0\t42\n";
+        let mut compressor = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        compressor.write_all(tsv).unwrap();
+        let (url, server) = http_fixture(compressor.finish().unwrap(), 3);
+        let temporary = root.join("title.ratings.tmp");
+        for round in 0..3 {
+            if round > 0 { public_tree(&root); }
+            if round == 2 {
+                std::fs::write(&temporary, b"old ratings temporary").unwrap();
+                std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644)).unwrap();
+            }
+            download_ratings_to(&root, &url).unwrap();
+            assert_eq!(std::fs::read(root.join("title.ratings.tsv")).unwrap(), tsv);
+            assert!(!temporary.exists());
+            private_tree(&root);
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn title_and_release_json_caches_are_private_on_write_and_read() {
+        for kind in ["by-id", NAME_CACHE_KIND] {
+            let scratch = Scratch::new(kind);
+            let root = scratch.cache();
+            for replacement in [false, true] {
+                if replacement { public_tree(&root); }
+                let value = serde_json::json!({"id": "tt1234567", "replacement": replacement});
+                cache_write_in(&root, kind, "Private fixture", &value).unwrap();
+                private_tree(&root);
+                public_tree(&root);
+                assert_eq!(cache_read_in(&root, kind, "Private fixture"), Some(value));
+                private_tree(&root);
+            }
+        }
+    }
 
     fn title(id: &str, name: &str, year: u16, kind: &str) -> Title {
         Title { id: id.into(), name: name.into(), year: Some(year), kind: kind.into(), ..Default::default() }

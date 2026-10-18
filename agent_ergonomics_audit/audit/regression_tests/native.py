@@ -249,8 +249,55 @@ def resume_done_refused(harness, root):
                    code == 0 and (downloads / name).read_bytes() == content)
 
 
-def store_modes(case, data, config, parked_data):
+def store_modes(case, root, env, cli, base, fixture):
     """Stat every saved app-data file after the real CLI/TUI lifecycle."""
+    data = Path(env["XDG_DATA_HOME"])
+    config = Path(env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+    parked_data = root / "parked/data"
+    cache = Path(env["XDG_CACHE_HOME"]) / "fbittorrent"
+    previous_mask = os.umask(0)
+    try:
+        stale = config.with_suffix(".toml.tmp")
+        stale.write_text("unpublished setup temporary")
+        stale.chmod(0o644)
+        case.check(stale.stat().st_mode & 0o7777 == 0o644,
+                   "The native setup fixture starts with an existing 0644 fixed temporary.")
+        cli("setup", "--save", str(root / "downloads"))
+        case.check(config.stat().st_mode & 0o7777 == 0o600 and
+                   str(root / "downloads") in config.read_text() and
+                   stale.read_text() == "unpublished setup temporary",
+                   "Setup saves a private config through its fresh atomic writer, bypassing the old temporary.",
+                   f"config mode={config.stat().st_mode & 0o7777:o}; old temporary is preserved; CLI umask=000.")
+
+        # Old readable caches exercise real CLI cache hits, without public requests.
+        by_name = cache / "imdb/by-name-v2/private_cache_fixture.json"
+        by_id = cache / "imdb/by-id/tt1234567.json"
+        ratings = cache / "title.ratings.tsv"
+        for directory in [cache, cache / "imdb", by_name.parent, by_id.parent]:
+            directory.mkdir(parents=True, exist_ok=True)
+            directory.chmod(0o777)
+        by_name.write_text(json.dumps(dict(id="tt1234567")))
+        by_id.write_text(json.dumps(dict(id="tt1234567", name="Private cache fixture", year=2026,
+                         kind="feature", stars="", poster_url=base + "/poster.jpg", rating=8.0,
+                         votes=42, blurb="Local fixture", wiki_url="")))
+        ratings.write_text("tconst\taverageRating\tnumVotes\ntt1234567\t8.0\t42\n")
+        for path in [by_name, by_id, ratings]:
+            path.chmod(0o644)
+        result = cli("imdb", "Private cache fixture")
+        poster = cache / "posters/poster_300.jpg"
+        case.check(result.get("found") is True and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
+                   "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
+                   f"found={result.get('found')}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
+        if poster.is_file():
+            poster.chmod(0o644)
+            poster.parent.chmod(0o777)
+        cli("imdb", "Private cache fixture")
+        case.check(fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+                   "The second IMDb CLI call repairs the existing poster without another HTTP request.",
+                   f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
+    finally:
+        os.umask(previous_mask)
+
     files = sorted(path for directory in [data, parked_data] for path in directory.rglob("*") if path.is_file())
     store = data / "fbittorrent"
     expected = {store / name for name in ["shows.json", "rss.json", "search.json", "engine/torrents.json"]}
@@ -258,10 +305,18 @@ def store_modes(case, data, config, parked_data):
     case.check(expected.issubset(files) and any(path.suffix == ".torrent" and path.parent == store / "engine" for path in files),
                "Shows, RSS, search preferences, ledger and torrent metadata were actually saved.",
                "Saved data paths: " + ", ".join(str(path.relative_to(data.parent)) for path in files))
-    for path in files + [config]:
-        step = case.step("stat -c %a " + str(path), "The saved file has mode 600, including locks and provider helpers.")
+    caches = [cache, root / "parked/cache/fbittorrent"]
+    paths = files + [config]
+    for directory in caches:
+        if directory.exists():
+            paths += [directory, *sorted(directory.rglob("*"))]
+    for directory in [Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent", root / "parked/runtime/fbittorrent"]:
+        paths += [directory, directory / "engine.lock"]
+    for path in paths:
+        mode = "700" if path.is_dir() else "600"
+        step = case.step("stat -c %a " + str(path), f"The saved {'directory' if path.is_dir() else 'file'} has mode {mode}.")
         result = subprocess.run(["stat", "-c", "%a", str(path)], capture_output=True, text=True)
-        (step.ok if result.returncode == 0 and result.stdout.strip() == "600" else step.fail)(
+        (step.ok if result.returncode == 0 and result.stdout.strip() == mode else step.fail)(
             f"{path}: stat exit {result.returncode}, mode {result.stdout.strip()!r}; {result.stderr.strip()}")
 
 
@@ -305,7 +360,7 @@ def main():
         torrent = bencode({"info": info})
         (root / "fixture.torrent").write_bytes(torrent)
         expected_hash = hashlib.sha1(bencode(info)).hexdigest()
-        fixture = {"version": 1, "feed_requests": 0, "torrent_requests": 0,
+        fixture = {"version": 1, "feed_requests": 0, "torrent_requests": 0, "poster_requests": 0,
                    "phase": "setup", "torrent_request_phases": []}
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -318,6 +373,10 @@ def main():
                     fixture["torrent_request_phases"].append(fixture["phase"])
                     body = torrent
                     kind = "application/x-bittorrent"
+                elif self.path == "/poster.jpg":
+                    fixture["poster_requests"] += 1
+                    body = b"Local poster fixture"
+                    kind = "image/jpeg"
                 elif self.path == "/rss":
                     fixture["feed_requests"] += 1
                     version = fixture["version"]
@@ -705,7 +764,7 @@ def main():
             if options.case == "resume_unknown_timestamp":
                 return suite_status("native")
             with Case("native", "store_modes", enabled=options.case in (None, "store_modes")) as case:
-                store_modes(case, Path(env["XDG_DATA_HOME"]), config_dir / "config.toml", parked_root / "data")
+                store_modes(case, root, env, cli, base, fixture)
             if options.case == "store_modes":
                 return suite_status("native")
         except Exception:

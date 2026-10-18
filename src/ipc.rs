@@ -151,6 +151,7 @@ impl InstanceLock {
             .truncate(false)
             .mode(0o600)
             .open(directory.join("engine.lock"))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         // The stable lock file must never be unlinked while another app can open it.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let error = std::io::Error::last_os_error();
@@ -306,6 +307,28 @@ impl Drop for Server {
 mod tests {
     use super::*;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn instance_lock_repairs_existing_permissions_without_replacing_the_file() {
+        use std::os::unix::fs::MetadataExt;
+        let directory = std::env::temp_dir().join(format!("fbittorrent-private-lock-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("engine.lock");
+        std::fs::write(&path, b"stable lock fixture").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let inode = std::fs::metadata(&path).unwrap().ino();
+        let lock = InstanceLock::acquire_in(directory.clone()).unwrap();
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(metadata.ino(), inode);
+        assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
+        assert_eq!(std::fs::read(&path).unwrap(), b"stable lock fixture");
+        assert!(InstanceLock::acquire_in(directory.clone()).is_err());
+        println!("{}: 600 after acquiring an existing 644 lock", path.display());
+        drop(lock);
+        drop(InstanceLock::acquire_in(directory.clone()).unwrap());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn stopping_socket_interrupts_an_incomplete_frame_and_joins_its_worker() {
         let directory = std::env::temp_dir().join(format!(
