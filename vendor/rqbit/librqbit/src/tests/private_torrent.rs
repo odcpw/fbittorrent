@@ -2,6 +2,7 @@
 //! Every remote address comes from these loopback fixtures. Public discovery
 //! remains enabled as a positive control; no production discovery is mocked.
 
+use crate::torrent_state::ManagedTorrentHandle;
 use crate::{
     AddTorrent, AddTorrentOptions, DhtSessionConfig, ListenerOptions, PeerConnectionOptions,
     PeerEncryption, Session, SessionOptions,
@@ -9,7 +10,7 @@ use crate::{
 use bencode::{BencodeValue, BencodeValueOwned, ByteBufOwned};
 use librqbit_core::hash_id::Id20;
 use peer_binary_protocol::Handshake;
-use rqbit_runtime::{Budget, RuntimeBuilder};
+use rqbit_runtime::{Budget, Cx, RuntimeBuilder, runtime::Runtime};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -17,7 +18,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -52,6 +53,9 @@ thread_local! {
 struct Counts {
     tracker: usize,
     extra_tracker: usize,
+    injected_tracker: usize,
+    backup_tracker: usize,
+    empty_tracker: usize,
     dht_queries: usize,
     dht_announces: usize,
     peer_handshakes: usize,
@@ -97,41 +101,64 @@ fn retry(error: &io::Error) -> bool {
 struct Fixtures {
     tracker: String,
     extra_tracker: String,
+    injected_tracker: String,
+    backup_tracker: String,
+    empty_tracker: String,
     dht: SocketAddr,
     observed: Observations,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
+
+#[derive(Clone, Copy)]
+enum Tracker {
+    Primary,
+    Extra,
+    Injected,
+    Backup,
+    Empty,
+}
+
+fn start_peer(
+    stop: Arc<AtomicBool>,
+    observed: Observations,
+    threads: &mut Vec<JoinHandle<()>>,
+) -> (SocketAddr, Arc<AtomicUsize>) {
+    let peer = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let addr = peer.local_addr().unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let connections = accepted.clone();
+    threads.push(thread::spawn(move || {
+        let mut peers = Vec::new();
+        while !stop.load(Ordering::Acquire) {
+            match peer.accept() {
+                Ok((socket, _)) => {
+                    // Count TCP contact before reading any handshake. Absence
+                    // assertions must also catch a connection that sends nothing.
+                    connections.fetch_add(1, Ordering::AcqRel);
+                    let stop = stop.clone();
+                    let observed = observed.clone();
+                    peers.push(thread::spawn(move || serve_peer(socket, stop, observed)));
+                }
+                Err(e) if retry(&e) => thread::sleep(Duration::from_millis(10)),
+                Err(e) => panic!("peer accept: {e}"),
+            }
+        }
+        for peer in peers {
+            peer.join().unwrap();
+        }
+    }));
+    (addr, accepted)
+}
+
 impl Fixtures {
     fn new() -> Self {
         let observed = Observations::default();
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
-        let peer = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let peer_addr = peer.local_addr().unwrap();
-        peer.set_nonblocking(true).unwrap();
-        threads.push(thread::spawn({
-            let stop = stop.clone();
-            let observed = observed.clone();
-            move || {
-                let mut peers = Vec::new();
-                while !stop.load(Ordering::Acquire) {
-                    match peer.accept() {
-                        Ok((socket, _)) => {
-                            let stop = stop.clone();
-                            let observed = observed.clone();
-                            peers.push(thread::spawn(move || serve_peer(socket, stop, observed)));
-                        }
-                        Err(e) if retry(&e) => thread::sleep(Duration::from_millis(10)),
-                        Err(e) => panic!("peer accept: {e}"),
-                    }
-                }
-                for peer in peers {
-                    peer.join().unwrap();
-                }
-            }
-        }));
-        let mut tracker = |extra| {
+        let (peer_addr, _) = start_peer(stop.clone(), observed.clone(), &mut threads);
+        let mut tracker = |kind| {
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             let url = format!("http://{}/announce", listener.local_addr().unwrap());
             listener.set_nonblocking(true).unwrap();
@@ -140,7 +167,7 @@ impl Fixtures {
             threads.push(thread::spawn(move || {
                 while !stop.load(Ordering::Acquire) {
                     match listener.accept() {
-                        Ok((socket, _)) => serve_tracker(socket, peer_addr, extra, &observed),
+                        Ok((socket, _)) => serve_tracker(socket, peer_addr, kind, &observed),
                         Err(e) if retry(&e) => thread::sleep(Duration::from_millis(10)),
                         Err(e) => panic!("tracker accept: {e}"),
                     }
@@ -148,8 +175,11 @@ impl Fixtures {
             }));
             url
         };
-        let tracker_url = tracker(false);
-        let extra_tracker = tracker(true);
+        let tracker_url = tracker(Tracker::Primary);
+        let extra_tracker = tracker(Tracker::Extra);
+        let injected_tracker = tracker(Tracker::Injected);
+        let backup_tracker = tracker(Tracker::Backup);
+        let empty_tracker = tracker(Tracker::Empty);
         // An ID close to the public info hash also exercises announce_peer:
         // the engine only announces to DHT nodes sufficiently near that hash.
         let public_hash = librqbit_core::torrent_metainfo::torrent_from_bytes(&metainfo(
@@ -170,11 +200,18 @@ impl Fixtures {
         Self {
             tracker: tracker_url,
             extra_tracker,
+            injected_tracker,
+            backup_tracker,
+            empty_tracker,
             dht: dht_addr,
             observed,
             stop,
             threads,
         }
+    }
+
+    fn peer(&mut self) -> (SocketAddr, Arc<AtomicUsize>) {
+        start_peer(self.stop.clone(), self.observed.clone(), &mut self.threads)
     }
 }
 impl Drop for Fixtures {
@@ -191,7 +228,7 @@ impl Drop for Fixtures {
     }
 }
 
-fn serve_tracker(mut socket: TcpStream, peer: SocketAddr, extra: bool, observed: &Observations) {
+fn serve_tracker(mut socket: TcpStream, peer: SocketAddr, kind: Tracker, observed: &Observations) {
     socket.set_read_timeout(Some(BOUND)).unwrap();
     socket.set_write_timeout(Some(BOUND)).unwrap();
     let mut request = Vec::new();
@@ -227,16 +264,16 @@ fn serve_tracker(mut socket: TcpStream, peer: SocketAddr, extra: bool, observed:
         }
     }
     let hash = Id20::new(decoded.try_into().expect("20 byte tracker info hash"));
-    count(observed, hash, |c| {
-        if extra {
-            c.extra_tracker += 1
-        } else {
-            c.tracker += 1
-        }
+    count(observed, hash, |c| match kind {
+        Tracker::Primary => c.tracker += 1,
+        Tracker::Extra => c.extra_tracker += 1,
+        Tracker::Injected => c.injected_tracker += 1,
+        Tracker::Backup => c.backup_tracker += 1,
+        Tracker::Empty => c.empty_tracker += 1,
     });
     let mut response = b"d8:intervali60e5:peers".to_vec();
     let mut compact = Vec::new();
-    if !extra {
+    if matches!(kind, Tracker::Primary | Tracker::Injected | Tracker::Backup) {
         compact.extend_from_slice(&Ipv4Addr::LOCALHOST.octets());
         compact.extend_from_slice(&peer.port().to_be_bytes());
     }
@@ -353,10 +390,30 @@ fn serve_peer(mut socket: TcpStream, stop: Arc<AtomicBool>, observed: Observatio
 }
 
 fn metainfo(name: &str, private: bool, tracker: Option<&str>) -> Vec<u8> {
+    metainfo_with_tiers(name, private, tracker, &[])
+}
+
+fn metainfo_with_tiers(
+    name: &str,
+    private: bool,
+    tracker: Option<&str>,
+    tiers: &[&[&str]],
+) -> Vec<u8> {
     let mut torrent = b"d".to_vec();
     if let Some(tracker) = tracker {
         torrent.extend_from_slice(b"8:announce");
         bytes(&mut torrent, tracker.as_bytes());
+    }
+    if !tiers.is_empty() {
+        torrent.extend_from_slice(b"13:announce-listl");
+        for tier in tiers {
+            torrent.push(b'l');
+            for tracker in *tier {
+                bytes(&mut torrent, tracker.as_bytes());
+            }
+            torrent.push(b'e');
+        }
+        torrent.push(b'e');
     }
     torrent.extend_from_slice(b"4:infod6:lengthi16384e4:name");
     bytes(&mut torrent, name.as_bytes());
@@ -551,4 +608,305 @@ fn private_no_dht_no_pex() {
         no_tracker_counts.extra_tracker, 0,
         "private torrents without a tracker stay undiscoverable"
     );
+}
+
+struct NativeSession {
+    runtime: Option<Runtime>,
+    cx: Cx,
+    session: Arc<Session>,
+    _output: tempfile::TempDir,
+}
+
+impl NativeSession {
+    fn new() -> Self {
+        let output = tempfile::tempdir().unwrap();
+        let runtime = RuntimeBuilder::new()
+            .worker_threads(2)
+            .blocking_threads(1, 2)
+            .enable_time()
+            .build()
+            .unwrap();
+        let cx = runtime.request_cx_with_budget(Budget::INFINITE);
+        let session = runtime
+            .block_on(Session::new_with_opts(
+                &cx,
+                output.path().to_owned(),
+                SessionOptions {
+                    peer_encryption: PeerEncryption::Off,
+                    dht: None,
+                    disable_local_service_discovery: true,
+                    runtime_worker_threads: Some(2),
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+        Self {
+            runtime: Some(runtime),
+            cx,
+            session,
+            _output: output,
+        }
+    }
+
+    fn add(&self, torrent: Vec<u8>, opts: AddTorrentOptions) -> ManagedTorrentHandle {
+        self.runtime
+            .as_ref()
+            .unwrap()
+            .block_on(self.session.add_torrent(
+                &self.cx,
+                AddTorrent::from_bytes(torrent),
+                Some(opts),
+            ))
+            .unwrap()
+            .into_handle()
+            .unwrap()
+    }
+
+    fn restart(&self, handle: &ManagedTorrentHandle) {
+        self.runtime.as_ref().unwrap().block_on(async {
+            self.session.pause(&self.cx, handle).await.unwrap();
+            self.session.unpause(&self.cx, handle).await.unwrap();
+        });
+    }
+
+    fn pause(&self, handle: &ManagedTorrentHandle) {
+        self.runtime
+            .as_ref()
+            .unwrap()
+            .block_on(self.session.pause(&self.cx, handle))
+            .unwrap();
+    }
+
+    fn finish(mut self) {
+        let runtime = self.runtime.take().unwrap();
+        let stopped = runtime.block_on(rqbit_runtime::time::timeout(
+            &self.cx,
+            BOUND,
+            self.session.stop(&self.cx),
+        ));
+        let leaks = runtime.diagnostics().find_leaked_obligations().len();
+        let joined = runtime.shutdown_timeout(BOUND);
+        assert!(matches!(stopped, Ok(Ok(()))), "session drains: {stopped:?}");
+        assert_eq!(leaks, 0);
+        assert!(joined, "runtime workers join");
+    }
+}
+
+impl Drop for NativeSession {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            let _ = runtime.block_on(rqbit_runtime::time::timeout(
+                &self.cx,
+                BOUND,
+                self.session.stop(&self.cx),
+            ));
+            let _ = runtime.shutdown_timeout(BOUND);
+        }
+    }
+}
+
+fn wait_for(mut condition: impl FnMut() -> bool) -> bool {
+    let began = Instant::now();
+    while began.elapsed() < BOUND {
+        if condition() {
+            return true;
+        }
+        thread::sleep(IO_TICK);
+    }
+    condition()
+}
+
+#[test]
+fn private_initial_peers_require_tracker_provenance() {
+    let mut fixtures = Fixtures::new();
+    let (injected_peer, private_contacts) = fixtures.peer();
+    let (public_peer, public_contacts) = fixtures.peer();
+    let native = NativeSession::new();
+    let add = |name, private, peer| {
+        native.add(
+            metainfo(name, private, Some(&fixtures.empty_tracker)),
+            AddTorrentOptions {
+                initial_peers: Some(vec![peer]),
+                ..Default::default()
+            },
+        )
+    };
+    let private = add("private-initial.bin", true, injected_peer);
+    let public = add("public-initial.bin", false, public_peer);
+    let ready = wait_for(|| {
+        private.live().is_some()
+            && snapshot(&fixtures.observed, private.info_hash()).empty_tracker > 0
+            && public_contacts.load(Ordering::Acquire) > 0
+    });
+    // Exercise untrusted live-peer insertion too, rather than relying only on
+    // the options sanitization to prevent non-tracker outgoing connections.
+    let direct_accepted = private
+        .live()
+        .map(|live| live.add_peer_if_not_seen(injected_peer).unwrap())
+        .unwrap_or(true);
+    thread::sleep(Duration::from_secs(2));
+    native.restart(&private);
+    native.restart(&public);
+    let restarted = wait_for(|| {
+        snapshot(&fixtures.observed, private.info_hash()).empty_tracker >= 2
+            && public_contacts.load(Ordering::Acquire) >= 2
+    });
+    thread::sleep(Duration::from_secs(2));
+    native.finish();
+    let private_contacts = private_contacts.load(Ordering::Acquire);
+    let public_contacts = public_contacts.load(Ordering::Acquire);
+    println!(
+        "PRIVATE-INITIAL {}",
+        serde_json::json!({
+            "private_tcp_contacts": private_contacts, "public_tcp_contacts": public_contacts,
+            "direct_untrusted_peer_accepted": direct_accepted, "ready": ready, "restarted": restarted,
+        })
+    );
+    assert!(
+        ready && restarted,
+        "empty tracker and public initial-peer control work before and after restart"
+    );
+    assert_eq!(
+        private_contacts, 0,
+        "the empty private tracker did not authorize the injected peer"
+    );
+    assert!(
+        !direct_accepted,
+        "non-tracker live-peer insertion is refused for a private torrent"
+    );
+    assert!(
+        public_contacts >= 2,
+        "public initial peers still connect after restart"
+    );
+}
+
+#[test]
+fn private_per_add_trackers_are_ignored() {
+    let fixtures = Fixtures::new();
+    let native = NativeSession::new();
+    let add = |name, private, tracker| {
+        native.add(
+            metainfo(name, private, tracker),
+            AddTorrentOptions {
+                trackers: Some(vec![fixtures.injected_tracker.clone()]),
+                ..Default::default()
+            },
+        )
+    };
+    let private_none = add("private-injected-none.bin", true, None);
+    let private_one = add("private-injected-one.bin", true, Some(&fixtures.tracker));
+    let public_none = add("public-injected-none.bin", false, None);
+    let public_one = add("public-injected-one.bin", false, Some(&fixtures.tracker));
+    let ready = wait_for(|| {
+        private_none.live().is_some()
+            && snapshot(&fixtures.observed, private_one.info_hash()).peer_handshakes > 0
+            && snapshot(&fixtures.observed, public_none.info_hash()).injected_tracker > 0
+            && snapshot(&fixtures.observed, public_one.info_hash()).injected_tracker > 0
+    });
+    thread::sleep(Duration::from_secs(2));
+    native.finish();
+    let private_none = snapshot(&fixtures.observed, private_none.info_hash());
+    let private_one = snapshot(&fixtures.observed, private_one.info_hash());
+    let public_none = snapshot(&fixtures.observed, public_none.info_hash());
+    let public_one = snapshot(&fixtures.observed, public_one.info_hash());
+    println!(
+        "PRIVATE-PER-ADD {}",
+        serde_json::json!({
+            "private_zero_metainfo_tracker_injected_announces": private_none.injected_tracker,
+            "private_one_metainfo_tracker_injected_announces": private_one.injected_tracker,
+            "private_metainfo_tracker_announces": private_one.tracker,
+            "public_zero_metainfo_tracker_injected_announces": public_none.injected_tracker,
+            "public_one_metainfo_tracker_injected_announces": public_one.injected_tracker,
+        })
+    );
+    assert!(
+        ready,
+        "ordinary private tracker and both public injected-tracker controls are live"
+    );
+    assert_eq!(
+        private_none.injected_tracker, 0,
+        "per-add tracker cannot supply a missing private tracker"
+    );
+    assert_eq!(
+        private_one.injected_tracker, 0,
+        "per-add tracker cannot extend private metainfo"
+    );
+    assert!(private_one.tracker > 0 && private_one.peer_handshakes > 0);
+    assert!(public_none.injected_tracker > 0 && public_one.injected_tracker > 0);
+}
+
+#[test]
+fn private_tracker_uses_first_metainfo_tier() {
+    let fixtures = Fixtures::new();
+    let native = NativeSession::new();
+    // Independent collections catch selection after an unordered conversion.
+    // Run each before/after pair to completion before starting the next one;
+    // this is a tier-selection test rather than a concurrent-init load test.
+    let public = native.add(
+        metainfo("healthy-backup.bin", false, Some(&fixtures.backup_tracker)),
+        AddTorrentOptions::default(),
+    );
+    let mut ready =
+        wait_for(|| snapshot(&fixtures.observed, public.info_hash()).peer_handshakes > 0);
+    let mut restarted = true;
+    let mut private = Vec::new();
+    for index in 0..16 {
+        let handle = native.add(
+            metainfo_with_tiers(
+                &format!("private-tiers-{index}.bin"),
+                true,
+                // BEP 12 ignores the legacy announce key when tiers are present.
+                Some(&fixtures.extra_tracker),
+                &[&[&fixtures.tracker], &[&fixtures.backup_tracker]],
+            ),
+            AddTorrentOptions::default(),
+        );
+        let announced = |minimum| {
+            let counts = snapshot(&fixtures.observed, handle.info_hash());
+            counts.tracker + counts.backup_tracker + counts.extra_tracker >= minimum
+                && counts.peer_handshakes >= minimum
+        };
+        ready &= wait_for(|| announced(1));
+        native.restart(&handle);
+        restarted &= wait_for(|| announced(2));
+        native.pause(&handle);
+        private.push(handle);
+    }
+    thread::sleep(Duration::from_secs(1));
+    native.finish();
+    let observations: Vec<_> = private
+        .iter()
+        .map(|handle| snapshot(&fixtures.observed, handle.info_hash()))
+        .collect();
+    let backup_control = snapshot(&fixtures.observed, public.info_hash());
+    println!(
+        "PRIVATE-TIERS {}",
+        serde_json::json!({
+            "private_torrents": private.len(),
+            "first_tier_announces": observations.iter().map(|c| c.tracker).sum::<usize>(),
+            "second_tier_announces": observations.iter().map(|c| c.backup_tracker).sum::<usize>(),
+            "legacy_announce_requests": observations.iter().map(|c| c.extra_tracker).sum::<usize>(),
+            "healthy_backup_control_announces": backup_control.backup_tracker,
+            "ready": ready, "restarted": restarted,
+        })
+    );
+    assert!(
+        ready && restarted,
+        "both healthy tiers are reachable and private torrents restart"
+    );
+    for counts in observations {
+        assert!(
+            counts.tracker >= 2,
+            "first tier before/after restart: {counts:?}"
+        );
+        assert_eq!(
+            counts.backup_tracker, 0,
+            "second tier must not replace a healthy first tier"
+        );
+        assert_eq!(
+            counts.extra_tracker, 0,
+            "announce-list takes precedence over announce"
+        );
+    }
+    assert!(backup_control.backup_tracker > 0 && backup_control.peer_handshakes > 0);
 }

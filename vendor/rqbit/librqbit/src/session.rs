@@ -264,7 +264,8 @@ pub struct AddTorrentOptions {
     #[serde(default)]
     pub ratelimits: LimitsConfig,
 
-    /// Initial peers to start of with.
+    /// Initial peers to start with. Ignored once private metadata is known:
+    /// these addresses carry no proof that the active private tracker returned them.
     pub initial_peers: Option<Vec<SocketAddr>>,
 
     /// Max concurrent connected peers.
@@ -276,7 +277,7 @@ pub struct AddTorrentOptions {
     #[serde(skip)]
     pub storage_factory: Option<BoxStorageFactory>,
 
-    // Custom trackers
+    /// Additional trackers for public torrents. Ignored for private metainfo.
     pub trackers: Option<Vec<String>>,
 }
 
@@ -1030,7 +1031,9 @@ impl Session {
                             }
                         })
                         .collect::<Vec<_>>();
-                    if let Some(custom_trackers) = opts.trackers.clone() {
+                    if !torrent.meta.info.data.private
+                        && let Some(custom_trackers) = opts.trackers.clone()
+                    {
                         trackers.extend(custom_trackers);
                     }
 
@@ -1139,6 +1142,14 @@ impl Session {
         };
         let peer_rx = None;
 
+        if metadata.info.info().private {
+            // This also discards peers seen while resolving magnet metadata:
+            // that merged stream did not preserve tracker provenance. The
+            // managed private stream will obtain fresh peers from its tracker.
+            opts.initial_peers = None;
+            seen_peers.clear();
+        }
+
         trace!("Torrent metadata: {:#?}", &metadata.info.info());
 
         let only_files = compute_only_files(
@@ -1206,7 +1217,7 @@ impl Session {
                 id,
                 span,
                 info_hash,
-                trackers: trackers.into_iter().collect(),
+                trackers,
                 spawner: self.spawner.clone(),
                 peer_id: self.peer_id,
                 storage_factory,
@@ -1366,7 +1377,7 @@ impl Session {
         self.make_peer_rx(
             cx,
             t.info_hash(),
-            t.shared().trackers.iter().cloned().collect(),
+            t.shared().trackers.clone(),
             announce,
             t.shared().options.force_tracker_interval,
             t.shared().options.initial_peers.clone(),
@@ -1435,7 +1446,7 @@ impl Session {
             self.udp_tracker_client.clone(),
         );
 
-        let initial_peers_rx = if initial_peers.is_empty() {
+        let initial_peers_rx = if is_private || initial_peers.is_empty() {
             None
         } else {
             Some(futures::stream::iter(initial_peers))
