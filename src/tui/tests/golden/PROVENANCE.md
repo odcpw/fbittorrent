@@ -41,5 +41,11 @@ git diff -- src/tui/tests/golden/
 ```
 
 A mismatch names the golden file and prints a unified diff. Never set the
-update variable in CI. The 60×20 meta-test renders all ten surfaces without
+update variable in CI. The 60×20 meta-test renders all eleven surfaces without
 creating extra goldens. The Unicode check verifies wide and combining text.
+
+P0-10 adds the `done` selection at all three sizes on base revision `ef2de87`.
+The second fixture torrent now has its real completed, stop-on-complete fields.
+Its footer offers `(U) Seed` and omits Resume. The other 30 goldens are unchanged.
+The interaction test selects this row through the Down key, prints the asserted
+80×24 footer under `--nocapture`, and checks that U dispatches the seed action.

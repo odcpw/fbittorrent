@@ -701,7 +701,7 @@ impl EngineDispatcher {
                 .await?;
             return Ok("Ok.".into());
         }
-        let hashes = requested_hashes(request, &ledger)?;
+        let (hashes, start_result) = mutation_hashes(request, &ledger)?;
         // Validate the complete selection before any mutation.
         for hash in &hashes {
             self.inner.handle(hash)?;
@@ -820,7 +820,7 @@ impl EngineDispatcher {
         self.inner
             .reconcile_queue(cx, &mut ledger, &retry_errors)
             .await?;
-        Ok("Ok.".into())
+        match start_result { Some(result) => json(&result), None => Ok("Ok.".into()) }
     }
 
     async fn add(&self, cx: &Cx, request: &Request) -> Result<String> {
@@ -1326,7 +1326,7 @@ fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<Stri
             }
             _ => {}
         }
-        let hashes = requested_hashes(request, &ledger)?;
+        let (hashes, start_result) = mutation_hashes(request, &ledger)?;
         if request.path == "torrents/delete" {
             if request.arg("deleteFiles") == Some("true") {
                 bail!("connect ProtonVPN before removing downloaded files; removing the saved torrent while keeping files is available now");
@@ -1347,7 +1347,7 @@ fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<Stri
             }
             save_parked_ledger(directory, &ledger)?;
         }
-        Ok("Ok.".into())
+        match start_result { Some(result) => json(&result), None => Ok("Ok.".into()) }
     })())
 }
 
@@ -1382,6 +1382,27 @@ fn requested_hashes(request: &Request, ledger: &Ledger) -> Result<Vec<String>> {
         }
     }
     Ok(hashes)
+}
+
+/// Validate the whole selection before changing intent. Bulk start omits done
+/// records; an explicit selection refuses atomically with a useful next step.
+fn mutation_hashes(request: &Request, ledger: &Ledger) -> Result<(Vec<String>, Option<crate::qbt::StartResult>)> {
+    let hashes = requested_hashes(request, ledger)?;
+    if request.path != "torrents/start" { return Ok((hashes, None)); }
+    let mut result = crate::qbt::StartResult::default();
+    let bulk = request.arg("hashes") == Some("all") || request.arg("skip_complete") == Some("true");
+    for hash in hashes {
+        let record = ledger.records.iter().find(|r| r.hash == hash).expect("validated hash");
+        if record.completion_on != 0 && record.stop_on_complete() {
+            if !bulk {
+                return Err(crate::agent::AppError::new(crate::agent::Code::Failure,
+                    "already complete; seeding is off for this torrent")
+                    .hint(format!("fbittorrent seed {hash}")).into());
+            }
+            result.skipped.push(crate::qbt::StartSkipped { hash, reason: "complete_no_seed".into() });
+        } else { result.started.push(hash); }
+    }
+    Ok((result.started.clone(), Some(result)))
 }
 fn json(value: &impl Serialize) -> Result<String> {
     Ok(serde_json::to_string(value)?)
@@ -1874,6 +1895,46 @@ mod tests {
     }
 
     #[test]
+    fn resume_done_is_typed_and_bulk_start_reports_skips() {
+        let directory = review_directory("resume-done");
+        std::fs::create_dir_all(&directory).unwrap();
+        let done_hash = "0000000000000000000000000000000000000001";
+        let download_hash = "0000000000000000000000000000000000000002";
+        let seed_hash = "0000000000000000000000000000000000000003";
+        let mut done = review_record(done_hash, &directory);
+        done.completion_on = 10;
+        done.paused = true;
+        let mut download = review_record(download_hash, &directory);
+        download.paused = true;
+        let mut seeder = done.clone();
+        seeder.hash = seed_hash.into();
+        seeder.ratio_limit = -2.0;
+        save_parked_ledger(&directory, &Ledger {
+            migrated_legacy: false, records: vec![done, download, seeder],
+        }).unwrap();
+        let before = std::fs::read(directory.join("torrents.json")).unwrap();
+        let selected = format!("{download_hash}|{done_hash}");
+        let error = dispatch_parked_in(&request("torrents/start", &[("hashes", &selected)]), &directory)
+            .unwrap().unwrap_err();
+        let typed = error.downcast_ref::<crate::agent::AppError>().unwrap_or_else(|| panic!("typed refusal: {error:#}"));
+        assert_eq!(typed.code, crate::agent::Code::Failure);
+        assert_eq!(typed.message, "already complete; seeding is off for this torrent");
+        assert_eq!(typed.hint, Some(format!("fbittorrent seed {done_hash}")));
+        assert_eq!(std::fs::read(directory.join("torrents.json")).unwrap(), before);
+        let selected = format!("{done_hash}|{download_hash}|{seed_hash}");
+        for args in [vec![("hashes", "all")], vec![("hashes", &selected), ("skip_complete", "true")]] {
+            let result: serde_json::Value = serde_json::from_str(&dispatch_parked_in(
+                &request("torrents/start", &args), &directory).unwrap().unwrap()).unwrap();
+            assert_eq!(result, serde_json::json!({"started": [download_hash, seed_hash],
+                "skipped": [{"hash": done_hash, "reason": "complete_no_seed"}]}));
+            let saved = read_ledger(&directory.join("torrents.json")).unwrap();
+            assert!(saved.records[0].paused);
+            assert!(!saved.records[1].paused && !saved.records[2].paused);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn parked_history_preserves_order_unknown_progress_and_durable_manual_intent() {
         let directory = review_directory("parked-queue");
         std::fs::create_dir_all(&directory).unwrap();
@@ -1885,6 +1946,7 @@ mod tests {
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         let mut record = review_record(&hash, &directory.join("downloads"));
         record.completion_on = 10;
+        record.ratio_limit = -2.0; // Completed records can resume when seeding is enabled.
         let ledger = Ledger {
             migrated_legacy: false,
             records: vec![record],

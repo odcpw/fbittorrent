@@ -41,14 +41,88 @@ def wait_for(check, label, seconds=10):
     raise AssertionError(f"timed out: {label}")
 
 
+def resume_done_refused(binary, env, root, daemon_stderr):
+    """Verify the real CLI/socket/engine refusal on locally verified bytes."""
+    suite = "native-p0-10-" + str(time.time_ns())
+    logs = Path("target/test-logs") / suite
+    logs.mkdir(parents=True)
+    case = "resume_done_refused"
+    artifact = logs / (case + ".cli.log")
+    artifact.touch()
+    daemon_log = logs / (case + ".daemon.log")
+    step = 0
+    started = time.monotonic()
+
+    def record(action, expect, observed, ok=True, final=False):
+        nonlocal step, started
+        step += 1
+        now = time.monotonic()
+        daemon_log.write_bytes(daemon_stderr.read_bytes() if daemon_stderr.exists() else b"")
+        row = dict(ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                   suite=suite, case=case, step=step, action=action, expect=expect,
+                   observed=observed, ok=ok, ms=round((now-started)*1000), artifacts=[str(artifact), str(daemon_log)])
+        if final:
+            row["final"] = True
+        with (logs / (case + ".jsonl")).open("a") as output:
+            output.write(json.dumps(row) + "\n")
+        print(json.dumps(row), flush=True)
+        if os.environ.get("FBT_TEST_VERBOSE") == "1":
+            print(json.dumps(row), file=sys.stderr, flush=True)
+        started = now
+
+    def command(*args):
+        result = subprocess.run([binary, *args, "--json"], env=env,
+                                capture_output=True, text=True, timeout=20)
+        with artifact.open("a") as output:
+            output.write(f"{args!r}: exit {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}\n")
+        return result.returncode, json.loads(result.stdout)
+
+    try:
+        name = "P0-10.complete.txt"
+        content = b"Verified local P0-10 torrent.\n"
+        downloads = root / "downloads"
+        downloads.mkdir(exist_ok=True)
+        (downloads / name).write_bytes(content)
+        info = {"length": len(content), "name": name, "piece length": 16384,
+                "pieces": hashlib.sha1(content).digest(), "private": 1}
+        torrent = root / "complete.torrent"
+        torrent.write_bytes(bencode({"info": info}))
+        hash_ = hashlib.sha1(bencode(info)).hexdigest()
+        code, added = command("add", str(torrent), "--quiet")
+        assert code == 0, added
+        def completed():
+            code, value = command("show", hash_)
+            return value if code == 0 and value.get("completion_on", 0) != 0 and value["state"] == "stoppedUP" else None
+        done = wait_for(completed, "local bytes verify and stop on completion")
+        record("add local complete torrent and await verification", "completed torrent stops with seeding off", json.dumps(done))
+        code, envelope = command("start", hash_)
+        expected = dict(ok=False, code=1, code_name="failure",
+                        error="already complete; seeding is off for this torrent", hint=f"fbittorrent seed {hash_}")
+        ok = code == 1 and envelope == expected
+        record("start finished stop-on-complete torrent", "exit 1; code 1, code_name failure and seed hint", json.dumps(envelope), ok)
+        assert ok, (code, envelope)
+        code, result = command("start", "all")
+        ok = code == 0 and {"hash": hash_, "reason": "complete_no_seed"} in result["skipped"] and hash_ not in result["hashes"]
+        record("start all", "exit 0; completed hash is skipped, never reported started", json.dumps(result), ok)
+        assert ok, result
+        code, result = command("delete", hash_)
+        assert code == 0 and (downloads / name).read_bytes() == content, result
+        record("remove disposable torrent, retaining verified bytes", "exit 0; fixture removed and files retained", json.dumps(result), final=True)
+    except Exception as error:
+        record("case failure", "all steps pass", str(error), False, final=True)
+        for path in [logs / (case + ".jsonl"), artifact, daemon_log]:
+            print(f"{path}:\n" + "\n".join(path.read_text().splitlines()[-20:]), file=sys.stderr)
+        raise
+
+
 def main():
     binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/fbittorrent").resolve())
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "runtime"),
-                   XDG_CACHE_HOME=str(root / "cache"), TERM="xterm-256color")
-        for key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"):
+                   XDG_STATE_HOME=str(root / "state"), XDG_CACHE_HOME=str(root / "cache"), TERM="xterm-256color")
+        for key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
             Path(env[key]).mkdir(mode=0o700)
         config_dir = Path(env["XDG_CONFIG_HOME"]) / "fbittorrent"
         config_dir.mkdir()
@@ -130,16 +204,21 @@ def main():
             return {episode["key"]: episode for episode in cli("shows", "episodes", imdb)["episodes"]}
 
         tmux_socket = f"fbt-native-{os.getpid()}"
+        session = "fbt-fbt-p0-10-xeq"
 
         def tmux(*args, check=True):
-            return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
-                                  capture_output=True, text=True, check=check)
+            result = subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
+                                    capture_output=True, text=True)
+            if check and result.returncode:
+                raise AssertionError(f"tmux {args!r}: {result.stderr.strip()}")
+            return result
 
         def capture():
-            return tmux("capture-pane", "-t", "test", "-p", check=False).stdout
+            return tmux("capture-pane", "-t", session, "-p", check=False).stdout
 
         def keys(*args):
-            tmux("send-keys", "-t", "test", *args)
+            for key in args:
+                tmux("send-keys", "-t", session, *(["-l", key] if len(key) == 1 else [key]))
 
         def mouse_text(text, button):
             rows = capture().splitlines()
@@ -148,7 +227,7 @@ def main():
             sequence = f"\x1b[<{button};{x+1};{y+1}M"
             if button == 0:
                 sequence += f"\x1b[<0;{x+1};{y+1}m"
-            tmux("send-keys", "-t", "test", "-l", sequence)
+            tmux("send-keys", "-t", session, "-l", sequence)
 
         def click_text(text):
             mouse_text(text, 0)
@@ -164,7 +243,10 @@ def main():
             assert not socket_path.exists(), "local feed commands opened torrent engine"
             assert len(cli("rss", "items", "Local feed")["items"]) == 1
             fixture["version"] = 2
-            tmux("new-session", "-d", "-s", "test", "-x", "120", "-y", "30", launch)
+            tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
+            # Keep the isolated server alive between quit and restart. Socket
+            # removal precedes terminal exit; neither is tmux session teardown.
+            tmux("set-option", "-s", "exit-empty", "off")
             wait_for(lambda: socket_path.exists(), "native socket")
             wait_for(lambda: cli("status").get("ok"), "native status")
             wait_for(lambda: terminal_bytes.exists() and b"\x1b[?1003h" in terminal_bytes.read_bytes(),
@@ -254,8 +336,12 @@ def main():
             assert details["state"] == "stoppedDL"
             cli("delete", expected_hash, "--files", code=3)
             print("ok: native CLI fields, file selection, cap and deletion safety")
+            resume_done_refused(binary, env, root, error_file)
+            cli("stop", expected_hash)
 
-            keys("1", "Enter")
+            keys("1")
+            wait_for(lambda: "P0-10.complete.txt" not in capture(), "completed fixture removed from TUI")
+            keys("Enter")
             wait_for(lambda: "Files" in capture(), "file modal")
             assert "high" not in capture().lower() and "max" not in capture().lower()
             keys("Escape")
@@ -310,7 +396,7 @@ def main():
             keys("PageDown")
             keys("Escape")
             wait_for(lambda: "GLOBAL" not in capture(), "help closes")
-            tmux("resize-window", "-t", "test", "-x", "80", "-y", "24")
+            tmux("resize-window", "-t", session, "-x", "80", "-y", "24")
             keys("1")
             wait_for(lambda: "Torrents" in capture(), "small terminal")
             print("ok: native file modal, Shows, scrollable help and 80x24 terminal")
@@ -358,9 +444,11 @@ def main():
 
             keys("q")
             wait_for(lambda: not socket_path.exists(), "quit removes socket", seconds=6)
+            wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode != 0,
+                     "quit closes the tmux session", seconds=6)
             assert cli("status")["backend"] == "stopped"
             assert not error_file.read_text(), error_file.read_text()
-            tmux("new-session", "-d", "-s", "test", "-x", "120", "-y", "30", launch)
+            tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
             wait_for(lambda: socket_path.exists(), "restart socket")
             assert show_episodes("tt1234001")["S01"]["read"]
             assert show_episodes("tt1234002")["S01E01"]["read"]

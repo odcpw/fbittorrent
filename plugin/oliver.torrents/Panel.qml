@@ -488,6 +488,9 @@ Panel {
       }
 
       PanelActionButton {
+        objectName: "toggle-" + (row.torrent ? row.torrent.hash : "")
+        visible: !(row.torrent && Number(row.torrent.completion_on || 0) !== 0
+                   && Number(row.torrent.ratio_limit) === 0)
         iconText: row.stopped ? "󰐊" : "󰏤"
         tooltipText: row.stopped ? "Start (p)" : "Stop (p)"
         foreground: root.foreground

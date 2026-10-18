@@ -53,6 +53,8 @@ impl Request {
 struct Response {
     value: Option<String>,
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app_error: Option<crate::agent::AppError>,
 }
 
 pub fn socket_path(_cfg: &Config) -> PathBuf {
@@ -114,6 +116,7 @@ pub fn request(
     };
     write_frame(&mut stream, &req)?;
     let response: Response = read_frame(&mut stream).context("reading native engine response")?;
+    if let Some(error) = response.app_error { return Err(error.into()); }
     match (response.value, response.error) {
         (Some(value), None) => Ok(value),
         (_, Some(error)) => bail!("{error}"),
@@ -211,6 +214,7 @@ impl Server {
                             &Response {
                                 value: None,
                                 error: Some("native engine is busy; retry shortly".into()),
+                                app_error: None,
                             },
                         );
                         continue;
@@ -230,10 +234,12 @@ impl Server {
                             Ok(value) => Response {
                                 value: Some(value),
                                 error: None,
+                                app_error: None,
                             },
                             Err(error) => Response {
                                 value: None,
                                 error: Some(format!("{error:#}")),
+                                app_error: error.downcast_ref::<crate::agent::AppError>().cloned(),
                             },
                         };
                         let _ = write_frame(&mut stream, &response);

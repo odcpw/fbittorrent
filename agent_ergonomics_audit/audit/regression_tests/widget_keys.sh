@@ -6,9 +6,9 @@ set -euo pipefail
 [[ "${FBT_TEST_WIDGET:-0}" == 1 ]] || { echo 'widget tests skipped (set FBT_TEST_WIDGET=1)'; exit 0; }
 cd "$(dirname "$0")/../../.."
 python3 - <<'PY'
-import datetime, json, os, pathlib, shutil, subprocess, tempfile, time
+import datetime, json, os, pathlib, shutil, subprocess, sys, tempfile, time
 repo=pathlib.Path.cwd()
-suite='widget-p0-13-'+str(time.time_ns())
+suite='widget-p0-10-'+str(time.time_ns())
 logs=repo/'target/test-logs'/suite
 logs.mkdir(parents=True,exist_ok=True)
 original=dict(os.environ)
@@ -26,6 +26,7 @@ def record(case,action,expect,observed,ok=True,final=False):
     with (logs/(case+'.jsonl')).open('a') as output: output.write(json.dumps(row)+'\n')
     if not ok: failed.add(case)
     print(json.dumps(row),flush=True)
+    if os.environ.get('FBT_TEST_VERBOSE')=='1': print(json.dumps(row),file=sys.stderr,flush=True)
 def wait(check):
     end=time.monotonic()+8
     while time.monotonic()<end:
@@ -108,6 +109,10 @@ ShellRoot {
       events.mouseClick(item, item.width / 2, item.height / 2)
       return "clicked"
     }
+    function toggleVisible(hash: string): bool {
+      var item = visualChild(events.findChild(widget, "torrent-rows"), "toggle-" + hash)
+      return item !== null && item.visible
+    }
   }
 }
 ''')
@@ -138,6 +143,15 @@ ShellRoot {
         record(current,'press l','header index 1',json.dumps(cur()),cur()['header']==1,True)
         current='W-005'; keys('-k','Escape'); wait(lambda:not cur()['opened'])
         record(current,'press Escape','popup closes',json.dumps(cur()),not cur()['opened'],True)
+        current='W-011'; ipc('open'); time.sleep(.2)
+        save([dict(torrents[0],completion_on=123,ratio_limit=0,progress=1,state='stoppedUP'),
+              dict(torrents[1],completion_on=123,ratio_limit=-2,progress=1,state='stoppedUP')])
+        ipc('refresh')
+        def toggles(): return [ipc('toggleVisible',t['hash'],target='fixture') for t in torrents]
+        wait(lambda:toggles()==['false','true'])
+        record(current,'render done rows with seeding off and on','start hidden only for completed stop-on-complete torrent',json.dumps(toggles()),toggles()==['false','true'])
+        save(torrents); ipc('refresh'); wait(lambda:toggles()==['true','true'])
+        record(current,'restore incomplete rows','start remains visible for both incomplete torrents',json.dumps(toggles()),toggles()==['true','true'],True)
         current='W-010'; ipc('open'); time.sleep(.2)
         record(current,'cursor before d','no confirmation; two torrents remain',json.dumps(cur()),not cur()['confirming'] and len(json.loads(state.read_text())['torrents'])==2)
         keys('d'); after=pending(); question=json.loads(ipc('question',target='fixture'))
