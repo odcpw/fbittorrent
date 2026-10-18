@@ -30,7 +30,7 @@ CASES = (
     "refresh_preserves_read_history", "rss_mouse_and_scoped_shortcuts",
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety",
     "resume_done_refused", "bulk_start_requires_hashes", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
-    "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp",
+    "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp", "store_modes",
 )
 
 
@@ -249,6 +249,22 @@ def resume_done_refused(harness, root):
                    code == 0 and (downloads / name).read_bytes() == content)
 
 
+def store_modes(case, data, config, parked_data):
+    """Stat every saved app-data file after the real CLI/TUI lifecycle."""
+    files = sorted(path for directory in [data, parked_data] for path in directory.rglob("*") if path.is_file())
+    store = data / "fbittorrent"
+    expected = {store / name for name in ["shows.json", "rss.json", "search.json", "engine/torrents.json"]}
+    expected.add(parked_data / "fbittorrent/engine/torrents.json")
+    case.check(expected.issubset(files) and any(path.suffix == ".torrent" and path.parent == store / "engine" for path in files),
+               "Shows, RSS, search preferences, ledger and torrent metadata were actually saved.",
+               "Saved data paths: " + ", ".join(str(path.relative_to(data.parent)) for path in files))
+    for path in files + [config]:
+        step = case.step("stat -c %a " + str(path), "The saved file has mode 600, including locks and provider helpers.")
+        result = subprocess.run(["stat", "-c", "%a", str(path)], capture_output=True, text=True)
+        (step.ok if result.returncode == 0 and result.stdout.strip() == "600" else step.fail)(
+            f"{path}: stat exit {result.returncode}, mode {result.stdout.strip()!r}; {result.stderr.strip()}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
@@ -344,8 +360,8 @@ def main():
         def show_episodes(imdb):
             return {episode["key"]: episode for episode in cli("shows", "episodes", imdb)["episodes"]}
 
-        tmux_socket = f"fbt-fbt-p0-10-xeq-{os.getpid()}"
-        session = "fbt-fbt-p0-10-xeq"
+        tmux_socket = f"fbt-fbt-p0-14-rsx-{os.getpid()}"
+        session = "fbt-fbt-p0-14-rsx"
 
         def tmux(*args, check=True, timeout=None):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
@@ -687,6 +703,10 @@ def main():
                 parked_cli("down")
                 wait_for(lambda: not parked_socket.exists(), "parked fixture closes without a stale socket", seconds=6)
             if options.case == "resume_unknown_timestamp":
+                return suite_status("native")
+            with Case("native", "store_modes", enabled=options.case in (None, "store_modes")) as case:
+                store_modes(case, Path(env["XDG_DATA_HOME"]), config_dir / "config.toml", parked_root / "data")
+            if options.case == "store_modes":
                 return suite_status("native")
         except Exception:
             print(f"fixture state: {fixture}", file=sys.stderr)

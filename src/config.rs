@@ -106,7 +106,7 @@ impl Config {
 
     fn save_to(&self, path: &std::path::Path) -> Result<()> {
         use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         use std::sync::atomic::{AtomicU64, Ordering};
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         self.validate()?;
@@ -115,6 +115,7 @@ impl Config {
         let staged = directory.join(format!(".config-{}-{}.tmp", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)));
         let result = (|| -> Result<()> {
             let mut file = std::fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&staged)?;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             file.write_all(toml::to_string_pretty(self)?.as_bytes())?;
             file.sync_all()?;
             drop(file);
@@ -128,12 +129,15 @@ impl Config {
 
     pub fn write_default_if_missing() -> Result<PathBuf> {
         let path = config_path();
-        if !path.exists() {
-            std::fs::create_dir_all(config_dir())?;
-            let body = toml::to_string_pretty(&Config::default())?;
-            std::fs::write(&path, body)?;
-        }
+        Self::write_default_to_if_missing(&path)?;
         Ok(path)
+    }
+
+    fn write_default_to_if_missing(path: &std::path::Path) -> Result<()> {
+        if !path.exists() {
+            Self::default().save_to(path)?;
+        }
+        Ok(())
     }
 }
 
@@ -149,6 +153,26 @@ pub fn runtime_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_save_and_default_creation_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("fbittorrent-config-private-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        Config::write_default_to_if_missing(&path).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut cfg = Config::default();
+        cfg.max_active_downloads = 7;
+        cfg.save_to(&path).unwrap();
+        Config::write_default_to_if_missing(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.max_active_downloads, 7, "default creation must preserve an existing config");
+        println!("{}: {mode:o} after config save", path.display());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn existing_settings_gain_queue_and_encryption_defaults() {
         let cfg: Config = toml::from_str("engine = 'native'\nseed_by_default = false\n").unwrap();
