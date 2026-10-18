@@ -516,6 +516,7 @@ impl AppEngine {
 
 impl Drop for AppEngine {
     fn drop(&mut self) {
+        let began = std::time::Instant::now();
         self.dispatcher
             .inner
             .stopping
@@ -524,22 +525,24 @@ impl Drop for AppEngine {
             server.stop_accepting();
         }
         if let Some(runtime) = self.runtime.take() {
-            let began = std::time::Instant::now();
             let bound = Duration::from_secs(4);
             let cx = runtime.cx();
+            let mut drained = false;
             match runtime.block_on(time::timeout(
                 cx,
-                bound,
+                bound.saturating_sub(began.elapsed()),
                 self.dispatcher.inner.session.stop(cx),
             )) {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => drained = true,
                 Ok(Err(error)) => eprintln!("closing native torrent session: {error:#}"),
                 Err(_) => eprintln!("native torrent session did not drain before its deadline"),
             }
             self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
+                drained = false;
                 eprintln!("closing native runtime: {error:#}");
             }
+            if drained { eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis()); }
         }
     }
 }

@@ -290,7 +290,9 @@ fn main() {
     let json = cli.json;
     match run(cli) {
         Ok(code) => std::process::exit(code as i32),
-        Err(e) => std::process::exit(agent::report(&e, json)),
+        Err(e) => std::process::exit(if let Some(signal) = e.downcast_ref::<tui::SignalTermination>() {
+            128 + signal.0
+        } else { agent::report(&e, json) }),
     }
 }
 
@@ -800,7 +802,7 @@ fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
     let snapshot = network_app::state(&cfg);
     network_app::initialize(snapshot.clone());
     if !snapshot.ready {
-        let parked = network_app::ParkedEngine::start(&cfg, snapshot)?;
+        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot)?);
         let result = tui::run(cfg.clone(), screen);
         drop(parked);
         result?;
@@ -824,6 +826,7 @@ fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
         network_app::controls(request, &snapshot).or_else(|| dispatcher.dispatch(request))
             .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
     })?;
+    let app = tui::signals::AppGuard::new(app);
     // The guard drops before run() returns, including a TUI initialization error.
     // main() only calls process::exit after network activity and searches stop.
     let result = tui::run(cfg.clone(), screen);
