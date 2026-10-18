@@ -132,3 +132,7 @@ Receipt: [P0-13.md](P0-13.md) (branch ntm/fbittorrent/cod_2, commit ea13ef3; mer
 ## P0-05
 
 Receipt: [P0-05.md](P0-05.md) (branch ntm/fbittorrent/cod_4, commit d4eb8fa; merged by the orchestrator after an independent test run).
+
+## P0-02
+
+Receipt: [P0-02.md](P0-02.md) (branch ntm/fbittorrent/cod_3, commit cf92a57; merged by the orchestrator after re-running the 63 timer-wheel tests in the prepared upstream checkout).
