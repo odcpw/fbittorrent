@@ -11,7 +11,7 @@
         let mut record = review_record(&hash, &directory.join("downloads"));
         record.completion_on = 10;
         record.ratio_limit = -2.0; // Completed records can resume when seeding is enabled.
-        let ledger = Ledger {
+        let ledger = Ledger { generation: Default::default(),
             migrated_legacy: false,
             records: vec![record],
         };
@@ -114,12 +114,12 @@
         let samples = [
             b"{\"records\":[".to_vec(),
             b"{}".to_vec(),
-            serde_json::to_vec(&Ledger {
+            serde_json::to_vec(&Ledger { generation: Default::default(),
                 migrated_legacy: false,
                 records: vec![invalid_hash],
             })
             .unwrap(),
-            serde_json::to_vec(&Ledger {
+            serde_json::to_vec(&Ledger { generation: Default::default(),
                 migrated_legacy: false,
                 records: vec![record.clone(), record.clone()],
             })
@@ -132,7 +132,7 @@
         }
         std::fs::write(
             &path,
-            serde_json::to_vec(&Ledger {
+            serde_json::to_vec(&Ledger { generation: Default::default(),
                 migrated_legacy: false,
                 records: vec![record],
             })

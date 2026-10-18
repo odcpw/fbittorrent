@@ -33,16 +33,19 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
 mod queue;
-mod ops;
-mod view;
+pub mod ops;
+mod restore;
+pub mod view;
 mod parked;
 mod legacy_import;
 
 use ledger::{Record, Ledger, read_ledger, save_parked_ledger};
-use ops::{required, mutation_hashes, json, now};
+use ops::{mutation_hashes, json, now};
 #[cfg(test)]
 use parked::dispatch_parked_in;
-pub use parked::dispatch_parked;
+#[allow(unused_imports)] // Preserve the old compatibility entry point for P1-10.
+pub use parked::{dispatch_parked, ParkedLedger};
+pub use ledger::LedgerGeneration;
 pub(crate) use legacy_import::migrate_legacy;
 #[cfg(test)]
 pub(crate) use legacy_import::LegacyMigration;
@@ -88,6 +91,7 @@ struct Inner {
 
 #[derive(Clone)]
 pub struct EngineDispatcher {
+    generation: Arc<LedgerGeneration>,
     lifecycle: Lifecycle,
     inner: Arc<Inner>,
     runtime: Handle,
@@ -159,6 +163,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             options,
         ))
         .context("starting the native torrent engine")?;
+    let generation = ledger.generation.clone();
     let inner = Arc::new(Inner {
         session,
         ledger: Arc::new(Mutex::new(ledger)),
@@ -176,6 +181,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     })?;
     inner.begin_restores(cx, records)?;
     let dispatcher = EngineDispatcher {
+        generation,
         lifecycle,
         inner: inner.clone(),
         runtime: runtime.handle(),
