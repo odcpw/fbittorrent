@@ -20,6 +20,9 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 - Prefer `cargo check` and `cargo test` (debug) while developing. The release build takes about
   7 minutes; run `cargo build --release --locked` only when a bead's acceptance needs the release
   binary (TUI smoke tests, `native.py`).
+- Build cadence: do not build after every small edit. Finish a whole step or a coherent group of
+  changes, then `cargo check` once; run `cargo test --locked` and the e2e scripts when a feature is
+  complete. A handful of builds per bead, not dozens; the build path is shared.
 - The TUI has no TTY in agent shells: drive it through tmux as the regression scripts do
   (`agent_ergonomics_audit/audit/regression_tests/tui_smoke.sh`). Always `tmux send-keys -l`
   for literal text. Use a unique tmux session name per bead (`fbt-<bead-id>`).
