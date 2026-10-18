@@ -6715,7 +6715,7 @@ in native mode they are free, which is why `s` (sort) and `f` (follow) can take 
 ```
           ┌──────────────────────────────────────────────────────┐
           │ Add torrent                                          │
-          │ The.Diplomat.S04.1080p.WEB-DL        8.9 GiB · 8 files│
+          │ The.Diplomat.S04.1080p.WEB-DL       8.9 GiB · 8 files│
           │ ☑ S04E01.mkv  1.1 GiB     ☑ S04E05.mkv  1.1 GiB      │
           │ ☑ S04E02.mkv  1.1 GiB     ☑ S04E06.mkv  1.1 GiB      │
           │ ☑ S04E03.mkv  1.1 GiB     ☐ sample.mkv   40 MiB      │
