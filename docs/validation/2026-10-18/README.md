@@ -208,3 +208,7 @@ Receipt: [P1-10.md](P1-10.md) (branch ntm/fbittorrent/cod_2-p1-10-zxk, commit a6
 ## P1-16 (engine half)
 
 Receipt: [P1-16.md](P1-16.md) (branch ntm/fbittorrent/cod_4-p1-16-vi1, commits a93b900 and f1e6fac; merged by the orchestrator after two Astra reviews, the first returning one P2 on dormant size/completed_bytes for partially selected torrents, the second verifying the selected-piece accounting against the live path; the daemon.py cases are bead P1-16b; batch gate on main follows).
+
+## P1-16c
+
+Receipt: [P1-16c.md](P1-16c.md) (branch ntm/fbittorrent/cod_4-p1-16c-yur, commit e7af809; merged by the orchestrator after an Astra review that re-ran the typed-seed tests; the queue-reconciliation defect it surfaced is bead P1-16d; batch gate on main follows).
