@@ -183,7 +183,9 @@ pub struct ManagedTorrentShared {
     pub id: TorrentId,
     pub info_hash: Id20,
     pub(crate) spawner: BlockingSpawner,
-    pub trackers: HashSet<url::Url>,
+    /// Metainfo order (tiers first, then URLs within each tier). In particular,
+    /// private first-tracker selection must happen before any set conversion.
+    pub trackers: Vec<url::Url>,
     pub peer_id: Id20,
     pub span: tracing::Span,
     pub(crate) options: ManagedTorrentOptions,
@@ -743,7 +745,7 @@ fn spawn_peer_adder(live: &Arc<TorrentStateLive>, mut peer_rx: PeerStream) {
                                 Some(live) => live,
                                 None => return Ok(()),
                             };
-                            live.add_peer_if_not_seen(peer)?;
+                            live.add_peer_from_discovery(peer)?;
                         }
                         Ok(None) => {
                             debug!("peer_rx closed, closing peer adder");

@@ -198,6 +198,10 @@ pub struct TorrentStateLive {
     // The queue for peer manager to connect to them.
     peer_queue_tx: UnboundedSender<SocketAddr>,
 
+    // For private torrents, Session's discovery stream contains only peers
+    // returned by the selected tracker. Forget this provenance on each run.
+    private_tracker_peers: RwLock<HashSet<SocketAddr>>,
+
     finished_notify: Notify,
     new_pieces_notify: Notify,
 
@@ -287,6 +291,7 @@ impl TorrentStateLive {
             )),
             new_pieces_notify: Notify::new(),
             peer_queue_tx,
+            private_tracker_peers: Default::default(),
             finished_notify: Notify::new(),
             down_speed_estimator,
             up_speed_estimator,
@@ -621,6 +626,13 @@ impl TorrentStateLive {
                 .recv(cx)
                 .await
                 .map_err(|_| Error::TorrentIsNotLive)?;
+            if !state.has_tracker_provenance_if_private(addr) {
+                // Includes reconnects based on an incoming peer's advertised
+                // listening address: a handshake is not tracker provenance.
+                debug!(?addr, "private torrent: refusing non-tracker outgoing peer");
+                state.peers.drop_peer(addr);
+                continue;
+            }
             if state.shared.options.disable_upload() && state.is_finished_and_no_active_streams() {
                 debug!(?addr, "ignoring peer as we are finished");
                 state.peers.mark_peer_not_needed(addr);
@@ -753,7 +765,24 @@ impl TorrentStateLive {
         let _ = self.have_broadcast_tx.send(&self.cx, index);
     }
 
+    fn has_tracker_provenance_if_private(&self, addr: SocketAddr) -> bool {
+        !self.metadata.info.info().private || self.private_tracker_peers.read().contains(&addr)
+    }
+
+    pub(super) fn add_peer_from_discovery(&self, addr: SocketAddr) -> crate::Result<bool> {
+        // Session::make_peer_rx excludes DHT, LSD and unverified initial peers
+        // for private metadata, leaving only the active private tracker stream.
+        if self.metadata.info.info().private {
+            self.private_tracker_peers.write().insert(addr);
+        }
+        self.add_peer_if_not_seen(addr)
+    }
+
     pub(crate) fn add_peer_if_not_seen(&self, addr: SocketAddr) -> crate::Result<bool> {
+        if !self.has_tracker_provenance_if_private(addr) {
+            debug!(?addr, "private torrent: ignoring unverified peer");
+            return Ok(false);
+        }
         match self.peers.add_if_not_seen(addr) {
             Some(handle) => handle,
             None => return Ok(false),
