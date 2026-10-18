@@ -176,3 +176,7 @@ Receipt: [P1-01.md](P1-01.md) (branch ntm/fbittorrent/cod_2, commit f3e03eb; mer
 ## P1-02
 
 Receipt: [P1-02.md](P1-02.md) (branch ntm/fbittorrent/cod_2, commit 4d0880b, merge 00bb354; merged by the orchestrator after an Astra review that independently ran the post-split test binary: 173/173, golden 2,704 bytes exact, size gate 15 files / max 702 lines; batch gate on main follows).
+
+## P6-12
+
+Receipt: [P6-12.md](P6-12.md) (branch ntm/fbittorrent/cod_3-p6-12-hn4, commits f38f7fa and 5e753b1; merged by the orchestrator after two Astra reviews, the first returning three findings on peer and tracker provenance that the second verified closed by independent runs of the four private-torrent tests; the Overview "private" marker criterion lives in P6-12b; batch gate on main follows).
