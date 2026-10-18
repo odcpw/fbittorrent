@@ -7,7 +7,7 @@ pub enum HashSelection {
 }
 
 impl HashSelection {
-    pub(super) fn resolve(&self, ledger: &Ledger) -> Result<Vec<String>> {
+    pub(in crate::engine) fn resolve(&self, ledger: &Ledger) -> Result<Vec<String>> {
         let hashes = match self {
             Self::All => ledger
                 .records
@@ -54,6 +54,12 @@ pub enum EngineOp {
     Files {
         hash: String,
     },
+    // Typed engine entry points for the daemon adapter. These do not add routes
+    // to the legacy transport or advertise v1 operations before that API lands.
+    OpenTarget { hash: String },
+    Recheck { hash: String },
+    SetFiles { hash: String, include: Vec<usize> },
+    SetSeed { hashes: HashSelection, on: bool },
     Add(AddRequest),
     Start {
         hashes: HashSelection,
@@ -180,6 +186,7 @@ pub enum EngineResult {
     Version(String),
     Torrents(Vec<super::super::view::TorrentView>),
     Files(Vec<TorrentFile>),
+    OpenTarget(PathBuf),
     Transfer(TransferInfo),
     Queue(QueueInfo),
     Start(crate::qbt::StartResult),
@@ -199,6 +206,7 @@ impl EngineResult {
                     .join(",")
             )),
             Self::Files(files) => json(files),
+            Self::OpenTarget(path) => json(path),
             Self::Transfer(info) => json(info),
             // These responses historically serialized through Value. Preserve
             // its object-member ordering at the legacy boundary.

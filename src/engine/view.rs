@@ -85,6 +85,7 @@ fn derive_state(f: StateFacts) -> (TorrentState, Option<&'static str>) {
 #[derive(Debug, Clone, Copy)]
 enum Source {
     Handle,
+    Dormant,
     Unrestored {
         checking: bool,
         stopped: bool,
@@ -278,6 +279,20 @@ impl TorrentView {
     }
 
     pub(super) fn unrestored(record: &Record, restore: Option<&RestoreTask>) -> Self {
+        if restore.is_some_and(|entry| matches!(entry.outcome, RestoreOutcome::Dormant)) {
+            let facts = StateFacts {
+                activity: Activity::Paused, paused: true, finished: true,
+                stop_on_complete: true, record_paused: record.paused,
+                check_cancelled: false, receiving: false, parked: false,
+            };
+            let mut view = Self::record(record, facts, Source::Dormant);
+            // Completion is saved history, explicitly not a new data check.
+            view.state = TorrentState::Done;
+            view.reason = Some("complete_no_seed".into());
+            view.progress = Some(1.0);
+            view.legacy.progress_known = true;
+            return view;
+        }
         let checking =
             restore.is_some_and(|entry| matches!(entry.outcome, RestoreOutcome::Checking));
         let stopped = restore.is_some_and(|entry| matches!(entry.outcome, RestoreOutcome::Stopped));
@@ -355,6 +370,7 @@ impl TorrentView {
     pub fn to_legacy_json(&self) -> Result<String> {
         let f = self.legacy.facts;
         let state = match self.legacy.source {
+            Source::Dormant => "stoppedUP",
             Source::Parked if !f.record_paused => "waitingVPN",
             Source::Parked => {
                 if f.finished {
@@ -439,7 +455,19 @@ impl TorrentView {
 
 impl Inner {
     pub(super) fn unrestored_view(&self, record: &Record) -> TorrentView {
-        TorrentView::unrestored(record, self.restores.lock().unwrap().get(&record.hash))
+        let mut view = TorrentView::unrestored(record, self.restores.lock().unwrap().get(&record.hash));
+        if matches!(view.legacy.source, Source::Dormant) {
+            if let Ok(files) = self.saved_files(record) {
+                let size = files.iter().map(|file| file.size as u64).sum();
+                view.size = Some(size);
+                view.completed_bytes = Some(size);
+                let mut path = PathBuf::from(&record.output_folder);
+                if files.len() == 1 { path.push(&files[0].name); }
+                view.content_path = Some(path.to_string_lossy().into());
+                view.legacy.content_path = view.content_path.clone().unwrap();
+            }
+        }
+        view
     }
     #[cfg(test)]
     pub(super) fn unrestored_snapshot(&self, record: &Record) -> Torrent {

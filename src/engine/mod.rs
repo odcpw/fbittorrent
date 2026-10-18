@@ -2,7 +2,8 @@
 //!
 //! We persist add options ourselves: librqbit's session JSON does not preserve
 //! per-torrent upload limits. Every restore therefore applies the cap before
-//! peers can exchange payload, and existing files are hash checked on opening.
+//! peers can exchange payload. Completed stop-on-complete records stay dormant;
+//! admitting one for transfer always checks its data first.
 
 use crate::native_runtime::{Handle, NativeRuntime};
 use anyhow::{anyhow, bail, Context, Result};
@@ -35,6 +36,7 @@ mod ledger;
 mod queue;
 pub mod ops;
 mod restore;
+mod dormant;
 pub mod view;
 mod parked;
 mod legacy_import;
@@ -46,6 +48,7 @@ use parked::dispatch_parked_in;
 #[allow(unused_imports)] // Preserve the old compatibility entry point for P1-10.
 pub use parked::{dispatch_parked, ParkedLedger};
 pub use ledger::LedgerGeneration;
+pub use dormant::InvalidTorrentState;
 pub(crate) use legacy_import::migrate_legacy;
 #[cfg(test)]
 pub(crate) use legacy_import::LegacyMigration;
@@ -56,6 +59,7 @@ static RESTORE_GENERATION: AtomicUsize = AtomicUsize::new(0);
 /// P1-03 can use these to publish engine changes without interpreting legacy JSON.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RestoreOutcome {
+    Dormant,
     Checking,
     Metadata,
     Restored,

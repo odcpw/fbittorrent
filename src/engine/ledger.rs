@@ -59,6 +59,10 @@ impl Record {
     pub(super) fn stop_on_complete(&self) -> bool {
         self.ratio_limit == 0.0
     }
+    pub(super) fn dormant_on_restore(&self) -> bool {
+        // -1 is the legacy unknown-completion sentinel, never proof of completion.
+        self.completion_on > 0 && self.stop_on_complete()
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
