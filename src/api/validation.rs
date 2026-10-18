@@ -1,0 +1,473 @@
+//! Shared API bounds and cross-field rules. Serde handles wire shapes; these
+//! checks also protect typed producers and contextual reply/fixture decoding.
+use super::*;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::{collections::BTreeMap, fmt};
+
+pub const MIN_UPLOAD_BPS: u64 = 16_384;
+pub const MIN_INTERVAL_MS: u64 = 250;
+pub const MAX_INTERVAL_MS: u64 = 10_000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Violation(pub String);
+impl fmt::Display for Violation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+impl std::error::Error for Violation {}
+pub type Checked = Result<(), Violation>;
+pub trait Validate {
+    fn validate(&self) -> Checked;
+}
+fn require(ok: bool, path: &str, expected: &str) -> Checked {
+    if ok {
+        Ok(())
+    } else {
+        Err(Violation(format!("{path}: {expected}")))
+    }
+}
+pub fn text(value: &str, max: usize, path: &str) -> Checked {
+    require(
+        value.chars().count() <= max,
+        path,
+        &format!("at most {max} characters"),
+    )
+}
+pub fn count(value: usize, max: usize, path: &str) -> Checked {
+    require(
+        (1..=max).contains(&value),
+        path,
+        &format!("must contain 1..{max} items"),
+    )
+}
+pub fn lower_hex(value: &str, len: usize) -> bool {
+    value.len() == len
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+pub fn mutation_ref(value: &str) -> Checked {
+    require(
+        value.is_ascii() && value.len() <= 64,
+        "ref",
+        "at most 64 ASCII characters",
+    )
+}
+pub fn progress(value: f64) -> Checked {
+    require(
+        value.is_finite() && (0.0..=1.0).contains(&value),
+        "progress",
+        "must be finite and in 0..=1",
+    )
+}
+pub fn upload_bps(value: u64) -> Checked {
+    require(
+        value >= MIN_UPLOAD_BPS,
+        "bps",
+        "numeric upload limit must be at least 16384; null means unlimited",
+    )
+}
+pub fn frame<T: Serialize>(value: &T, cap: usize) -> Checked {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| Violation(e.to_string()))?
+        .len();
+    require(
+        bytes < cap,
+        "frame",
+        "serialized frame plus newline exceeds the byte cap",
+    )
+}
+pub fn deserialize_topics<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Topic>, D::Error> {
+    let topics = Vec::<Topic>::deserialize(d)?;
+    count(topics.len(), MAX_SUBSCRIPTIONS, "topics").map_err(serde::de::Error::custom)?;
+    Ok(topics)
+}
+pub fn deserialize_upload_update<'de, D: Deserializer<'de>>(d: D) -> Result<Update<u64>, D::Error> {
+    let update = Update::<u64>::deserialize(d)?;
+    if let Update::Set(bps) = update {
+        upload_bps(bps).map_err(serde::de::Error::custom)?;
+    }
+    Ok(update)
+}
+impl SubscribeArgs {
+    /// Preserve the supplied wire value for round trips; use this normalized
+    /// interval for sampling. The caller supplies the topic's default (e.g. 5000
+    /// for an idle bar summary, 1000 for an open view).
+    pub fn effective_interval_ms(&self, default: u64) -> u64 {
+        self.interval_ms
+            .unwrap_or(default)
+            .clamp(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
+    }
+}
+impl Validate for SubscribeArgs {
+    fn validate(&self) -> Checked {
+        count(self.topics.len(), MAX_SUBSCRIPTIONS, "topics")?;
+        require(
+            self.since_seq.is_none() || self.topics.contains(&Topic::Events),
+            "since_seq",
+            "requires the events topic",
+        )
+    }
+}
+impl Validate for UploadLimitArgs {
+    fn validate(&self) -> Checked {
+        count(self.hashes.as_slice().len(), MAX_HASHES, "hashes")?;
+        if let Update::Set(bps) = self.bps {
+            upload_bps(bps)?;
+        }
+        Ok(())
+    }
+}
+impl Validate for Request {
+    fn validate(&self) -> Checked {
+        match &self.call {
+            Call::Subscribe { args } => args.validate(),
+            Call::TorrentsSetUploadLimit { args } => args.validate(),
+            Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
+            _ => Ok(()),
+        }
+    }
+}
+impl Validate for Error {
+    fn validate(&self) -> Checked {
+        text(&self.message, 200, "error.message")
+    }
+}
+fn torrent(value: &Torrent, list_name: bool) -> Checked {
+    if list_name {
+        text(&value.name, 1024, "torrent.name")?;
+    }
+    if let Some(p) = value.progress {
+        progress(p)?;
+    }
+    Ok(())
+}
+impl Validate for Torrent {
+    fn validate(&self) -> Checked {
+        torrent(self, true)
+    }
+}
+impl Validate for TorrentDetail {
+    fn validate(&self) -> Checked {
+        torrent(&self.torrent, false)
+    }
+}
+impl Validate for File {
+    fn validate(&self) -> Checked {
+        progress(self.progress)
+    }
+}
+impl Validate for Summary {
+    fn validate(&self) -> Checked {
+        require(self.top.len() <= 5, "summary.top", "at most 5 entries")?;
+        for top in &self.top {
+            text(&top.name, 1024, "summary.top.name")?;
+            if let Some(p) = top.progress {
+                progress(p)?;
+            }
+        }
+        Ok(())
+    }
+}
+impl Validate for Reply {
+    fn validate(&self) -> Checked {
+        match self {
+            Self::TorrentsList(result) => {
+                for value in &result.torrents {
+                    value.validate()?;
+                }
+                Ok(())
+            }
+            Self::TorrentsGet(result) => result.torrent.validate(),
+            Self::TorrentsFiles(result) => {
+                for value in &result.files {
+                    value.validate()?;
+                }
+                Ok(())
+            }
+            Self::Subscribe(result) => count(result.topics.len(), MAX_SUBSCRIPTIONS, "topics"),
+            _ => Ok(()), // Pending refs are required by their serde variants.
+        }
+    }
+}
+
+/// Output rules that require the connection's hello capabilities, in addition
+/// to the context-free shape/bounds checks above. Playable fields and events
+/// require watch in a successful hello.
+#[derive(Debug, Default)]
+pub struct NegotiatedCaps {
+    watch: bool,
+}
+impl NegotiatedCaps {
+    pub fn from_hello(hello: &HelloResult) -> Self {
+        Self {
+            watch: hello.caps.iter().any(|cap| cap == "watch"),
+        }
+    }
+    fn playable(&self, present: bool, path: &str) -> Checked {
+        require(
+            !present || self.watch,
+            path,
+            "requires the watch capability",
+        )
+    }
+    pub fn torrent(&self, value: &Torrent) -> Checked {
+        self.playable(value.playable.is_some(), "torrent.playable")
+    }
+    pub fn summary(&self, value: &Summary) -> Checked {
+        for (index, top) in value.top.iter().enumerate() {
+            self.playable(
+                top.playable.is_some(),
+                &format!("summary.top[{index}].playable"),
+            )?;
+        }
+        Ok(())
+    }
+    pub fn reply(&self, value: &Reply) -> Checked {
+        match value {
+            Reply::TorrentsList(result) => {
+                for torrent in &result.torrents {
+                    self.torrent(torrent)?;
+                }
+                Ok(())
+            }
+            Reply::TorrentsGet(result) => self.torrent(&result.torrent.torrent),
+            _ => Ok(()),
+        }
+    }
+    fn items(&self, values: &[Item], field: &str) -> Checked {
+        for (index, value) in values.iter().enumerate() {
+            let result = match value {
+                Item::Torrent(torrent) => self.torrent(torrent),
+                Item::Event(event) => self.event(event),
+                Item::File(_) => Ok(()),
+            };
+            result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
+        }
+        Ok(())
+    }
+    pub fn event(&self, value: &Event) -> Checked {
+        match value {
+            Event::TorrentPlayable { .. } => require(
+                self.watch,
+                "ev",
+                "torrent.playable requires the watch capability",
+            ),
+            Event::State {
+                data: StateData::Summary(summary),
+                ..
+            } => self.summary(summary),
+            Event::SnapshotChunk { items, .. } => self.items(items, "items"),
+            Event::Delta {
+                topic,
+                added,
+                changed,
+                ..
+            } => {
+                if let Some(items) = added {
+                    self.items(items, "added")?;
+                }
+                if *topic == Topic::Torrents {
+                    if let Some(changed) = changed {
+                        for (hash, fields) in changed {
+                            // Null removes an optional field; it does not
+                            // advertise playable data without the capability.
+                            self.playable(
+                                fields.get("playable").is_some_and(|v| !v.is_null()),
+                                &format!("changed.{hash}.playable"),
+                            )?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+fn items(topic: &Topic, values: &[Item]) -> Checked {
+    for value in values {
+        match (topic, value) {
+            (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
+            (Topic::Files(_), Item::File(f)) => f.validate()?,
+            (Topic::Events, Item::Event(e))
+                if e.subscription_revision().is_none()
+                    && !matches!(
+                        e.as_ref(),
+                        Event::Heartbeat { .. } | Event::Bye { .. } | Event::Error { .. }
+                    ) =>
+            {
+                e.validate()?
+            }
+            _ => return Err(Violation("items: payload does not match topic".into())),
+        }
+    }
+    Ok(())
+}
+fn delta_value(key: &str, value: &Value) -> Checked {
+    if value.is_null() {
+        return Ok(());
+    } // Explicit deletion of an optional field.
+    match key {
+        "progress" => progress(
+            value
+                .as_f64()
+                .ok_or_else(|| Violation("progress: expected a number".into()))?,
+        ),
+        "name" => text(
+            value
+                .as_str()
+                .ok_or_else(|| Violation("name: expected a string".into()))?,
+            1024,
+            "name",
+        ),
+        "hash" => require(
+            value.as_str().is_some_and(|h| lower_hex(h, 40)),
+            "hash",
+            "40 lowercase hex characters",
+        ),
+        _ => Ok(()), // Optional future output fields remain additive.
+    }
+}
+impl Validate for Event {
+    fn validate(&self) -> Checked {
+        if let Some((_, rev)) = self.subscription_revision() {
+            require(rev > 0, "rev", "starts at 1")?;
+        }
+        match self {
+            Self::SnapshotBegin {
+                topic,
+                reason,
+                oldest_seq,
+                ..
+            } => require(
+                oldest_seq.is_none()
+                    || (*reason == SnapshotReason::Resync && *topic == Topic::Events),
+                "oldest_seq",
+                "only valid for an events resync",
+            ),
+            Self::SnapshotChunk {
+                topic,
+                items: values,
+                ..
+            } => {
+                require(
+                    values.len() <= MAX_CHUNK_ITEMS,
+                    "items",
+                    "snapshot chunk exceeds 256 items",
+                )?;
+                items(topic, values)
+            }
+            Self::Delta {
+                topic,
+                changed,
+                added,
+                removed,
+                ..
+            } => {
+                if let Some(values) = added {
+                    items(topic, values)?;
+                }
+                if let Some(keys) = removed {
+                    for key in keys {
+                        require(
+                            match topic {
+                                Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
+                                Topic::Files(_) | Topic::Events => key.as_u64().is_some(),
+                                _ => false,
+                            },
+                            "removed",
+                            "key does not match topic",
+                        )?;
+                    }
+                }
+                if let Some(changed) = changed {
+                    require(
+                        *topic != Topic::Events || changed.is_empty(),
+                        "changed",
+                        "events topic is append-only",
+                    )?;
+                    for (key, fields) in changed {
+                        require(
+                            match topic {
+                                Topic::Torrents => lower_hex(key, 40),
+                                Topic::Files(_) => key.parse::<u64>().is_ok(),
+                                _ => false,
+                            },
+                            "changed",
+                            "key does not match topic",
+                        )?;
+                        for (field, value) in fields {
+                            delta_value(field, value)?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Self::State { topic, data, .. } => match (topic, data) {
+                (Topic::Summary, StateData::Summary(value)) => value.validate(),
+                (Topic::Network, StateData::Network(_))
+                | (Topic::Settings, StateData::Settings(_)) => Ok(()),
+                _ => Err(Violation("state: data does not match topic".into())),
+            },
+            Self::MutationResult {
+                op,
+                outcome,
+                error,
+                result,
+                ..
+            } => {
+                require(
+                    !(*outcome == MutationOutcome::Done && error.is_some()),
+                    "error",
+                    "done mutation cannot carry an error",
+                )?;
+                require(
+                    !(*outcome == MutationOutcome::Failed && error.is_none()),
+                    "error",
+                    "failed mutation requires an error",
+                )?;
+                if let Some(error) = error {
+                    error.validate()?;
+                }
+                if let Some(result) = result {
+                    if ops::TABLE.iter().any(|row| row.name == op) {
+                        Reply::decode(op, Value::Object(result.clone()))
+                            .map_err(|e| Violation(e.to_string()))?;
+                    }
+                }
+                Ok(())
+            }
+            Self::Error { error } => error.validate(),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Per-subscription revisions share a counter across topics. Rejected frames
+/// leave the last accepted revision intact, so clients can recover from a gap.
+#[derive(Debug, Default)]
+pub struct Revisions(BTreeMap<u64, u64>);
+impl Revisions {
+    pub fn last(&self, sub: u64) -> u64 {
+        self.0.get(&sub).copied().unwrap_or(0)
+    }
+    pub fn observe(&mut self, sub: u64, rev: u64) -> Checked {
+        require(
+            self.last(sub).checked_add(1) == Some(rev),
+            "rev",
+            "must increase by exactly one per subscription",
+        )?;
+        self.0.insert(sub, rev);
+        Ok(())
+    }
+    pub fn unsubscribe(&mut self, sub: u64) {
+        self.0.remove(&sub);
+    }
+}
+
+#[cfg(test)]
+mod tests;
