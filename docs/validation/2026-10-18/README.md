@@ -180,3 +180,7 @@ Receipt: [P1-02.md](P1-02.md) (branch ntm/fbittorrent/cod_2, commit 4d0880b, mer
 ## P6-12
 
 Receipt: [P6-12.md](P6-12.md) (branch ntm/fbittorrent/cod_3-p6-12-hn4, commits f38f7fa and 5e753b1; merged by the orchestrator after two Astra reviews, the first returning three findings on peer and tracker provenance that the second verified closed by independent runs of the four private-torrent tests; the Overview "private" marker criterion lives in P6-12b; batch gate on main follows).
+
+## P1-19
+
+Receipt: [P1-19.md](P1-19.md) (branch ntm/fbittorrent/cod_2, commits 9e60087 and 57f2832; merged by the orchestrator after two Astra reviews, the first returning two findings (a wildcard arm in the state derivation, changed member order in parked/queue/settings responses) that the second verified closed by an independent engine-test run with the ten frozen old-code wire fixtures; batch gate on main follows).
