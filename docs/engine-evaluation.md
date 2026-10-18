@@ -83,7 +83,9 @@ measurements before performance changes. This is internal qualification of the
 client's used surface; full upstream parity, long WAN soak and comparative
 engine benchmarks remain open.
 
-Reproducible checks:
+Reproducible checks use the repository's pinned Rust 1.98.0 toolchain.
+The core crate defaults to the same `sha1-ring` backend as librqbit's
+`rust-tls` feature, so selecting both packages in one invocation is supported.
 
 ```sh
 # App behavior, actual magnet/payload transfer, persisted policy, source parsing,
@@ -95,8 +97,11 @@ cargo test --locked -p librqbit-dualstack-sockets -p librqbit-tracker-comms \
   -p librqbit-dht --features librqbit-core/sha1-ring --lib
 
 # Piece/hash boundary cases, malformed metainfo and real storage operations.
-cargo test --locked -p librqbit-core -p librqbit \
-  --features librqbit/rust-tls --lib
+cargo test --locked -p librqbit-core -p librqbit --features librqbit/rust-tls --lib
+
+# The same engine libraries can also be checked separately.
+cargo test --locked -p librqbit-core --lib
+cargo test --locked -p librqbit --features rust-tls --lib
 
 # Real CLI/TUI/RSS actions and close/reopen in isolated temporary state.
 python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
