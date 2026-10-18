@@ -6,6 +6,11 @@ use std::fmt;
 
 pub const CONTRACT_VERSION: &str = "1.1.1";
 
+const NATIVE_LIFETIME: &str = "The TUI owns its engine until quit; fbittorrent serve owns a headless engine until shutdown, independently of windows.";
+const SERVE_LIMITATIONS: &str = "serve currently has no idle exit yet and no start-on-demand yet; it uses the framed legacy socket (engine.sock), not API v1.";
+const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
+const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
+
 /// Exit codes. Stable; documented by `capabilities --json` and `robot-docs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
@@ -140,6 +145,7 @@ fn upload_cap_text() -> String {
 
 pub fn capabilities_json() -> serde_json::Value {
     let cmds = [
+        CommandDoc { name: "serve", aliases: &[], summary: "Run the torrent engine daemon (other commands start it on demand)", json: false, mutating: true, needs_backend: false },
         CommandDoc { name: "triage", aliases: &["robot-triage"], summary: "One-call overview: backend, rates, torrents, warnings, next commands", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "status", aliases: &[], summary: "Rates and counts; never starts the backend", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
@@ -168,9 +174,13 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
-    let exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
+    let mut exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
         "code": *c as i32, "name": c.name(), "meaning": c.describe()
     })).collect();
+    exit_codes.extend([
+        serde_json::json!({"code": 70, "name": "panic", "scope": "serve unit", "meaning": "daemon panic; outside the CLI 0..8 dictionary"}),
+        serde_json::json!({"code": 75, "name": "upgrade", "scope": "serve unit", "meaning": "binary replaced while idle; outside the CLI 0..8 dictionary"}),
+    ]);
     serde_json::json!({
         "ok": true,
         "tool": "fbittorrent",
@@ -185,12 +195,13 @@ pub fn capabilities_json() -> serde_json::Value {
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
         "global_flags": ["--json", "--no-start"],
-        "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, and bar widget. Downloads run while the app is open.",
-        "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": "open app only; closing it stops downloads, peers, sockets and provider searches", "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
+        "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, bar widget and headless serve command.",
+        "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": NATIVE_LIFETIME, "serve_limitations": SERVE_LIMITATIONS, "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
         "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
         "backend_subcommands": ["rss grab", "shows grab"],
         "conventions": {
-            "json": "pass --json (global flag) for a JSON object on stdout; errors become {ok:false,code,code_name,error,hint} on stdout with the same exit code",
+            "json": JSON_CONVENTION,
+            "unit_exits": UNIT_EXITS,
             "stdout": "data only; diagnostics and progress go to stderr",
             "selectors": "torrents are selected by hash prefix (>= 4 hex chars) or a unique case-insensitive substring of the name; `all` selects every torrent",
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
@@ -235,26 +246,28 @@ pub const ROBOT_GUIDE: RobotGuide = RobotGuide;
 
 impl fmt::Display for RobotGuide {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()).replace("{contract_version}", CONTRACT_VERSION))
+        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()).replace("{contract_version}", CONTRACT_VERSION)
+            .replace("{native_lifetime}", NATIVE_LIFETIME)
+            .replace("{serve_limitations}", SERVE_LIMITATIONS)
+            .replace("{json_convention}", JSON_CONVENTION)
+            .replace("{unit_exits}", UNIT_EXITS))
     }
 }
 
 const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract {contract_version})
 
 WHAT IT IS
-  A native Rust torrent app. The engine runs in the open TUI process; closing
-  the app stops downloading, peers, listeners, and provider processes. Torrent
-  commands open the app when needed. Status and triage never open it. Search,
-  RSS browsing, and Shows tracking work locally without starting downloads.
+  A native Rust torrent app. {native_lifetime}
+  {serve_limitations}
+  Torrent commands still open the TUI when needed; they do not start serve yet.
+  Status and triage never open it. Search, RSS browsing, and Shows tracking work
+  locally without starting downloads.
   Upload is capped at {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
   Explicit engine = "qbittorrent" retains the legacy WebUI/service path.
 
 RULES
-  - Pass --json (global) for machine output. Every command then prints ONE JSON
-    object on stdout. Errors also come as JSON on stdout:
-      {"ok":false,"code":6,"code_name":"not_found","error":"...","hint":"..."}
-    and the process exits with `code`.
+  - {json_convention}
   - stdout is data. Progress and diagnostics are on stderr.
   - Select torrents by hash prefix (>= 4 hex chars) or a unique substring of
     the name. `all` means every torrent. Ambiguous -> exit 7 with the matches.
@@ -286,6 +299,7 @@ RULES
 EXIT CODES
   0 ok            1 failure       2 usage         3 safety (needs --yes)
   4 backend down  5 upstream err  6 not found     7 ambiguous     8 timeout
+  {unit_exits}
 
 DOWNLOAD SOMETHING (the canonical flow)
   fbittorrent triage --json                       # backend state, torrents, warnings
@@ -298,6 +312,7 @@ DOWNLOAD SOMETHING (the canonical flow)
   Shortcut: `fbittorrent add "<magnet>" --wait --json` does add + wait.
 
 OTHER USEFUL CALLS
+  fbittorrent serve                              # foreground daemon; stop with SIGTERM
   fbittorrent list --json                         # every torrent
   fbittorrent stop|start|delete <sel> --json      # {"ok":true,"action":"stop","hashes":[...]}
   fbittorrent seed <sel> --json                   # allow upload for one torrent
@@ -353,6 +368,36 @@ mod tests {
         assert!(capabilities["global_flags"].as_array().unwrap().contains(&serde_json::json!("--no-start")));
         assert!(capabilities["env"]["FBITTORRENT_NO_START"].is_string());
         assert!(ROBOT_GUIDE.to_string().contains("contract 1.1.1"));
+    }
+
+    #[test]
+    fn serve_documentation_matches_capabilities() {
+        let capabilities = capabilities_json();
+        let guide = ROBOT_GUIDE.to_string();
+        let serve = capabilities["commands"].as_array().unwrap().iter()
+            .find(|command| command["name"] == "serve").unwrap();
+        assert_eq!(serve["json"], false);
+        for text in [capabilities["engines"]["native_lifetime"].as_str().unwrap(),
+                     capabilities["engines"]["serve_limitations"].as_str().unwrap(),
+                     capabilities["conventions"]["json"].as_str().unwrap(),
+                     capabilities["conventions"]["unit_exits"].as_str().unwrap()] {
+            assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
+        }
+        assert!(guide.contains("fbittorrent serve"));
+        for limitation in ["no idle exit yet", "no start-on-demand yet", "framed legacy socket"] {
+            assert!(guide.contains(limitation));
+        }
+        for (code, name) in [(70, "panic"), (75, "upgrade")] {
+            let entry = capabilities["exit_codes"].as_array().unwrap().iter()
+                .find(|entry| entry["code"] == code).unwrap();
+            assert_eq!(entry["scope"], "serve unit");
+            assert_eq!(entry["name"], name);
+            assert!(guide.contains(&format!("{code} {name}")));
+        }
+        assert!(guide.contains("outside the CLI 0..8 dictionary"));
+        assert_eq!(Code::ALL.map(|code| code as i32), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(capabilities["contract_version"], "1.1.1");
+        println!("serve docs/capabilities agree on lifetime, JSON exception, limitations and unit exits 70/75; CLI dictionary and contract unchanged");
     }
 
     #[test]

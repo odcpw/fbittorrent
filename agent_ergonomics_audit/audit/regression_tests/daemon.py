@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Shared daemon integration harness; today exercises the real legacy engine socket.
+"""Shared daemon integration harness, using real serve processes and private XDG.
 
 Run locally or in CI with --no-systemd (default), or use --systemd for disposable
 transient user units. No installed unit or owner XDG directory is used.
-P1-03 adds daemon cases; P1-06 adds ApiConn. P1-07's fixture-serving and daemon
+P1-06 adds ApiConn. P1-07's fixture-serving and daemon
 seed/leech follow-up waits for those items; no --serve-fixture capability is
 claimed by this skeleton. There is no --self-test mode.
 """
 import argparse
 import ctypes
+import fcntl
 from contextlib import ExitStack
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import signal
@@ -43,8 +45,8 @@ def process_alive(pid):
     return state is not None and state[0] not in ("Z", "X")
 
 
-class FutureDaemon:
-    """FUTURE DAEMON ASSUMPTIONS — only this adapter names the P1-03 contract.
+class DaemonContract:
+    """Process contract; future API assumptions remain confined to this adapter.
 
     No v1 messages are implemented here. ApiConn belongs to P1-06; fixture
     recipes, transfer.set_limits and the daemon peer pair follow that API.
@@ -83,7 +85,7 @@ class ManagedProcess:
         self.unit = sandbox.unit if name == "process" else sandbox.unit.removesuffix(".service") + "-" + slug(name) + ".service"
         self.stdout = case.path.with_suffix("." + slug(name) + ".stdout.log")
         command = list(map(str, argv))
-        environment = dict(sandbox.env, **{FutureDaemon.unit_variable: self.unit})
+        environment = dict(sandbox.env, **{DaemonContract.unit_variable: self.unit})
         launcher_env = environment.copy()
         self.closed = False
         # systemd's client must discover the real user bus even when no explicit
@@ -220,6 +222,9 @@ class Harness:
 
     def __exit__(self, *_):
         self.resources.close()
+        failures = re.findall(r"thread .*panicked|obligation.*leak|closing native (?:torrent session|runtime):|native torrent session did not drain", self.stderr())
+        self.case.check(not failures, "owned process stderr contains no worker panic or failed engine drain",
+                        f"Unexpected runtime failures={failures!r}.")
 
     def spawn(self, argv, name="process"):
         self.names[name] = self.names.get(name, 0) + 1
@@ -238,9 +243,75 @@ class Harness:
         return receiver
 
     def start_serve(self, idle_exit_secs=300, no_notify=False):
-        """Spawner for P1-03's real binary; intentionally unused until serve exists."""
-        self.notify_socket()
-        return self.spawn(FutureDaemon.command(self.binary, idle_exit_secs, no_notify))
+        self.notify = self.notify_socket()
+        return self.spawn(DaemonContract.command(self.binary, idle_exit_secs, no_notify))
+
+    @property
+    def engine_path(self):
+        return Path(self.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+
+    def engine_call(self, path, method="GET", args=(), timeout=2):
+        """Temporary legacy framing until P1-06's API v1 connection exists."""
+        request = json.dumps(dict(method=method, path=path, args=list(args), file=None)).encode()
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(timeout)
+            connection.connect(str(self.engine_path))
+            connection.sendall(struct.pack(">I", len(request)) + request)
+
+            def read(size):
+                value = bytearray()
+                while len(value) < size:
+                    part = connection.recv(size - len(value))
+                    if not part:
+                        raise EOFError("engine socket closed during frame")
+                    value.extend(part)
+                return value
+
+            size = struct.unpack(">I", read(4))[0]
+            if size > 32 * 1024 * 1024:
+                raise ValueError(f"legacy frame too large: {size}")
+            return json.loads(read(size))
+
+    def receive_ready(self):
+        step = self.case.step("receive daemon readiness", "READY=1 datagram from the owned serve process within 10 seconds")
+        try:
+            observed = self.notify.receive(timeout=10)
+            return step.close(observed == "READY=1", f"Datagram={observed!r}.")
+        except OSError as error:
+            return step.fail(f"No readiness: {error}.")
+
+    def daemon_pid(self):
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.connect(str(self.engine_path))
+            return struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+
+    def stderr(self):
+        return self.case.suite.stderr_path.read_bytes()[self.case.stderr_offset:].decode(errors="replace")
+
+    def wait_engine(self):
+        return self.wait_for(lambda: ((response := self.engine_call("app/version")).get("error") is None,
+                                     f"Legacy version response={response!r}."), "engine session answers")
+
+    def stop_serve(self, process, number=signal.SIGTERM, code=0):
+        step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
+        pid = self.daemon_pid()
+        began = time.monotonic()
+        os.kill(pid, number)
+        step.ok(f"Delivered signal {number} to owned PID {pid}.")
+        process.wait(timeout=10, code=code)
+        elapsed = time.monotonic() - began
+        self.case.check(elapsed < 10 and not self.engine_path.exists(),
+                        "daemon exits and removes its socket within 10 seconds", f"elapsed={elapsed:.3f}s; socket={self.engine_path.exists()}.")
+
+    def lock_free(self):
+        path = self.engine_path.with_name("engine.lock")
+        step = self.case.step("probe instance lock after exit", "stable engine.lock exists and flock succeeds without blocking")
+        try:
+            with path.open("r+") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return step.ok(f"Acquired and released {path}; lock inode remains {path.stat().st_ino}.")
+        except OSError as error:
+            return step.fail(f"Lock unavailable: {error}.")
 
     def cli(self, *args, code=0, timeout=10):
         command = [self.binary, "--no-start", *args, "--json"]
@@ -276,35 +347,17 @@ class Harness:
         return step.fail(f"Timed out; last observation: {observed}.")
 
 
-# INTERIM CURRENT-ENGINE ADAPTER: the pre-daemon engine uses 4-byte lengths,
-# not API v1 NDJSON. Remove this probe when P1-03 supplies real daemon cases.
+# Keep the original TUI-hosted socket case as a compatibility regression while
+# P1-15 moves TUI attachment. It shares the legacy wire helper with serve cases.
 class InterimEngine:
     def __init__(self, harness):
         self.harness = harness
         self.path = Path(harness.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
-        self.server = "fbt-fbt-p1-07-0h3-" + harness.sandbox.root.name
-        self.session = "fbt-fbt-p1-07-0h3"
+        self.server = "fbt-fbt-p1-03-ghy-" + harness.sandbox.root.name
+        self.session = "fbt-fbt-p1-03-ghy"
 
     def call(self, path):
-        request = json.dumps(dict(method="GET", path=path, args=[], file=None)).encode()
-        with socket.socket(socket.AF_UNIX) as connection:
-            connection.settimeout(.5)
-            connection.connect(str(self.path))
-            connection.sendall(struct.pack(">I", len(request)) + request)
-
-            def read(size):
-                value = bytearray()
-                while len(value) < size:
-                    part = connection.recv(size - len(value))
-                    if not part:
-                        raise EOFError("engine socket closed during frame")
-                    value.extend(part)
-                return value
-
-            size = struct.unpack(">I", read(4))[0]
-            if size > 1024 * 1024:
-                raise ValueError(f"interim probe frame too large: {size}")
-            return json.loads(read(size))
+        return self.harness.engine_call(path, timeout=.5)
 
     def start(self):
         # Keep a foreground owner for the detached tmux server in either mode.
@@ -330,7 +383,7 @@ finally:
     def close(self):
         if self.process.child.poll() is None and self.path.exists():
             try:
-                self.call("app/shutdown")
+                self.harness.engine_call("app/shutdown", method="POST")
             except (OSError, ValueError, EOFError):
                 pass
         # The generic spawner reaps its owner after this callback returns.
@@ -439,7 +492,7 @@ def notify_and_process(binary, systemd):
         harness.wait_for(lambda: (process.stdout.stat().st_size > 0, process.stdout.read_text()), "child environment report")
         value = json.loads(process.stdout.read_text())
         case.check(all(value.get(key) == sandbox.env[key] for key in sandbox.keys if key.startswith("XDG_"))
-                   and value[FutureDaemon.unit_variable] == sandbox.unit,
+                   and value[DaemonContract.unit_variable] == sandbox.unit,
                    "child receives every isolated XDG path and the disposable unit name", f"Environment={value!r}.")
         case.check(value.get("cwd") == str(sandbox.root),
                    "actual child working directory is the sandbox root", f"cwd={value.get('cwd')!r}; root={sandbox.root}.")
@@ -579,9 +632,206 @@ def interim_engine_socket(binary, systemd):
             harness.wait_for(lambda: (not engine.path.exists(), f"socket exists={engine.path.exists()}"), "current engine removes its socket")
 
 
+def saved_hash_fixture(sandbox, size=256 * fixtures.MIB):
+    """Sparse zero payload, real v1 hashes, and durable paused intent. No peers."""
+    name, piece = "daemon-hash.bin", fixtures.MIB
+    payload = sandbox.downloads / name
+    with payload.open("wb") as output:
+        output.truncate(size)
+    info = dict(name=name, length=size, **{"piece length": piece,
+                "pieces": hashlib.sha1(bytes(piece)).digest() * (size // piece), "private": 1})
+    digest = hashlib.sha1(fixtures.bencode(info)).hexdigest()
+    directory = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine"
+    directory.mkdir(parents=True)
+    (directory / (digest + ".torrent")).write_bytes(fixtures.bencode(dict(info=info)))
+    record = dict(hash=digest, name=name, source="", output_folder=str(sandbox.downloads),
+                  only_files=None, upload_limit=32768, ratio_limit=0.0, category="fixture", tags="",
+                  added_on=1, completion_on=0, paused=True, resume_after_migration=False)
+    (directory / "torrents.json").write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
+    return digest, size
+
+
+def ready_notify(binary, systemd):
+    with Case("daemon", "ready_notify") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        digest, size = saved_hash_fixture(sandbox)
+        process = harness.start_serve(no_notify=True)
+        if harness.receive_ready() and harness.wait_engine():
+            text = harness.stderr()
+            case.check(0 <= text.find("INFO daemon ready state=starting") < text.find("INFO engine starting session"),
+                       "READY is sent before session creation, hence before any saved-payload hash check can finish",
+                       f"Startup ordering in stderr: ready at {text.find('INFO daemon ready')}; session at {text.find('INFO engine starting')}.")
+            rows = []
+            def hashed():
+                response = harness.engine_call("torrents/info")
+                rows[:] = json.loads(response.get("value") or "[]")
+                row = next((row for row in rows if row.get("hash") == digest), {})
+                return row.get("completed") == size and row.get("progress_known", True) and row.get("state") != "checkingDL", f"Restored payload row={row!r}."
+            harness.wait_for(hashed, "real saved payload finishes hashing after READY", timeout=30)
+            mode = harness.engine_path.stat().st_mode & 0o777
+            case.check(mode == 0o600 and harness.engine_path.parent.stat().st_mode & 0o777 == 0o700,
+                       "daemon listener and runtime directory are private", f"socket mode={mode:o}.")
+            harness.stop_serve(process)
+            harness.lock_free()
+
+
+def parked_start(binary, systemd):
+    with Case("daemon", "parked_start") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        digest, _ = saved_hash_fixture(sandbox, 4 * fixtures.MIB)
+        ledger = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
+        saved = json.loads(ledger.read_text())
+        saved["records"][0]["name"] = "ProtonVPN is part of this saved title"
+        ledger.write_text(json.dumps(saved))
+        config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        config.write_text(config.read_text().replace('network_interface = "lo"', 'network_interface = "fbmissing0"'))
+        process = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            network = json.loads(harness.engine_call("app/network")["value"])
+            rows = json.loads(harness.engine_call("torrents/info")["value"])
+            case.check(network["ready"] is False and network["interface"] == "fbmissing0" and
+                       network["message"] == "Waiting for fbmissing0" and len(rows) == 1 and
+                       rows[0]["hash"] == digest and rows[0]["progress_known"] is False,
+                       "missing interface starts parked and serves the saved ledger without claiming progress",
+                       f"network={network!r}; rows={rows!r}.")
+            case.check(rows[0].get("name") == "ProtonVPN is part of this saved title",
+                       "interface wording replacement never changes saved torrent data", f"Saved title={rows[0].get('name')!r}.")
+            harness.cli("start", digest)
+            harness.cli("stop", digest)
+            # Typed parsing validates add input before slot availability. Send a
+            # valid disposable magnet so this check exercises the parked engine.
+            response = harness.engine_call("torrents/add", method="POST",
+                                           args=[("urls", "magnet:?xt=urn:btih:" + digest)])
+            case.check("engine_unavailable" in str(response.get("error")) and "fbmissing0" in str(response.get("error")),
+                       "add while parked fails with engine_unavailable and the configured interface", f"Response={response!r}.")
+            response = harness.engine_call("torrents/delete", method="POST", args=[("hashes", digest), ("deleteFiles", "false")])
+            case.check(response.get("error") is None and json.loads(harness.engine_call("torrents/info")["value"]) == [],
+                       "parked remove keeps payload and durably removes the ledger record", f"Response={response!r}.")
+            case.check((sandbox.downloads / "daemon-hash.bin").exists(), "parked removal preserves payload")
+            harness.stop_serve(process)
+            harness.lock_free()
+
+
+def sigterm_drains(binary, systemd):
+    with Case("daemon", "sigterm_drains") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        process = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            # One client has only supplied half a frame. It cannot stretch the
+            # drain to the transport's normal read timeout.
+            with socket.socket(socket.AF_UNIX) as partial:
+                partial.connect(str(harness.engine_path))
+                partial.sendall(b"\x00\x00")
+                harness.stop_serve(process)
+            text = harness.stderr()
+            case.check(re.search(r"engine drained in \d+ ms", text) is not None and "sockets unlinked" in text,
+                       "SIGTERM logs the bounded drain and socket unlink", text[-1800:])
+            harness.lock_free()
+
+
+def panic_exits_70(binary, systemd):
+    with Case("daemon", "panic_exits_70") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        sandbox.env["FBT_TEST_PANIC_AFTER_READY"] = "1"
+        sandbox.keys.append("FBT_TEST_PANIC_AFTER_READY")
+        process = harness.start_serve()
+        harness.receive_ready()
+        process.wait(timeout=10, code=70)
+        text = harness.stderr()
+        case.check("ERROR daemon panic" in text and "FBT_TEST_PANIC_AFTER_READY" in text and "sockets unlinked" in text
+                   and not harness.engine_path.exists(),
+                   "injected panic is logged, drains, unlinks the socket and exits 70", text[-1800:])
+        harness.lock_free()
+
+
+def second_serve_refused(binary, systemd):
+    with Case("daemon", "second_serve_refused") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        first = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            inode = harness.engine_path.stat().st_ino
+            second = harness.spawn([*DaemonContract.command(binary), "--json"], "second")
+            second.wait(timeout=8, code=1)
+            value = json.loads(second.stdout.read_text())
+            case.check("already_running" in value.get("error", "") and value.get("code") == 1 and
+                       value.get("hint") == "fbittorrent status --json" and harness.engine_path.stat().st_ino == inode,
+                       "second serve waits at most five seconds then fails without replacing the owner's socket", f"Response={value!r}; socket inode={inode}.")
+            # A plain invocation must carry the same actionable hint as JSON.
+            offset = len(harness.stderr())
+            plain = harness.spawn(DaemonContract.command(binary), "second_plain")
+            plain.wait(timeout=8, code=1)
+            diagnostic = harness.stderr()[offset:]
+            case.check("already_running" in diagnostic and "fbittorrent status --json" in diagnostic
+                       and plain.stdout.read_text() == "" and harness.engine_path.stat().st_ino == inode,
+                       "plain second serve exits 1 with already_running and the status hint, retaining the owner's socket",
+                       f"Plain startup stderr={diagnostic!r}; socket inode={inode}.")
+            harness.wait_engine()
+            harness.stop_serve(first)
+            harness.lock_free()
+
+
+def engine_restart_retains_owner(binary, systemd):
+    with Case("daemon", "engine_restart_retains_owner") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        process = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            inode, pid = harness.engine_path.stat().st_ino, harness.daemon_pid()
+            lockpath = harness.engine_path.with_name("engine.lock")
+            before = harness.stderr()
+            response = harness.engine_call("app/restart", method="POST")
+            case.check(response.get("error") is None, "legacy restart queues an owner lifecycle request", str(response))
+            harness.wait_for(lambda: ("state=running engine_epoch=2" in harness.stderr(), harness.stderr()[-1400:]),
+                             "new engine reaches epoch 2")
+            with lockpath.open("r+") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held = False
+                except BlockingIOError:
+                    held = True
+            case.check(held and harness.engine_path.stat().st_ino == inode and harness.daemon_pid() == pid,
+                       "restart retains the instance lock, listener inode and daemon PID", f"held={held}; inode={inode}; PID={pid}.")
+            case.check(harness.stderr().count('"instance":') == before.count('"instance":') == 1,
+                       "engine restart keeps the same process instance identity")
+            harness.stop_serve(process, signal.SIGHUP)
+            harness.lock_free()
+
+
+def shutdown_inflight_add(binary, systemd):
+    with Case("daemon", "shutdown_inflight_add") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        process = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            with socket.socket(socket.AF_UNIX) as pending:
+                pending.settimeout(2)
+                pending.connect(str(harness.engine_path))
+                value = dict(method="POST", path="torrents/add", file=None,
+                             args=[("urls", "magnet:?xt=urn:btih:" + "ab" * 20), ("paused", "true")])
+                packet = json.dumps(value).encode()
+                pending.sendall(struct.pack(">I", len(packet)) + packet)
+                entered = harness.wait_for(lambda: ('legacy dispatch path="torrents/add"' in harness.stderr(), harness.stderr()[-600:]),
+                                           "unresolved add enters live engine dispatch")
+                if entered:
+                    harness.stop_serve(process)
+                    def read(size):
+                        data = b""
+                        while len(data) < size:
+                            part = pending.recv(size - len(data))
+                            if not part:
+                                raise EOFError("shutdown discarded an already-read request's reply")
+                            data += part
+                        return data
+                    response = json.loads(read(struct.unpack(">I", read(4))[0]))
+                    case.check(response.get("error") is not None and
+                               ("closing" in response["error"] or "stopping" in response["error"]),
+                               "an already-read unresolved add gets a shutdown error instead of delaying drain for 90 seconds",
+                               f"Reply={response!r}.")
+                    harness.lock_free()
+
+
 CASES = {function.__name__: function for function in
          (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
-          systemd_without_bus_address, interim_engine_socket)}
+          systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
+          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add)}
 SYSTEMD_CASES = {"systemd_without_bus_address"}
 
 

@@ -102,13 +102,19 @@ pub struct AppEngine {
     runtime: Option<NativeRuntime>,
     server: Option<Server>,
     // Released only after the socket, workers, session and runtime have stopped.
-    instance: InstanceLock,
+    instance: Arc<InstanceLock>,
 }
 
 pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
     cfg.validate()?;
-    let instance = InstanceLock::acquire()?;
-    start_in(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
+    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?))
+}
+
+/// Start one replaceable session under the daemon owner's existing lock. The
+/// listener and the owner's Arc stay alive while this engine drains/restarts.
+pub(crate) fn start_with_lock(cfg: &Config, lifecycle: Lifecycle, instance: Arc<InstanceLock>) -> Result<AppEngine> {
+    cfg.validate()?;
+    start_shared(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
         peer_encryption: match cfg.peer_encryption.as_str() {
             "off" => librqbit::PeerEncryption::Off,
             "require" => librqbit::PeerEncryption::Require,
@@ -131,10 +137,18 @@ pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
 }
 
 // The production startup path, with explicit paths/options for local-only tests.
+#[cfg(test)]
 fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: InstanceLock, options: SessionOptions) -> Result<AppEngine> {
+    start_shared(cfg, lifecycle, directory, Arc::new(instance), options)
+}
+
+fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, options: SessionOptions) -> Result<AppEngine> {
     std::fs::create_dir_all(&directory)?;
     let ledger_path = directory.join("torrents.json");
     let ledger = read_ledger(&ledger_path)?;
+    // Both TUI start() and daemon start_with_lock() enter here. Capture the
+    // same generation before moving the ledger or starting background restores.
+    let generation = ledger.generation.clone();
     let default_folder = cfg
         .save_path
         .as_ref()
@@ -152,7 +166,6 @@ fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: In
             options,
         ))
         .context("starting the native torrent engine")?;
-    let generation = ledger.generation.clone();
     let inner = Arc::new(Inner {
         session,
         ledger: Arc::new(Mutex::new(ledger)),
@@ -201,6 +214,19 @@ fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: In
 }
 
 impl AppEngine {
+    pub(crate) fn is_quiescing(&self) -> bool {
+        self.dispatcher.inner.stopping.load(Ordering::Acquire)
+    }
+    /// Interrupt in-flight legacy operations before waiting for the slot writer.
+    /// Their dispatch select observes this token, so an unresolved add cannot
+    /// hold shutdown behind its 90-second metadata timeout.
+    pub(crate) fn quiesce(&self) {
+        self.dispatcher.inner.stopping.store(true, Ordering::Release);
+        self.dispatcher.inner.session.cancellation_token().cancel();
+        for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
+            restore.cancel.cancel();
+        }
+    }
     pub fn dispatcher(&self) -> EngineDispatcher {
         self.dispatcher.clone()
     }
@@ -214,6 +240,15 @@ impl AppEngine {
         }
         self.server = Some(Server::start(cfg, &self.instance, handler)?);
         Ok(())
+    }
+}
+
+// Debug quoting escapes newline/control characters in chained error details.
+// Retain the old diagnostic substrings consumed by the worker-failure scans.
+fn drain_failure(message: &str, detail: Option<String>) -> String {
+    match detail {
+        Some(detail) => format!("ERROR engine {message} error={detail:?}"),
+        None => format!("ERROR engine {message}"),
     }
 }
 
@@ -240,13 +275,13 @@ impl Drop for AppEngine {
                 self.dispatcher.inner.session.stop(cx),
             )) {
                 Ok(Ok(())) => drained = true,
-                Ok(Err(error)) => eprintln!("closing native torrent session: {error:#}"),
-                Err(_) => eprintln!("native torrent session did not drain before its deadline"),
+                Ok(Err(error)) => eprintln!("{}", drain_failure("closing native torrent session:", Some(format!("{error:#}")))),
+                Err(_) => eprintln!("{}", drain_failure("native torrent session did not drain before its deadline", None)),
             }
             self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
                 drained = false;
-                eprintln!("closing native runtime: {error:#}");
+                eprintln!("{}", drain_failure("closing native runtime:", Some(format!("{error:#}"))));
             }
             if drained { eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis()); }
         }
@@ -255,3 +290,57 @@ impl Drop for AppEngine {
 
 #[cfg(test)]
 mod tests;
+
+// Integration regressions for the shared production startup path. The P1-19
+// typed operation/fixture tests remain unchanged.
+#[cfg(test)]
+mod startup_reconciliation_tests {
+    use super::*;
+
+    #[test]
+    fn drain_failures_use_single_line_engine_format() {
+        for message in ["closing native torrent session:", "closing native runtime:"] {
+            let error = anyhow!("disk error\nsecond line\rthird line").context("drain failed");
+            let line = drain_failure(message, Some(format!("{error:#}")));
+            assert_eq!(line, format!("ERROR engine {message} error=\"drain failed: disk error\\nsecond line\\rthird line\""));
+            assert_eq!(line.lines().count(), 1);
+            assert!(line.contains(message), "existing failure scanner must still match");
+        }
+        assert_eq!(drain_failure("native torrent session did not drain before its deadline", None),
+            "ERROR engine native torrent session did not drain before its deadline");
+        println!("verified level/source, escaped details and scanner compatibility for all three drain diagnostics");
+    }
+
+    #[test]
+    fn shared_startup_retains_generation_and_owner_lock() {
+        let directory = std::env::temp_dir().join(format!("fbt-shared-start-{}-{}",
+            std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let downloads = directory.join("downloads");
+        let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
+        let owner = Arc::new(InstanceLock::acquire_in(directory.join("runtime")).unwrap());
+        let lifecycle = Lifecycle::default();
+        for _ in 0..2 {
+            let app = start_shared(&cfg, lifecycle.clone(), directory.clone(), owner.clone(), SessionOptions {
+                dht: None, disable_trackers: true, disable_local_service_discovery: true, ..Default::default()
+            }).unwrap();
+            let dispatcher = app.dispatcher();
+            let generation = dispatcher.ledger_generation();
+            let before = generation.current();
+            dispatcher.runtime.block_on(async {
+                let cx = dispatcher.runtime.cx();
+                let ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), cx).await.unwrap();
+                assert!(Arc::ptr_eq(&generation, &ledger.generation));
+                dispatcher.inner.save(cx, &ledger).await.unwrap();
+            });
+            assert_eq!(generation.wait_after(before, Duration::ZERO), Some(before + 1));
+            app.quiesce();
+            assert!(app.is_quiescing());
+            drop(app);
+            assert!(InstanceLock::acquire_in(directory.join("runtime")).is_err());
+            println!("shared startup generation advanced to {}; owner lock survives quiesce/drop", generation.current());
+        }
+        drop(owner);
+        drop(InstanceLock::acquire_in(directory.join("runtime")).unwrap());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}

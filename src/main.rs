@@ -54,6 +54,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run the torrent engine daemon (other commands start it on demand)
+    Serve {
+        /// Idle shutdown delay; 0 disables the idle safety net
+        #[arg(long, default_value_t = 300)]
+        idle_exit_secs: u64,
+        /// Disable desktop notifications (systemd readiness is still sent)
+        #[arg(long)]
+        no_notify: bool,
+    },
     /// One-call overview for agents: backend, rates, torrents, warnings, next commands
     #[command(alias = "robot-triage")]
     Triage,
@@ -296,6 +305,29 @@ fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
     let cli = Cli::parse();
     let json = cli.json;
+    if let Some(Cmd::Serve { idle_exit_secs, no_notify }) = &cli.cmd {
+        // No search session, TUI signal owner or background thread may start
+        // before serve has blocked its shutdown signals.
+        let result = std::panic::catch_unwind(|| Config::load()
+            .and_then(|cfg| daemon::run_serve(cfg, *idle_exit_secs, *no_notify)));
+        std::process::exit(match result {
+            Ok(result) => result.unwrap_or_else(|error| {
+                let (_, message, hint) = agent::classify(&error);
+                eprintln!("ERROR daemon startup failed message={message:?}");
+                if json {
+                    let mut error = AppError::new(Code::Failure, message);
+                    error.hint = hint;
+                    agent::report(&error.into(), true)
+                } else {
+                    if let Some(hint) = hint {
+                        eprintln!("ERROR daemon startup hint={hint:?}");
+                    }
+                    1
+                }
+            }),
+            Err(_) => 70,
+        });
+    }
     match run(cli) {
         Ok(code) => std::process::exit(code as i32),
         Err(e) => std::process::exit(if let Some(signal) = e.downcast_ref::<tui::SignalTermination>() {
@@ -743,7 +775,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 
