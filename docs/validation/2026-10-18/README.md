@@ -172,3 +172,7 @@ Receipt: [P1-07.md](P1-07.md) (branch ntm/fbittorrent/cod_1, commits 64d131b..84
 ## P1-01
 
 Receipt: [P1-01.md](P1-01.md) (branch ntm/fbittorrent/cod_2, commit f3e03eb; merged by the orchestrator after an Astra review; batch gate on main follows).
+
+## P1-02
+
+Receipt: [P1-02.md](P1-02.md) (branch ntm/fbittorrent/cod_2, commit 4d0880b, merge 00bb354; merged by the orchestrator after an Astra review that independently ran the post-split test binary: 173/173, golden 2,704 bytes exact, size gate 15 files / max 702 lines; batch gate on main follows).

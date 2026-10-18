@@ -77,7 +77,7 @@ evidence rows is treated as not done.
 | Area | Path |
 |---|---|
 | CLI, dispatch | `src/main.rs`, `src/agent.rs` (triage/capabilities/robot-docs) |
-| Engine, records, IPC | `src/engine.rs`, `src/ipc.rs`, `src/network_app.rs`, `src/backend.rs`, `src/native_runtime*.rs` |
+| Engine, records, IPC | `src/engine/` (`mod.rs`, `ledger.rs`, `queue.rs`, `ops.rs`, `view.rs`, `parked.rs`, `legacy_import.rs`), `src/ipc.rs`, `src/network_app.rs`, `src/backend.rs`, `src/native_runtime*.rs` |
 | Client contract | `src/qbt.rs` (native IPC or legacy WebUI) |
 | TUI | `src/tui/mod.rs`, `src/tui/theme.rs`, `src/tui/poster.rs` |
 | Search, RSS, Shows, IMDb | `src/search.rs`, `src/browse.rs`, `src/rss.rs`, `src/shows.rs`, `src/imdb.rs` |
