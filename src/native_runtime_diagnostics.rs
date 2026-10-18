@@ -8,7 +8,7 @@ use asupersync::{
 use serde_json::{json, Value};
 use std::{
     fs::OpenOptions,
-    io::Write,
+    io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     sync::{mpsc, OnceLock},
     time::{Duration, Instant},
@@ -16,10 +16,11 @@ use std::{
 
 const SNAPSHOT_BYTES: usize = 3072;
 const OUTPUT_WAIT: Duration = Duration::from_millis(10);
+const OUTPUT_WRITE_BUDGET: Duration = Duration::from_millis(5);
 struct Output {
     detail: String,
     fallback: String,
-    finished: mpsc::SyncSender<()>,
+    finished: mpsc::SyncSender<bool>,
 }
 static OUTPUT: OnceLock<Option<mpsc::SyncSender<Output>>> = OnceLock::new();
 
@@ -33,40 +34,40 @@ pub(super) fn prepare_output() {
             .name("fbt-deadline-log".into())
             .spawn(move || {
                 for record in rx {
-                    // Journald/socket stderr cannot be reopened through procfs.
-                    // MSG_DONTWAIT bounds a socket send without changing the
-                    // shared file-description flags used by other loggers.
-                    let line = if record.detail.len() <= libc::PIPE_BUF as usize {
-                        &record.detail
-                    } else {
-                        &record.fallback
-                    };
-                    let sent = unsafe {
-                        libc::send(
-                            libc::STDERR_FILENO,
-                            line.as_ptr().cast(),
-                            line.len(),
-                            libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
-                        )
-                    };
-                    if sent >= 0
-                        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ENOTSOCK)
-                    {
-                        if sent < 0 {
-                            let _ = unsafe {
-                                libc::send(
-                                    libc::STDERR_FILENO,
-                                    record.fallback.as_ptr().cast(),
-                                    record.fallback.len(),
-                                    libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
-                                )
+                    let deadline = Instant::now() + OUTPUT_WRITE_BUDGET;
+                    // Select a complete record BEFORE sending any bytes: a
+                    // stream cannot roll back a prefix to replace it with a
+                    // fallback. Linux AF_UNIX sendmsg splits at sndbuf/2 - 64;
+                    // admitting one chunk avoids a partial detail when the
+                    // receiver stops reading. Normal PIPE_BUF records still fit
+                    // the default socket buffer. Never change stderr's flags.
+                    match socket_record_limit(libc::STDERR_FILENO) {
+                        Ok(limit) => {
+                            let line = if record.detail.len() <= limit {
+                                &record.detail
+                            } else {
+                                &record.fallback
                             };
+                            let complete = line.len() <= limit
+                                && send_socket_record(
+                                    libc::STDERR_FILENO,
+                                    line.as_bytes(),
+                                    0,
+                                    deadline,
+                                )
+                                .is_ok_and(|written| written == line.len());
+                            let _ = record.finished.try_send(complete);
+                            continue;
                         }
-                        let _ = record.finished.try_send(());
-                        continue;
+                        Err(error) if error.raw_os_error() == Some(libc::ENOTSOCK) => {}
+                        Err(_) => {
+                            let _ = record.finished.try_send(false);
+                            continue;
+                        }
                     }
                     // A fresh file description avoids changing stderr's O_NONBLOCK
                     // flag for the rest of the process. Append preserves log files.
+                    let mut complete = false;
                     if let Ok(mut file) = OpenOptions::new()
                         .append(true)
                         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
@@ -78,10 +79,13 @@ pub(super) fn prepare_output() {
                             || file.write(record.detail.as_bytes()).ok()
                                 != Some(record.detail.len())
                         {
-                            let _ = file.write(record.fallback.as_bytes());
+                            complete = file.write(record.fallback.as_bytes()).ok()
+                                == Some(record.fallback.len());
+                        } else {
+                            complete = true;
                         }
                     }
-                    let _ = record.finished.try_send(());
+                    let _ = record.finished.try_send(complete);
                 }
             })
             .ok()
@@ -89,9 +93,75 @@ pub(super) fn prepare_output() {
     });
 }
 
-pub(super) fn emit(detail: String, fallback: String) {
+// Linux's AF_UNIX stream sendmsg per-skb payload ceiling, capped below
+// UNIX_SKB_FRAGS_SZ as well. A small buffer chooses the whole fallback instead
+// of starting a detail that would need a second skb. See the receipt's kernel
+// source reference. SO_SNDBUF includes the kernel's doubling/minimum already.
+fn socket_record_limit(fd: libc::c_int) -> io::Result<usize> {
+    let mut size: libc::c_int = 0;
+    let mut length = std::mem::size_of_val(&size) as libc::socklen_t;
+    // SAFETY: size/length point to live writable storage of the declared size.
+    if unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            (&mut size as *mut libc::c_int).cast(),
+            &mut length,
+        )
+    } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((size.max(0) as usize / 2)
+        .saturating_sub(64)
+        .min(libc::PIPE_BUF as usize))
+}
+
+// Return the actual byte count; a short result is never a success receipt. Do
+// not restart the record/fallback at offset zero after bytes have been sent.
+// The deadline belongs only to the output worker; the shutdown caller retains
+// its independent OUTPUT_WAIT fuse. A closed/full sink can drop output, never
+// the independently returned phase errors.
+pub(super) fn send_socket_record(
+    fd: libc::c_int,
+    line: &[u8],
+    mut offset: usize,
+    deadline: Instant,
+) -> io::Result<usize> {
+    while offset < line.len() && Instant::now() < deadline {
+        // SAFETY: the borrowed suffix stays live for this synchronous syscall.
+        let sent = unsafe {
+            libc::send(
+                fd,
+                line[offset..].as_ptr().cast(),
+                line.len() - offset,
+                libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+            )
+        };
+        if sent > 0 {
+            offset += sent as usize;
+            continue;
+        }
+        if sent == 0 {
+            break;
+        }
+        let error = io::Error::last_os_error();
+        if !matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+        ) {
+            return Err(error);
+        }
+        // No blocking write/poll, and no unbounded retry on EAGAIN/EINTR.
+        std::thread::yield_now();
+    }
+    Ok(offset)
+}
+
+pub(super) fn emit(detail: String, fallback: String) -> bool {
     let Some(Some(output)) = OUTPUT.get() else {
-        return;
+        return false;
     };
     let (finished, receipt) = mpsc::sync_channel(1);
     if output
@@ -104,8 +174,9 @@ pub(super) fn emit(detail: String, fallback: String) {
     {
         // Normal output is ordered before the caller's combined error line.
         // A stalled device/worker never extends this fixed wait.
-        let _ = receipt.recv_timeout(OUTPUT_WAIT);
+        return receipt.recv_timeout(OUTPUT_WAIT).unwrap_or(false);
     }
+    false
 }
 
 struct Observer {

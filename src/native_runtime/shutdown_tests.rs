@@ -7,7 +7,7 @@ const REGION_FAILURE: &str = "native application region did not drain before its
 const RUNTIME_FAILURE: &str = "native runtime teardown exceeded its deadline";
 const STORAGE_SITE: &str = "blocked_storage_read at src/native_runtime/shutdown_tests.rs";
 
-fn probe(kind: &str) {
+fn probe(kind: &str) -> String {
     let runtime = NativeRuntime::new().unwrap();
     let raw = runtime
         .handle
@@ -111,6 +111,7 @@ fn probe(kind: &str) {
             "invented region failure: {error}"
         );
     }
+    error
 }
 
 fn assert_probe(kind: &str, name: &str) {
@@ -455,6 +456,10 @@ fn socket_stderr_keeps_attribution_and_shutdown_budget() {
         io::Read,
         os::{fd::OwnedFd, unix::net::UnixStream},
     };
+    if std::env::var_os("FBT_P103C_PRESSURED_REPLAY").is_some() {
+        pressured_socket_child();
+        return;
+    }
     let (mut reader, writer) = UnixStream::pair().unwrap();
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "native_runtime::shutdown_tests::blocked_storage_task_names_outstanding_work_and_preserves_both_failures", "--nocapture"])
@@ -496,4 +501,194 @@ fn socket_stderr_keeps_attribution_and_shutdown_budget() {
         "FBT-P103C-PROBE-LOG {}",
         base64::engine::general_purpose::STANDARD.encode(format!("{stdout}\n{stderr}"))
     );
+    pressured_socket_replay();
+    short_socket_write_resumes_from_offset();
+}
+
+fn pressured_socket_child() {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    // First obtain the actual, asserted two-phase error without filling the
+    // replay socket. This redirection is confined to this test subprocess.
+    let saved = unsafe { libc::fcntl(libc::STDERR_FILENO, libc::F_DUPFD_CLOEXEC, 3) };
+    assert!(saved >= 0);
+    let saved = unsafe { OwnedFd::from_raw_fd(saved) };
+    let null = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/null")
+        .unwrap();
+    assert_eq!(
+        unsafe { libc::dup2(null.as_raw_fd(), libc::STDERR_FILENO) },
+        libc::STDERR_FILENO
+    );
+    let began = Instant::now();
+    let error = probe("worker");
+    // A FIFO output receipt proves all previous /dev/null records are done
+    // before restoring stderr; no sleep-based redirection race.
+    assert!(shutdown_diagnostics::emit(String::new(), String::new()));
+    assert_eq!(
+        unsafe { libc::dup2(saved.as_raw_fd(), libc::STDERR_FILENO) },
+        libc::STDERR_FILENO
+    );
+    let detail = replay_record(&error);
+    let fallback = "ERROR engine closing native runtime:\n".to_string();
+    assert!(detail.len() > 2048 && detail.len() < libc::PIPE_BUF as usize);
+    assert!(shutdown_diagnostics::emit(detail.clone(), fallback));
+    assert!(
+        began.elapsed() < Duration::from_millis(250),
+        "replay exceeded original ceiling"
+    );
+    assert!(error.contains(REGION_FAILURE) && error.contains(RUNTIME_FAILURE));
+    println!(
+        "pressured_replay_bytes={} elapsed_us={}",
+        detail.len(),
+        began.elapsed().as_micros()
+    );
+}
+
+fn small_send_buffer(writer: &std::os::unix::net::UnixStream) {
+    use std::os::fd::AsRawFd;
+    let size: libc::c_int = 1024;
+    assert_eq!(
+        unsafe {
+            libc::setsockopt(
+                writer.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                (&size as *const libc::c_int).cast(),
+                std::mem::size_of_val(&size) as libc::socklen_t,
+            )
+        },
+        0
+    );
+}
+
+fn replay_record(error: &str) -> String {
+    let mut line = format!("ERROR engine closing native runtime: error={error:?}");
+    // Match the reviewer's 2562-byte record despite variable IDs/ages. Padding
+    // after the quoted error preserves the exact two returned phase errors.
+    while line.len() < 2561 {
+        line.push(' ');
+    }
+    line.push('\n');
+    line
+}
+
+fn pressured_socket_replay() {
+    use std::{
+        io::{Read, Write},
+        os::{fd::OwnedFd, unix::net::UnixStream},
+    };
+    let (mut reader, mut writer) = UnixStream::pair().unwrap();
+    small_send_buffer(&writer);
+    writer.write_all(b"x").unwrap(); // Reviewer setup: one queued byte, reader paused.
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "native_runtime::shutdown_tests::socket_stderr_keeps_attribution_and_shutdown_budget",
+            "--nocapture",
+        ])
+        .env("FBT_P103C_PRESSURED_REPLAY", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(OwnedFd::from(writer))
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            panic!(
+                "pressured socket hung: {:?}",
+                child.wait_with_output().unwrap()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert!(output.status.success(), "{stdout} sink={bytes:?}");
+    assert_eq!(bytes.first(), Some(&b'x'));
+    let received = std::str::from_utf8(&bytes[1..]).unwrap();
+    let error = stdout
+        .lines()
+        .find(|line| line.starts_with("probe=worker still_blocked=true"))
+        .unwrap()
+        .split_once(" returned=")
+        .unwrap()
+        .1;
+    let expected = replay_record(error);
+    assert!(expected.len() > 2048);
+    assert!(
+        received == expected || received == "ERROR engine closing native runtime:\n",
+        "torn/unframed replay: {received:?}"
+    );
+    assert!(received.ends_with('\n'));
+    assert_eq!(received.lines().count(), 1);
+    println!(
+        "pressured_socket sndbuf=1024 prequeued=1 replay_bytes={} received_bytes={} fallback={}",
+        expected.len(),
+        received.len(),
+        received != expected
+    );
+    use base64::Engine;
+    println!(
+        "FBT-P103C-PROBE-LOG {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("{stdout}\n{received}"))
+    );
+}
+
+fn short_socket_write_resumes_from_offset() {
+    use std::{
+        io::{Read, Write},
+        os::{fd::AsRawFd, unix::net::UnixStream},
+    };
+    let (mut reader, mut writer) = UnixStream::pair().unwrap();
+    small_send_buffer(&writer);
+    writer.write_all(b"x").unwrap();
+    let line = format!("ERROR engine partial-write control {}\n", "z".repeat(2530));
+    let sent = unsafe {
+        libc::send(
+            writer.as_raw_fd(),
+            line.as_ptr().cast(),
+            line.len(),
+            libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+        )
+    };
+    assert!(
+        sent > 0 && (sent as usize) < line.len(),
+        "control must produce a real short send: {sent}"
+    );
+    let blocked_at = Instant::now();
+    let blocked = shutdown_diagnostics::send_socket_record(
+        writer.as_raw_fd(),
+        line.as_bytes(),
+        sent as usize,
+        blocked_at + Duration::from_millis(5),
+    )
+    .unwrap();
+    assert_eq!(
+        blocked, sent as usize,
+        "a full socket must neither lose nor replay the prefix"
+    );
+    assert!(
+        blocked_at.elapsed() < Duration::from_millis(250),
+        "socket retry fuse overran"
+    );
+    let mut received = vec![0; sent as usize + 1];
+    reader.read_exact(&mut received).unwrap(); // Release capacity before resuming.
+    let began = Instant::now();
+    let written = shutdown_diagnostics::send_socket_record(
+        writer.as_raw_fd(),
+        line.as_bytes(),
+        sent as usize,
+        began + Duration::from_millis(5),
+    )
+    .unwrap();
+    assert_eq!(written, line.len());
+    assert!(began.elapsed() < Duration::from_millis(5));
+    drop(writer);
+    reader.read_to_end(&mut received).unwrap();
+    assert_eq!(&received[1..], line.as_bytes());
+    println!("short_socket first_bytes={sent} total_bytes={written} blocked_retry_ms={} completed_with_offset=true", blocked_at.elapsed().as_millis());
 }
