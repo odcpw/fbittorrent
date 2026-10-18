@@ -103,9 +103,8 @@ pub struct EmptyResult {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingResult {
     pub state: PendingState,
-    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "ref")]
-    pub reference: Option<MutationRef>,
+    pub reference: MutationRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,24 +112,21 @@ pub struct DoneResult {
     pub state: DoneState,
 }
 
+/// Pending is correlated by construction, including when flattened into add/remove.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MutationResult {
-    pub state: MutationState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "ref")]
-    pub reference: Option<MutationRef>,
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum MutationResult {
+    Done,
+    Pending {
+        #[serde(rename = "ref")]
+        reference: MutationRef,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkResult {
     pub state: NetworkState,
     pub interfaces: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LogResult {
-    pub entries: Vec<LogEntry>,
-    pub next_seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,10 +141,8 @@ pub struct GetResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddResult {
-    pub state: MutationState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "ref")]
-    pub reference: Option<MutationRef>,
+    #[serde(flatten)]
+    pub status: MutationResult,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<Hash>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,10 +174,8 @@ pub struct StopResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoveResult {
-    pub state: MutationState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(rename = "ref")]
-    pub reference: Option<MutationRef>,
+    #[serde(flatten)]
+    pub status: MutationResult,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub undo_until: Option<u64>,
 }
@@ -216,8 +208,6 @@ pub enum Reply {
     AppShutdown(PendingResult),
     AppRestart(PendingResult),
     AppNetwork(NetworkResult),
-    AppLog(LogResult),
-    AppStats(Stats),
     TransferInfo(TransferInfo),
     TorrentsList(ListResult),
     TorrentsGet(GetResult),
@@ -235,15 +225,13 @@ pub enum Reply {
 }
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
-        match op {
+        let reply = match op {
             "hello" => serde_json::from_value(result).map(Self::Hello),
             "app.info" => serde_json::from_value(result).map(Self::AppInfo),
             "app.client" => serde_json::from_value(result).map(Self::AppClient),
             "app.shutdown" => serde_json::from_value(result).map(Self::AppShutdown),
             "app.restart" => serde_json::from_value(result).map(Self::AppRestart),
             "app.network" => serde_json::from_value(result).map(Self::AppNetwork),
-            "app.log" => serde_json::from_value(result).map(Self::AppLog),
-            "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "transfer.info" => serde_json::from_value(result).map(Self::TransferInfo),
             "torrents.list" => serde_json::from_value(result).map(Self::TorrentsList),
             "torrents.get" => serde_json::from_value(result).map(Self::TorrentsGet),
@@ -263,7 +251,10 @@ impl Reply {
             _ => Err(<serde_json::Error as serde::de::Error>::custom(
                 "unknown P1 operation",
             )),
-        }
+        }?;
+        super::validation::Validate::validate(&reply)
+            .map_err(<serde_json::Error as serde::de::Error>::custom)?;
+        Ok(reply)
     }
     pub fn to_value(&self) -> Result<Value, serde_json::Error> {
         serde_json::to_value(self)

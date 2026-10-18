@@ -4,6 +4,7 @@ use super::scalar::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "UncheckedRequest")]
 pub struct Request {
     pub id: RequestId,
     #[serde(flatten)]
@@ -12,6 +13,30 @@ pub struct Request {
     pub reference: Option<MutationRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<Instance>,
+}
+
+#[derive(Deserialize)]
+struct UncheckedRequest {
+    id: RequestId,
+    #[serde(flatten)]
+    call: Call,
+    #[serde(rename = "ref", skip_serializing_if = "Option::is_none")]
+    reference: Option<MutationRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance: Option<Instance>,
+}
+impl TryFrom<UncheckedRequest> for Request {
+    type Error = super::validation::Violation;
+    fn try_from(raw: UncheckedRequest) -> Result<Self, Self::Error> {
+        let request = Self {
+            id: raw.id,
+            call: raw.call,
+            reference: raw.reference,
+            instance: raw.instance,
+        };
+        super::validation::Validate::validate(&request)?;
+        Ok(request)
+    }
 }
 
 /// Omitted means unchanged; explicit null means unlimited. `Option<Option<T>>`
@@ -47,12 +72,9 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Update<T> {
 #[serde(transparent)]
 pub struct Hashes(Vec<Hash>);
 impl Hashes {
-    pub fn new(hashes: Vec<Hash>) -> Result<Self, &'static str> {
-        if (1..=super::MAX_HASHES).contains(&hashes.len()) {
-            Ok(Self(hashes))
-        } else {
-            Err("hashes must contain 1..256 hashes")
-        }
+    pub fn new(hashes: Vec<Hash>) -> Result<Self, super::validation::Violation> {
+        super::validation::count(hashes.len(), super::MAX_HASHES, "hashes")?;
+        Ok(Self(hashes))
     }
     pub fn as_slice(&self) -> &[Hash] {
         &self.0
@@ -114,28 +136,6 @@ pub struct ShutdownArgs {
 #[serde(deny_unknown_fields)]
 pub struct RestartArgs {
     pub scope: RestartScope,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LogArgs {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub since_seq: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub level: Option<LogLevel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hash: Option<Hash>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StatsArgs {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -222,6 +222,7 @@ pub struct OpenTargetArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubscribeArgs {
+    #[serde(deserialize_with = "super::validation::deserialize_topics")]
     pub topics: Vec<Topic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interval_ms: Option<u64>,
@@ -239,7 +240,11 @@ pub struct UnsubscribeArgs {
 #[serde(deny_unknown_fields)]
 pub struct UploadLimitArgs {
     pub hashes: Hashes,
-    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    #[serde(
+        default,
+        skip_serializing_if = "Update::is_unset",
+        deserialize_with = "super::validation::deserialize_upload_update"
+    )]
     pub bps: Update<u64>,
 }
 
@@ -264,10 +269,6 @@ pub enum Call {
         #[serde(skip_serializing_if = "Option::is_none")]
         args: Option<EmptyArgs>,
     },
-    #[serde(rename = "app.log")]
-    AppLog { args: LogArgs },
-    #[serde(rename = "app.stats")]
-    AppStats { args: StatsArgs },
     #[serde(rename = "transfer.info")]
     TransferInfo {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -309,8 +310,6 @@ impl Call {
             Self::AppShutdown { .. } => "app.shutdown",
             Self::AppRestart { .. } => "app.restart",
             Self::AppNetwork { .. } => "app.network",
-            Self::AppLog { .. } => "app.log",
-            Self::AppStats { .. } => "app.stats",
             Self::TransferInfo { .. } => "transfer.info",
             Self::TorrentsList { .. } => "torrents.list",
             Self::TorrentsGet { .. } => "torrents.get",

@@ -35,31 +35,25 @@ macro_rules! identifier {
         }
     };
 }
-fn hex(value: &str, n: usize) -> bool {
-    value.len() == n
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
 identifier!(
     Hash,
     "hash must be 40 lowercase hex characters",
-    |s: &str| hex(s, 40)
+    |s: &str| super::validation::lower_hex(s, 40)
 );
 identifier!(
     Instance,
     "instance must be 32 lowercase hex characters",
-    |s: &str| hex(s, 32)
+    |s: &str| super::validation::lower_hex(s, 32)
 );
 identifier!(
     MutationRef,
     "ref must be at most 64 ASCII characters",
-    |s: &str| s.is_ascii() && s.len() <= 64
+    |s: &str| super::validation::mutation_ref(s).is_ok()
 );
 identifier!(
     ClientName,
     "client name must be at most 64 characters",
-    |s: &str| s.chars().count() <= 64
+    |s: &str| super::validation::text(s, 64, "client.name").is_ok()
 );
 
 macro_rules! closed_enum {
@@ -156,7 +150,6 @@ pub enum Topic {
     Network,
     Settings,
     Events,
-    Log,
 }
 impl Topic {
     pub fn as_str(&self) -> String {
@@ -166,7 +159,6 @@ impl Topic {
             Self::Network => "network".into(),
             Self::Settings => "settings".into(),
             Self::Events => "events".into(),
-            Self::Log => "log".into(),
             Self::Files(h) => format!("torrent:{h}.files"),
         }
     }
@@ -185,7 +177,6 @@ impl<'de> Deserialize<'de> for Topic {
             "network" => Ok(Self::Network),
             "settings" => Ok(Self::Settings),
             "events" => Ok(Self::Events),
-            "log" => Ok(Self::Log),
             _ => s
                 .strip_prefix("torrent:")
                 .and_then(|s| s.strip_suffix(".files"))

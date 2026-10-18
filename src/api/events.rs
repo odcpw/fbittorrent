@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 pub enum Item {
     Torrent(Torrent),
     File(File),
-    Log(LogEntry),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,85 +183,18 @@ impl Event {
             Self::Error { .. } => "error",
         }
     }
-    /// Shape checks that depend on the topic cannot be expressed by serde's
-    /// field types alone. Servers and fixture consumers use the same check.
-    pub fn validate(&self) -> Result<(), &'static str> {
+    /// Value and topic checks are shared with replies and fixture consumers.
+    pub fn validate(&self) -> Result<(), super::validation::Violation> {
+        super::validation::Validate::validate(self)
+    }
+    pub fn subscription_revision(&self) -> Option<(u64, u64)> {
         match self {
-            Self::SnapshotBegin {
-                topic,
-                reason,
-                oldest_seq,
-                ..
-            } if oldest_seq.is_some()
-                && (*reason != SnapshotReason::Resync || *topic != Topic::Events) =>
-            {
-                Err("oldest_seq is only valid for an events resync")
-            }
-            Self::SnapshotChunk { topic, items, .. } => {
-                if items.len() > super::MAX_CHUNK_ITEMS {
-                    return Err("snapshot chunk exceeds 256 items");
-                }
-                validate_items(topic, items)
-            }
-            Self::Delta {
-                topic,
-                added,
-                removed,
-                ..
-            } => {
-                if let Some(added) = added {
-                    validate_items(topic, added)?;
-                }
-                if removed.as_ref().is_some_and(|keys| {
-                    keys.iter().any(|key| match topic {
-                        Topic::Torrents => serde_json::from_value::<Hash>(key.clone()).is_err(),
-                        Topic::Files(_) | Topic::Log | Topic::Events => key.as_u64().is_none(),
-                        _ => true,
-                    })
-                }) {
-                    return Err("removed key does not match topic");
-                }
-                Ok(())
-            }
-            Self::State { topic, data, .. } => match (topic, data) {
-                (Topic::Summary, StateData::Summary(_))
-                | (Topic::Network, StateData::Network(_))
-                | (Topic::Settings, StateData::Settings(_)) => Ok(()),
-                _ => Err("state data does not match topic"),
-            },
-            Self::MutationResult { outcome, error, .. } => match (outcome, error) {
-                (MutationOutcome::Done, Some(_)) => Err("done mutation cannot carry an error"),
-                (MutationOutcome::Failed, None) => Err("failed mutation requires an error"),
-                _ => Ok(()),
-            },
-            _ => Ok(()),
+            Self::SnapshotBegin { sub, rev, .. }
+            | Self::SnapshotChunk { sub, rev, .. }
+            | Self::SnapshotEnd { sub, rev, .. }
+            | Self::Delta { sub, rev, .. }
+            | Self::State { sub, rev, .. } => Some((*sub, *rev)),
+            _ => None,
         }
     }
-}
-fn validate_items(topic: &Topic, items: &[Item]) -> Result<(), &'static str> {
-    for item in items {
-        match (topic, item) {
-            (Topic::Torrents, Item::Torrent(_))
-            | (Topic::Files(_), Item::File(_))
-            | (Topic::Log, Item::Log(_)) => {}
-            (Topic::Events, Item::Event(event))
-                if matches!(
-                    event.as_ref(),
-                    Event::EngineChanged { .. }
-                        | Event::TorrentAdded { .. }
-                        | Event::TorrentCompleted { .. }
-                        | Event::TorrentPlayable { .. }
-                        | Event::TorrentError { .. }
-                        | Event::MutationResult { .. }
-                        | Event::SearchDone { .. }
-                        | Event::ShowsChecked { .. }
-                        | Event::ClipboardMagnet { .. }
-                ) =>
-            {
-                event.validate()?;
-            }
-            _ => return Err("snapshot item does not match topic"),
-        }
-    }
-    Ok(())
 }

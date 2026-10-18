@@ -44,18 +44,6 @@ pub const TABLE: &[Operation] = &[
         since: "P1-06",
     },
     Operation {
-        name: "app.log",
-        mutating: false,
-        idempotent: false,
-        since: "P1-14",
-    },
-    Operation {
-        name: "app.stats",
-        mutating: false,
-        idempotent: false,
-        since: "P1-14",
-    },
-    Operation {
         name: "transfer.info",
         mutating: false,
         idempotent: false,

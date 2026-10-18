@@ -56,6 +56,10 @@ pub struct Subscriptions {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppInfo {
+    pub proto: u64,
+    pub caps: Vec<String>,
+    pub limits: WireLimits,
+    pub policy: Policy,
     pub server: Server,
     pub engine: String,
     pub instance: Instance,
@@ -290,35 +294,6 @@ pub struct LogEntry {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<Hash>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StatsSession {
-    pub downloaded: u64,
-    pub uploaded: u64,
-    pub started_at: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StatsAllTime {
-    pub downloaded: u64,
-    pub uploaded: u64,
-    pub completed: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StatsHistory {
-    pub download: Vec<u64>,
-    pub upload: Vec<u64>,
-    pub interval_s: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Stats {
-    pub session: StatsSession,
-    pub all_time: StatsAllTime,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub history: Option<StatsHistory>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

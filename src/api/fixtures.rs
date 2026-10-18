@@ -1,5 +1,6 @@
 //! Shared fixture format and contract checks. The daemon and UI replay runners
 //! consume these same files; this module makes no claim of live server proof.
+use super::validation::{self, Revisions, Validate};
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -81,88 +82,127 @@ fn canonical(mut value: Value) -> String {
     serde_json::to_string(&value).unwrap()
 }
 
-#[test]
-fn roundtrip() {
-    for (group, text) in GROUPS {
-        let mut calls = BTreeMap::new();
-        for (i, text) in text.lines().enumerate() {
-            let location = format!("contracts/ipc/v1/{group}.ndjson:{}", i + 1);
-            let line = parse(group, i + 1, text).unwrap_or_else(|e| panic!("{e}"));
-            if matches!(line, Line::Volatile { .. }) {
-                assert_eq!(i, 0, "{location}: volatile must be first");
-            }
+/// The explicit gap fixture is a client recovery scenario. Every other fixture
+/// is checked as a contiguous server transcript, using the production tracker.
+pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
+    let mut calls = BTreeMap::new();
+    let mut revisions = Revisions::default();
+    let mut unsubscribes = BTreeMap::new();
+    let mut expected_gaps = 0;
+    for (i, text) in text.lines().enumerate() {
+        let location = format!("contracts/ipc/v1/{group}.ndjson:{}", i + 1);
+        let line = parse(group, i + 1, text)?;
+        let check = (|| -> Result<(), String> {
             match &line {
+                Line::Volatile { .. } if i != 0 => return Err("volatile must be first".into()),
                 Line::C2s { frame } => {
+                    frame.validate().map_err(|e| e.to_string())?;
+                    validation::frame(frame, LINE_IN).map_err(|e| e.to_string())?;
                     calls.insert(frame.id.get(), frame.call.op());
+                    unsubscribes.remove(&frame.id.get());
+                    if let Call::Unsubscribe { args } = &frame.call {
+                        unsubscribes.insert(frame.id.get(), args.sub);
+                    }
                 }
-                Line::S2c {
-                    frame: ServerFrame::Response(Response::Success(frame)),
-                } => {
-                    let op = calls
-                        .get(&frame.id.get())
-                        .unwrap_or_else(|| panic!("{location}: response has no request"));
-                    let result = Reply::decode(op, frame.result.clone())
-                        .unwrap_or_else(|e| panic!("{location}: {op} result: {e}"));
-                    assert_eq!(
-                        result.to_value().unwrap(),
-                        frame.result,
-                        "{location}: typed result differs"
-                    );
-                    let typed = Success {
-                        id: frame.id,
-                        ok: Bool,
-                        result,
-                    };
-                    assert_eq!(
-                        serde_json::to_value(typed).unwrap(),
-                        serde_json::to_value(frame).unwrap(),
-                        "{location}: typed success envelope differs"
-                    );
-                }
-                Line::S2c {
-                    frame: ServerFrame::Event(event),
-                } => {
-                    event
-                        .validate()
-                        .unwrap_or_else(|e| panic!("{location}: {e}"));
-                    if let Event::MutationResult {
-                        op,
-                        result: Some(result),
-                        ..
-                    } = event
-                    {
-                        if ops::TABLE.iter().any(|row| row.name == op) {
-                            let value = Value::Object(result.clone());
-                            let typed = Reply::decode(op, value.clone())
-                                .unwrap_or_else(|e| panic!("{location}: {e}"));
-                            assert_eq!(
-                                typed.to_value().unwrap(),
-                                value,
-                                "{location}: mutation result differs"
-                            );
+                Line::S2c { frame } => {
+                    validation::frame(frame, LINE_OUT).map_err(|e| e.to_string())?;
+                    match frame {
+                        ServerFrame::Response(Response::Success(frame)) => {
+                            let op = calls
+                                .get(&frame.id.get())
+                                .ok_or("response has no request")?;
+                            let reply = Reply::decode(op, frame.result.clone())
+                                .map_err(|e| format!("{op} result: {e}"))?;
+                            if *op == "unsubscribe" {
+                                if let Some(sub) = unsubscribes.remove(&frame.id.get()) {
+                                    revisions.unsubscribe(sub);
+                                }
+                            }
+                            let typed = Success {
+                                id: frame.id,
+                                ok: Bool,
+                                result: reply,
+                            };
+                            if canonical(serde_json::to_value(typed).unwrap())
+                                != canonical(serde_json::to_value(frame).unwrap())
+                            {
+                                return Err("typed success envelope differs".into());
+                            }
                         }
+                        ServerFrame::Response(Response::Failure(frame)) => {
+                            frame.error.validate().map_err(|e| e.to_string())?
+                        }
+                        ServerFrame::Event(event) => {
+                            event.validate().map_err(|e| e.to_string())?;
+                            if let Event::MutationResult {
+                                op,
+                                result: Some(result),
+                                ..
+                            } = event
+                            {
+                                if ops::TABLE.iter().any(|r| r.name == op) {
+                                    let raw = Value::Object(result.clone());
+                                    let typed = Reply::decode(op, raw.clone())
+                                        .map_err(|e| e.to_string())?;
+                                    if canonical(typed.to_value().unwrap()) != canonical(raw) {
+                                        return Err("typed mutation result differs".into());
+                                    }
+                                }
+                            }
+                            if let Some((sub, rev)) = event.subscription_revision() {
+                                if let Err(error) = revisions.observe(sub, rev) {
+                                    if group == "subscribe-gap"
+                                        && expected_gaps == 0
+                                        && revisions.last(sub) == 3
+                                        && matches!(
+                                            event,
+                                            Event::Delta {
+                                                sub: 1,
+                                                rev: 5,
+                                                topic: Topic::Torrents,
+                                                ..
+                                            }
+                                        )
+                                    {
+                                        expected_gaps += 1;
+                                    } else {
+                                        return Err(error.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Line::Expect { model } => {
+                    if let Some(torrents) = &model.torrents {
+                        for t in torrents.values() {
+                            t.validate().map_err(|e| e.to_string())?;
+                        }
+                    }
+                    if let Some(summary) = &model.summary {
+                        summary.validate().map_err(|e| e.to_string())?;
                     }
                 }
                 _ => {}
             }
-            match &line {
-                Line::C2s { frame } => assert!(
-                    serde_json::to_vec(frame).unwrap().len() <= LINE_IN,
-                    "{location}: client frame exceeds line cap"
-                ),
-                Line::S2c { frame } => assert!(
-                    serde_json::to_vec(frame).unwrap().len() <= LINE_OUT,
-                    "{location}: server frame exceeds line cap"
-                ),
-                _ => {}
+            let original: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            if canonical(serde_json::to_value(line).unwrap()) != canonical(original) {
+                return Err("canonical round-trip differs".into());
             }
-            let original: Value = serde_json::from_str(text).unwrap();
-            assert_eq!(
-                canonical(serde_json::to_value(line).unwrap()),
-                canonical(original),
-                "{location}: canonical round-trip differs"
-            );
-        }
+            Ok(())
+        })();
+        check.map_err(|e| format!("{location}: {e}"))?;
+    }
+    if group == "subscribe-gap" && expected_gaps != 1 {
+        return Err("subscribe-gap: missing the one deliberate revision gap".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn roundtrip() {
+    for (group, text) in GROUPS {
+        check_group(group, text).unwrap_or_else(|e| panic!("{e}"));
     }
 }
 
@@ -373,7 +413,41 @@ fn operation_event_error_and_document_coverage() {
         }
     }
     let ipc = include_str!("../../docs/IPC.md");
-    assert_eq!(operations, ops::TABLE.iter().map(|r| r.name).collect());
+    // This literal is the frozen operation list in fbt-p1-05-2qa. It must not
+    // expand just because TABLE and fixtures were expanded together.
+    let required_operations = [
+        "hello",
+        "app.info",
+        "app.client",
+        "app.shutdown",
+        "app.restart",
+        "app.network",
+        "transfer.info",
+        "torrents.list",
+        "torrents.get",
+        "torrents.add",
+        "torrents.start",
+        "torrents.stop",
+        "torrents.remove",
+        "torrents.files",
+        "torrents.set_files",
+        "torrents.set_seed",
+        "torrents.set_upload_limit",
+        "torrents.open_target",
+        "subscribe",
+        "unsubscribe",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    assert_eq!(
+        operations, required_operations,
+        "fixture operations must match the bead"
+    );
+    assert_eq!(
+        ops::TABLE.iter().map(|r| r.name).collect::<BTreeSet<_>>(),
+        required_operations,
+        "TABLE must match the bead, independently of fixture coverage"
+    );
     let idempotent = ipc
         .split("- Idempotent operations")
         .nth(1)
@@ -419,6 +493,11 @@ fn operation_event_error_and_document_coverage() {
             "missing documented event: {name}"
         );
     }
+    assert_eq!(
+        events.len(),
+        17,
+        "event names must match the bead's literal list"
+    );
     assert_eq!(
         codes.len(),
         16,
@@ -486,13 +565,14 @@ fn all_argument_objects_reject_unknown_keys() {
 #[test]
 fn topic_payloads_and_chunk_bounds() {
     let hash = Hash::new("0123456789abcdef0123456789abcdef01234567").unwrap();
-    let log = LogEntry {
-        seq: 1,
-        ts: 1,
-        level: LogLevel::Info,
-        source: "api".into(),
-        hash: None,
-        message: "ready".into(),
+    let file = File {
+        index: 0,
+        path: "e2.mkv".into(),
+        size: 1,
+        progress: 0.0,
+        included: true,
+        sort_key: "e0000000002.mkv".into(),
+        ready: None,
     };
     let chunk = |topic, items| Event::SnapshotChunk {
         sub: 1,
@@ -500,16 +580,19 @@ fn topic_payloads_and_chunk_bounds() {
         rev: 1,
         items,
     };
-    chunk(Topic::Log, vec![Item::Log(log.clone()); MAX_CHUNK_ITEMS])
-        .validate()
-        .unwrap();
+    chunk(
+        Topic::Files(hash.clone()),
+        vec![Item::File(file.clone()); MAX_CHUNK_ITEMS],
+    )
+    .validate()
+    .unwrap();
     assert!(chunk(
-        Topic::Log,
-        vec![Item::Log(log.clone()); MAX_CHUNK_ITEMS + 1]
+        Topic::Files(hash.clone()),
+        vec![Item::File(file.clone()); MAX_CHUNK_ITEMS + 1]
     )
     .validate()
     .is_err());
-    assert!(chunk(Topic::Torrents, vec![Item::Log(log)])
+    assert!(chunk(Topic::Torrents, vec![Item::File(file)])
         .validate()
         .is_err());
     assert!(Event::State {
@@ -582,3 +665,8 @@ fn gap_fixture_requires_recovery_and_preserves_last_revision() {
     assert_eq!(recovery, ["unsubscribe", "subscribe"]);
     assert!(consistent, "missing rebuilt consistent model");
 }
+
+#[path = "fixtures/coverage.rs"]
+mod coverage;
+#[path = "fixtures/negative.rs"]
+mod negative;
