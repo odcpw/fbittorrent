@@ -200,3 +200,11 @@ Receipt: [P6-07.md](P6-07.md) (branch ntm/fbittorrent/cod_4-p6-07-9bt, commit 73
 ## P5-06b
 
 Receipt: [P5-06b.md](P5-06b.md) (branch ntm/fbittorrent/cod_2-p5-06b-vt1, commit 0c7ac31; the exact change prescribed by the P5-06 review, verified by the orchestrator from the diff; batch gate on main follows).
+
+## P1-10
+
+Receipt: [P1-10.md](P1-10.md) (branch ntm/fbittorrent/cod_2-p1-10-zxk, commit a6b520d; merged by the orchestrator after an Astra review that re-ran the adapter tests and the restart/shutdown daemon cases; batch gate on main follows).
+
+## P1-16 (engine half)
+
+Receipt: [P1-16.md](P1-16.md) (branch ntm/fbittorrent/cod_4-p1-16-vi1, commits a93b900 and f1e6fac; merged by the orchestrator after two Astra reviews, the first returning one P2 on dormant size/completed_bytes for partially selected torrents, the second verifying the selected-piece accounting against the live path; the daemon.py cases are bead P1-16b; batch gate on main follows).
