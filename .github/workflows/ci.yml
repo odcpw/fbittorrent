@@ -156,7 +156,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Clear scheduled case logs after cache restore
-        run: python3 scripts/testlog-summary.py --reset --suite ci_lint_tree --suite ci_lint_commits
+        run: python3 scripts/testlog-summary.py --reset --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes
       - name: Check working tree and committed diff whitespace
         env:
           DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -167,10 +167,12 @@ jobs:
             base=$(git rev-parse --verify HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
           python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_commits -- git diff --check "$base" HEAD
-      # Token, plugin-structure and size lints arrive in their named P1/P2/P4 beads.
+      - name: Check engine file sizes and the size-lint boundary cases
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test src/engine
+      # Token and plugin-structure lints arrive in their named P2/P4 beads.
       - name: Summarize cases
         if: always()
-        run: python3 scripts/testlog-summary.py --suite ci_lint_tree --suite ci_lint_commits
+        run: python3 scripts/testlog-summary.py --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:

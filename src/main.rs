@@ -22,6 +22,9 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
+use engine::migrate_legacy;
+#[cfg(test)]
+use engine::LegacyMigration;
 use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
@@ -870,38 +873,6 @@ fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct LegacyMigration {
-    phase: String,
-    source_url: String,
-    source_unit: String,
-    backup: std::path::PathBuf,
-    torrents: Vec<Torrent>,
-    files: std::collections::HashMap<String, Vec<qbt::TorrentFile>>,
-    feeds: Vec<qbt::RssFeed>,
-    plugins: Vec<qbt::SearchPlugin>,
-}
-
-impl LegacyMigration {
-    fn save(&self, path: &std::path::Path) -> Result<()> {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let directory = path.parent().context("migration path has no parent")?;
-        std::fs::create_dir_all(directory)?;
-        let staged = path.with_extension("json.tmp");
-        let mut file = std::fs::OpenOptions::new().create(true).truncate(true).write(true)
-            .mode(0o600).open(&staged)?;
-        // Creation mode does not repair a temporary left by an earlier writer.
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        file.write_all(&serde_json::to_vec_pretty(self)?)?;
-        file.sync_all()?;
-        std::fs::rename(&staged, path)?;
-        std::fs::File::open(directory)?.sync_all()?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod migration_store_tests {
     use super::*;
@@ -933,111 +904,6 @@ mod migration_store_tests {
         }
         std::fs::remove_dir_all(directory).unwrap();
     }
-}
-
-fn migrate_legacy(cfg: &Config, dispatcher: &engine::EngineDispatcher) -> Result<()> {
-    let path = config::data_dir().join("legacy-migration.json");
-    let mut source_cfg = cfg.clone();
-    source_cfg.engine = "qbittorrent".into();
-    let mut migration: LegacyMigration = if path.exists() {
-        let saved: LegacyMigration = serde_json::from_slice(&std::fs::read(&path)?)
-            .context("reading legacy migration progress; the qBittorrent source is preserved")?;
-        if saved.phase == "complete" { return Ok(()); }
-        anyhow::ensure!(matches!(saved.phase.as_str(), "captured" | "prepared"), "unknown legacy migration phase; source preserved");
-        source_cfg.url = saved.source_url.clone();
-        source_cfg.backend_unit = saved.source_unit.clone();
-        saved
-    } else {
-        let source = Client::from_config(&source_cfg);
-        if source.login().is_err() || source.version().is_err() {
-            anyhow::ensure!(!backend::is_active(&source_cfg.backend_unit),
-                "the legacy qBittorrent service is active but unavailable; migration is deferred and its records are preserved");
-            if !backend::start_for_legacy_migration(&source_cfg, &source)? { return Ok(()); }
-        }
-        anyhow::ensure!(source_cfg.url.starts_with("http://127.0.0.1:") || source_cfg.url.starts_with("http://localhost:"),
-            "automatic legacy migration requires a local qBittorrent WebUI; the source is preserved");
-        source.login().context("logging into legacy qBittorrent before migration")?;
-        let torrents = source.torrents().context("capturing all legacy torrents")?;
-        let mut files = std::collections::HashMap::new();
-        for torrent in &torrents {
-            let selected = source.files(&torrent.hash)
-                .with_context(|| format!("capturing legacy file selection for {}", torrent.name))?;
-            anyhow::ensure!(!selected.is_empty(), "legacy torrent {} has no resolved file metadata; source preserved", torrent.name);
-            files.insert(torrent.hash.clone(), selected);
-        }
-        let saved = LegacyMigration {
-            phase: "captured".into(),
-            source_url: source_cfg.url.clone(),
-            source_unit: source_cfg.backend_unit.clone(),
-            backup: dirs::data_local_dir().context("no local data directory for qBittorrent backup")?
-                .join("qBittorrent/BT_backup"),
-            torrents,
-            files,
-            feeds: source.rss_feeds().context("capturing legacy RSS feeds and read history")?,
-            plugins: source.search_plugins().context("capturing legacy provider preferences")?,
-        };
-        saved.save(&path).context("saving legacy migration snapshot; source preserved")?;
-        saved
-    };
-
-    if migration.phase == "captured" {
-        if migration.files.values().flatten().any(|file| !matches!(file.priority, 0 | 1)) {
-            eprintln!("legacy file priorities above normal become normal; native file selection supports skip and normal");
-        }
-        let count = dispatcher.import_legacy(migration.torrents.clone(), migration.files.clone(), migration.backup.clone())
-            .context("importing legacy torrents paused; qBittorrent remains available")?;
-        rss::import(&migration.feeds).context("saving legacy RSS history; qBittorrent remains available")?;
-        search::import_plugins(&migration.plugins).context("saving legacy search preferences; qBittorrent remains available")?;
-        migration.phase = "prepared".into();
-        migration.save(&path).context("saving completed import before retiring the source")?;
-        eprintln!("saved {count} legacy torrent(s), {} RSS feed(s), and provider preferences", migration.feeds.len());
-    }
-
-    let source = Client::from_config(&source_cfg);
-    if legacy_endpoint_reachable(&source_cfg.url)? {
-        source.login()?;
-        let current = source.torrents()?;
-        let same_hashes = current.len() == migration.torrents.len()
-            && current.iter().all(|torrent| migration.torrents.iter().any(|old| old.hash == torrent.hash));
-        anyhow::ensure!(same_hashes, "legacy torrents changed during migration; source kept running and imported torrents remain paused");
-        for torrent in &current {
-            let old = migration.torrents.iter().find(|old| old.hash == torrent.hash).unwrap();
-            anyhow::ensure!(migration_torrent_settings(old) == migration_torrent_settings(torrent),
-                "legacy settings changed for {}; source kept running and imported torrents remain paused", torrent.name);
-            let files = source.files(&torrent.hash)?;
-            let selection = |items: &[qbt::TorrentFile]| items.iter().map(|file| (file.index, file.name.clone(), file.priority)).collect::<Vec<_>>();
-            anyhow::ensure!(selection(&files) == selection(&migration.files[&torrent.hash]),
-                "legacy file selection changed for {}; source kept running and imported torrents remain paused", torrent.name);
-        }
-    }
-    backend::stop_legacy(&source_cfg).context("retiring the legacy service after saved import; native torrents remain paused")?;
-    anyhow::ensure!(!legacy_endpoint_reachable(&source_cfg.url)?,
-        "legacy qBittorrent still answers after stopping its service; close that instance before native downloads can resume");
-    anyhow::ensure!(dispatcher.legacy_migration_completed()?, "native import has not been durably completed; source records preserved");
-    backend::disable_legacy(&source_cfg).context("retiring legacy login startup after verified import")?;
-    dispatcher.resume_imported().context("resuming only the legacy torrents that were running")?;
-    migration.phase = "complete".into();
-    migration.save(&path).context("saving completed legacy migration")?;
-    eprintln!("legacy migration complete; downloads now run while fbittorrent is open");
-    Ok(())
-}
-
-fn migration_torrent_settings(torrent: &Torrent) -> serde_json::Value {
-    serde_json::json!({
-        "hash": torrent.hash, "name": torrent.name, "save_path": torrent.save_path,
-        "content_path": torrent.content_path, "category": torrent.category, "tags": torrent.tags,
-        "up_limit": torrent.up_limit, "ratio_limit": torrent.ratio_limit,
-        "stopped": torrent.is_stopped(),
-    })
-}
-
-fn legacy_endpoint_reachable(url: &str) -> Result<bool> {
-    let authority = url.strip_prefix("http://").context("legacy migration requires a local HTTP WebUI")?
-        .split('/').next().unwrap_or_default();
-    let (host, port) = authority.rsplit_once(':').context("legacy WebUI URL has no port")?;
-    anyhow::ensure!(matches!(host, "127.0.0.1" | "localhost"), "legacy migration requires a loopback WebUI");
-    let port: u16 = port.parse().context("invalid legacy WebUI port")?;
-    Ok(std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(250)).is_ok())
 }
 
 fn rss(c: &Client, sub: RssCmd, json: bool, cfg: &Config) -> Result<Code> {
