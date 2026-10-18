@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub         │
+│ ▌ The Diplomat S04 (2026) 1080…5 DDP 5.1 ESub ██████████  100.0%     3.4 GiB         SF·  ││                                                                 │
+│                                     ╭ Keys ────────────────────────────────────────────────────────────────────────────╮                                     │
+│                                     │                                                                                  │of 3.4 GiB                           │
+│                                     │ SHOWS    Starts in All unread, across every followed show.                       │s                                    │
+│                                     │          (Left/Right) or h/l: focus Shows/Releases                               │                                     │
+│                                     │          Shows: All unread or one show · (Enter) Releases                        │ers                                  │
+│                                     │          (N) Follow title/IMDb id                                                │                                     │
+│                                     │          Releases: (Enter) Download episode or season pack                       │ty automatic                         │
+│                                     │          Inbox: (M)ark read or Space removes the selected release                │tops when complete  (u to seed)      │
+│                                     │          (U)ndo restores the last inbox read action                              │nloads                               │
+│                                     │          One show: (M)ark read/unread or Space toggles one release               │                                     │
+│                                     │          (Shift+M) Mark all releases of one show read                            │                                     │
+│                                     │          Select a followed show first; unavailable in All unread.                │he Diplomat (2023)  TV series        │
+│                                     │          (R) Check all · (Shift+R) Check selected show                           │ 8.0  ·  102k votes                  │
+│                                     │          (X) Unfollow · (Shift+O) EZTV · (I) IMDb · (W)ikipedia                  │eri Russell, Rufus Sewell            │
+│                                     │          Counts show unread releases, including old releases.                    │                                     │
+│                                     │          Download history and read state are stored separately.                  │he Diplomat is an American           │
+│                                     │          Cached releases survive source removal and years between runs.          │olitical thriller television series  │
+│                                     │          Checking finds releases; downloading is always your choice.             │reated by Debora Cahn. First airing  │
+│                                     │                                                                                  │n 2023, it stars Keri Russell as a   │
+│                                     │ MOUSE    Hover previews names; keyboard target stays selected.                   │eteran US diplomat who is            │
+│                                     │          Click selects and focuses · wheel scrolls the pointed pane.             │nexpectedly appointed as the         │
+│                                     │          Double-click activates the clicked row.                                 │mbassador to the United Kingdom      │
+│                                     │          A feed/show activates its child pane; an item downloads.                │mid an emerging international        │
+│                                     │          Files/providers: double-click toggles the selected row.                 │risis.                               │
+│                                     │          Click tabs or query box · long selected names scroll.                   │                                     │
+│                                     │                                                                                  │ open on IMDb    w open Wikipedia    │
+│                                     │ RELEASES ● unread · ↓ downloading · … queued/waiting · ‖ paused                  │                                     │
+│                                     │          ✓ complete · + added earlier; separate from read state.                 │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ Native feed checks and transfers stop when the owning app closes.                │                                     │
+│                                     │ Defaults: seeding off; (U) allows it per torrent.                                │                                     │
+│                                     │ j/k ↑/↓ wheel scroll · PgUp/PgDn · Esc or click close                            │                                     │
+│                                     │                                                                                  │                                     │
+│                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Help] (↑↓) Scroll  (PgUp/PgDn) Page                                                                                                                 (Esc) Close
+

@@ -1,0 +1,161 @@
+# cargo test --release  (2026-10-18T03:03:40+02:00, rustc rustc 1.98.0 (88d9e12ae 2026-08-18))
+warning: struct `DiskBackedBitV` is never constructed
+  --> vendor/rqbit/librqbit/src/bitv.rs:24:12
+   |
+24 | pub struct DiskBackedBitV {
+   |            ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated function `new` is never used
+  --> vendor/rqbit/librqbit/src/bitv.rs:39:18
+   |
+38 | impl DiskBackedBitV {
+   | ------------------- associated function in this implementation
+39 |     pub async fn new(cx: &Cx, filename: PathBuf, spawner: BlockingSpawner) -> anyhow::Result<Self> {
+   |                  ^^^
+
+warning: method `load` is never used
+ --> vendor/rqbit/librqbit/src/bitv_factory.rs:7:14
+  |
+6 | pub trait BitVFactory: Send + Sync {
+  |           ----------- method in this trait
+7 |     async fn load(&self, cx: &Cx, id: TorrentIdOrHash) -> anyhow::Result<Option<Box<dyn BitV>>>;
+  |              ^^^^
+
+warning: field `rx` is never read
+  --> vendor/rqbit/librqbit/src/dht_utils.rs:22:9
+   |
+19 |     Found {
+   |     ----- field in this variant
+...
+22 |         rx: Rx,
+   |         ^^
+   |
+   = note: `ReadMetainfoResult` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `enable_upnp_port_forwarding` is never read
+  --> vendor/rqbit/librqbit/src/listen.rs:15:9
+   |
+13 | pub(crate) struct ListenResult {
+   |                   ------------ field in this struct
+14 |     pub tcp_socket: Option<TcpListener>,
+15 |     pub enable_upnp_port_forwarding: bool,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `librqbit` (lib) generated 5 warnings
+   Compiling fbittorrent v0.1.0 (/home/oliver/Projects/odcpw/fbittorrent)
+warning: method `set_download_limit` is never used
+    --> src/engine.rs:1131:12
+     |
+ 547 | impl EngineDispatcher {
+     | --------------------- method in this implementation
+...
+1131 |     pub fn set_download_limit(&self, limit: usize) -> Result<()> {
+     |            ^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `fbittorrent` (bin "fbittorrent" test) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 11s
+     Running unittests src/main.rs (target/release/deps/fbittorrent-94d77117fd4d481a)
+
+running 90 tests
+test config::tests::existing_settings_gain_queue_and_encryption_defaults ... ok
+test config::tests::invalid_settings_leave_saved_file_intact ... ok
+test engine::tests::invalid_saved_records_preserve_the_original_ledger ... ok
+test engine::tests::parked_history_preserves_order_unknown_progress_and_durable_manual_intent ... ok
+test engine::tests::restoring_downloads_preserves_upload_policy ... ok
+test imdb::tests::episodes_prefer_matching_tv_titles_and_allow_a_leading_the ... ok
+test imdb::tests::manual_show_names_match_before_preferring_series_and_year ... ok
+test imdb::tests::release_punctuation_and_year_keep_the_intended_movie ... ok
+test imdb::tests::release_title_rejects_unrelated_suggestions_and_prefixes ... ok
+test ipc::tests::stopping_socket_interrupts_an_incomplete_frame_and_joins_its_worker ... ok
+test engine::tests::mismatched_saved_metadata_never_opens_download_files ... ok
+test engine::tests::pending_metadata_keeps_reads_responsive_and_cancels_on_close ... ok
+test native_runtime::tests::cancelling_a_parked_native_file_task_closes_its_descriptor ... ok
+test native_runtime::tests::requests_use_the_application_region_for_native_effects ... ok
+test network_app::tests::proton_selection_is_exact_and_excludes_killswitch_devices ... ok
+test network_app::tests::required_missing_interface_never_uses_available_network ... ok
+test qbt_tests::add_accepts_the_json_summary_of_qbittorrent_5 ... ok
+test engine::tests::legacy_import_preserves_files_and_refuses_renamed_layout_before_writes ... ok
+test qbt_tests::add_file_posts_a_multipart_body_with_the_torrent ... ok
+test qbt_tests::add_url_sends_the_no_upload_defaults ... ok
+test qbt_tests::community_plugin_list_is_clean ... ok
+test qbt_tests::add_url_with_seed_tags_instead_of_capping ... ok
+test qbt_tests::http_errors_become_actionable_messages ... ok
+test engine::tests::queue_limit_changes_and_network_suspension_keep_intent_and_exclude_seeders ... ok
+test qbt_tests::rfc2822_dates_parse_and_sort_newest_first ... ok
+test qbt_tests::nested_rss_feed_uses_the_backend_path_for_refresh_and_read ... ok
+test qbt_tests::the_session_cookie_is_carried_to_the_next_request ... ok
+test qbt_tests::torrents_parse_the_fields_the_ui_depends_on ... ok
+test release::tests::anime_group_tags_and_absolute_episodes ... ok
+test qbt_tests::reconcile_only_touches_untagged_uploading_torrents ... ok
+test rss::tests::atom_parses_links_dates_and_xhtml_titles ... ok
+test release::tests::movies_and_shows ... ok
+test engine::tests::native_lifecycle_hashes_existing_data_stops_restores_and_deletes_durably ... ok
+test rss::tests::malformed_responses_preserve_the_cached_feed ... ok
+test rss::tests::imported_history_is_local_and_idempotent ... ok
+test rss::tests::rss_parses_entities_cdata_torrents_and_dates ... ok
+test rss::tests::read_ids_survive_cache_eviction_and_returning_releases ... ok
+test rss::tests::marking_read_during_network_refresh_is_not_overwritten ... ok
+test rss::tests::single_item_read_can_be_undone_without_marking_other_items ... ok
+test rss::tests::one_refresh_returns_current_items_and_uses_conditional_requests ... ok
+test search::tests::nova_results_preserve_urls_sizes_providers_and_dates ... ok
+test engine::tests::queue_caps_downloads_preserves_fifo_pause_delete_completion_and_restart ... ok
+test native_runtime::storage_ownership_tests::native_storage_waiter_drop_keeps_admission_until_physical_write_finishes ... ok
+test native_runtime::storage_ownership_tests::native_storage_region_close_receipt_follows_physical_write_completion ... ok
+test search::tests::active_search_streams_results_and_stop_kills_python_process_group ... ok
+test search::tests::direct_search_download_bypasses_python_even_after_shutdown ... ok
+test search::tests::nova_parent_death_kills_provider_created_subprocesses ... ok
+test search::tests::provider_failure_keeps_partial_results_and_reports_the_failure ... ok
+test setup::tests::desktop_handler_command_preserves_paths_and_generic_launcher_compatibility ... ok
+test shows::tests::concurrent_saves_merge_read_changes_without_resurrecting_unfollowed_shows ... ok
+test shows::tests::corrupt_history_is_an_error_and_is_not_overwritten ... ok
+test shows::tests::eztv_json_shape ... ok
+test shows::tests::falls_back_to_release_name_and_drops_junk ... ok
+test shows::tests::incremental_check_fetches_boundary_and_one_overlap_page ... ok
+test shows::tests::large_first_catalogue_has_an_explicit_budget_warning ... ok
+test shows::tests::picks_preferred_quality_then_seeds ... ok
+test shows::tests::refresh_retains_old_unread_releases_and_per_key_history ... ok
+test shows::tests::roundtrip_and_find ... ok
+test shows::tests::season_packs_are_separate_from_episodes_and_survive_read_changes ... ok
+test shows::tests::states_and_counts ... ok
+test source_tests::browser_file_urls_preserve_plus_spaces_and_unicode ... ok
+test source_tests::malformed_unicode_query_escapes_do_not_panic ... ok
+test tui::interaction_tests::clicking_visible_tab_titles_selects_the_same_screen ... ok
+test tui::interaction_tests::completed_search_keeps_partial_results_and_provider_warning ... ok
+test tui::interaction_tests::inbox_mark_and_explicit_undo_use_show_and_episode_identity ... ok
+test tui::interaction_tests::inbox_mouse_geometry_uses_rendered_rows_after_summary_warnings_and_scroll ... ok
+test tui::interaction_tests::inbox_refresh_and_download_dispatch_preserve_the_stable_release_target ... ok
+test tui::interaction_tests::mouse_row_uses_visible_scroll_offset ... ok
+test tui::interaction_tests::native_controls_do_not_offer_unsupported_priorities_or_toggles ... ok
+test tui::interaction_tests::parent_pane_read_key_never_marks_a_whole_feed_or_show ... ok
+test tui::interaction_tests::queued_and_vpn_waiting_rows_do_not_claim_running_downloads ... ok
+test tui::interaction_tests::read_actions_and_help_remain_visible_while_feedback_changes ... ok
+test tui::interaction_tests::refreshed_rss_row_with_a_different_id_requires_its_own_double_click ... ok
+test tui::interaction_tests::rss_initial_check_and_download_dispatch_only_once ... ok
+test tui::interaction_tests::rss_mouse_hover_keeps_target_and_click_selects_without_reading_or_adding ... ok
+test tui::interaction_tests::rss_refresh_preserves_article_and_rejects_stale_results ... ok
+test tui::interaction_tests::screens_and_scrollable_help_keep_names_visible_at_supported_sizes ... ok
+test tui::interaction_tests::selected_name_reveals_hidden_middle_and_tail ... ok
+test tui::interaction_tests::selecting_a_followed_show_opens_its_releases_before_download ... ok
+test tui::interaction_tests::settings_controls_and_small_terminal_keep_meaningful_labels ... ok
+test tui::interaction_tests::shows_badge_order_and_direct_keys_are_visible_on_other_screens ... ok
+test tui::interaction_tests::shows_inbox_aggregates_unread_episodes_and_seasons_newest_first ... ok
+test tui::interaction_tests::torrent_names_and_mouse_rows_remain_usable_across_details_cutoff ... ok
+test search::tests::providers_are_imported_without_changing_original_files ... ok
+test search::tests::selected_detail_result_runs_its_provider_download_hook ... ok
+test search::tests::selected_download_hook_obeys_closed_spawn_gate ... ok
+test search::tests::selected_download_timeout_stops_provider_children ... ok
+test search::tests::selected_provider_torrent_file_is_read_and_its_scratch_is_removed ... ok
+test search::tests::shutdown_while_provider_metadata_loads_closes_the_spawn_gate ... ok
+test engine::tests::loopback_transfer_obeys_cap_stops_with_app_and_resumes_exact_bytes ... ok
+
+test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.81s
+
+
+real	1m18.732s
+user	3m12.993s
+sys	0m4.414s
+EXIT=0

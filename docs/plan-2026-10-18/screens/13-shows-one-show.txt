@@ -1,0 +1,45 @@
+  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Shows (6) ──────────────────────────────────────╮╭ It's Always Sunny in Philadelphia (2005) · 77 releases ───────────────────────────────────────────────────╮
+│                                                 ││                                                                                                           │
+│   All unread                                  2 ││ checked 25m ago · prefers 1080p                                                                           │
+│ ▌ It's Always Sunny in Philadelphia (2005)      ││      RELEASE TITLE                                                     QUAL       SIZE  SEEDS        DATE │
+│   President Curtis (2026)                       ││ ▌  + S18E10   Always Sunny in Philadelphia S18E10 1080p WEB H264-CAKE 1080p  851.2 MiB   2358  2026-10-13 │
+│   Reacher (2022)                                ││      S18E09  Its Always Sunny in Philadelphia S18…WEB H264-CAKES EZTV 1080p    1.1 GiB   1427  2026-10-06 │
+│   Rick and Morty (2013)                         ││      S18E08  Its Always Sunny in Philadelphia S18…WEB h264-ETHEL EZTV 1080p  979.7 MiB   1173  2026-09-29 │
+│   Slow Horses (2022)                          1 ││      S18E07  Its Always Sunny in Philadelphia S18…C x265-MeGusta EZTV 1080p  298.3 MiB   1232  2026-09-22 │
+│   South Park (1997)                           1 ││      S18E06  Its Always Sunny in Philadelphia S18…WEB H264-CAKES EZTV 1080p    1.1 GiB   1312  2026-09-15 │
+│                                                 ││      S18E05  Its Always Sunny in Philadelphia S18…WEB H264-CAKES EZTV 1080p    1.2 GiB   1095  2026-09-08 │
+│                                                 ││      S18E04  Its Always Sunny in Philadelphia S18…WEB H264-CAKES EZTV 1080p    1.0 GiB   1205  2026-09-01 │
+│                                                 ││      S18E03  Its Always Sunny in Philadelphia S18…WEB H264-CAKES EZTV 1080p    1.1 GiB    834  2026-08-25 │
+│                                                 ││      S18E02  Its Always Sunny in Philadelphia S18…WEB h264-ETHEL EZTV 1080p    1.1 GiB   1370  2026-08-18 │
+│                                                 ││      S18E01  Its Always Sunny in Philadelphia S18…WEB h264-ETHEL EZTV 1080p    1.1 GiB   1348  2026-08-18 │
+│                                                 ││      S17E08  Its Always Sunny in Philadelphia S17…5 1 H 264-FLUX EZTV 1080p    1.7 GiB    332  2025-08-21 │
+│                                                 ││      S17E07  Its Always Sunny In Philadelphia S17…WEB h264-ETHEL EZTV 1080p    1.1 GiB    289  2025-08-14 │
+│                                                 ││      S17E06  Its Always Sunny in Philadelphia S17…SuccessfulCrab EZTV 1080p    1.1 GiB    240  2025-08-07 │
+│                                                 ││      S17E05  Its Always Sunny In Philadelphia S17…WEB h264-ETHEL EZTV 1080p    1.1 GiB    240  2025-07-31 │
+│                                                 ││      S17E04  Its Always Sunny in Philadelphia S17…SuccessfulCrab EZTV 1080p    1.0 GiB    245  2025-07-24 │
+│                                                 ││      S17E03  Its Always Sunny In Philadelphia S17…WEB h264-ETHEL EZTV 1080p    1.1 GiB    270  2025-07-17 │
+│                                                 ││      S17E02  Its Always Sunny in Philadelphia S17…SuccessfulCrab EZTV 1080p    1.1 GiB    257  2025-07-10 │
+│                                                 ││      S17E01  Its Always Sunny in Philadelphia S17…SuccessfulCrab EZTV 1080p  966.3 MiB    286  2025-07-10 │
+│                                                 ││      S17     Its Always Sunny in Philadelphia S17…80p x265-ELiTE EZTV 1080p    3.8 GiB    359  2026-10-14 │
+│                                                 ││      S16E08  Its Always Sunny In Philadelphia S16…WEB h264-EDITH EZTV 1080p  932.4 MiB     28  2023-07-20 │
+│                                                 ││      S16E07  Its Always Sunny in Philadelphia S16…P5 1 H 264-NTb EZTV 1080p    1.6 GiB     18  2023-07-13 │
+│                                                 ││      S16E06  Its Always Sunny In Philadelphia S16…WEB h264-EDITH EZTV 1080p  905.7 MiB     24  2023-07-06 │
+│                                                 ││      S16E05  Its Always Sunny In Philadelphia S16…WEB h264-EDITH EZTV 1080p  811.3 MiB     22  2023-06-29 │
+│                                                 ││      S16E04  Its Always Sunny In Philadelphia S16…WEB h264-EDITH EZTV 1080p  843.4 MiB     18  2023-06-22 │
+│                                                 ││      S16E03  Its Always Sunny In Philadelphia S16…WEB h264-EDITH EZTV 1080p  922.4 MiB     19  2023-06-15 │
+│                                                 ││      S16E02  Its Always Sunny in Philadelphia S16…5 1 H 264-FLUX EZTV 1080p    1.6 GiB     16  2023-08-10 │
+╰─────────────────────────────────────────────────╯│      S16E01  Its Always Sunny in Philadelphia S16…5 1 H 264-FLUX EZTV 1080p    1.5 GiB     17  2023-08-10 │
+╭ IMDb ───────────────────────────────────────────╮│      S16     Its Always Sunny in Philadelphia S16…ZN WEBRip x264 EZTV  720p    1.4 GiB     54  2023-07-20 │
+│                                                 ││      S15E08  Its Always Sunny In Philadelphia S15…EB h264-GOSSIP EZTV 1080p    1.5 GiB     81  2021-12-23 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ It's Always Sunny in  ││      S15E07  Its Always Sunny In Philadelphia S15…EB h264-GOSSIP EZTV 1080p    1.5 GiB     78  2021-12-23 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Philadelphia (2005)   ││      S15E06  Its Alway Sunny In Philadelphia S15E…EB h264-GOSSIP EZTV 1080p    1.4 GiB    137  2021-12-17 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ TV series             ││      S15E05  Its Always Sunny in Philadelphia S15…H264-PLZPROPER EZTV 1080p  895.4 MiB     63  2021-12-17 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ★ 8.8  ·  286k votes  ││      S15E04  Its Always Sunny In Philadelphia S15…EB h264-GOSSIP EZTV 1080p    1.4 GiB     91  2021-12-09 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Charlie Day, Glenn    ││      S15E03  Its Always Sunny In Philadelphia S15…EB h264-GOSSIP EZTV 1080p    1.5 GiB     98  2021-12-09 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Howerton              ││      S15E02  Its Always Sunny in Philadelphia S15… WEB H264-GGEZ EZTV 1080p  908.8 MiB    111  2021-12-02 │
+│  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                       ││      S15E01  Its Always Sunny in Philadelphia S15… WEB H264-GGEZ EZTV 1080p  905.3 MiB    110  2021-12-0↓ │
+│                                                 ││                                                                                                           │
+╰─────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[Releases] (Enter) Download  (M)ark unread  (Shift+M) All read  (←) Shows  (Shift+R) Check show  (R) Check all                                          (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

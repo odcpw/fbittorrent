@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub         │
+│ ▌ The Diplomat S04 (2026) 1080…5 DDP 5.1 ESub ██████████  100.0%     3.4 GiB         SF·  ││                                                                 │
+│                                                                                           ││  state     done                                                 │
+│                                                                                           ││  progress  100.0%  3.4 GiB of 3.4 GiB                           │
+│                                                                                           ││  speed     ↓ 0 B/s   ↑ 0 B/s                                    │
+│                                                                                           ││  eta       ∞                                                    │
+│                                                                                           ││  peers     0 seeds, 0 leechers                                  │
+│                                                                                           ││  ratio     0.00                                                 │
+│                                                                                           ││  flags     streaming priority automatic                         │
+│                                                                                           ││  upload    32 KiB/s cap · stops when complete  (u to seed)      │
+│                                                                                           ││  path      /home/oliver/Downloads                               │
+│                                                                                           ││  added     2d ago                                               │
+│                                                                                           ││                                                                 │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ The Diplomat (2023)  TV series        │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ★ 8.0  ·  102k votes                  │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Keri Russell, Rufus Sewell            │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ The Diplomat is an American           │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ political thriller television series  │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ created by Debora Cahn. First airing  │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ in 2023, it stars Keri Russell as a   │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ veteran US diplomat who is            │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ unexpectedly appointed as the         │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ambassador to the United Kingdom      │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ amid an emerging international        │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ crisis.                               │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ i open on IMDb    w open Wikipedia    │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+╭Add magnet / URL · streaming automatic · F4 seed:off ─────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[Input] (Enter) Add                                                                                                                                 (Esc) Cancel
+

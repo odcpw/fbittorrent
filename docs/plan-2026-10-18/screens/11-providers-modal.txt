@@ -1,0 +1,45 @@
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Search ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Sintel                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Results (50) · 18/18 providers ───────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                              IMDB  SEEDS      SIZE ││  Satanik (1968) [1080p] [YTS] ★4.7                              │
+│ ▌ Satanik (1968) [1080p] [YTS] ★4.7                                  4.7      0   1.4 GiB ││                                                                 │
+│   American Juggalo (2011) [1080p] [YTS] ★6.9                         6.9      0 398.4 MiB ││  size      1.4 GiB                                              │
+│   Syd Barrett: Up Close and Personal (2007) [1080p] [YTS] ★6.5       6.5      0 957.7 MiB ││  peers     0 seeds, 0 leechers                                  │
+│   Gluten Is a Joke (2026) [1080p] [YTS] ★9.0                         9.0      0   1.5 GiB ││  uploaded  2026-10-17                                           │
+│   Ela (2026) [1080p] [YTS] ★5.6     ╭ Search providers ────────────────────────────────────────────────────────────────╮.lt                                  │
+│   Social Media Killed the Movie Star│ ▌ [x] Bit Search            bitsearch.to                                         │                                     │
+│   Crude Awakenings (2026) [1080p] [Y│   [x] EZTV                  eztvx.to                                             │atanik (1968)  feature               │
+│   Awakening the Last Dream (2026) [1│   [x] EZTVX                 eztvx.to                                             │ 4.7  ·  524 votes                   │
+│   Higher Calling (2026) [1080p] [YTS│   [x] Kickasstorrents       katcr.to                                             │agda Konopka, Julio Peña             │
+│   In the Company of Wolves: An Ameri│   [x] LimeTorrents          www.limetorrents.lol                                 │                                     │
+│   Vicious Murder (2024) [1080p] [YTS│   [x] MagnetDL              www.magnetdl.com                                     │atanik is a 1968 film directed by    │
+│   De capul nostru (2026) [1080p] [YT│   [x] Nyaa.si               nyaa.si                                              │iero Vivarelli. It is based on the   │
+│   Africa (1999) [1080p] [YTS] ★4.4  │   [x] Snowfl                snowfl.com                                           │talian comic series Satanik and was  │
+│   Haunted Heist (2025) [1080p] [YTS]│   [x] Solid Torrents        solidtorrents.to                                     │eleased to a moderate financial      │
+│   The Odyssey - The Real Story (2026│   [x] The Pirate Bay        thepiratebay.org                                     │uccess in Italy.                     │
+│   Affinity (2008) [1080p] [YTS] ★6.1│   [x] The RarBg             therarbg.com                                         │                                     │
+│   49 Miles More (2026) [1080p] [YTS]│   [x] TorLock               www.torlock.com                                      │ open on IMDb    w open Wikipedia    │
+│   Escape from Area 51: The Hidden Sc│   [x] Torrent Downloads     torrentdownloads.pro                                 │                                     │
+│   Sex and the Friend Group (2026) [1│   [x] TorrentGalaxy         torrentgalaxy.to                                     │                                     │
+│   De piraten van hiernaast: De ninja│   [x] TorrentProject        torrentproject.com.se                                │                                     │
+│   Winterland (2019) [1080p] [YTS] ★7│   [x] torrents-csv          torrents-csv.com                                     │                                     │
+│   Now Days (2026) [1080p] [YTS] ★7.6│   [x] YTS                   yts.bz                                               │                                     │
+│   This Mountain Life (2018) [1080p] │   [x] Zooqle                zooqle.skin                                          │                                     │
+│   Contamination .7 (1990) [1080p] [Y│                                                                                  │                                     │
+│   Tribulation (2000) [1080p] [YTS] ★│ 18 of 18 enabled · Space toggle · a all · n none · o open site · Esc close       │                                     │
+│   The Militia (2025) [1080p] [YTS] ★╰──────────────────────────────────────────────────────────────────────────────────╯                                     │
+│   Dummie de Mummie en de Sfinx van Shakaba (…5) [1080p] [YTS] ★5.6   5.6     20   1.5 GiB ││                                                                 │
+│   Cloudboy (2017) [1080p] [YTS] ★6.1                                 6.1     42   1.2 GiB ││                                                                 │
+│   Letting Go of Jack (2025) [1080p] [YTS] ★6.2                       6.2    100   1.4 GiB ││                                                                 │
+│   Mermaid Beach (2026) [1080p] [YTS] ★6.8                            6.9    100   1.5 GiB ││                                                                 │
+│   Lego Friends: Heartlake the Musical (2026) [1080p] [YTS] ★7.8              83 955.7 MiB ││                                                                 │
+│   Jitters (2026) [1080p] [YTS] ★4.3                                  4.3    100   1.8 GiB ││                                                                 │
+│   Lo dejamos acá (2026) [1080p] [YTS] ★6.6                           7.7    100   1.8 GiB ││                                                                 │
+│   The Disciple (2026) [1080p] [YTS] ★6.2                             6.2    100   2.0 Gi↓ ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Providers] (Space) Toggle  (A)ll  (N)one  (O)pen site                                                                                               (Esc) Close
+

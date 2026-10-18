@@ -1,0 +1,21 @@
+# App lifecycle observations, 2026-10-18 (installed binary ~/.local/bin/fbittorrent, sha256 b7c6ede0880b...76b19c)
+
+Before this session (02:35-02:40 earlier run by the user):
+  /run/user/1000/fbittorrent/engine.sock  mtime 02:35:02, no fbittorrent process, connect() -> ECONNREFUSED  (stale socket)
+  `fbittorrent status --json` -> {"app_open":false,"backend":"stopped","engine":"native","ok":false}  exit 0 (handles the stale socket)
+
+Run 1 - tmux 160x45, `fbittorrent tui`, quit with `q`:
+  process exit code 0, stderr empty, engine.sock removed, status -> app_open:false   (graceful path OK)
+  On open, the one saved (completed, 3.4 GiB selected of 4.4 GiB) torrent was re-hashed: state "checking", 44.9% -> 100% within ~7 s
+  (fastresume disabled, src/engine.rs:437; every open re-verifies existing data).
+
+Run 2 - real Ghostty window via `omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent ~/.local/bin/fbittorrent tui`,
+  closed with `hyprctl dispatch "hl.dsp.window.close({ window = \"address:...\" })"` (same as clicking the window close button):
+  fbittorrent process exited ~2.2 s after the close request; Ghostty window gone;
+  engine.sock LEFT BEHIND (connect -> ECONNREFUSED); status still reports app_open:false correctly.
+  => terminal-close path is not the graceful AppEngine::drop path (src/engine.rs:517-545 / src/ipc.rs:278-286 never ran).
+     No SIGHUP/SIGTERM handling in app code (only SIGPIPE, src/main.rs:288); FrankenTUI's signal thread
+     (ftui-core-0.6.0 terminal_session.rs:1281-1287) calls exit(128+sig) if the app does not acknowledge.
+
+Widget IPC while app open: `omarchy-shell oliver.torrents open` -> cursor {"opened":true,"rows":1}; popup could not be captured
+  on screen within the time box (screenshot of the region showed other window content and was deleted for privacy).

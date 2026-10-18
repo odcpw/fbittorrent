@@ -1,0 +1,24 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   NAME                                          DONE       SPEED     ETA SFU │
+│ ▌ he Diplomat S04 (2026) 1080p W ██████████  100.0%     3.4 GiB         SF·  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Torrents] (Enter) Files  (O)pen  (P) Resume  (D) Remove  (U) Seed on   (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

@@ -1,0 +1,14 @@
+# native.py against target/release/fbittorrent (2026-10-18T03:05:20+02:00)
+ok: actual terminal startup emits DEC mouse mode 1003
+ok: closed status stays closed; local RSS works; launch refreshes once
+ok: one Enter adds once and marks the RSS article read
+ok: one refresh updates the visible view and preserves read history
+ok: actual RSS tab/item mouse clicks and scoped read/unread shortcuts
+ok: actual mouse selection at nonzero scroll offset; hover keeps keyboard target
+ok: native CLI fields, file selection, cap and deletion safety
+ok: combined Shows inbox, exact read/undo/download targets, parent batch scope and tab badge/order
+ok: native file modal, Shows, scrollable help and 80x24 terminal
+ok: settings, durable live queue limit, VPN waiting and safe engine restart
+ok: quit stops engine; restart preserves state; down closes app
+native integration passed
+EXIT=0

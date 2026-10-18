@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub         │
+│ ▌  Dip╭ Files · The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub ──────────────────────────────────────────────────────────────────────────────╮       │
+│       │       FILE                                                                                                               SIZE   DONE    PRIO │       │
+│       │ ▌ [x] The Diplomat S04 E07.mkv                                                                                      751.9 MiB   100% include │       │
+│       │   [ ] The Diplomat S04 E02.mkv                                                                                      486.1 MiB   100%    skip │       │
+│       │   [x] The Diplomat S04 E03.mkv                                                                                      555.5 MiB   100% include │       │
+│       │   [x] The Diplomat S04 E04.mkv                                                                                      485.1 MiB   100% include │       │
+│       │   [x] The Diplomat S04 E05.mkv                                                                                      531.4 MiB   100% include │       │
+│       │   [x] The Diplomat S04 E06.mkv                                                                                      393.2 MiB   100% include │       │
+│       │   [ ] The Diplomat S04 E01.mkv                                                                                      562.1 MiB   100%    skip │)      │
+│       │   [x] The Diplomat S04 E08.mkv                                                                                      711.4 MiB   100% include │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │eries  │
+│       │                                                                                                                                              │iring  │
+│       │                                                                                                                                              │as a   │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │m      │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │dia    │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │                                                                                                                                              │       │
+│       │ 6/8 · 3.3 GiB · Space include/skip · a/n all/none · Esc close                                                                                │       │
+│       ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯       │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Files] (Space) Include/skip  (1) Include  (A)ll  (N)one                                                                                             (Esc) Close
+

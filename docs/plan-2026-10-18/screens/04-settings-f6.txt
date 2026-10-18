@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub         │
+│ ▌ The Diplomat S04 (2026) 1080…5 DDP 5.1 ESub ██████████  100.0%     3.4 GiB         SF·  ││                                                                 │
+│                                                                                           ││  state     done                                                 │
+│                                                                                           ││  progress  100.0%  3.4 GiB of 3.4 GiB                           │
+│                                                                                           ││  speed     ↓ 0 B/s   ↑ 0 B/s                                    │
+│                                                                                           ││  eta       ∞                                                    │
+│                                                                                           ││  peers     0 seeds, 0 leechers                                  │
+│                                                                                           ││  ratio     0.00                                                 │
+│                                                                                           ││  flags     streaming priority automatic                         │
+│                                                                                           ││  upload    32 KiB/s cap · stops when complete  (u to seed)      │
+│                                        ╭ Download settings ─────────────────────────────────────────────────────────╮Downloads                               │
+│                                        │ ▌ Simultaneous downloads   3                                               │                                        │
+│                                        │   Peer encryption          Prefer encryption                               │                                        │
+│                                        │   VPN connection           Off · ordinary connection                       │▀ The Diplomat (2023)  TV series        │
+│                                        │ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          │▀ ★ 8.0  ·  102k votes                  │
+│                                        │                                                                            │▀ Keri Russell, Rufus Sewell            │
+│                                        │ Extra downloads wait their turn. Encryption protects peer traffic; your IP │▀                                       │
+│                                        │ remains visible.                                                           │▀ The Diplomat is an American           │
+│                                        │                                                                            │▀ political thriller television series  │
+│                                        │ A required VPN blocks torrent transfers when disconnected. Feed and search │▀ created by Debora Cahn. First airing  │
+│                                        │ websites use your usual connection.                                        │▀ in 2023, it stars Keri Russell as a   │
+│                                        │                                                                            │▀ veteran US diplomat who is            │
+│                                        │ VPN binding off                                                            │▀ unexpectedly appointed as the         │
+│                                        │ Changing encryption or VPN reopens the app's engine.                       │▀ ambassador to the United Kingdom      │
+│                                        │                                                                            │▀ amid an emerging international        │
+│                                        │                                                                            │▀ crisis.                               │
+│                                        │                                                                            │▀                                       │
+│                                        ╰────────────────────────────────────────────────────────────────────────────╯▀ i open on IMDb    w open Wikipedia    │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Settings] (↑↓) Choose  (←→) Change  (Enter) Save                                                                                                   (Esc) Cancel
+

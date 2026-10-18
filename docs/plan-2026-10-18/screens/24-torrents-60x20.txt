@@ -1,0 +1,20 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS  ↓ 0 B/s  ↑
+╭ Torrents (1) ────────────────────────────────────────────╮
+│                                                          │
+│   NAME                      DONE       SPEED     ETA SFU │
+│ ▌ ESub   The ██████████  100.0%     3.4 GiB         SF·  │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+╰──────────────────────────────────────────────────────────╯
+[Torrents] (Enter) Files  (O)pen  (P) Resume        (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

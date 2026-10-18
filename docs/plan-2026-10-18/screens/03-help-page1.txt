@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04 (2026) 1080p WEBRip x265 DDP 5.1 ESub         │
+│ ▌ The Diplomat S04 (2026) 1080…5 DDP 5.1 ESub ██████████  100.0%     3.4 GiB         SF·  ││                                                                 │
+│                                     ╭ Keys ────────────────────────────────────────────────────────────────────────────╮                                     │
+│                                     │                                                                                  │of 3.4 GiB                           │
+│                                     │ GLOBAL   (1) Torrents · (2) Search · (3) Shows · (4) RSS                         │s                                    │
+│                                     │          (Tab/Shift+Tab) Next/previous screen                                    │                                     │
+│                                     │          (?) Help · (Esc) Leave input, close a dialog or return                  │ers                                  │
+│                                     │          Letters in parentheses use lowercase; Shift is explicit.                │                                     │
+│                                     │          (F6) Download queue, encryption and VPN (native engine)                 │ty automatic                         │
+│                                     │          (Q)uit and stop the engine · Shift+Q also quits                         │tops when complete  (u to seed)      │
+│                                     │          (A)dd URL/magnet · F4 toggles seeding in the add prompt                 │nloads                               │
+│                                     │          (C)lipboard · arrows or j/k move · g/Shift+G first/last                 │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ TORRENTS (Enter) Files · (O)pen downloaded file/folder                           │he Diplomat (2023)  TV series        │
+│                                     │          (P)ause/resume · (U) Allow/stop seeding                                 │ 8.0  ·  102k votes                  │
+│                                     │          (D) Remove, keep files · (Shift+D) Delete with files                    │eri Russell, Rufus Sewell            │
+│                                     │          (I) IMDb · (W)ikipedia · (Shift+F) Follow this show                     │                                     │
+│                                     │          Streaming priority is automatic; file selection supports include/skip.  │he Diplomat is an American           │
+│                                     │                                                                                  │olitical thriller television series  │
+│                                     │ SEARCH   Query: type + (Enter) Search; empty query browses lists                 │reated by Debora Cahn. First airing  │
+│                                     │          (Down/Esc) Leave query · (/) Edit query from results                    │n 2023, it stars Keri Russell as a   │
+│                                     │          Results: (Enter) Download · (Shift+O) Source page                       │eteran US diplomat who is            │
+│                                     │          (S) Providers · (B)rowse lists · (F)ollow show                          │nexpectedly appointed as the         │
+│                                     │          (I) IMDb · (W)ikipedia; press Esc before ? in the query                 │mbassador to the United Kingdom      │
+│                                     │                                                                                  │mid an emerging international        │
+│                                     │ BROWSE   (Enter) Load selected list or open a browser-only site                  │risis.                               │
+│                                     │          (Esc) Results · (/) Query                                               │                                     │
+│                                     │                                                                                  │ open on IMDb    w open Wikipedia    │
+│                                     │ PROVIDERS (Space) Toggle · (A)ll · (N)one · (O)pen site                          │                                     │
+│                                     │           (Esc/Enter) Close; choices are saved                                   │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ FILES    (Space) Include/skip · (1) Include                                      │                                     │
+│                                     │          (A)ll files · (N)one · (Esc/Enter) Close                                │                                     │
+│                                     │ j/k ↑/↓ wheel scroll · PgUp/PgDn · Esc or click close                            │                                     │
+│                                     │                                                                                  │                                     │
+│                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Help] (↑↓) Scroll  (PgUp/PgDn) Page                                                                                                                 (Esc) Close
+

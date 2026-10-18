@@ -1,0 +1,250 @@
+### cargo test --release --locked -p librqbit-dualstack-sockets -p librqbit-tracker-comms -p librqbit-dht --features librqbit-core/sha1-ring --lib   (2026-10-18T03:08:43+02:00)
+    Blocking waiting for file lock on build directory
+    Finished `release` profile [optimized] target(s) in 10m 31s
+     Running unittests src/lib.rs (target/release/deps/librqbit_dht-cf7dd90f6c2f300e)
+running 28 tests
+test bprotocol::tests::deserialize_request_get_peers_request_1 ... ok
+test bprotocol::tests::deserialize_bencode_packets_captured_from_wireshark ... ok
+test bprotocol::tests::deserialize_response_find_node_2 ... ok
+test bprotocol::tests::deserialize_request_find_node ... ok
+test bprotocol::tests::deserialize_response_find_node_3 ... ok
+test bprotocol::tests::deserialize_request_get_peers ... ok
+test bprotocol::tests::serde_want_serialize ... ok
+test bprotocol::tests::deserialize_response_find_node ... ok
+test bprotocol::tests::serialize_then_deserialize_then_serialize_error ... ok
+test bprotocol::tests::serde_want_deserialize ... ok
+test bprotocol::tests::test_announce ... ok
+test persistence::tests::explicit_overrides_stored_v4 ... ok
+test persistence::tests::explicit_overrides_stored_v6 ... ok
+test persistence::tests::explicit_port_v4 ... ok
+test persistence::tests::no_port_no_stored_v4 ... ok
+test persistence::tests::explicit_port_v6 ... ok
+test persistence::tests::stored_port_only_v6 ... ok
+test routing_table::tests::compute_split_start_end_3 ... ok
+test routing_table::tests::compute_split_start_end_root ... ok
+test persistence::tests::no_port_no_stored_v6 ... ok
+test persistence::tests::stored_port_only_v4 ... ok
+test routing_table::tests::compute_split_start_end_second_split ... ok
+test routing_table::tests::test_generate_random_id ... ok
+test routing_table::tests::serialize_deserialize_routing_table ... ok
+test dht::native_tests::dropped_dht_request_releases_pending_transaction ... ok
+test routing_table::tests::test_sorted_by_distance_from ... ok
+test routing_table::tests::test_iter_is_ordered ... ok
+test dht::native_tests::native_dht_bootstrap_and_get_peers_use_udp ... ok
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+     Running unittests src/lib.rs (target/release/deps/librqbit_dualstack_sockets-a505404266d16318)
+running 5 tests
+test tests::isolated_bound_listener_udp_and_interface_loss ... ok
+test bind_device::tests::bind_device_rejects_unknown_interfaces ... ok
+test multicast::tests::multicast_scope_classification ... ok
+test tests::parked_udp_receive_can_be_aborted_and_joined ... ok
+test tests::native_tcp_accept_split_and_udp_dualstack ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (target/release/deps/librqbit_tracker_comms-137547c762d4ea2f)
+running 6 tests
+test tracker_comms_http::tests::test_parse_tracker_response_compact ... ok
+test tracker_comms_http::tests::parse_peers_dict ... ok
+test tracker_comms_http::tests::test_serialize ... ok
+test tracker_comms_udp::tests::native_udp_tracker_connect_and_announce ... ok
+test tracker_comms::native_tests::native_http_tracker_runs_on_default_worker_stack ... ok
+test tracker_comms::native_tests::native_http_tracker_announces_and_reads_compact_peers ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+EXIT=0
+### cargo test --release --locked -p librqbit-core -p librqbit --features librqbit/rust-tls --lib   (2026-10-18T03:19:16+02:00)
+error[E0428]: the name `Sha1` is defined multiple times
+144 | pub type Sha1 = crypto_hash_impl::Sha1CryptoHash;
+...
+147 | pub type Sha1 = ring_impl::Sha1Ring;
+error[E0428]: the name `Sha256` is defined multiple times
+150 | pub type Sha256 = crypto_hash_impl::Sha256CryptoHash;
+...
+153 | pub type Sha256 = ring_impl::Sha256Ring;
+error[E0080]: evaluation panicked: 
+              too many features were enabled, only one of them can be enabled:
+              - `feature = "sha1-crypto-hash"`
+              - `feature = "sha1-ring"`
+              
+28 | / assert_cfg::exactly_one! {
+29 | |     feature = "sha1-crypto-hash",
+30 | |     feature = "sha1-ring",
+31 | | }
+Some errors have detailed explanations: E0080, E0428.
+For more information about an error, try `rustc --explain E0080`.
+error: could not compile `librqbit-sha1-wrapper` (lib) due to 3 previous errors
+EXIT=101
+### cargo test --release --locked -p rqbit-runtime   (2026-10-18T03:25:40+02:00)
+    Finished `release` profile [optimized] target(s) in 7m 09s
+     Running unittests src/lib.rs (target/release/deps/rqbit_runtime-a31588fb87d32101)
+running 15 tests
+test net::bound_tcp::tests::isolated_binding_throughput_measurement ... ignored, explicit native throughput measurement in a disposable network namespace
+test net::bound_dns::tests::isolated_dns_socket_and_truncated_tcp_answer ... ok
+test http::tests::isolated_http_ipv6_redirect_and_interface_loss ... ok
+test net::bound_dns::tests::dns_parser_rejects_mismatch_and_compression_cycles ... ok
+test net::bound_tcp::tests::isolated_tcp_binding_loss_and_wrong_device ... ok
+test net::interface::tests::unavailable_interface_and_replacement_are_rejected ... ok
+test net::interface::tests::isolated_interface_loss_and_kernel_binding ... ok
+test tests::hierarchical_stop_does_not_cancel_siblings ... ok
+test http::tests::request_future_stays_small ... ok
+test tests::deterministic_select_disables_guards_and_mismatched_patterns ... ok
+test tests::guarded_block_branches_keep_trailing_commas ... ok
+test tests::closed_native_region_rejects_async_and_blocking_bodies ... ok
+test tests::lab_pause_drains_a_channel_waiter_and_releases_its_resources ... ok
+test tests::native_region_close_drains_a_parked_task_and_releases_resources ... ok
+test net::bound_tcp::tests::parked_native_tcp_read_cancels_and_releases_connection ... ok
+test result: ok. 14 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+   Doc-tests rqbit_runtime
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT=0
+### cargo test --release --locked -p librqbit --features librqbit/rust-tls --lib   (2026-10-18T03:33:03+02:00)
+6 | pub trait BitVFactory: Send + Sync {
+7 |     async fn load(&self, cx: &Cx, id: TorrentIdOrHash) -> anyhow::Result<Option<Box<dyn BitV>>>;
+19 |     Found {
+...
+22 |         rx: Rx,
+13 | pub(crate) struct ListenResult {
+14 |     pub tcp_socket: Option<TcpListener>,
+15 |     pub enable_upnp_port_forwarding: bool,
+    Finished `release` profile [optimized] target(s) in 2m 05s
+     Running unittests src/lib.rs (target/release/deps/librqbit-d5457dcb28b300b8)
+running 100 tests
+test chunk_tracker::tests::test_compute_chunk_status ... ok
+test chunk_tracker::tests::test_update_only_files ... ok
+test file_info::tests::test_iter_piece_priorities ... ok
+test ip_ranges::tests::inclusive_range_and_comments ... ok
+test mse::protocol::dh::tests::exchange_agrees ... ok
+test mse::protocol::handshake::tests::selection_rules ... ok
+test mse::protocol::handshake::tests::plaintext_selected_without_prefer_rc4 ... ok
+test dht_utils::tests::exhausted_peer_discovery_preserves_seen_addresses ... ok
+test mse::protocol::rc4s::tests::symmetric_and_discarding ... ok
+test create_torrent_file::tests::create_torrent_rejects_zero_piece_length ... ok
+test create_torrent_file::tests::create_torrent_hashes_across_files_and_trailing_empty_file ... ok
+test mse::tests::crypto_reader_vectored_preserves_prefix_and_ring_wrap_cipher_order ... ok
+test mse::tests::libtorrent_metadata_and_payload_interoperability ... ignored, requires the independent Python libtorrent oracle; run explicitly
+test bitv::tests::disk_bitfield_persists_flush_and_final_drop ... ok
+test mse::tests::libtorrent_single_blocking_thread_metadata_and_payload_interoperability ... ignored, requires the independent Python libtorrent oracle with one blocking pool thread; run explicitly
+test mse::tests::crypto_writer_pending_partial_and_changed_buffer_keep_cipher_position ... ok
+test mse::tests::malformed_dh_public_keys_fail_before_negotiation ... ok
+test mse::protocol::handshake::tests::unknown_torrent_and_garbage_fail_cleanly ... ok
+test mse::tests::malformed_encrypted_padding_is_rejected_before_allocation ... ok
+test mse::protocol::rc4s::tests::matches_rustcrypto_rc4_after_discard_across_chunks ... ok
+test mse::tests::native_encryption_policies_reject_incompatible_incoming ... ok
+test mse::protocol::handshake::tests::rc4_roundtrip_in_small_chunks ... ok
+test mse::tests::native_encrypted_stream_key_must_match_inner_bittorrent_hash ... ok
+test mse::tests::native_cancellation_drains_parked_encryption_handshake ... ok
+test piece_tracker::tests::test_complete_piece ... ok
+test piece_tracker::tests::test_fail_piece_requeues ... ok
+test piece_tracker::tests::test_into_chunks_requeues_inflight ... ok
+test piece_tracker::tests::test_new_piece_tracker ... ok
+test piece_tracker::tests::test_none_available_when_no_pieces ... ok
+test piece_tracker::tests::test_priority_pieces_checked_first ... ok
+test piece_tracker::tests::test_release_pieces_owned_by_peer ... ok
+test piece_tracker::tests::test_reserve_filters_by_peer_has_piece ... ok
+test piece_tracker::tests::test_reserve_piece_from_queue ... ok
+test create_torrent_file::tests::create_torrent_hashes_exact_and_partial_pieces ... ok
+test piece_tracker::tests::test_take_inflight_nonexistent_piece_returns_none ... ok
+test peer_connection::upload_tests::native_upload_read_keeps_read_admission_and_cancellation_errors_distinct ... ok
+test read_buf::tests::adaptive_coalescing::piece_adaptive_coalescing_passive_has_only_checkpoint_clock_no_sleep_and_keeps_read_bound ... ok
+test read_buf::tests::adaptive_coalescing::piece_adaptive_coalescing_passive_preserves_control_eof_parse_fault_key_and_cancel ... ok
+test read_buf::tests::coalescing_delayed_tcp_fences::piece_coalescing_actual_pending_then_eof_defers_transport_error_and_preserves_wrapped_prefix ... ok
+test read_buf::tests::coalescing_delayed_tcp_fences::piece_coalescing_actual_pending_then_have_preserves_control_tail_and_wrapped_prefix ... ok
+test piece_tracker::tests::test_steal_only_pieces_peer_has ... ok
+test read_buf::tests::owned_piece_frame_preserves_malformed_tail_and_parser_boundaries ... ok
+test read_buf::tests::adaptive_coalescing::piece_adaptive_coalescing_parsed_high_low_high_low_and_periodic_probe ... ok
+test read_buf::tests::owned_piece_frame_preserves_fragmented_headers ... ok
+test read_buf::tests::owned_piece_frame_rejects_invalid_memory_bounds ... ok
+test read_buf::tests::piece_batch_growth_preserves_wrapped_unread_tail ... ok
+test read_buf::tests::piece_batch_grown_buffer_preserves_original_wire_frame_limit ... ok
+test read_buf::tests::owned_piece_frame_preserves_wrapped_payload_tail_and_allocation ... ok
+test read_buf::tests::piece_batch_intake_fences_control_and_defers_truncated_piece ... ok
+test read_buf::tests::piece_batch_intake_reserves_wrapped_wire_and_preserves_allocation ... ok
+test read_buf::tests::piece_coalescing_first_key_fence_does_not_poll_input ... ok
+test read_buf::tests::piece_coalescing_ready_control_parse_eof_and_fault_do_not_wait ... ok
+test peer_connection::upload_tests::native_upload_read_reuses_buffer_and_allows_timer_progress ... ok
+test read_buf::tests::piece_coalescing_timeout_preserves_prefix_and_absolute_deadline ... ok
+test read_buf::tests::test_read_buf_miri ... ignored, run with --features=miri only
+test read_buf::tests::test_ringbuf_advance ... ok
+test read_buf::tests::test_ringbuf_make_contiguous ... ok
+test read_buf::tests::test_ringbuf_ranges ... ok
+test read_buf::tests::test_unfilled_ioslices ... ok
+test session::tests::test_torrent_file_from_info_and_bytes ... ok
+test spawn_utils::storage_owner::tests::a_physical_panic_outranks_simultaneous_origin_cancellation ... ok
+test spawn_utils::storage_owner::tests::a_rejected_native_pool_never_executes_work_inline ... ok
+test spawn_utils::storage_owner::tests::coalescing_native_tests::native_coalescing_original_cancel_after_actual_pending_settles_and_preserves_first_frame ... ok
+test spawn_utils::storage_owner::tests::dropping_an_accepted_queued_waiter_preserves_its_work_exactly_once ... ok
+test spawn_utils::storage_owner::tests::individual_queued_cancel_is_deferred_but_region_cancel_disposes_queue_before_physical_end ... ok
+test spawn_utils::storage_owner::tests::old_native_blocking_oracle_classifies_panics_and_ungated_fs ... ok
+test read_buf::tests::tcp_batch_metamorphic::piece_batch_actual_tcp_preserves_wire_limit_and_live_chunk_shape_boundary ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_batch_consumer_error_after_real_prefix_never_invokes_later_frame ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_batch_key_fence_returns_same_suffix_and_reselects_original_caller_one_frame_fallback ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_batch_physical_panic_after_real_prefix_outranks_origin_cancellation ... ok
+test peer_connection::upload_tests::native_upload_read_drop_keeps_admission_until_actual_read_finishes ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_frame_returns_same_payload_allocation_and_unread_tail_after_real_write ... ok
+test read_buf::tests::tcp_batch_metamorphic::piece_batch_actual_tcp_ready_three_four_five_frames_obey_stack_capacity ... ok
+test mse::tests::native_partial_handshake_timeout_drops_socket ... ok
+test spawn_utils::storage_owner::tests::peer_lease_capacity_fallback_retries_and_reuses_after_slot_returns ... ok
+test spawn_utils::storage_owner::tests::peer_lease_departed_draining_key_keeps_its_slot_and_cannot_create_duplicate_group ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_batch_caller_cancel_between_items_drains_first_write_and_never_enters_second ... ok
+test spawn_utils::storage_owner::tests::peer_lease_more_than_sixteen_departed_peer_contexts_reuse_capacity ... ok
+test spawn_utils::storage_owner::tests::peer_lease_more_than_sixteen_idle_eligible_contexts_allocate_no_owners ... ok
+test read_buf::tests::can_read_long_metainfo_correctly ... ok
+test spawn_utils::storage_owner::tests::peer_lease_pool_discard_drop_panic_reaches_pending_native_child_after_resources_drop ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_batch_serial_helper_keeps_second_frame_after_held_first_write ... ok
+test spawn_utils::storage_owner::tests::owned_frame_tests::native_owned_frame_waiter_drop_and_region_close_keep_real_payload_capture_until_write_finishes ... ok
+test spawn_utils::storage_owner::tests::region_cache_saturation_uses_safe_fallback_and_closing_one_region_keeps_siblings ... ok
+test spawn_utils::storage_owner::tests::rejected_capture_drop_panic_settles_as_panicked_and_owner_survives ... ok
+test spawn_utils::storage_owner::tests::sequential_work_reuses_one_live_owner_and_preserves_generic_results ... ok
+test spawn_utils::storage_owner::tests::peer_lease_departure_keeps_real_physical_write_and_exits_after_natural_sender_close ... ok
+test storage::filesystem::fs::tests::selected_folder_can_be_a_symlink_and_normal_files_keep_positioned_io ... ok
+test storage::filesystem::fs::tests::torrent_paths_cannot_follow_symlinks_outside_the_selected_folder ... ok
+test storage::filesystem::opened_file::tests::test_pwrite_all_vectored ... ok
+test spawn_utils::storage_owner::tests::warmed_owner_cannot_broaden_denied_io_or_spawn ... ok
+test torrent_state::stats::tests::state_flattens_to_string_with_optional_paused ... ok
+test spawn_utils::storage_owner::tests::peer_lease_last_spawn_reservation_rollback_releases_slot_with_group_retained ... ok
+test torrent_state::streaming::tests::stream_crosses_creator_task_without_retaining_its_permit ... ok
+test torrent_state::live::live_fatal_write_tests::native_live_first_positioned_write_error_signals_fatal_and_stops_later_valid_batch_effects ... ok
+test spawn_utils::storage_owner::tests::peer_lease_sender_eof_preserves_accepted_sibling_waiting_global_admission ... ok
+test spawn_utils::storage_owner::tests::peer_lease_region_close_drains_held_work_without_retiring_sibling_lease ... ok
+test spawn_utils::storage_owner::tests::queued_capture_drop_panic_does_not_release_a_running_physical_owner ... ok
+test mse::tests::outgoing_prefer_reconnects_and_require_never_downgrades ... ok
+test read_buf::tests::tcp_batch_metamorphic::piece_batch_actual_tcp_segmentation_and_ring_offsets_are_metamorphic ... ok
+test result: ok. 97 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.98s
+EXIT=0
+### cargo test --release --locked -p librqbit-core --no-default-features --features sha1-ring --lib   (2026-10-18T03:35:10+02:00)
+    Finished `release` profile [optimized] target(s) in 6m 39s
+     Running unittests src/lib.rs (target/release/deps/librqbit_core-dc7e65ca1ad3e5ed)
+running 32 tests
+test compact_ip::tests::test_compact_list ... ok
+test hash_id::tests::test_clone_to_owned_id20 ... ok
+test hash_id::tests::test_id32_truncate_for_dht_uses_first_20_bytes ... ok
+test hash_id::tests::test_set_bit_range ... ok
+test hash_id::tests::test_id20_base32_encoded_from_str ... ok
+test hash_id::tests::test_id32_from_str ... ok
+test compact_ip::tests::test_same ... ok
+test compact_ip::tests::test_invalid_compact_list ... ok
+test hash_id::tests::test_clone_to_owned_id32 ... ok
+test compact_ip::tests::test_compact ... ok
+test lengths::tests::test_chunk_size ... ok
+test lengths::tests::test_chunks_in_piece ... ok
+test lengths::tests::rejects_invalid_piece_and_chunk_ranges ... ok
+test lengths::tests::test_iter_pieces_within ... ok
+test lengths::tests::test_lengths_extensive ... ok
+test lengths::tests::test_piece_length ... ok
+test lengths::tests::test_size_of_piece_in_file ... ok
+test lengths::tests::test_total_pieces_2 ... ok
+test magnet::tests::test_magnet_to_string ... ok
+test lengths::tests::test_chunk_infos ... ok
+test lengths::tests::test_total_pieces ... ok
+test magnet::tests::test_parse_magnet_as_url ... ok
+test magnet::tests::test_parse_magnet_v2 ... ok
+test torrent_metainfo::tests::rejects_missing_or_extra_piece_hashes ... ok
+test torrent_metainfo::tests::rejects_overflowing_file_lengths ... ok
+test peer_id::tests::test_azereus_peer_id_generation ... ok
+test torrent_metainfo::tests::test_private_real_torrent ... ok
+test torrent_metainfo::tests::test_deserialize_torrent_borrowed ... ok
+test torrent_metainfo::tests::test_private_serialize_deserialize ... ok
+test torrent_metainfo::tests::test_deserialize_torrent_with_info_hash ... ok
+test torrent_metainfo::tests::test_serialize_then_deserialize_bencode ... ok
+test spawn_utils::tests::cancellation_joins_a_parked_task_and_releases_its_state ... ok
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+EXIT=0

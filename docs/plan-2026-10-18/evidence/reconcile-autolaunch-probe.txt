@@ -1,0 +1,10 @@
+# Isolated probe (temp XDG dirs, fake omarchy-launch-or-focus-tui on PATH that only records its arguments)
+# Binary: target/release/fbittorrent (working tree), config: engine=native, autostart=true, app closed.
+$ fbittorrent status --json            -> {"app_open":false,"backend":"stopped","engine":"native","ok":false}  exit 0, launcher NOT invoked
+$ fbittorrent reconcile --recent 180 --json   (what plugin/oliver.torrents/Service.qml:121-126 runs every 60 s while 'online')
+  -> launcher invoked: LAUNCHED --app-id=org.omarchy.fbittorrent '/home/oliver/Projects/odcpw/fbittorrent/target/release/fbittorrent' tui
+  -> then blocks waiting for the engine (killed by timeout 3s, exit 124)
+$ fbittorrent list --json  -> same: launcher invoked again (any connect() command autostarts)
+Conclusion: reconcile goes through connect() -> backend::ensure_running() -> open_app(). The widget's 'online' flag is only refreshed
+every idleRefreshIntervalSec (10 s) while the popup is closed, so a reconcile tick that lands in that window after the user quits
+re-opens the app. In native mode reconcile has nothing to do (seq/first-last are intrinsic, torrents cannot be added outside the app).

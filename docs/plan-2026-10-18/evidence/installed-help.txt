@@ -1,0 +1,52 @@
+Torrent app for Omarchy. The native engine runs while the app is open.
+
+Bare `fbittorrent` opens the TUI on a terminal; without a TTY it prints `triage --json`.
+Every command accepts --json. Agents: start with `fbittorrent robot-docs`.
+
+Usage: fbittorrent [OPTIONS] [COMMAND]
+
+Commands:
+  triage           One-call overview for agents: backend, rates, torrents, warnings, next commands
+  capabilities     Machine-readable contract: commands, exit codes, conventions
+  robot-docs       Agent handbook (plain text)
+  status           Transfer rates and torrent counts (used by the bar widget). Never starts the backend
+  up               Open or focus the app (starts the service only in explicit legacy mode)
+  down             Close the app and stop its engine (legacy mode stops the service)
+  list             List torrents
+  show             Show one torrent in full: fields, files, and what `open` would launch
+  add              Add a magnet link or URL. Sequential + first/last piece on, upload off, by default
+  wait             Block until torrents complete. Progress on stderr, result on stdout. Exit 8 on timeout
+  start            Start (resume) torrents
+  stop             Stop (pause) torrents
+  delete           Remove torrents. Data is kept unless --files (which needs --yes)
+  seq              Toggle sequential download (legacy mode; native scheduling is intrinsic)
+  first-last       Toggle first/last piece priority (legacy mode; native scheduling is intrinsic)
+  seed             Allow uploading/seeding
+  noseed           Limit uploading and stop when complete (default for new torrents)
+  reconcile        Enforce default flags on torrents added outside fbittorrent
+  add-clipboard    Add whatever magnet/URL is on the Wayland clipboard
+  open             Open the file (single-file torrent) or folder in the desktop
+  rss              RSS feeds
+  shows            Followed TV shows: a local list checked against EZTV (no service, no timer)
+  search           Search torrents through the enabled providers
+  setup            Configure the app download folder (explicit legacy mode also sets up its service)
+  register-magnet  Register fbittorrent as the magnet: / .torrent handler
+  tui              Open the terminal UI
+  config           Show config path and effective values
+  settings         Download queue, peer encryption and VPN connection settings
+  imdb             Look a release name up on IMDb (title, rating, blurb, poster)
+  help             Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Machine-readable JSON on stdout (errors too, with the same exit code)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Exit codes: 0 ok, 2 usage, 3 safety (needs --yes), 4 backend down, 5 upstream, 6 not found, 7 ambiguous, 8 timeout.
+Select torrents by hash prefix or a unique part of the name; `all` selects every torrent.
+exit=0

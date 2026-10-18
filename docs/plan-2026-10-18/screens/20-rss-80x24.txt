@@ -1,0 +1,24 @@
+  1 Torrents    2 Search    3 Shows (2)  [ 4 RSS ]   ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Feeds (1) ──────────────╮╭ EpisodeFeed custom feed ──────────────────────────╮
+│                         ││                                                   │
+│ ▌ episodefeed.com  0/47 ││ ▌    S29E03 1080p HEVC x265       0 B  2026-10-15 │
+│                         ││     Slow Horses S0…sta EZTV       0 B  2026-10-14 │
+│                         ││     Its Always Sun…sta EZTV       0 B  2026-10-13 │
+│                         ││     Slow Horses S0…sta EZTV       0 B  2026-10-07 │
+│                         ││     Its Always Sun…sta EZTV       0 B  2026-10-06 │
+│                         ││     South Park S29…sta EZTV       0 B  2026-10-01 │
+│                         ││     Slow Horses S0…sta EZTV       0 B  2026-09-30 │
+│                         ││     Its Always Sun…65-ELiTE       0 B  2026-09-29 │
+│                         ││     President Curt…sta EZTV       0 B  2026-09-28 │
+│                         ││     Slow Horses S0…sta EZTV       0 B  2026-09-23 │
+│                         ││     Its Always Sun…sta EZTV       0 B  2026-09-22 │
+│                         ││     President Curt…iTE EZTV       0 B  2026-09-21 │
+│                         ││     South Park S29…sta EZTV       0 B  2026-09-17 │
+│                         ││     Reacher S04E08…sta EZTV       0 B  2026-09-16 │
+│                         ││     Slow Horses S0…sta EZTV       0 B  2026-09-16 │
+│                         ││     Its Always Sun…sta EZTV       0 B  2026-09-15 │
+│                         ││     President Curt…sta EZTV       0 B  2026-09-1↓ │
+│                         ││                                                   │
+╰─────────────────────────╯╰───────────────────────────────────────────────────╯
+[Items] (Enter) Download  (M)ark unread  (Shift+M) All read  (←) Feeds  (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

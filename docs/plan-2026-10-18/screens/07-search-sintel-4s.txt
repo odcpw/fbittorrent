@@ -1,0 +1,45 @@
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Search ⠋ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Sintel                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Results (67) · 18/18 providers ───────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                              IMDB  SEEDS      SIZE ││                                                                 │
+│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD                                     22 556.6 MiB ││                                                                 │
+│   Sintel.2010.720p.WEB.H264-CLASSiCALHD                                       5 363.3 MiB ││                                                                 │
+│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                                     5 749.2 MiB ││                                                                 │
+│   Sintel 2010 1080p WEB H264-CLASSiCALHD                                      4 556.6 MiB ││                                                                 │
+│   Sintel                                                                      3 441.9 MiB ││                                                                 │
+│   Sintel 2010 4k FLAC mkv                                                     2   4.3 GiB ││                                                                 │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X264 ZMachine                2   4.8 GiB ││                                                                 │
+│   Sintel (2010)DVD5 nl subs NLT-Release                                       1 749.3 MiB ││                                                                 │
+│   Sintel (2010), BRRip(xvid), NL Subs, DMT                                    1 350.1 MiB ││                                                                 │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][HI444…][4096x1776][BT 202..            1   7.0 GiB ││                                                                 │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X265 ZMachine                1   3.2 GiB ││                                                                 │
+│   Sintel.2010.2K.SURROUND.X264-VODO                                           1 441.9 MiB ││                                                                 │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][BDRIP][10bitåŽ‹åˆ¶][2Kç..              1 963.2 MiB ││                                                                 │
+│   Sintel.2010.HDRip.XviD.AC3-ViSiON                                           1 294.6 MiB ││                                                                 │
+│   SINTEL-4D                                                                   0 445.0 MiB ││                                                                 │
+│   Sintel (2010) 720p - 75MB - CHINNA                                          0  76.0 MiB ││                                                                 │
+│   Sintel 2010 HDRip XviD AC3-ViSiON                                           0 294.6 MiB ││                                                                 │
+│   Sintel Blu Ray Test                                                         0   1.6 GiB ││                                                                 │
+│   Sintel.2010.4K.DMRip.Hi444PP.x264.DTSMA.SRT-MaLLIeHbKa                      0   3.5 GiB ││                                                                 │
+│   Sintel 2010 HDRip-AVC                                                       0 399.4 MiB ││                                                                 │
+│   Sintel Anti Banding Edition 1280 x264                                       0 702.9 MiB ││                                                                 │
+│   Sintel 1920 Anti Banding Edition x264                                       0   1.1 GiB ││                                                                 │
+│   Sintel _ 2010_ x264-viny                                                    0  69.6 MiB ││                                                                 │
+│   Sintel 4k 27qp 24fps 1aud 9subs mkv                                         0 394.2 MiB ││                                                                 │
+│   Sintel [H264 - Eng - Multisubs] [Tntvillage]                                0 441.5 MiB ││                                                                 │
+│   Sintel (2010 - x264 2k - AAC 5.1) En sub En Fr Ge Es It Pt N Ru             0 442.0 MiB ││                                                                 │
+│   Sintel 2010 4K DMRip Hi444PP x264 DTSMA SRT-MaLLIeHbKa                      0   3.5 GiB ││                                                                 │
+│   Sintel.2010.1080p.DM x264 - dBt                                             0 329.1 MiB ││                                                                 │
+│   Sintel (2010) 2160p DMRip x264 DTS - ABI                                    0   1.9 GiB ││                                                                 │
+│   Durian Open Movie Project - Sintel - full DVD set                           0  25.8 GiB ││                                                                 │
+│   Sintel 95 pngs.7z                                                           0 133.3 MiB ││                                                                 │
+│   1024.Sintel.x264.aac                                                        0 254.0 MiB ││                                                                 │
+│   Sintel 2010                                                                 0   5.1 GiB ││                                                                 │
+│   Sintel.2010.SWESUB.HDRip.XviD.AC3-TankaNer                                  0 294.6 Mi↓ ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Query] (Enter) Search  (↓/Esc) Results                                                                                                            (Esc, ?) Help
+searching "Sintel"…

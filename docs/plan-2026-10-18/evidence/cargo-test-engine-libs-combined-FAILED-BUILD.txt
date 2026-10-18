@@ -1,0 +1,87 @@
+# engine/library tests (release): cargo test --release --locked -p librqbit -p librqbit-core -p librqbit-dht -p librqbit-dualstack-sockets -p librqbit-tracker-comms -p rqbit-runtime --features librqbit/rust-tls --lib  (2026-10-18T03:05:33+02:00)
+   Compiling rustix v1.1.4
+   Compiling log v0.4.34
+   Compiling vcpkg v0.2.15
+   Compiling rustls v0.23.43
+   Compiling percent-encoding v2.3.2
+   Compiling asupersync v0.5.0 (/home/oliver/Projects/odcpw/fbittorrent/vendor/asupersync)
+   Compiling idna v1.1.0
+   Compiling tracing-core v0.1.36
+   Compiling form_urlencoded v1.2.2
+   Compiling nkeys v0.4.5
+   Compiling openssl v0.10.81
+   Compiling url v2.5.8
+   Compiling foreign-types-shared v0.1.1
+   Compiling tracing v0.1.44
+   Compiling foreign-types v0.3.2
+   Compiling openssl-macros v0.1.1
+   Compiling hex v0.3.2
+   Compiling openssl-sys v0.9.117
+   Compiling regex-automata v0.4.18
+   Compiling tracing-log v0.2.0
+   Compiling sharded-slab v0.1.7
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling inout v0.1.4
+   Compiling simd-adler32 v0.3.10
+   Compiling miniz_oxide v0.9.1
+   Compiling cipher v0.4.4
+   Compiling librqbit v9.0.1 (/home/oliver/Projects/odcpw/fbittorrent/vendor/rqbit/librqbit)
+   Compiling serde_urlencoded v0.7.1
+   Compiling rc4 v0.1.0
+   Compiling flate2 v1.1.10
+   Compiling polling v3.11.0
+   Compiling tempfile v3.27.0
+   Compiling xattr v1.6.1
+   Compiling matchers v0.2.0
+   Compiling bstr v1.13.1
+   Compiling regex v1.13.1
+   Compiling crypto-hash v0.3.4
+   Compiling tracing-subscriber v0.3.23
+   Compiling librqbit-sha1-wrapper v9.0.1 (/home/oliver/Projects/odcpw/fbittorrent/vendor/rqbit/librqbit-sha1-wrapper)
+error[E0428]: the name `Sha1` is defined multiple times
+   --> vendor/rqbit/librqbit-sha1-wrapper/src/lib.rs:147:1
+    |
+144 | pub type Sha1 = crypto_hash_impl::Sha1CryptoHash;
+    | ------------------------------------------------- previous definition of the type `Sha1` here
+...
+147 | pub type Sha1 = ring_impl::Sha1Ring;
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Sha1` redefined here
+    |
+    = note: `Sha1` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `Sha256` is defined multiple times
+   --> vendor/rqbit/librqbit-sha1-wrapper/src/lib.rs:153:1
+    |
+150 | pub type Sha256 = crypto_hash_impl::Sha256CryptoHash;
+    | ----------------------------------------------------- previous definition of the type `Sha256` here
+...
+153 | pub type Sha256 = ring_impl::Sha256Ring;
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Sha256` redefined here
+    |
+    = note: `Sha256` must be defined only once in the type namespace of this module
+
+error[E0080]: evaluation panicked: 
+              too many features were enabled, only one of them can be enabled:
+              - `feature = "sha1-crypto-hash"`
+              - `feature = "sha1-ring"`
+              
+  --> vendor/rqbit/librqbit-sha1-wrapper/src/lib.rs:28:1
+   |
+28 | / assert_cfg::exactly_one! {
+29 | |     feature = "sha1-crypto-hash",
+30 | |     feature = "sha1-ring",
+31 | | }
+   | |_^ evaluation of `_` failed here
+   |
+   = note: this error originates in the macro `assert_cfg::exactly_one` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0080, E0428.
+For more information about an error, try `rustc --explain E0080`.
+error: could not compile `librqbit-sha1-wrapper` (lib) due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...
+
+real	6m25.924s
+user	6m45.727s
+sys	0m10.166s
+EXIT=101

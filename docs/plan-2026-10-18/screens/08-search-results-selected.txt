@@ -1,0 +1,45 @@
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Search ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Sintel                                                                                                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Results (100) · 18/18 providers ──────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                              IMDB  SEEDS      SIZE ││  Sintel                                                         │
+│ ▌ Sintel                                                             7.4    124 123.3 MiB ││                                                                 │
+│   Sintel - 2010 - Multisubs mkv                                      7.4     29 441.5 MiB ││  size      123.3 MiB                                            │
+│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD                             7.4     22 556.6 MiB ││  peers     124 seeds, 26 leechers                               │
+│   Sintel                                                             7.4     19 136.5 MiB ││  uploaded  2023-04-30                                           │
+│   Sintel (2010) [720p] [x264] [bluray] [2.0] [YTS]                   7.4     19 136.5 MiB ││  source    torrentscsv  https://torrents-csv.com                │
+│   Sintel 2010 x264 DMRip 1080p mkv                                   7.4     16   1.0 GiB ││                                                                 │
+│   Sintel 2010 820p H264                                              7.4     10 174.8 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Sintel (2010)  short                  │
+│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                            7.4      5 749.2 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ★ 7.4  ·  3k votes                    │
+│   Sintel.2010.720p.WEB.H264-CLASSiCALHD                              7.4      5 363.3 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Halina Reijn, Thom Hoffman            │
+│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                            7.4      5 749.2 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀                                       │
+│   Sintel 2010 1080p WEB H264-CLASSiCALHD                             7.4      4 556.6 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Sintel is a 2010 animated fantasy     │
+│   Sintel 2010 2K SURROUND x264-VODO                                  7.4      4 441.9 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ short film and the third Blender      │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X264 ZMachine       7.4      2   4.8 GiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ "open movie". It was produced by Ton  │
+│   Sintel 2010 4k FLAC mkv                                            7.4      2   4.3 GiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Roosendaal, chairman of the Blender   │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X264 ZMachine       7.4      2   4.8 GiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Foundation, written by Esther Wouda,  │
+│   Sintel 2010 4k FLAC mkv                                            7.4      2   4.3 GiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ directed by Colin Levy, at the time   │
+│   Sintel 2010 720p SURROUND x264-VODO                                7.4      1 218.3 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ an artist at Pixar and art direction  │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][BDRIP][10bitåŽ‹åˆ¶][2Kç..              1 963.2 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ by David Revoy, who is known for      │
+│   Sintel_DivXPlusHD_2Titles_6500kbps mkv                                      1 890.5 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ Pepper&Carrot, a free and open        │
+│   1024 sintel x264                                                            1 254.0 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ source webcomic series. It was made   │
+│   Sintel (2010)DVD5 nl subs NLT-Release                              7.4      1 749.3 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ at the Blender Institute, part of     │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][BDRIP][10bitåŽ‹åˆ¶][2Kç..              1 963.2 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ the Blender Foundation. The plot      │
+│   Sintel 2010 Nl Subs Dutchreleaseteam                               7.4      1 442.0 MiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ follows the character, Sintel, who    │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X265 ZMachine       7.4      1   3.2 GiB ││  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ is tracking down her pet Scales, a    │
+│   Sintel 4K UHD ENG FLAC ITA ENG Sub DMRip 1744p X265 ZMachine       7.4      1   3.2 GiB ││                           dragon. Just like the other Blender   │
+│   Sintel.2010.HDRip.XviD.AC3-ViSiON                                  7.4      1 294.6 MiB ││                           "open movies," the film was made      │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][HI444…][4096x1776][BT 202..            1   7.0 GiB ││                           using Blender, a free and open        │
+│   [philosophy-raws][è¾›ç‰¹å°”][sintel][HI444…][4096x1776][BT 202..            1   7.0 GiB ││                           source software application for       │
+│   Sintel (2010), BRRip(xvid), NL Subs, DMT                           7.4      1 350.1 MiB ││                           animation, created and supported by   │
+│   Sintel 2010 720p X264 Vodo                                         7.4      1 191.0 MiB ││                           the Blender Foundation.               │
+│   Sintel (2010), BRRip(xvid), NL Subs, DMT                           7.4      1 350.1 MiB ││                                                                 │
+│   Sintel.2010.2K.SURROUND.X264-VODO                                  7.4      1 441.9 MiB ││                           i open on IMDb    w open Wikipedia    │
+│   Sintel (2010)DVD5 nl subs NLT-Release                              7.4      1 749.3 MiB ││                                                                 │
+│   Sintel 2010 2K x264-VODO                                           7.4      0 269.6 Mi↓ ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Results] (Enter) Download  (Shift+O) Source  (F)ollow show  (/) Query  (S) Providers  (B)rowse lists                                                   (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
