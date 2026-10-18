@@ -332,6 +332,10 @@ fn run(cli: Cli) -> Result<Code> {
             return Ok(Code::Ok);
         }
         Cmd::Setup { port, save, magnet } => {
+            if no_start && !cfg.native() {
+                return Err(AppError::new(Code::Backend, "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active")
+                    .hint("fbittorrent up").into());
+            }
             setup::run(port, save)?;
             if magnet { setup::register_magnet_handler()?; }
             emit(json, serde_json::json!({"ok": true, "action": "setup", "engine": cfg.engine, "port": if cfg.native() { cfg.peer_port } else { port }, "magnet_handler": magnet}), || {});

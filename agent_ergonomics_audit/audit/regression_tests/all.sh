@@ -43,7 +43,7 @@ echo "## Release build"
 # The optimized build normally exceeds rch's five-minute default.
 RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-1200}" cargo build --release --locked
 echo "## Isolated native CLI/TUI and RSS checks"
-rg -n -F 'readonly property bool online: status.ok === true && status.running !== false' plugin/oliver.torrents/Service.qml
+python3 scripts/check-widget-online.py --self-test
 python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
 if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
   echo "## Configured legacy CLI and TUI"

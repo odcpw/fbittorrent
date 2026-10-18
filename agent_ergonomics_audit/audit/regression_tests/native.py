@@ -33,10 +33,14 @@ CASES = (
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
     with Case("native", "launcher_never_called") as case, \
-            tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary:
+            tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary, \
+            socket.socket() as legacy_endpoint:
         root = Path(temporary)
         env = dict(os.environ)
         env.pop("FBITTORRENT_NO_START", None)
+        home = root / "home"
+        home.mkdir()
+        env["HOME"] = str(home)
         for key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
                     "XDG_STATE_HOME", "XDG_CACHE_HOME"):
             directory = root / key.lower()
@@ -57,6 +61,9 @@ def launcher_never_called(binary):
             shim.write_text("#!/bin/sh\nprintf '%s\\n' " + shlex.quote(name) +
                             ' "$@" >> ' + shlex.quote(str(calls)) + "\nexit 99\n")
             shim.chmod(0o700)
+        clipboard = shims / "wl-paste"
+        clipboard.write_text("#!/bin/sh\nprintf '%s' 'magnet:?xt=urn:btih:" + "1" * 40 + "'\n")
+        clipboard.chmod(0o700)
 
         probes = (
             (("status",), 0, {}, "stopped"),
@@ -67,6 +74,14 @@ def launcher_never_called(binary):
             (("--no-start", "stop", "all"), 4, {}, "closed"),
             (("--no-start", "up"), 4, {}, "closed"),
             (("up",), 4, {"FBITTORRENT_NO_START": "1"}, "closed"),
+            (("--no-start", "status"), 0, {}, "stopped"),
+            (("--no-start", "start", "all"), 4, {}, "closed"),
+            (("--no-start", "delete", "all"), 4, {}, "closed"),
+            (("--no-start", "open", "deadbeef"), 4, {}, "closed"),
+            (("--no-start", "seed", "all"), 4, {}, "closed"),
+            (("--no-start", "noseed", "all"), 4, {}, "closed"),
+            (("--no-start", "add-clipboard"), 4, {}, "closed"),
+            (("--no-start", "add", "magnet:?xt=urn:btih:" + "1" * 40), 4, {}, "closed"),
         )
         for args, code, overrides, outcome in probes:
             argv = [binary, *args, "--json"]
@@ -149,6 +164,59 @@ def launcher_never_called(binary):
                    "Invocation flags leave the stored autostart setting enabled.")
         case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock").exists(),
                    "No probe has started a native engine socket.")
+        legacy_endpoint.bind(("127.0.0.1", 0))
+        legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
+                         f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
+        config.write_text(legacy_config)
+        for args, overrides in ((("--no-start", "setup"), {}),
+                                (("setup",), {"FBITTORRENT_NO_START": "1"})):
+            argv = [binary, *args, "--json"]
+            step = case.step("Legacy setup " + shlex.join(argv),
+                             "Typed exit 4 with the opening hint, zero systemctl calls, and no setup writes.")
+            child = case.popen(argv, env=dict(env, **overrides), stdout=subprocess.PIPE, text=True)
+            try:
+                stdout, _ = child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate()
+                step.fail("Legacy setup timed out.", [calls])
+                continue
+            value = json.loads(stdout)
+            step.close(child.returncode == 4 and value.get("code") == 4 and
+                       value.get("code_name") == "backend" and value.get("hint") == "fbittorrent up" and
+                       value.get("error") == "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active" and
+                       not calls.read_text() and not (home / ".config").exists() and
+                       config.read_text() == legacy_config,
+                       f"argv={argv!r}, env={overrides!r}; exit {child.returncode}; JSON={value!r}; "
+                       f"launcher/systemctl calls={calls.read_text()!r}; setup writes={(home / '.config').exists()}.", [calls])
+
+        # Ordinary setup must still reach its explicit service start. Refuse
+        # that start in a recording shim; no real systemd service is controlled.
+        control = case.path.with_suffix(".setup-systemctl.log")
+        control.write_text("")
+        (shims / "systemctl").write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> " +
+            shlex.quote(str(control)) + '\n[ "$2" != start ]\n')
+        step = case.step("Ordinary legacy setup without startup restrictions",
+                         "Installed nox reaches the recording service-start refusal; missing nox retains its dependency error.")
+        child = case.popen([binary, "setup", "--save", str(root / "downloads"), "--json"],
+                           env=env, stdout=subprocess.PIPE, text=True)
+        try:
+            stdout, _ = child.communicate(timeout=5)
+            value = json.loads(stdout)
+            if Path("/usr/bin/qbittorrent-nox").exists():
+                expected_calls = ["--user daemon-reload", "--user disable qbittorrent-nox.service",
+                                  "--user start qbittorrent-nox.service"]
+                ok = (child.returncode == 1 and control.read_text().splitlines() == expected_calls and
+                      value.get("error") == "systemctl --user start qbittorrent-nox.service failed")
+            else:
+                ok = child.returncode == 4 and "qbittorrent-nox is not installed" in value.get("error", "") and not control.read_text()
+            step.close(ok and not calls.read_text(),
+                       f"exit {child.returncode}; JSON={value!r}; systemctl argv={control.read_text()!r}; "
+                       f"automatic-path launcher calls={calls.read_text()!r}.", [control, calls])
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            step.fail("Ordinary setup timed out.", [control, calls])
 
 
 def bencode(value):
