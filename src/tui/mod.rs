@@ -1261,7 +1261,7 @@ impl TuiApp {
         if p.yes_no {
             let kind = p.kind.clone();
             match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                KeyCode::Char('y') | KeyCode::Char('Y') if k.modifiers.is_empty() || k.modifiers == Modifiers::SHIFT => {
                     self.close_prompt();
                     return match kind {
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
@@ -1345,11 +1345,11 @@ impl TuiApp {
             },
             KeyCode::Char('d') | KeyCode::Delete => if let Some(t) = self.selected_torrent().cloned() {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: false },
-                    &format!("Remove '{}' (keep files)? y/n", short(&t.name, 50)), true);
+                    &format!("Remove '{}' (keep files)? y/N", short(&t.name, 50)), true);
             },
             KeyCode::Char('D') => if let Some(t) = self.selected_torrent().cloned() {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: true },
-                    &format!("DELETE '{}' AND ITS FILES? y/n", short(&t.name, 50)), true);
+                    &format!("DELETE '{}' AND ITS FILES? y/N", short(&t.name, 50)), true);
             },
             KeyCode::Char('o') => if let Some(t) = self.selected_torrent() {
                 let _ = std::process::Command::new("xdg-open").arg(crate::qbt::open_target(t)).spawn();
@@ -1487,7 +1487,7 @@ impl TuiApp {
             KeyCode::Char('n') => { self.open_prompt(PromptKind::AddFeed, "Add RSS feed URL", false); }
             KeyCode::Char('x') => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
-                self.open_prompt(PromptKind::ConfirmRemoveFeed { name: name.clone() }, &format!("Remove feed '{name}'? y/n"), true);
+                self.open_prompt(PromptKind::ConfirmRemoveFeed { name: name.clone() }, &format!("Remove feed '{name}'? y/N"), true);
             },
             KeyCode::Char('r') => return self.refresh_rss(),
             KeyCode::Char('R') => return self.load_rss(),
@@ -1564,7 +1564,7 @@ impl TuiApp {
             KeyCode::Char('n') | KeyCode::Char('+') => { self.open_prompt(PromptKind::FollowShow, "Follow show: title or IMDb id (tt…)", false); }
             KeyCode::Char('x') => if let Some(s) = self.selected_show() {
                 let (imdb, title) = (s.imdb.clone(), s.label());
-                self.open_prompt(PromptKind::ConfirmUnfollow { imdb, title: title.clone() }, &format!("Unfollow '{title}'? y/n"), true);
+                self.open_prompt(PromptKind::ConfirmUnfollow { imdb, title: title.clone() }, &format!("Unfollow '{title}'? y/N"), true);
             },
             KeyCode::Char('r') => return self.refresh_shows(true),
             KeyCode::Char('R') => if let Some(s) = self.release_show() { let id = s.imdb.clone(); return self.refresh_show(id); },
@@ -1954,7 +1954,7 @@ impl Model for TuiApp {
             let inner = block.inner(root[2]);
             block.render(root[2], frame);
             if p.yes_no {
-                Paragraph::new("y / n").style(th.accented()).render(inner, frame);
+                Paragraph::new("y / N (default: No)").style(th.accented()).render(inner, frame);
             } else {
                 p.input.render(inner, frame);
             }
@@ -2024,7 +2024,7 @@ impl TuiApp {
             ("Settings", vec!["(↑↓) Choose", "(←→) Change", "(Enter) Save"], "(Esc) Cancel")
         } else if let Some(prompt) = &self.prompt {
             if prompt.yes_no {
-                ("Confirm", vec!["(Y/Enter) Confirm", "(N) Cancel"], "(Esc) Cancel")
+                ("Confirm", vec!["(y) Remove"], "(Esc) Cancel")
             } else {
                 let submit = match prompt.kind {
                     PromptKind::FollowShow => "(Enter) Follow",
@@ -3039,6 +3039,70 @@ fn torrent_header(width: u16, th: &Theme) -> Line<'static> {
 #[cfg(test)]
 mod interaction_tests {
     use super::*;
+
+    fn destructive_keys(open: fn(&mut TuiApp), unfollow: bool) {
+        for code in [KeyCode::Enter, KeyCode::Escape, KeyCode::Char('n'), KeyCode::Char(' '), KeyCode::Char('q'), KeyCode::Char('y'), KeyCode::Char('Y')] {
+            let mut app = inbox_app();
+            app.torrents = vec![Torrent { hash: "fixture-hash".into(), name: "Fixture".into(), ..Default::default() }];
+            app.tor_list.borrow_mut().select(Some(0));
+            app.feeds = vec![feed(vec![])];
+            app.feed_list.borrow_mut().select(Some(0));
+            open(&mut app);
+            assert!(app.prompt.as_ref().unwrap().label.ends_with("y/N"));
+            let text = render(&app, 120, 30);
+            assert!(text.contains("(y) Remove") && text.contains("(Esc) Cancel") && text.contains("default: No"));
+            let command = app.on_key(KeyEvent::new(code));
+            assert!(app.prompt.is_none());
+            let yes = matches!(code, KeyCode::Char('y') | KeyCode::Char('Y'));
+            if unfollow {
+                assert!(matches!(command, Cmd::None));
+                assert_eq!(app.shows.shows.len(), if yes { 1 } else { 2 });
+                assert_eq!(app.status.starts_with("unfollowed"), yes);
+            } else {
+                assert_eq!(matches!(command, Cmd::Task(..)), yes, "key {code:?}");
+                assert_eq!(app.torrents.len(), 1);
+                assert_eq!(app.feeds.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn destructive_remove_requires_y() {
+        destructive_keys(|app| { app.on_torrents_key(KeyEvent::new(KeyCode::Char('d'))); }, false);
+    }
+
+    #[test]
+    fn destructive_delete_files_requires_y() {
+        destructive_keys(|app| { app.on_torrents_key(KeyEvent::new(KeyCode::Char('D'))); }, false);
+    }
+
+    #[test]
+    fn destructive_remove_feed_requires_y() {
+        destructive_keys(|app| { app.screen = Screen::Rss; app.on_rss_key(KeyEvent::new(KeyCode::Char('x'))); }, false);
+    }
+
+    #[test]
+    fn destructive_unfollow_requires_y() {
+        // Unfollow persists synchronously. Run this unit case in a child with
+        // private XDG roots rather than mutating process-wide env in parallel.
+        if std::env::var_os("FBT_P013_UNFOLLOW_CHILD").is_none() {
+            let root = std::env::temp_dir().join(format!("fbt-p013-unfollow-{}", std::process::id()));
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "tui::interaction_tests::destructive_unfollow_requires_y", "--nocapture"])
+                .env("FBT_P013_UNFOLLOW_CHILD", "1");
+            for name in ["XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"] {
+                let path = root.join(name);
+                std::fs::create_dir_all(&path).unwrap();
+                child.env(name, path);
+            }
+            let output = child.output().unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            assert!(output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed;"), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        assert!(shows::path().starts_with(std::env::temp_dir()), "unfollow fixture requires temporary XDG_DATA_HOME");
+        destructive_keys(|app| { app.screen = Screen::Shows; app.select_show_parent(1); app.on_shows_key(KeyEvent::new(KeyCode::Char('x'))); }, true);
+    }
 
     fn app() -> TuiApp {
         let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());

@@ -90,7 +90,7 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help);
+goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm);
 
 #[test]
 fn all_surfaces_render_at_60x20_without_panics() {

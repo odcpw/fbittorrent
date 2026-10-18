@@ -1,8 +1,8 @@
 //! Local render state only: never init/update the model or start subscriptions.
 use super::*;
 
-pub(super) const SURFACES: [&str; 9] = [
-    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help",
+pub(super) const SURFACES: [&str; 10] = [
+    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm",
 ];
 
 pub(super) fn app(surface: &str) -> TuiApp {
@@ -101,6 +101,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
             app.prompt.as_mut().unwrap().input.set_value("magnet:?xt=urn:btih:0000000000000000000000000000000000000001");
         },
         "help" => app.show_help = true,
+        "confirm" => { let _ = app.on_torrents_key(KeyEvent::new(KeyCode::Char('D'))); },
         _ => panic!("unknown render fixture: {surface}"),
     }
     app
