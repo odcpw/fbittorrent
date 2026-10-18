@@ -60,10 +60,9 @@ search jobs, and feed checks. Torrent records and feed history stay on disk.
   title. Hover lookup also works on the Torrents screen and on RSS items.
 - **Pick your providers.** `s` on the Search screen opens a checkbox list of the
   installed search plugins; the choice is stored locally and applies to
-  every search. Results show an UPLOADED column where the provider reports one,
-  and an IMDB column with the rating: instant for sources that carry IMDb ids
-  (browse lists), filled in for others once their title lookup completes.
-  Duplicate torrents from several providers are collapsed by info hash.
+  every search. Results show IMDb ratings where space allows: instant for
+  sources that carry IMDb ids (browse lists), filled in for others once their
+  title lookup completes.
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
   desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
   seeding for that add), or the CLI.
@@ -216,12 +215,12 @@ that hook. Provider scripts
 execute locally, so install scripts you trust. Private trackers usually need Jackett or Prowlarr; the
 official `jackett.py` plugin works once you have one of those running.
 
-## Why some providers are browser-only
+## Provider browsing
 
-1337x answers every script with a Cloudflare challenge page, and YTS's main
-domain does not resolve from this network (its mirrors redirect back to it), so
-those entries open the site in your browser instead of loading a list. The
-Pirate Bay (`apibay.org`) and EZTV publish plain JSON and work in the TUI.
+YTS loads in the app through its JSON API; if a host is unavailable, the app
+tries mirrors and offers an Open site entry. The Pirate Bay (`apibay.org`)
+and EZTV also load in the TUI. 1337x stays browser-only because its Cloudflare
+challenge blocks scripted requests; its entries open in your browser.
 
 ## Security
 

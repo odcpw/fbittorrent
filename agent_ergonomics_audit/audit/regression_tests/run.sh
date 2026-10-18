@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Agent-ergonomics regression tests for fbittorrent.
 # Each R-NNN pins one applied recommendation. Run: agent_ergonomics_audit/audit/regression_tests/run.sh [binary]
+# Run only the isolated P0-12 case: run.sh [binary] --upload-text-only
 # Exit 0 when every test passes, 1 otherwise. Needs a reachable (or auto-startable) qbittorrent-nox for the R-01x tests.
 set -u
 F="${1:-fbittorrent}"
@@ -8,6 +9,92 @@ pass=0; fail=0
 ok()   { pass=$((pass+1)); echo "  ok   $1"; }
 bad()  { fail=$((fail+1)); echo "  FAIL $1: $2"; }
 json() { python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; }
+
+echo "P0-12 capabilities_upload_text: derived upload policy and README claims"
+if python3 - "$F" "$(dirname "$0")/../../.." <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+
+binary = sys.argv[1]
+repo = Path(sys.argv[2]).resolve()
+log = repo / "target/test-logs/fbt-p0-12-wkl/capabilities_upload_text.jsonl"
+stderr_log = log.with_suffix(".cli.log")
+log.parent.mkdir(parents=True, exist_ok=True)
+expected = ("32 KiB/s while downloading (non-zero caps must be at least 16 KiB/s); "
+            "stops when complete unless seeding is enabled")
+failed = 0
+started = time.monotonic()
+
+with tempfile.TemporaryDirectory(prefix="fbt-p0-12-") as temporary, \
+        log.open("w") as output, stderr_log.open("w") as diagnostics:
+    env = dict(os.environ)
+    for key in ("XDG_RUNTIME_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+        path = Path(temporary) / key
+        path.mkdir(mode=0o700)
+        env[key] = str(path)
+
+    def record(step, action, expect, observed, ok, ms, final=False):
+        row = dict(ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                   suite="agent-contract", case="capabilities_upload_text", step=step,
+                   action=action, expect=expect, observed=observed, ok=ok, ms=ms,
+                   artifacts=[str(stderr_log.relative_to(repo))])
+        if final:
+            row["final"] = True
+        line = json.dumps(row)
+        output.write(line + "\n")
+        output.flush()
+        if env.get("FBT_TEST_VERBOSE") == "1":
+            print(line, file=sys.stderr)
+
+    for step, command in enumerate(("capabilities", "robot-docs"), 1):
+        begin = time.monotonic()
+        try:
+            args = [binary, command] + (["--json"] if command == "capabilities" else [])
+            result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=20)
+            diagnostics.write(f"{command}: exit {result.returncode}\n{result.stderr}\n")
+            observed = result.stdout
+            if command == "capabilities":
+                payload = json.loads(result.stdout)
+                observed = json.dumps({key: payload[key] for key in ("defaults", "conventions")})
+                ok = (result.returncode == 0 and payload["defaults"]["upload"] == expected
+                      and payload["conventions"]["native_upload"] == expected)
+            else:
+                ok = (result.returncode == 0 and f"Upload is capped at {expected}." in observed
+                      and "1 B/s" not in observed)
+        except Exception as error:
+            observed, ok = f"{type(error).__name__}: {error}", False
+        failed += not ok
+        record(step, f"{command} in isolated XDG directories", expected,
+               observed, ok, int((time.monotonic() - begin) * 1000))
+
+    readme = (repo / "README.md").read_text()
+    ok = ("YTS loads in the app" in readme and "1337x stays browser-only" in readme
+          and "UPLOADED" not in readme and "info hash" not in readme)
+    failed += not ok
+    record(3, "read README provider claims", "YTS in app; 1337x browser-only; no promised upload-date column or hash dedupe",
+           f"provider claims match: {ok}", ok, 0)
+    record(4, "summarise", "all three checks pass", f"3 checks, {failed} failures",
+           failed == 0, int((time.monotonic() - started) * 1000), final=True)
+
+print(f"capabilities_upload_text: {log}")
+if failed:
+    for path in (log, stderr_log):
+        print(f"{path}:\n" + "\n".join(path.read_text().splitlines()[-20:]), file=sys.stderr)
+sys.exit(1 if failed else 0)
+PY
+then ok capabilities_upload_text; else bad capabilities_upload_text "see JSONL and CLI log above"; fi
+
+if [[ "${2:-}" == --upload-text-only ]]; then
+  [ "$fail" = 0 ]
+  exit $?
+fi
 
 echo "R-001 capabilities --json is valid JSON with an exit-code dictionary"
 if $F capabilities --json | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["ok"]; assert len(d["exit_codes"])>=8; assert d["contract_version"]' 2>/dev/null; then ok R-001; else bad R-001 "invalid or incomplete"; fi
