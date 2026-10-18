@@ -3,6 +3,8 @@ pub mod live;
 pub mod paused;
 pub mod stats;
 mod streaming;
+#[cfg(test)]
+mod live_limits_test;
 pub mod utils;
 
 use std::collections::HashSet;
@@ -38,9 +40,10 @@ use tracing::trace;
 use tracing::warn;
 
 use crate::Session;
+use crate::BitV;
 use crate::chunk_tracker::ChunkTracker;
 use crate::file_info::FileInfo;
-use crate::limits::LimitsConfig;
+use crate::limits::Limits;
 use crate::session::TorrentId;
 use crate::spawn_utils::BlockingSpawner;
 use crate::storage::BoxStorageFactory;
@@ -114,7 +117,8 @@ pub(crate) struct ManagedTorrentOptions {
     pub peer_read_write_timeout: Option<Duration>,
     pub allow_overwrite: bool,
     pub output_folder: PathBuf,
-    pub ratelimits: LimitsConfig,
+    // Shared by all run states; pause/resume must not recreate an old cap.
+    pub ratelimits: Limits,
     pub initial_peers: Vec<SocketAddr>,
     pub peer_limit: Option<usize>,
     #[cfg(feature = "disable-upload")]
@@ -207,7 +211,7 @@ impl ManagedTorrentShared {
 
 pub struct ManagedTorrent {
     pub(crate) run_region: parking_lot::Mutex<Option<ChildRegion>>,
-    // Static torrent configuration that doesn't change.
+    // Shared torrent configuration, including live-mutable rate limits.
     pub shared: Arc<ManagedTorrentShared>,
     // Torrent metadata. Maybe be None when the magnet is resolving (not implemented yet)
     pub metadata: ArcSwapOption<TorrentMetadata>,
@@ -238,6 +242,20 @@ impl ManagedTorrent {
     /// The resolved on-disk folder this torrent's files are written under.
     pub fn output_folder(&self) -> &Path {
         &self.shared.options.output_folder
+    }
+
+    /// Change the per-torrent payload upload cap without replacing its handle,
+    /// storage or run state. None is unlimited; finite caps must accommodate a
+    /// complete 16 KiB protocol chunk. The value survives pause/resume.
+    pub fn set_upload_bps(&self, bps: Option<u64>) -> anyhow::Result<()> {
+        let limit = bps.map(|bps| {
+            anyhow::ensure!(bps >= 16 * 1024, "upload cap must be at least 16 KiB/s");
+            let bps = u32::try_from(bps).context("upload cap exceeds the native engine maximum")?;
+            Ok::<_, anyhow::Error>(std::num::NonZeroU32::new(bps).unwrap())
+        }).transpose()?;
+        let limits = &self.shared.options.ratelimits;
+        if limits.get_upload_bps() != limit { limits.set_upload_bps(limit); }
+        Ok(())
     }
 
     pub fn with_metadata<R>(
@@ -278,6 +296,35 @@ impl ManagedTorrent {
                 .context("error getting chunks")?)),
             _ => bail!("no chunk tracker, torrent neither paused nor live"),
         }
+    }
+
+    /// Copy the verified have-bitfield into an independent in-memory snapshot.
+    ///
+    /// The copy is made while holding the tracker read locks. It retains the
+    /// tracker's MSB-first byte layout, including zero padding in the last byte;
+    /// metadata's piece count determines which bits are meaningful. Mutating or
+    /// dropping the snapshot never changes the tracker or its persisted state.
+    /// Returns `None` during initialization or whenever no tracker is available.
+    /// A paused torrent with an initialized tracker still returns a snapshot.
+    ///
+    /// ```
+    /// use librqbit::{BitV, ManagedTorrent};
+    /// fn snapshot(torrent: &ManagedTorrent) -> Option<Box<dyn BitV>> {
+    ///     torrent.have_pieces_snapshot()
+    /// }
+    /// ```
+    pub fn have_pieces_snapshot(&self) -> Option<Box<dyn BitV>> {
+        // The critical section allocates only the bitfield copy. Box the trait
+        // object after with_chunk_tracker releases the tracker read guards.
+        self.with_chunk_tracker(|tracker| {
+            tracker
+                .get_have_pieces()
+                .as_slice()
+                .to_bitvec()
+                .into_boxed_bitslice()
+        })
+        .ok()
+        .map(|bits| bits.into_dyn())
     }
 
     /// Get the live state if the torrent is live.

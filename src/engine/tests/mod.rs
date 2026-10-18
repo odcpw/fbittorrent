@@ -85,6 +85,8 @@
             max_active_downloads: AtomicUsize::new(3),
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
+            retired_restores: std::sync::Mutex::new(Vec::new()),
+            restore_join_started: std::sync::Mutex::new(None),
             cancelled_checks: std::sync::Mutex::new(HashMap::new()),
         });
         runtime.block_on(async {
@@ -100,6 +102,25 @@
                     .unwrap();
             }
             inner.maintain(&test_cx()).await.unwrap();
+        });
+        // Mirror production start_shared's maintenance task: an active check
+        // retains paused transfer intent until a post-check queue decision.
+        // In particular a restored seed must resume after verification even
+        // when this fixture's caller sends no additional engine operations.
+        let maintenance = inner.clone();
+        task::spawn_with(runtime.cx(), move |cx| async move {
+            let mut interval = time::interval(&cx, Duration::from_secs(1));
+            loop {
+                if cx.checkpoint().is_err() { break; }
+                interval.tick(&cx).await;
+                if maintenance.stopping.load(Ordering::Acquire) { break; }
+                if let Err(error) = maintenance.maintain(&cx).await {
+                    if cx.checkpoint().is_err() || maintenance.stopping.load(Ordering::Acquire) {
+                        break;
+                    }
+                    panic!("test queue maintenance failed: {error:#}");
+                }
+            }
         });
         let dispatcher = EngineDispatcher {
             generation,
@@ -141,8 +162,16 @@
 
 include!("ownership.rs");
 include!("startup.rs");
+include!("dormant.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");
+include!("live_limits.rs");
+mod typed_seed {
+    include!("typed_seed.rs");
+    mod check_reconciliation {
+        include!("check_reconciliation.rs");
+    }
+}
 include!("legacy_wire.rs");
 include!("wire_probe.rs");

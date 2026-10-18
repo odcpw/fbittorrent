@@ -1,0 +1,38 @@
+{"dir":"volatile","paths":["result.instance","result.server.pid","result.server.build","result.uptime_s","ts","result.torrent.added_at","result.torrent.completed_at"]}
+{"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"c2s","frame":{"id":2,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_message","details":{"bytes":65537},"hint":"inspect fbittorrent log","message":"invalid message","retryable":false},"id":2,"ok":false}}
+{"dir":"c2s","frame":{"id":3,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"hello_required","hint":"inspect fbittorrent log","message":"hello required","retryable":false},"id":3,"ok":false}}
+{"dir":"c2s","frame":{"id":4,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"proto_unsupported","details":{"server_proto":1},"hint":"inspect fbittorrent log","message":"proto unsupported","retryable":false},"id":4,"ok":false}}
+{"dir":"c2s","frame":{"id":5,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"unknown_op","details":{"nearest":["torrents.stop"]},"hint":"inspect fbittorrent log","message":"unknown op","retryable":false},"id":5,"ok":false}}
+{"dir":"c2s","frame":{"id":6,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_args","details":{"expected":"boolean","key":"delete_files"},"hint":"inspect fbittorrent log","message":"invalid args","retryable":false},"id":6,"ok":false}}
+{"dir":"c2s","frame":{"id":7,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"not_found","details":{"hash":"0123456789abcdef0123456789abcdef01234567"},"hint":"inspect fbittorrent log","message":"not found","retryable":false},"id":7,"ok":false}}
+{"dir":"c2s","frame":{"id":8,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"ambiguous","details":{"matches":["one","two"]},"hint":"inspect fbittorrent log","message":"ambiguous","retryable":false},"id":8,"ok":false}}
+{"dir":"c2s","frame":{"id":9,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"safety","hint":"inspect fbittorrent log","message":"safety","retryable":false},"id":9,"ok":false}}
+{"dir":"c2s","frame":{"id":10,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_state","details":{"reason":"complete_no_seed","state":"done"},"hint":"inspect fbittorrent log","message":"invalid state","retryable":false},"id":10,"ok":false}}
+{"dir":"c2s","frame":{"id":11,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"unsupported","hint":"inspect fbittorrent log","message":"unsupported","retryable":false},"id":11,"ok":false}}
+{"dir":"c2s","frame":{"id":12,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"engine_unavailable","details":{"message":"engine is starting","state":"starting"},"hint":"retry in a moment","message":"engine unavailable","retryable":true},"id":12,"ok":false}}
+{"dir":"c2s","frame":{"id":13,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"already_running","details":{"pid":1234},"hint":"inspect fbittorrent log","message":"already running","retryable":false},"id":13,"ok":false}}
+{"dir":"c2s","frame":{"id":14,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"upstream","details":{"source":"tracker"},"hint":"retry in a moment","message":"upstream","retryable":true},"id":14,"ok":false}}
+{"dir":"c2s","frame":{"id":15,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"timeout","details":{"after_s":15},"hint":"retry in a moment","message":"timeout","retryable":true},"id":15,"ok":false}}
+{"dir":"c2s","frame":{"id":16,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"busy","details":{"limit":"inflight"},"hint":"retry in a moment","message":"busy","retryable":true},"id":16,"ok":false}}
+{"dir":"c2s","frame":{"id":17,"op":"app.info"}}
+{"dir":"s2c","frame":{"error":{"code":"internal","details":{"entries":[{"hash":"0123456789abcdef0123456789abcdef01234567","level":"info","message":"Fixture diagnostics","seq":1,"source":"api","ts":1792310400},{"level":"info","message":"Fixture diagnostics","seq":1,"source":"api","ts":1792310400}]},"hint":"inspect fbittorrent log","message":"internal","retryable":false},"id":17,"ok":false}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_args","details":{"key":"id"},"message":"id must be a positive integer","retryable":false},"id":null,"ok":false}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_message","details":{"bytes":65537},"message":"line exceeds 65536 bytes","retryable":false},"ev":"error"}}
+{"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}

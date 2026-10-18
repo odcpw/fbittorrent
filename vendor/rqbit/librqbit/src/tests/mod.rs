@@ -2,3 +2,4 @@
 //! Native consumer transfer/lifecycle coverage lives in fbittorrent src/engine.rs.
 
 mod private_torrent;
+mod have_pieces;

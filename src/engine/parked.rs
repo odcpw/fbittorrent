@@ -7,7 +7,7 @@ use view::TorrentView;
 // well as owned parked ledgers. The daemon can retain one ParkedLedger handle.
 static PARKED_LEDGER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn parked_metadata(record: &Record, directory: &Path) -> Result<Option<Vec<u8>>> {
+pub(super) fn parked_metadata(record: &Record, directory: &Path) -> Result<Option<Vec<u8>>> {
     let path = directory.join(format!("{}.torrent", record.hash));
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,

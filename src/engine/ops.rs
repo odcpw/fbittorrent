@@ -37,6 +37,7 @@ impl EngineDispatcher {
         })
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
+        if let Some(result) = self.execute_dormant(cx, &op).await { return result; }
         if matches!(
             op,
             EngineOp::Network | EngineOp::Settings | EngineOp::Restart | EngineOp::Shutdown
@@ -97,7 +98,15 @@ impl EngineDispatcher {
             }
             EngineOp::Info => return Ok(EngineResult::Torrents(self.info(cx).await?)),
             EngineOp::Files { hash } => {
-                let handle = self.inner.handle(hash)?;
+                let handle = match self.inner.handle(hash) {
+                    Ok(handle) => handle,
+                    Err(_) => {
+                        let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+                        let record = ledger.records.iter().find(|r| &r.hash == hash)
+                            .context("torrent record not found")?;
+                        return Ok(EngineResult::Files(self.inner.saved_files(record)?));
+                    }
+                };
                 let metadata = handle
                     .metadata
                     .load_full()
@@ -154,6 +163,18 @@ impl EngineDispatcher {
             priority,
         } = &op
         {
+            if self.inner.handle(hash).is_err() && self.inner.dormant(hash) && *priority != 0 && !ids.is_empty() {
+                let index = ledger.records.iter().position(|r| &r.hash == hash).context("torrent record not found")?;
+                let mut changed = ledger.records[index].clone();
+                let files = self.inner.saved_files(&changed)?;
+                if ids.iter().any(|index| *index >= files.len()) { bail!("file index is out of range"); }
+                let mut selected = changed.only_files.clone().unwrap_or_else(|| (0..files.len()).collect());
+                selected.extend(ids); selected.sort_unstable(); selected.dedup();
+                changed.only_files = Some(selected);
+                self.inner.activate_record(cx, &mut ledger, index, changed).await?;
+                self.inner.reconcile_queue(cx, &mut ledger, &HashSet::new()).await?;
+                return Ok(EngineResult::Acknowledged);
+            }
             let handle = self.inner.handle(hash)?;
             let metadata = handle
                 .metadata
@@ -264,9 +285,6 @@ impl EngineDispatcher {
                 EngineOp::SetUploadLimit { limit, .. } => {
                     record.upload_limit = *limit;
                     record.options(record.paused)?;
-                    if record.upload_limit != old.upload_limit {
-                        self.inner.rebuild(cx, &old, &record).await?;
-                    }
                 }
                 EngineOp::SetShareLimits { ratio, .. } => {
                     record.ratio_limit = *ratio;
@@ -302,6 +320,13 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
+            }
+            if matches!(op, EngineOp::SetUploadLimit { .. }) {
+                // Validate before saving, then apply synchronously under the
+                // ledger lock. A failed save leaves the live limiter unchanged.
+                let limit = ledger.records[index].upload_limit;
+                handle.as_ref().expect("validated upload-cap handle")
+                    .set_upload_bps((limit != 0).then_some(limit as u64))?;
             }
             if matches!(op, EngineOp::Stop { .. }) {
                 self.inner.cancel_restore(&hash, false);

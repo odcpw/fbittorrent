@@ -25,6 +25,12 @@ impl Inner {
                 continue;
             };
             let stats = handle.stats();
+            // Initializing.paused is transfer intent, not check activity.
+            // Unpause closes the current run, so leave active verification
+            // alone. Recompute post-check policy on the next reconciliation;
+            // explicitly cancelled checks may still resume.
+            let active_check = matches!(stats.state, TorrentStatsState::Initializing { .. })
+                && !self.check_cancelled(&record.hash, &handle);
             if stats.finished && record.completion_on <= 0 {
                 record.completion_on = now();
                 changed = true;
@@ -42,14 +48,14 @@ impl Inner {
             } else {
                 false
             };
-            decisions.push((handle, running));
+            decisions.push((handle, running, active_check));
         }
         if changed {
             self.save(cx, ledger).await?;
         }
         // Stop first: reducing the limit or restarting an earlier queue entry
         // must never create a transient extra payload download.
-        for (handle, running) in &decisions {
+        for (handle, running, _) in &decisions {
             cx.checkpoint()?;
             if !running
                 && !handle.is_paused()
@@ -58,9 +64,10 @@ impl Inner {
                 self.pause_handle(cx, handle).await?;
             }
         }
-        for (handle, running) in decisions {
+        for (handle, running, active_check) in decisions {
             cx.checkpoint()?;
             if running
+                && !active_check
                 && (handle.is_paused() || matches!(handle.stats().state, TorrentStatsState::Error))
             {
                 self.unpause_handle(cx, &handle).await?;

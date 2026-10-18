@@ -59,8 +59,9 @@ impl Daemon {
         if self.stopping.load(Ordering::Acquire) {
             return Err(Self::unavailable(State::Stopping));
         }
+        let op = crate::api::legacy::parse(request)?;
         let network = self.network.read().unwrap().clone();
-        if let Some(result) = network_app::controls(request, &network, &self.lifecycle) {
+        if let Some(result) = crate::api::legacy::control(&op, &network, &self.lifecycle) {
             return result;
         }
         let began = Instant::now();
@@ -80,15 +81,7 @@ impl Daemon {
                         "DEBUG api legacy dispatch path={:?}",
                         request.path.chars().take(80).collect::<String>()
                     );
-                    return app
-                        .dispatcher()
-                        .dispatch(request)
-                        .unwrap_or_else(|| {
-                            Err(anyhow::anyhow!(
-                                "unsupported native engine request {}",
-                                request.path
-                            ))
-                        })
+                    return crate::api::legacy::running(&app.dispatcher(), op)
                         .map_err(|error| {
                             if app.is_quiescing() {
                                 Self::unavailable(if self.stopping.load(Ordering::Acquire) {
@@ -103,17 +96,7 @@ impl Daemon {
                 }
                 Slot::Parked(ledger) => {
                     let interface = network.interface.as_deref().unwrap_or("configured interface");
-                    return slot::dispatch_parked(ledger, request, interface).unwrap_or_else(|| {
-                        Err(AppError::new(
-                            Code::Backend,
-                            format!(
-                                "engine_unavailable state=parked; Waiting for {}",
-                                interface
-                            ),
-                        )
-                        .hint(format!("connect {} then retry", interface))
-                        .into())
-                    })
+                    return crate::api::legacy::parked(ledger, op, interface);
                 }
                 Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
             }

@@ -188,3 +188,39 @@ Receipt: [P1-19.md](P1-19.md) (branch ntm/fbittorrent/cod_2, commits 9e60087 and
 ## P1-03
 
 Receipt: [P1-03.md](P1-03.md) (branch ntm/fbittorrent/cod_1, commits e320b68 and 8a1d4dd with the orchestrator's reconciliation merge a3c5fb3; merged by the orchestrator after two Astra reviews, the first returning two P2 findings (agent documentation, drain-failure log format), one P3 (plain second-owner hint) and a P1-19 reconciliation item, the second verifying all four closed with 44 unit tests and 7/7 daemon cases in both modes; batch gate on main follows).
+
+## P5-06
+
+Receipt: [P5-06.md](P5-06.md) (branch ntm/fbittorrent/cod_2, commit cfda9b5; merged by the orchestrator after an Astra review that re-ran the three fork tests independently; the review's non-blocking P3, boxing the snapshot outside the chunk-tracker locks, is bead P5-06b; batch gate on main follows).
+
+## P6-07
+
+Receipt: [P6-07.md](P6-07.md) (branch ntm/fbittorrent/cod_4-p6-07-9bt, commit 73c22f9; merged by the orchestrator after an Astra review; the daemon.py conflict with P1-03's harness was resolved additively by the orchestrator; its 19-line docs/IPC.md note is folded into P1-05's document when that merges; the disclosed startup-teardown flake is bead P1-03b; batch gate on main follows).
+
+## P5-06b
+
+Receipt: [P5-06b.md](P5-06b.md) (branch ntm/fbittorrent/cod_2-p5-06b-vt1, commit 0c7ac31; the exact change prescribed by the P5-06 review, verified by the orchestrator from the diff; batch gate on main follows).
+
+## P1-10
+
+Receipt: [P1-10.md](P1-10.md) (branch ntm/fbittorrent/cod_2-p1-10-zxk, commit a6b520d; merged by the orchestrator after an Astra review that re-ran the adapter tests and the restart/shutdown daemon cases; batch gate on main follows).
+
+## P1-16 (engine half)
+
+Receipt: [P1-16.md](P1-16.md) (branch ntm/fbittorrent/cod_4-p1-16-vi1, commits a93b900 and f1e6fac; merged by the orchestrator after two Astra reviews, the first returning one P2 on dormant size/completed_bytes for partially selected torrents, the second verifying the selected-piece accounting against the live path; the daemon.py cases are bead P1-16b; batch gate on main follows).
+
+## P1-16c
+
+Receipt: [P1-16c.md](P1-16c.md) (branch ntm/fbittorrent/cod_4-p1-16c-yur, commit e7af809; merged by the orchestrator after an Astra review that re-ran the typed-seed tests; the queue-reconciliation defect it surfaced is bead P1-16d; batch gate on main follows).
+
+## P1-16d
+
+Receipt: [P1-16d.md](P1-16d.md) (branch ntm/fbittorrent/cod_4-p1-16d, commit b84e09b; merged by the orchestrator after an Astra review that re-ran the reconciliation regressions and the whole engine suite; batch gate on main follows).
+
+## P1-05
+
+Receipt: [P1-05.md](P1-05.md) (branch ntm/fbittorrent/cod_3-p1-05-2qa, commits 5052283, 573dc12, 7044f6f, b87e031 and 3a4caac, the last three applied by cod_3, cod_4 and cod_2 in turn; merged by the orchestrator after five Astra reviews that progressively enforced the bead's literal operation list, the app.info shape, complete fixture coverage, required pending refs, value validation, watch-gated playable fields and events, and the append-only events topic; batch gate on main follows).
+
+## P1-03b
+
+Receipt: [P1-03b.md](P1-03b.md) (branch ntm/fbittorrent/cod_3-p1-03b, commits abe3dad and 95291d4; merged by the orchestrator after two Astra reviews, the first returning two P2 findings (a 25 ms scheduling window in the regression, unfinished handles dropped on join timeout) that the second verified closed with 3/3 runs of each of the five startup tests; the historical cause stays open in P1-03c; batch gate on main follows).
