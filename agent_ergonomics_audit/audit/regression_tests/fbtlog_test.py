@@ -5,15 +5,85 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from unittest.mock import patch
 
 import fbtlog
 from fbtlog import Case, REPO, suite_status
 from native import NativeHarness
+
+
+def tmux_relaunch():
+    with Case("fbtlog_test", "tmux_relaunch") as test:
+        fixtures = test.suite.directory / "fixtures/tmux"
+        fixtures.mkdir(parents=True)
+        with tempfile.TemporaryDirectory(prefix="fbt-tmux-") as temporary:
+            release = fixtures / "release"
+            session = "tui-fixture"
+            server = f"fbt-p0-15-tmux-{os.getpid()}"
+
+            def tmux(*args, check=True, timeout=5):
+                return subprocess.run(["tmux", "-f", "/dev/null", "-L", server, *args],
+                                      capture_output=True, text=True, check=check, timeout=timeout,
+                                      env=dict(os.environ, TMPDIR=temporary))
+
+            hold = shlex.join([sys.executable, "-c",
+                "import pathlib,sys,time\np=pathlib.Path(sys.argv[1])\n"
+                "while not p.exists(): time.sleep(.01)\n", str(release)])
+            try:
+                tmux("new-session", "-d", "-s", session, hold)
+                tmux("set-option", "-s", "exit-empty", "off")
+                duplicate = tmux("new-session", "-d", "-s", session, "sleep 60", check=False)
+                test.check(duplicate.returncode == 1 and "duplicate session" in duplicate.stderr,
+                           "reusing the name before teardown reproduces duplicate session",
+                           f"Exit {duplicate.returncode}; stderr: {duplicate.stderr.strip()}")
+                probes = []
+
+                def delayed_exit(*args, **kwargs):
+                    result = tmux(*args, **kwargs)
+                    if args[0] == "has-session":
+                        probes.append(result.returncode)
+                        if len(probes) == 2:
+                            release.touch()
+                    return result
+
+                harness = NativeHarness(lambda: test, "unused", os.environ)
+                harness.start_tmux(delayed_exit, session, "sleep 60")
+                test.check(probes[:2] == [0, 0] and probes[-1] == 1
+                           and tmux("has-session", "-t", session, check=False).returncode == 0,
+                           "relaunch waits through delayed teardown, then starts the replacement session",
+                           f"Old session probe exits: {probes}; replacement session is present.")
+                waits = [r for r in map(json.loads, test.path.read_text().splitlines())
+                         if r.get("action") == "wait for tmux session teardown"]
+                test.check(len(waits) == 1 and waits[0]["ok"] and session in waits[0]["observed"]
+                           and "exit 1" in waits[0]["observed"],
+                           "the successful teardown wait records the session and final probe exit")
+                diagnostics = io.StringIO()
+                sentinel = fixtures / "must_not_launch"
+                with patch.object(fbtlog, "LOG_ROOT", fixtures), \
+                        contextlib.redirect_stderr(diagnostics), contextlib.redirect_stdout(diagnostics):
+                    with Case("tmux_timeout", "session_stays_alive") as negative:
+                        harness = NativeHarness(lambda: negative, "unused", os.environ)
+                        error = ""
+                        try:
+                            harness.start_tmux(tmux, session, shlex.join(["touch", str(sentinel)]), seconds=.2)
+                        except TimeoutError as exception:
+                            error = str(exception)
+                (fixtures / "timeout.diagnostics.txt").write_text(diagnostics.getvalue())
+                rows = [json.loads(line) for line in negative.path.read_text().splitlines()]
+                test.check(error and not sentinel.exists() and rows[-1]["ok"] is False
+                           and rows[-1]["failed"] == [1] and rows[0]["ok"] is False
+                           and session in rows[0]["observed"] and "still present" in rows[0]["observed"]
+                           and "exit 0" in rows[0]["observed"],
+                           "a session that never exits fails the logged wait and prevents relaunch",
+                           f"Timeout: {error}; replacement launched: {sentinel.exists()}.")
+            finally:
+                tmux("kill-server", check=False)
 
 
 def polling_cli_exits():
@@ -223,6 +293,7 @@ def main():
             if original_force is not None:
                 os.environ["FBT_TEST_FORCE_FAIL"] = original_force
     polling_cli_exits()
+    tmux_relaunch()
     early_abort_summary()
     return suite_status("fbtlog_test")
 

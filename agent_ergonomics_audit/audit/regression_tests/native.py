@@ -82,6 +82,35 @@ class NativeHarness:
                     bool(result), started)
         return result
 
+    def start_tmux(self, tmux, session, launch, seconds=10):
+        started = time.monotonic()
+        end = started + seconds
+        gone, probes, probe = False, 0, None
+        while probe is None or time.monotonic() < end:
+            probes += 1
+            try:
+                probe = tmux("has-session", "-t", session, check=False,
+                             timeout=max(.01, end - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                detail = "has-session probe timed out"
+                break
+            gone = probe.returncode == 1
+            detail = f"last has-session exit {probe.returncode}; stderr: {probe.stderr.strip() or '<empty>'}"
+            if gone:
+                break
+            time.sleep(max(0, min(.1, end - time.monotonic())))
+        state = "absent" if gone else "still present" if probe and probe.returncode == 0 else "absence unconfirmed"
+        observed = (f"Tmux session {session!r} {state} after {time.monotonic()-started:.3f} seconds; "
+                    f"{detail}; {probes} probes.")
+        self.record("wait for tmux session teardown", f"Session {session!r} absent before reuse within {seconds} seconds",
+                    observed, gone, started)
+        if not gone:
+            raise TimeoutError(observed)
+        tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
+        # Socket removal precedes terminal teardown. Keep this private server
+        # alive between sessions so session absence cannot race server exit.
+        tmux("set-option", "-s", "exit-empty", "off")
+
     def cli(self, *args, code=0):
         started = time.monotonic()
         child = self.get_case().popen([self.binary, *args, "--json"], env=self.env,
@@ -203,9 +232,9 @@ def main():
         tmux_socket = f"fbt-fbt-p0-15-3hq-{os.getpid()}"
         session = "fbt-fbt-p0-15-3hq"
 
-        def tmux(*args, check=True):
+        def tmux(*args, check=True, timeout=None):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
-                                  capture_output=True, text=True, check=check)
+                                  capture_output=True, text=True, check=check, timeout=timeout)
 
         def capture(log=True):
             result = tmux("capture-pane", "-t", session, "-p", check=False)
@@ -243,7 +272,7 @@ def main():
                 case.check(not socket_path.exists(), 'Local RSS commands leave the torrent engine closed.')
                 case.check(len(cli("rss", "items", "Local feed")["items"]) == 1, 'The local feed initially contains one article.')
                 fixture["version"] = 2
-                tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
+                harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "native socket")
                 wait_for(lambda: cli("status").get("ok"), "native status")
                 wait_for(lambda: terminal_bytes.exists() and b"\x1b[?1003h" in terminal_bytes.read_bytes(),
@@ -451,7 +480,7 @@ def main():
                 wait_for(lambda: not socket_path.exists(), "quit removes socket", seconds=6)
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
                 case.check(not error_file.read_text(), 'The app and CLI have emitted no unexpected stderr.')
-                tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
+                harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
                 case.check(show_episodes("tt1234002")["S01E01"]["read"], 'Restart preserves the exact Beta Show episode read marker.')
