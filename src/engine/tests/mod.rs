@@ -144,3 +144,5 @@ include!("startup.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");
+include!("legacy_wire.rs");
+include!("wire_probe.rs");

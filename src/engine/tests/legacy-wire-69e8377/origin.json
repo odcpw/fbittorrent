@@ -1,0 +1,25 @@
+{
+  "source_commit": "69e83770d4be22e4c50218cb13355a484012e0de",
+  "capture": "Unmodified old production handlers executed by legacy_wire_fixture_probe in an archived source tree. Private XDG directories; only temporary root replaced with <FIXTURE>. No JSON parsing or reserialization of captured bytes. No newline appended.",
+  "production_sha256": {
+    "src/engine/parked.rs": "94cb24f7a77c5e9868843df7d9d0acb2ceeea9ffae1147ca28b563757b839db7",
+    "src/engine/ops.rs": "c4c3b70777394005cc1b5566166227acbff68d286480768bed397001d7507018",
+    "src/network_app.rs": "5beaf46178197e2a12c2d7689840c3b4a2f08889345500ed3ca4a4b057983099",
+    "src/qbt.rs": "6085d35534b40b976a197e40610a7f6c7fc87639c59b4b2d6eb68dcaba45bb6f",
+    "Cargo.toml": "c804517decde8f2d96ca349ce6de814b9aa1c1b3556ef8c75217f5c938a83038",
+    "Cargo.lock": "27c4064c09220f58d803ec7d4fa133a856e892ace281762b85d4aa1a2d29deae"
+  },
+  "probe_sha256": "65fbd9dc2034212e0b38d49cfada66b74edf445adac11133ccfa5076e353b879",
+  "fixtures_sha256": {
+    "live-files.json": "c3bb7ef5251387fe81c28507e7f239438a50ee8c0ccbdc6eb75ecf88d88657d5",
+    "live-queue.json": "affb254f543b4b8e13612563082bc8a4e8c2e6f23f16d3b91676bd8cb92617b3",
+    "parked-empty-info.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "parked-empty-queue.json": "0b8ba39dc229e47ad41503c189c9bb56337d620b1264d16896e3e66bdf2e4d5f",
+    "parked-files-multi.json": "4091bb05fd88fd68d94e32224da6f483d17c900af3301a06dd26730ea59d6a0c",
+    "parked-files-single.json": "826686f59349fd37778d71bcdb399cc0584880ed6b4ae6aab7fb5a235664a3cc",
+    "parked-info.json": "1586ad001457931cba16e520d29b89258bc20db3f996a85df3f95dcc2e11b133",
+    "parked-queue.json": "83867375ad470e659969be17e48470c5519241f93d344714541b9e7ede559d29",
+    "settings-bound.json": "29c070543ed949cb7ce71e6adba9606436c523fca4cb092739ac01a66d624179",
+    "settings-unbound.json": "500cc8bdc661c520581fadbc4086ad47a4ed34623338b115eb7e0eb589fe1901"
+  }
+}

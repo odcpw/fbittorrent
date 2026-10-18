@@ -200,9 +200,11 @@ impl EngineResult {
             )),
             Self::Files(files) => json(files),
             Self::Transfer(info) => json(info),
-            Self::Queue(info) => json(info),
+            // These responses historically serialized through Value. Preserve
+            // its object-member ordering at the legacy boundary.
+            Self::Queue(info) => json(&serde_json::to_value(info)?),
             Self::Start(result) => json(result),
-            Self::Settings(settings) => json(settings),
+            Self::Settings(settings) => json(&serde_json::to_value(settings)?),
             Self::Network(network) => json(network),
         }
     }

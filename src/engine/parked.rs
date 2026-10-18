@@ -194,7 +194,17 @@ impl ParkedLedger {
     }
     pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
         match EngineOp::parse(&request.path, request) {
-            Ok(Some(op)) => Some(self.execute(op).and_then(|result| result.to_legacy_json())),
+            Ok(Some(op)) => Some(self.execute(op).and_then(|result| {
+                let legacy = result.to_legacy_json()?;
+                match result {
+                    // Parked lists used Vec<Value>, unlike the live lists of
+                    // structs. Retain that wire ordering at this legacy facade.
+                    EngineResult::Torrents(_) | EngineResult::Files(_) => {
+                        json(&serde_json::from_str::<serde_json::Value>(&legacy)?)
+                    }
+                    _ => Ok(legacy),
+                }
+            })),
             Ok(None) if request.path.starts_with("torrents/") => Some(Err(anyhow!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ))),

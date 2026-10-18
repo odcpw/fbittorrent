@@ -54,31 +54,31 @@ fn derive_state(f: StateFacts) -> (TorrentState, Option<&'static str>) {
     if f.parked {
         return (WaitingVpn, Some("vpn_down"));
     }
-    if f.activity == Activity::Error {
-        return (Error, None);
-    }
-    // A saved-paused record can still be actively verifying. Only a drained,
-    // cancelled check is paused; transfer intent alone cannot establish that.
-    if f.activity == Activity::Checking && !f.check_cancelled {
-        return (Checking, None);
-    }
-    if f.activity == Activity::Metadata {
-        return (Metadata, None);
-    }
-    if f.record_paused {
-        return (Paused, Some("user"));
-    }
-    if f.finished && f.stop_on_complete {
-        return (Done, Some("complete_no_seed"));
-    }
-    if f.paused && !f.finished {
-        return (Queued, Some("queue_full"));
-    }
-    match f.activity {
-        Activity::Live if f.finished => (Seeding, None),
-        Activity::Live if f.receiving => (Downloading, None),
-        Activity::Live => (Stalled, None),
-        _ => (Paused, None),
+    match (f.activity, f.check_cancelled) {
+        (Activity::Error, _) => (Error, None),
+        // Saved pause is transfer intent; an active verification still checks.
+        (Activity::Checking, false) => (Checking, None),
+        (Activity::Metadata, _) => (Metadata, None),
+        (Activity::Checking, true) | (Activity::Paused, _) | (Activity::Live, _)
+            if f.record_paused =>
+        {
+            (Paused, Some("user"))
+        }
+        (Activity::Checking, true) | (Activity::Paused, _) | (Activity::Live, _)
+            if f.finished && f.stop_on_complete =>
+        {
+            (Done, Some("complete_no_seed"))
+        }
+        (Activity::Checking, true) | (Activity::Paused, _) | (Activity::Live, _)
+            if f.paused && !f.finished =>
+        {
+            (Queued, Some("queue_full"))
+        }
+        (Activity::Live, _) if f.finished => (Seeding, None),
+        (Activity::Live, _) if f.receiving => (Downloading, None),
+        (Activity::Live, _) => (Stalled, None),
+        // Name both inactive cases so a new Activity requires a mapping.
+        (Activity::Checking, true) | (Activity::Paused, _) => (Paused, None),
     }
 }
 
