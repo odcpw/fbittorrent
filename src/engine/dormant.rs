@@ -159,6 +159,10 @@ impl Inner {
         mut changed: Record,
     ) -> Result<()> {
         let hash = changed.hash.clone();
+        // Seed activation already has running intent. Starting its check as
+        // paused would make reconciliation unpause an initializing handle,
+        // cancelling that run and potentially performing a second check.
+        let dormant_seed = self.dormant(&hash) && !changed.stop_on_complete() && !changed.paused;
         if self.dormant(&hash) {
             self.require_saved_data(cx, ledger, index).await?;
         }
@@ -179,7 +183,7 @@ impl Inner {
         }
         self.set_restore_outcome(&hash, RestoreOutcome::Checking);
         match self
-            .admit_record(cx, &ledger.records[index], true, metadata)
+            .admit_record(cx, &ledger.records[index], !dormant_seed, metadata)
             .await
         {
             Ok(_) => {
@@ -243,22 +247,31 @@ impl EngineDispatcher {
                             changed.paused = false;
                         }
                         let handle = self.inner.handle(&hash).ok();
-                        if (*on && handle.is_none() && self.inner.dormant(&hash))
-                            || handle.is_some()
-                                && changed.upload_limit != ledger.records[index].upload_limit
-                        {
+                        if *on && handle.is_none() && self.inner.dormant(&hash) {
                             self.inner
                                 .activate_record(cx, &mut ledger, index, changed)
                                 .await?;
                         } else {
-                            ledger.records[index] = changed;
-                            self.inner.save(cx, &ledger).await?;
-                            if *on && handle.is_none() {
-                                // An unresolved magnet must retain cached-first
-                                // startup's nonblocking metadata resolution.
-                                self.inner
-                                    .spawn_restore(cx, ledger.records[index].clone())?;
+                            let old = std::mem::replace(&mut ledger.records[index], changed);
+                            if let Err(error) = self.inner.save(cx, &ledger).await {
+                                ledger.records[index] = old;
+                                let _ = self.inner.save(cx, &ledger).await;
+                                return Err(error)
+                                    .context("saving seed intent; previous intent restored");
                             }
+                        }
+                        if let Ok(handle) = self.inner.handle(&hash) {
+                            // Save first, then use the same live limiter setter
+                            // for existing and newly admitted dormant handles.
+                            // Queue reconciliation owns pause/resume; neither a
+                            // cap change nor a seed toggle needs another check.
+                            let limit = ledger.records[index].upload_limit;
+                            handle.set_upload_bps((limit != 0).then_some(limit as u64))?;
+                        } else if *on {
+                            // An unresolved magnet must retain cached-first
+                            // startup's nonblocking metadata resolution.
+                            self.inner
+                                .spawn_restore(cx, ledger.records[index].clone())?;
                         }
                     }
                 } else {
