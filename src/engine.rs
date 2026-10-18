@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
@@ -181,6 +181,10 @@ struct Inner {
     max_active_downloads: AtomicUsize,
     network_blocked: AtomicBool,
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
+    // Initializing.paused is transfer intent, not check activity. Only a
+    // successfully drained pause cancels an initial check. Track the handle
+    // identity so rebuilding the same hash cannot inherit an old cancellation.
+    cancelled_checks: std::sync::Mutex<HashMap<String, Weak<ManagedTorrent>>>,
 }
 
 impl Inner {
@@ -286,7 +290,33 @@ impl Inner {
             restore.cancel.cancel();
             restore.outcome = RestoreOutcome::Stopped;
         }
-        if remove { restores.remove(hash); }
+        if remove {
+            restores.remove(hash);
+            drop(restores);
+            self.cancelled_checks.lock().unwrap().remove(hash);
+        }
+    }
+
+    fn check_cancelled(&self, hash: &str, handle: &Arc<ManagedTorrent>) -> bool {
+        self.cancelled_checks.lock().unwrap().get(hash).is_some_and(|saved|
+            saved.upgrade().is_some_and(|saved| Arc::ptr_eq(&saved, handle)))
+    }
+
+    async fn pause_handle(&self, cx: &Cx, handle: &Arc<ManagedTorrent>) -> Result<()> {
+        // Session::pause waits for the check's region and blocking file work.
+        // Publish cancellation only after that work has actually drained.
+        self.session.pause(cx, handle).await?;
+        if matches!(handle.stats().state, TorrentStatsState::Initializing { .. }) {
+            self.cancelled_checks.lock().unwrap().insert(
+                handle.info_hash().as_string(), Arc::downgrade(handle));
+        }
+        Ok(())
+    }
+
+    async fn unpause_handle(&self, cx: &Cx, handle: &Arc<ManagedTorrent>) -> Result<()> {
+        self.session.unpause(cx, handle).await?;
+        self.cancelled_checks.lock().unwrap().remove(&handle.info_hash().as_string());
+        Ok(())
     }
 
     fn spawn_restore(self: &Arc<Self>, cx: &Cx, record: Record) -> Result<()> {
@@ -461,7 +491,7 @@ impl Inner {
                 && !handle.is_paused()
                 && !matches!(handle.stats().state, TorrentStatsState::Error)
             {
-                self.session.pause(cx, handle).await?;
+                self.pause_handle(cx, handle).await?;
             }
         }
         for (handle, running) in decisions {
@@ -469,7 +499,7 @@ impl Inner {
             if running
                 && (handle.is_paused() || matches!(handle.stats().state, TorrentStatsState::Error))
             {
-                self.session.unpause(cx, &handle).await?;
+                self.unpause_handle(cx, &handle).await?;
             }
         }
         Ok(())
@@ -583,6 +613,7 @@ fn start_in(cfg: &Config, directory: PathBuf, instance: InstanceLock, options: S
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
         network_blocked: AtomicBool::new(false),
         restores: std::sync::Mutex::new(HashMap::new()),
+        cancelled_checks: std::sync::Mutex::new(HashMap::new()),
     });
     let records = runtime.block_on(async {
         Ok::<_, anyhow::Error>(OwnedMutexGuard::lock(inner.ledger.clone(), cx).await?.records.clone())
@@ -759,7 +790,7 @@ impl EngineDispatcher {
                 for record in &ledger.records {
                     torrents.push(match self.inner.handle(&record.hash) {
                         Ok(handle) => {
-                            let mut torrent = snapshot(record, &handle);
+                            let mut torrent = snapshot(record, &handle, self.inner.check_cancelled(&record.hash, &handle));
                             if torrent.error_message.is_none() {
                                 torrent.error_message = self.inner.restores.lock().unwrap()
                                     .get(&record.hash).and_then(|restore| restore.last_error.clone());
@@ -822,7 +853,7 @@ impl EngineDispatcher {
             // A finished seeder can become an unfinished download when another
             // file is selected. Stop its run before changing the selected set.
             if !handle.is_paused() && !matches!(handle.stats().state, TorrentStatsState::Error) {
-                self.inner.session.pause(cx, &handle).await?;
+                self.inner.pause_handle(cx, &handle).await?;
             }
             self.inner
                 .session
@@ -926,7 +957,7 @@ impl EngineDispatcher {
                     record.ratio_limit = ratio;
                     if let Some(handle) = &handle {
                         if ratio == 0.0 && handle.stats().finished && !handle.is_paused() {
-                            self.inner.session.pause(cx, handle).await?;
+                            self.inner.pause_handle(cx, handle).await?;
                         }
                     }
                 }
@@ -961,7 +992,15 @@ impl EngineDispatcher {
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
             }
-            if request.path == "torrents/stop" { self.inner.cancel_restore(&hash, false); }
+            if request.path == "torrents/stop" {
+                self.inner.cancel_restore(&hash, false);
+                if let Some(handle) = &handle {
+                    if matches!(handle.stats().state, TorrentStatsState::Initializing { .. }) {
+                        // Even a saved-paused handle may be actively hashing.
+                        self.inner.pause_handle(cx, handle).await?;
+                    }
+                }
+            }
             if request.path == "torrents/start" && handle.is_none() {
                 self.inner.spawn_restore(cx, ledger.records[index].clone())?;
             }
@@ -1564,7 +1603,7 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
-fn snapshot(record: &Record, handle: &Arc<ManagedTorrent>) -> Torrent {
+fn snapshot(record: &Record, handle: &Arc<ManagedTorrent>, check_cancelled: bool) -> Torrent {
     let stats = handle.stats();
     let progress = if stats.total_bytes > 0 {
         (stats.progress_bytes as f64 / stats.total_bytes as f64).min(1.0)
@@ -1587,13 +1626,14 @@ fn snapshot(record: &Record, handle: &Arc<ManagedTorrent>) -> Torrent {
     let state = if handle.is_paused()
         && !record.paused
         && !stats.finished
-        && !matches!(stats.state, TorrentStatsState::Error | TorrentStatsState::Initializing { .. })
+        && !matches!(stats.state, TorrentStatsState::Error)
+        && (!matches!(stats.state, TorrentStatsState::Initializing { .. }) || check_cancelled)
     {
         "queuedDL"
     } else {
         match stats.state {
-            TorrentStatsState::Initializing { paused: false } => "checkingDL",
-            TorrentStatsState::Initializing { paused: true } => "stoppedDL",
+            TorrentStatsState::Initializing { .. } if check_cancelled => "stoppedDL",
+            TorrentStatsState::Initializing { .. } => "checkingDL",
             TorrentStatsState::Paused => {
                 if stats.finished {
                     "stoppedUP"
@@ -1745,6 +1785,7 @@ mod tests {
             max_active_downloads: AtomicUsize::new(3),
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
+            cancelled_checks: std::sync::Mutex::new(HashMap::new()),
         });
         runtime.block_on(async {
             let records = OwnedMutexGuard::lock(inner.ledger.clone(), &test_cx())
@@ -1894,9 +1935,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn stop_during_hashing_is_paused_and_can_resume() {
-        use std::time::Instant;
+    fn hashing_fixture(saved_paused: bool) -> (AppEngine, PathBuf, String, u64) {
         let directory = review_directory("stop-during-hashing");
         let downloads = directory.join("downloads");
         std::fs::create_dir_all(&downloads).unwrap();
@@ -1914,7 +1953,8 @@ mod tests {
         bytes.extend_from_slice(&pieces);
         bytes.extend_from_slice(b"7:privatei1eee");
         let hash = librqbit::torrent_from_bytes(&bytes).unwrap().info_hash.as_string();
-        let record = review_record(&hash, &downloads);
+        let mut record = review_record(&hash, &downloads);
+        record.paused = saved_paused;
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger {
             migrated_legacy: true, records: vec![record],
@@ -1925,39 +1965,82 @@ mod tests {
             dht: None, disable_trackers: true, disable_local_service_discovery: true,
             concurrent_init_limit: Some(1), ..Default::default()
         }).unwrap();
-        let dispatcher = app.dispatcher();
-        let row = || -> Torrent {
-            let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
-            rows.into_iter().find(|row| row.hash == hash).unwrap()
-        };
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let checking = row();
-            if checking.state == "checkingDL" && checking.completed > 0 && checking.completed < length as i64 {
-                println!("active hashing: state={} checked_bytes={}", checking.state, checking.completed);
-                break;
+        (app, directory, hash, length)
+    }
+
+    #[test]
+    fn stop_during_hashing_is_paused_and_can_resume() {
+        use std::time::Instant;
+        for saved_paused in [false, true] {
+            let (app, directory, hash, length) = hashing_fixture(saved_paused);
+            let dispatcher = app.dispatcher();
+            let row = || -> Torrent {
+                let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
+                rows.into_iter().find(|row| row.hash == hash).unwrap()
+            };
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let checking = row();
+                if checking.state == "checkingDL" && checking.completed > 0 && checking.completed < length as i64 {
+                    println!("active hashing: state={} checked_bytes={}", checking.state, checking.completed);
+                    break;
+                }
+                assert!(Instant::now() < deadline, "must stop during real hashing: {checking:?}");
+                std::thread::sleep(Duration::from_millis(1));
             }
-            assert!(Instant::now() < deadline, "must stop during real hashing: {checking:?}");
+            dispatcher.dispatch(&request("torrents/stop", &[("hashes", &hash)])).unwrap().unwrap();
+            let stopped = row();
+            println!("stopped hashing (saved_paused={saved_paused}): state={} checked_bytes={}", stopped.state, stopped.completed);
+            assert_eq!(stopped.state, "stoppedDL");
+            assert!(stopped.is_stopped(), "the shared client must offer Resume");
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(row().completed, stopped.completed, "Stop must drain the real check, including a saved-paused check");
+            let saved = read_ledger(&directory.join("torrents.json")).unwrap();
+            assert!(saved.records[0].paused);
+            dispatcher.dispatch(&request("torrents/start", &[("hashes", &hash)])).unwrap().unwrap();
+            let handle = dispatcher.inner.handle(&hash).unwrap();
+            dispatcher.runtime.block_on(async {
+                time::timeout(dispatcher.runtime.cx(), Duration::from_secs(15),
+                    handle.wait_until_initialized(dispatcher.runtime.cx())).await.unwrap().unwrap();
+            });
+            let resumed = row();
+            println!("resumed hashing: state={} verified_bytes={}", resumed.state, resumed.completed);
+            assert_eq!(resumed.state, "stalledDL");
+            assert!(resumed.completed > 0 && resumed.completed < length as i64);
+            assert!(!read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
+            drop(app);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn saved_paused_check_reports_activity_until_complete() {
+        use std::time::Instant;
+        let (app, directory, hash, length) = hashing_fixture(true);
+        let dispatcher = app.dispatcher();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut active_observations = 0;
+        loop {
+            let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
+            let row = rows.iter().find(|row| row.hash == hash).unwrap();
+            assert!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
+            match row.state.as_str() {
+                "checkingDL" => {
+                    if row.completed > 0 && row.completed < length as i64 {
+                        active_observations += 1;
+                    }
+                }
+                "stoppedDL" => {
+                    assert!(active_observations > 0, "saved-paused verification must be shown as checking while active: {row:?}");
+                    assert!(matches!(dispatcher.inner.handle(&hash).unwrap().stats().state, TorrentStatsState::Paused));
+                    println!("saved-paused verification: {active_observations} active checking observations, then state={} verified_bytes={}", row.state, row.completed);
+                    break;
+                }
+                _ => panic!("unexpected saved-paused verification state: {row:?}"),
+            }
+            assert!(Instant::now() < deadline, "saved-paused check must finish: {row:?}");
             std::thread::sleep(Duration::from_millis(1));
         }
-        dispatcher.dispatch(&request("torrents/stop", &[("hashes", &hash)])).unwrap().unwrap();
-        let stopped = row();
-        println!("stopped hashing: state={} checked_bytes={}", stopped.state, stopped.completed);
-        assert_eq!(stopped.state, "stoppedDL");
-        assert!(stopped.is_stopped(), "the shared client must offer Resume");
-        let saved = read_ledger(&directory.join("torrents.json")).unwrap();
-        assert!(saved.records[0].paused);
-        dispatcher.dispatch(&request("torrents/start", &[("hashes", &hash)])).unwrap().unwrap();
-        let handle = dispatcher.inner.handle(&hash).unwrap();
-        dispatcher.runtime.block_on(async {
-            time::timeout(dispatcher.runtime.cx(), Duration::from_secs(15),
-                handle.wait_until_initialized(dispatcher.runtime.cx())).await.unwrap().unwrap();
-        });
-        let resumed = row();
-        println!("resumed hashing: state={} verified_bytes={}", resumed.state, resumed.completed);
-        assert_eq!(resumed.state, "stalledDL");
-        assert!(resumed.completed > 0 && resumed.completed < length as i64);
-        assert!(!read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
         drop(app);
         std::fs::remove_dir_all(directory).unwrap();
     }

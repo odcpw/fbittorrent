@@ -426,7 +426,7 @@ def startup_survives_bad_record(binary):
 
 
 def stop_during_hashing(binary):
-    """Stop a real 1 GiB hash check, then resume through the actual TUI."""
+    """Observe saved-paused verification, then Stop and Resume a real check."""
     with Case("native", "stop_during_hashing") as case, \
             tempfile.TemporaryDirectory(prefix="fbittorrent-hashing-") as temporary:
         root = Path(temporary)
@@ -453,7 +453,7 @@ def stop_during_hashing(binary):
         store.mkdir(parents=True)
         record = dict(hash=hash_, name=name, source="", output_folder=str(downloads),
                       only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
-                      added_on=100, completion_on=0, paused=False, resume_after_migration=False)
+                      added_on=100, completion_on=0, paused=True, resume_after_migration=False)
         ledger = store / "torrents.json"
         ledger.write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
         (store / f"{hash_}.torrent").write_bytes(bencode(dict(info=info)))
@@ -475,6 +475,7 @@ def stop_during_hashing(binary):
             return tmux("capture-pane", "-t", session, "-p").stdout
 
         socket_path = root / "runtime/fbittorrent/engine.sock"
+        stderr_offset = case.stderr_offset
         try:
             command = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
             launch = f"exec script -qef -c {shlex.quote(command)} {shlex.quote(str(root / 'terminal.typescript'))}"
@@ -485,6 +486,32 @@ def stop_during_hashing(binary):
                 row = harness.cli("show", hash_)
                 return row if row["state"] == "checkingDL" and 0 < row["completed"] < length else None
 
+            initial = harness.wait_for(active_hashing, "saved-paused startup verification is actively hashing")
+            case.check(bool(initial) and json.loads(ledger.read_text())["records"][0]["paused"] is True,
+                       "A saved-paused record lists checkingDL while real verification is active.", json.dumps(initial))
+
+            def finished_paused():
+                row = harness.cli("show", hash_)
+                return row if row["state"] == "stoppedDL" else None
+
+            finished = harness.wait_for(finished_paused, "saved-paused verification completes before listing stoppedDL", seconds=15)
+            case.check(bool(finished) and finished["completed"] == length-piece_length and
+                       json.loads(ledger.read_text())["records"][0]["paused"] is True,
+                       "The stopped state follows completed verification and preserves saved paused intent.", json.dumps(finished))
+            harness.cli("down")
+            harness.wait_for(lambda: not socket_path.exists(), "saved-paused verification app closes", seconds=6)
+            harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
+                             "saved-paused verification app drains and exits", seconds=6)
+            stderr_bytes = case.suite.stderr_path.read_bytes()
+            first_stderr = stderr_bytes[stderr_offset:].decode("utf-8", errors="replace")
+            case.check(expected_shutdown_stderr(first_stderr),
+                       "The verification run emits only its optional successful-drain INFO line.",
+                       first_stderr or "No stderr was emitted.")
+            stderr_offset = len(stderr_bytes)
+            # Restart with the same saved-paused intent, then explicitly Stop
+            # its fresh startup check before exercising the actual Resume key.
+            harness.start_tmux(tmux, session, launch)
+            harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
             case.check(bool(hashing), "Stop is issued while the real 1 GiB payload is being hashed.", json.dumps(hashing))
             harness.cli("stop", hash_)
@@ -508,7 +535,7 @@ def stop_during_hashing(binary):
             harness.wait_for(lambda: not socket_path.exists(), "hashing fixture closes", seconds=6)
             harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
                              "hashing fixture process drains and exits", seconds=6)
-            stderr = case.suite.stderr_path.read_bytes()[case.stderr_offset:].decode("utf-8", errors="replace")
+            stderr = case.suite.stderr_path.read_bytes()[stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_shutdown_stderr(stderr),
                        "The hashing fixture emits only the optional successful-drain INFO line.",
                        stderr or "No stderr was emitted.")
