@@ -1,6 +1,33 @@
 //! Cached-first restore work, cancellation and handle policy.
 use super::*;
 
+// A cancelled join future must not turn unfinished work into task: None.
+// Generation changes/removals return unfinished attempts to the retired list.
+type RestoreJoin = (Option<(String, usize)>, task::JoinHandle<()>);
+struct RestoreJoins<'a> {
+    inner: &'a Inner,
+    tasks: Vec<RestoreJoin>,
+}
+impl Drop for RestoreJoins<'_> {
+    fn drop(&mut self) {
+        let mut restores = self.inner.restores.lock().unwrap();
+        let mut retired = self.inner.retired_restores.lock().unwrap();
+        for (slot, task) in self.tasks.drain(..) {
+            if let Some((hash, generation)) = slot {
+                if let Some(restore) = restores.get_mut(&hash) {
+                    if restore.generation == generation && restore.task.is_none() {
+                        restore.task = Some(task);
+                        continue;
+                    }
+                }
+            }
+            if !task.is_finished() {
+                retired.push(task);
+            }
+        }
+    }
+}
+
 impl Inner {
     fn retire_restore(&self, mut restore: RestoreTask) {
         restore.cancel.cancel();
@@ -12,40 +39,37 @@ impl Inner {
     }
 
     pub(super) async fn drain_restores(&self) -> Result<()> {
-        // stopping is set before this snapshot. Spawn checks it under the same
-        // map lock, so no attempt can arrive after the snapshot. Never hold a
-        // bookkeeping lock across a join: the task needs it to publish its end.
-        let mut tasks = {
-            let mut restores = self.restores.lock().unwrap();
-            restores
-                .iter_mut()
-                .filter_map(|(hash, restore)| {
-                    restore.cancel.cancel();
-                    restore
-                        .task
-                        .take()
-                        .map(|task| (Some((hash.clone(), restore.generation)), task))
-                })
-                .collect::<Vec<_>>()
+        // The guard returns every handle on normal completion, cancellation or
+        // timeout. No bookkeeping lock spans a join: tasks publish through it.
+        let mut joins = RestoreJoins {
+            inner: self,
+            tasks: Vec::new(),
         };
-        tasks.extend(
+        {
+            let mut restores = self.restores.lock().unwrap();
+            for (hash, restore) in restores.iter_mut() {
+                restore.cancel.cancel();
+                if let Some(task) = restore.task.take() {
+                    joins
+                        .tasks
+                        .push((Some((hash.clone(), restore.generation)), task));
+                }
+            }
+        }
+        joins.tasks.extend(
             std::mem::take(&mut *self.retired_restores.lock().unwrap())
                 .into_iter()
                 .map(|task| (None, task)),
         );
+        // This test-only rendezvous releases the real resolver's epilogue only
+        // after teardown has acquired responsibility for joining its handle.
+        #[cfg(test)]
+        if let Some(signal) = self.restore_join_started.lock().unwrap().as_ref() {
+            signal.cancel();
+        }
         let mut failure = None;
-        for (slot, mut task) in tasks {
-            let result = (&mut task).await;
-            // Keep the completed handle as evidence for retained dispatchers
-            // (and the existing post-drop is_finished assertions).
-            if let Some((hash, generation)) = slot {
-                if let Some(restore) = self.restores.lock().unwrap().get_mut(&hash) {
-                    if restore.generation == generation {
-                        restore.task = Some(task);
-                    }
-                }
-            }
-            if let Err(error) = result {
+        for (_, task) in &mut joins.tasks {
+            if let Err(error) = task.await {
                 failure.get_or_insert_with(|| anyhow!(error).context("joining torrent restore"));
             }
         }

@@ -85,6 +85,8 @@ struct Inner {
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
     // Removing/retrying an intent does not end the previous task's cleanup.
     retired_restores: std::sync::Mutex<Vec<task::JoinHandle<()>>>,
+    #[cfg(test)]
+    restore_join_started: std::sync::Mutex<Option<CancellationToken>>,
     // Initializing.paused is transfer intent, not check activity. Only a
     // successfully drained pause cancels an initial check. Track the handle
     // identity so rebuilding the same hash cannot inherit an old cancellation.
@@ -179,6 +181,8 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         network_blocked: AtomicBool::new(false),
         restores: std::sync::Mutex::new(HashMap::new()),
         retired_restores: std::sync::Mutex::new(Vec::new()),
+        #[cfg(test)]
+        restore_join_started: std::sync::Mutex::new(None),
         cancelled_checks: std::sync::Mutex::new(HashMap::new()),
     });
     let records = runtime.block_on(async {

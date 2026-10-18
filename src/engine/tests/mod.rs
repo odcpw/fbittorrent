@@ -86,6 +86,7 @@
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
             retired_restores: std::sync::Mutex::new(Vec::new()),
+            restore_join_started: std::sync::Mutex::new(None),
             cancelled_checks: std::sync::Mutex::new(HashMap::new()),
         });
         runtime.block_on(async {
