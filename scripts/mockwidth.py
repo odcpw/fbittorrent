@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review cell widths and rectangular boxes in PLAN §5 and Appendix C (not a CI gate)."""
+"""Review PLAN mockups, adapted from the round-2 script in review-log.md (not a CI gate)."""
 import argparse
 from pathlib import Path
 import re
@@ -12,49 +12,78 @@ def width(text):
                2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
 
 
-def check(text):
-    active, fenced, measured, declared, box = False, False, False, None, None
-    errors, blocks = [], 0
+def review(text):
+    active, fenced, measured, heading = False, False, False, ""
+    reports, errors, rows = [], [], []
+
+    def finish(opening, declared, closed):
+        issues, details, frame = [], [], None
+        widths = sorted({cells for _, cells, line in rows if line.lstrip().startswith(tuple("│┌└├╭╰"))})
+        for number, cells, line in rows:
+            if declared and cells > declared:
+                issues.append(f"line {number}: {cells} cells overflow declared width {declared}")
+                details.append(f"   OVERFLOW {cells}: {line}")
+            stripped = line.strip()
+            if len(widths) > 1 and stripped.startswith(tuple("│┌└├╭╰")) and cells != widths[-1]:
+                issues.append(f"line {number}: ragged box, {cells} cells; expected {widths[-1]}")
+                details.append(f"   RAGGED {cells} (expected {widths[-1]}): {line}")
+            if stripped.startswith(("┌", "╭")):
+                if frame is not None:
+                    issues.append(f"line {number}: previous box was not closed")
+                frame = number
+                if not stripped.endswith(("┐", "╮")):
+                    issues.append(f"line {number}: malformed top box edge")
+            elif stripped.startswith(("│", "├", "└", "╰")):
+                if not stripped.endswith(("│", "┤", "┘", "╯")):
+                    issues.append(f"line {number}: malformed box edge")
+                if stripped.startswith(("└", "╰")):
+                    frame = None
+        if frame is not None:
+            issues.append(f"line {frame}: box was not closed")
+        if not closed:
+            issues.append(f"line {opening}: mockup fence was not closed")
+        # Keep the review-round per-block summary and OVERFLOW/RAGGED diagnostics.
+        # Structural checks are additions to that script, so name them separately.
+        details.extend("   INVALID " + issue for issue in issues
+                       if "overflow" not in issue and "ragged" not in issue)
+        reports.append((f"L{opening} [{'FIX' if issues else 'OK'}] {heading[:70]!r}: "
+                        f"declared {declared}, max {max((w for _, w, _ in rows), default=0)}, "
+                        f"box widths {widths}", details, bool(issues)))
+        errors.extend(issues)
+
     for number, line in enumerate(text.splitlines(), 1):
         if line.startswith("## ") and not fenced:
             active = bool(re.match(r"## (?:5[. ]|Appendix C\b)", line))
-            fenced, measured, box, declared = False, False, None, None
+            heading = line.strip("*# ")
         if not active:
             continue
-        if not fenced:
-            found = re.search(r"\b(80|120|160)(?:[x×]\d+|[- ](?:cells|columns|wide))", line)
-            if found:
-                declared = int(found[1])
+        if not fenced and (re.match(r"#{2,6} ", line) or line.startswith("**")):
+            heading = line.strip("*# ")
         if line.startswith("```"):
             fenced = not fenced
             if fenced:
                 measured = line.strip() in ("```", "```text", "```plaintext")
-                blocks += int(measured)
-            elif box is not None:
-                errors.append(f"line {number}: box was not closed")
-                box = None
+                opening, rows = number, []
+                found = re.search(r"\b(\d{2,3})(?:\s*[x×]\s*\d+\b|[- ](?:cells|(?:text )?columns|wide)\b)", heading)
+                declared = int(found[1]) if found else None
+            elif measured:
+                finish(opening, declared, closed=True)
             continue
         if not fenced or not measured:
             continue
         # Notes after a frame's closing edge describe the mockup; they are not
         # terminal cells (for example "focus starts on Cancel").
-        if box is not None and line.lstrip().startswith("│") and "│" in line:
+        if line.lstrip().startswith("│"):
             line = line[:line.rfind("│") + 1]
-        cells = width(line)
-        limit = declared or (next((n for n in (80, 120, 160) if cells <= n), 160) if box is None else box[1])
-        if cells > limit:
-            errors.append(f"line {number}: {cells} cells overflow declared/inferred width {limit}")
-        stripped = line.strip()
-        if stripped.startswith("┌") and stripped.endswith("┐"):
-            box = (cells, declared or next((n for n in (80, 120, 160) if cells <= n), 160))
-        elif box is not None and stripped.startswith(("│", "├", "└")):
-            if not stripped.endswith(("│", "┤", "┘")) or cells != box[0]:
-                errors.append(f"line {number}: ragged box, {cells} cells; top edge has {box[0]}")
-            if stripped.startswith("└"):
-                box = None
-    if box is not None:
-        errors.append("unclosed box at end of plan")
-    return blocks, errors
+        rows.append((number, width(line), line))
+    if fenced and measured:
+        finish(opening, declared, closed=False)
+    return reports, errors
+
+
+def check(text):
+    reports, errors = review(text)
+    return len(reports), errors
 
 
 def main():
@@ -62,10 +91,12 @@ def main():
     parser.add_argument("plan", nargs="?", type=Path,
                         default=Path(__file__).resolve().parents[1] / "docs/plan-2026-10-18/PLAN.md")
     args = parser.parse_args()
-    blocks, errors = check(args.plan.read_text())
-    print(f"checked {blocks} mockup blocks in §5 and Appendix C")
-    for error in errors:
-        print(error, file=sys.stderr)
+    reports, errors = review(args.plan.read_text())
+    for summary, details, _ in reports:
+        print(summary)
+        for detail in details:
+            print(detail)
+    print(f"{len(reports)} blocks measured, {sum(failed for _, _, failed in reports)} need fixing")
     return int(bool(errors))
 
 
