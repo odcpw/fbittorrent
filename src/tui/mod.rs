@@ -2,6 +2,7 @@
 
 mod poster;
 mod theme;
+pub(crate) mod signals;
 
 #[cfg(test)]
 #[path = "tests/golden.rs"]
@@ -25,7 +26,7 @@ use ftui::widgets::list::{List, ListItem, ListState};
 use ftui::widgets::paragraph::Paragraph;
 use ftui::widgets::progress::MiniBar;
 use ftui::widgets::{StatefulWidget, StatusLine, Tab, Tabs, TabsState, Widget};
-use ftui::{App, Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
+use ftui::{Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
 
 use crate::config::Config;
 use crate::imdb::{self, Title};
@@ -180,6 +181,7 @@ pub struct TuiApp {
     hover_key: Option<String>,
     hover_since: std::time::Instant,
     pointer_motion_on_start: bool,
+    termination_signal: Option<i32>,
     marquee_key: Option<String>,
     marquee_since: std::time::Instant,
     last_bounds: Cell<Rect>,
@@ -222,11 +224,38 @@ const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];
 pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     let mut model = TuiApp::new(cfg, screen, Shows::load()?);
     model.pointer_motion_on_start = true;
-    App::fullscreen(model).with_mouse().run()?;
+    // AppBuilder::run exits the process on a signal, skipping the outer engine
+    // guard. Program returns instead, so our application owner drains first.
+    let mut program = ftui::Program::with_config(model, ftui::ProgramConfig::fullscreen().with_mouse())?;
+    let result = program.run();
+    signals::event("shutdown_once end (Program::run returned)");
+    let signal = program.model().termination_signal;
+    drop(program);
+    if let Some(signal) = signal { return Err(SignalTermination(signal).into()); }
+    result?;
     Ok(())
 }
 
+#[derive(Debug)]
+pub(crate) struct SignalTermination(pub i32);
+impl std::fmt::Display for SignalTermination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "terminated by signal {}", self.0) }
+}
+impl std::error::Error for SignalTermination {}
+
 impl TuiApp {
+    fn acknowledge_signal(&mut self) -> bool {
+        if let Some(signal) = ftui::core::shutdown_signal::pending_termination_signal() {
+            signals::event("loop observed signal (model)");
+            self.termination_signal.get_or_insert(signal);
+            // Preserve the request if terminal teardown blocks after this ack.
+            signals::request(signal);
+            ftui::core::shutdown_signal::clear_pending_termination_signal();
+            signals::event("clear (model)");
+            true
+        } else { false }
+    }
+
     fn new(cfg: Config, screen: Screen, shows: Shows) -> Self {
         let theme = Theme::load();
         let mut search_input = TextInput::new()
@@ -271,6 +300,7 @@ impl TuiApp {
             hover_key: None,
             hover_since: std::time::Instant::now(),
             pointer_motion_on_start: false,
+            termination_signal: None,
             marquee_key: None,
             marquee_since: std::time::Instant::now(),
             last_bounds: Cell::new(Rect::new(0, 0, 0, 0)),
@@ -1654,6 +1684,12 @@ impl TuiApp {
 impl Model for TuiApp {
     type Message = Msg;
 
+    fn on_shutdown(&mut self) -> Cmd<Msg> {
+        signals::event("shutdown_once begin (model hook)");
+        self.acknowledge_signal();
+        Cmd::none()
+    }
+
     fn init(&mut self) -> Cmd<Msg> {
         if self.pointer_motion_on_start {
             // FrankenTUI's default captures clicks and dragging (1002), but
@@ -1706,6 +1742,7 @@ impl Model for TuiApp {
                 self.tick += 1; self.maybe_reload_theme(); self.poll()
             }
             Msg::Hover => {
+                if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
                 if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); }
                 self.on_hover()
@@ -3119,6 +3156,19 @@ mod interaction_tests {
         app.kitty = None;
         app.rss_initial_refresh_pending = false;
         app
+    }
+
+    #[test]
+    fn hover_acknowledges_termination_before_quitting() {
+        ftui::core::shutdown_signal::with_test_signal_serialization(|| {
+            for signal in [libc::SIGHUP, libc::SIGINT, libc::SIGTERM] {
+                let mut app = app();
+                ftui::core::shutdown_signal::record_pending_termination_signal(signal);
+                assert!(matches!(app.update(Msg::Hover), Cmd::Quit));
+                assert_eq!(ftui::core::shutdown_signal::pending_termination_signal(), None);
+                assert_eq!(app.termination_signal, Some(signal));
+            }
+        });
     }
 
     fn article(id: &str, title: &str) -> crate::qbt::RssArticle {

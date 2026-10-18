@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import signal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shlex
@@ -31,7 +32,7 @@ CASES = (
     "refresh_preserves_read_history", "rss_mouse_and_scoped_shortcuts",
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety", "no_fake_seed_counts",
     "resume_done_refused", "bulk_start_requires_hashes", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
-    "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp", "launcher_never_called",
+    "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp", "launcher_never_called", "terminal_close_is_graceful",
 )
 
 
@@ -222,6 +223,123 @@ def launcher_never_called(binary):
             child.kill()
             child.communicate()
             step.fail("Ordinary setup timed out.", [control, calls])
+
+
+
+def terminal_close_is_graceful(binary):
+    with Case("native", "terminal_close_is_graceful") as case, tempfile.TemporaryDirectory(prefix="fbt-hup-") as temporary:
+        root = Path(temporary)
+        env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color", FBT_DEBUG_SIGNALS="1")
+        for key in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+            if key != "HOME": env[key] = str(root / key.lower())
+            Path(env[key]).mkdir(mode=0o700)
+        env.pop("FBITTORRENT_NO_START", None)
+        shims = root / "shims"
+        shims.mkdir()
+        for name in ("systemctl", "notify-send", "xdg-open", "wl-paste", "wl-copy", "systemd-inhibit", "omarchy-launch-or-focus-tui"):
+            path = shims / name
+            path.write_text("#!/bin/sh\nexit 3\n")
+            path.chmod(0o700)
+        env["PATH"] = str(shims) + os.pathsep + env["PATH"]
+        config = Path(env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        config.parent.mkdir()
+        with socket.socket() as port:
+            port.bind(("127.0.0.1", 0))
+            peer_port = port.getsockname()[1]
+        config.write_text(f'engine = "native"\nautostart = false\nnotify = false\nnetwork_interface = "lo"\n'
+                          f'peer_port = {peer_port}\nurl = "http://127.0.0.1:9"\n'
+                          f'save_path = {json.dumps(str(root / "downloads"))}\n')
+        stderr = case.path.with_suffix(".tui.stderr")
+        stderr.write_text("")
+        trace = case.path.with_suffix(".signals.log")
+        source_trace = Path(env["XDG_STATE_HOME"]) / "fbittorrent/tui-signals.log"
+        status_path, pid_path = root / "exit.json", root / "pid"
+        supervisor = root / "supervise.py"
+        # Keep a parent alive after the real pty is hung up, so the test can
+        # observe the app's wait status rather than infer it from socket removal.
+        supervisor.write_text('''import json, os, signal, subprocess, sys
+from pathlib import Path
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+def prepare_child():
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+with open(sys.argv[4], "ab", buffering=0) as err:
+    child = subprocess.Popen([sys.argv[1], "tui"], stderr=err,
+        preexec_fn=prepare_child)
+    forwarded = []
+    def hangup(*_):
+        forwarded.append("SIGHUP")
+        try: os.kill(child.pid, signal.SIGHUP)
+        except ProcessLookupError: pass
+    signal.signal(signal.SIGHUP, hangup)
+    Path(sys.argv[3]).write_text(str(child.pid))
+    code = child.wait()
+    Path(sys.argv[2]).write_text(json.dumps({"returncode": code, "terminal_signals_forwarded": forwarded}))
+''')
+        tmux_base = ["tmux", "-L", f"fbt-p0-08-{os.getpid()}", "-f", "/dev/null"]
+        session = "fbt-fbt-p0-08-plg"
+        def tmux(*args):
+            child = case.popen([*tmux_base, *args], env=env, stdout=subprocess.PIPE, text=True)
+            out, _ = child.communicate(timeout=5)
+            return child.returncode, out.strip()
+        def cli(*args):
+            child = case.popen([binary, *args, "--json"], env=env, stdout=subprocess.PIPE, text=True)
+            out, _ = child.communicate(timeout=5)
+            return child.returncode, json.loads(out)
+        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        lock_path = socket_path.with_name("engine.lock")
+        try:
+            tmux("new-session", "-d", "-s", session, "-n", "keeper", "sleep 120")
+            launch = shlex.join([sys.executable, str(supervisor), binary, str(status_path), str(pid_path), str(stderr)])
+            code, window = tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", session, launch)
+            step = case.step("start the native TUI on a disposable tmux pty", "An open native engine socket within 10 seconds.")
+            deadline = time.monotonic() + 10
+            screen = ""
+            while not status_path.exists() and time.monotonic() < deadline:
+                _, screen = tmux("capture-pane", "-p", "-t", window)
+                if socket_path.exists() and "Torrents" in screen: break
+                time.sleep(.1)
+            step.close(code == 0 and socket_path.exists() and "Torrents" in screen,
+                       f"tmux exit {code}; window={window}; socket={socket_path.exists()}; screen={screen!r}", [stderr])
+            # A private, trackerless, unfinished torrent keeps a real download
+            # handle alive without contacting a public tracker or peer.
+            info = {"name": "terminal-close.fixture", "length": 65536, "piece length": 16384,
+                    "pieces": hashlib.sha1(b"x" * 16384).digest() * 4, "private": 1}
+            torrent = root / "fixture.torrent"
+            torrent.write_bytes(bencode({"info": info}))
+            code, added = cli("add", str(torrent), "--quiet")
+            case.check(code == 0 and added.get("ok") is True, "A real unfinished torrent is admitted before terminal close.", json.dumps(added))
+            step = case.step("check the app owns engine.lock before closing its terminal", "flock -n refuses the held instance lock.")
+            probe = case.popen(["flock", "-n", str(lock_path), "true"], env=env)
+            lock_code = probe.wait(timeout=5)
+            step.close(lock_code == 1, f"flock exit {lock_code} while the app is open.")
+            step = case.step("tmux kill-window " + window,
+                             "No engine.sock, flock -n succeeds, and app exit 129 within 6 seconds; engine drain is logged.")
+            began = time.monotonic()
+            kill_code, _ = tmux("kill-window", "-t", window)
+            acquired, samples = False, []
+            while time.monotonic() - began < 6:
+                probe = case.popen(["flock", "-n", str(lock_path), "true"], env=env)
+                acquired = probe.wait(timeout=1) == 0
+                samples.append(dict(ms=round((time.monotonic()-began)*1000), socket=socket_path.exists(), lock=acquired))
+                if acquired and not socket_path.exists() and status_path.exists(): break
+                time.sleep(.1)
+            elapsed = time.monotonic() - began
+            status = json.loads(status_path.read_text()) if status_path.exists() else {}
+            trace.write_text(source_trace.read_text() if source_trace.exists() else "<no signal trace>\n")
+            diagnostics = stderr.read_text()
+            step.close(kill_code == 0 and elapsed <= 6 and acquired and not socket_path.exists() and
+                       status.get("returncode") == 129 and "engine drained in " in diagnostics,
+                       f"elapsed={elapsed:.3f}s; status={status}; polls={samples}; tui.stderr tail={diagnostics[-2000:]!r}; "
+                       f"signals={trace.read_text()!r}", [stderr, trace])
+        finally:
+            if pid_path.exists() and not status_path.exists():
+                pid = int(pid_path.read_text())
+                try:
+                    if ("XDG_RUNTIME_DIR=" + env["XDG_RUNTIME_DIR"]).encode() in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0"):
+                        os.kill(pid, signal.SIGKILL)
+                except FileNotFoundError:
+                    pass
+            tmux("kill-server")
 
 
 def bencode(value):
@@ -535,6 +653,8 @@ def main():
     binary = str(Path(options.binary).resolve())
     if options.case == "launcher_never_called":
         launcher_never_called(binary)
+    if options.case == "terminal_close_is_graceful":
+        terminal_close_is_graceful(binary)
         return suite_status("native")
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
@@ -890,7 +1010,9 @@ def main():
                 keys("q")
                 wait_for(lambda: not socket_path.exists(), "quit removes socket", seconds=6)
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
-                case.check(not error_file.read_text(), 'The app and CLI have emitted no unexpected stderr.')
+                diagnostics = error_file.read_text()
+                case.check(all(re.fullmatch(r"INFO engine drained in \d+ ms", line) for line in diagnostics.splitlines()),
+                           'The app and CLI have emitted only successful engine-drain info messages on stderr.', diagnostics)
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
@@ -985,6 +1107,8 @@ def main():
                 print(f"Terminal stream retained: {terminal_artifact}")
             tmux("kill-server", check=False)
             server.shutdown()
+    if options.case is None:
+        terminal_close_is_graceful(binary)
     # This case deliberately captures the widget's human error on stderr.
     # Run it after the lifecycle cases' assertion of otherwise empty stderr.
     if options.case is None:

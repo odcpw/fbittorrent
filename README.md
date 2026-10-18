@@ -18,6 +18,10 @@ search jobs, and feed checks. Torrent records and feed history stay on disk.
   Widget torrent actions require an already open app. Explicit Open TUI actions
   may open it. Status queries never open it. Nothing runs at login. Closing the
   terminal or quitting the TUI stops the native engine.
+  Terminal hangups drain the engine and remove its socket before exiting with
+  the signal status (`128 + signal`, so SIGHUP exits 129). For diagnosis, set
+  `FBT_DEBUG_SIGNALS=1`: lifecycle events are appended to
+  `$XDG_STATE_HOME/fbittorrent/tui-signals.log` (normally `~/.local/state/...`).
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
   app is open. Hover clipped names or details to see their full text.
