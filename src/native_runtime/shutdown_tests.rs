@@ -221,3 +221,279 @@ fn retained_runtime_owner_does_not_invent_region_failure() {
         "native_runtime::shutdown_tests::retained_runtime_owner_does_not_invent_region_failure",
     );
 }
+
+#[test]
+fn saturated_stderr_does_not_extend_shutdown_or_erase_phase_errors() {
+    const NAME: &str = "native_runtime::shutdown_tests::saturated_stderr_does_not_extend_shutdown_or_erase_phase_errors";
+    if std::env::var(CHILD).is_ok_and(|value| value == "saturated") {
+        // Reuse every original worker assertion, including the 250 ms bound,
+        // both returned errors and the checkpoint. Only the output sink differs.
+        let flags = unsafe { libc::fcntl(libc::STDERR_FILENO, libc::F_GETFL) };
+        assert_eq!(flags & libc::O_NONBLOCK, 0);
+        probe("worker");
+        assert_eq!(
+            unsafe { libc::fcntl(libc::STDERR_FILENO, libc::F_GETFL) },
+            flags
+        );
+        return;
+    }
+    full_stderr_child(NAME, CHILD, "saturated", "probe=worker still_blocked=true");
+    full_stderr_child(
+        "engine::tests::join_timeout_preserves_unfinished_restore",
+        "FBT_P103B_TIMEOUT_CHILD",
+        "1",
+        "drained=false present=true unfinished=true old_completion_assertion=false",
+    );
+}
+
+fn full_stderr_child(name: &str, environment: &str, value: &str, expected: &str) {
+    use std::{
+        io::{Read, Write},
+        os::fd::{AsRawFd, FromRawFd},
+    };
+    let mut descriptors = [-1; 2];
+    // SAFETY: pipe2 initializes two owned descriptors on success.
+    assert_eq!(
+        unsafe { libc::pipe2(descriptors.as_mut_ptr(), libc::O_CLOEXEC) },
+        0
+    );
+    let mut reader = unsafe { std::fs::File::from_raw_fd(descriptors[0]) };
+    let mut writer = unsafe { std::fs::File::from_raw_fd(descriptors[1]) };
+    let fd = writer.as_raw_fd();
+    assert_eq!(
+        unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) },
+        0
+    );
+    let mut filled = 0;
+    loop {
+        match writer.write(&[b'x'; 4096]) {
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            other => panic!("filling pipe: {other:?}"),
+        }
+    }
+    assert!(filled >= 4096);
+    // The CHILD's stderr is blocking, exactly the old eprintln failure mode.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFL, 0) }, 0);
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture"])
+        .env(environment, value)
+        .stdout(std::process::Stdio::piped())
+        .stderr(writer)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            panic!(
+                "shutdown waited on saturated stderr: {:?}",
+                child.wait_with_output().unwrap()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let output = child.wait_with_output().unwrap();
+    let mut sink = Vec::new();
+    reader.read_to_end(&mut sink).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains(expected), "{stdout}");
+    if environment == CHILD {
+        assert!(
+            stdout.contains(REGION_FAILURE) && stdout.contains(RUNTIME_FAILURE),
+            "{stdout}"
+        );
+        assert!(stdout.contains(STORAGE_SITE), "{stdout}");
+    }
+    assert_eq!(
+        sink.len(),
+        filled,
+        "a full pipe cannot accept even the fallback line"
+    );
+    assert!(sink.iter().all(|&byte| byte == b'x'));
+    use base64::Engine;
+    println!(
+        "FBT-P103C-PROBE-LOG {}",
+        base64::engine::general_purpose::STANDARD.encode(stdout)
+    );
+    println!("saturated_stderr_bytes={filled}; both phase failures retained without output");
+}
+
+#[test]
+fn large_snapshot_with_held_task_lock_is_partial_and_bounded() {
+    use asupersync::{
+        observability::task_inspector::{SnapshotLimits, TaskInspector},
+        runtime::state::RuntimeState,
+        time::{TimeSource, TimerDriver, TimerDriverHandle},
+    };
+    #[derive(Debug)]
+    struct Clock {
+        armed: std::sync::atomic::AtomicBool,
+    }
+    impl TimeSource for Clock {
+        fn now(&self) -> asupersync::types::Time {
+            assert!(
+                !self.armed.load(std::sync::atomic::Ordering::SeqCst),
+                "bounded collection must not call an arbitrary runtime clock under locks"
+            );
+            asupersync::types::Time::ZERO
+        }
+    }
+    let mut state = RuntimeState::new();
+    let region = state.create_root_region(Budget::INFINITE);
+    let mut handles = Vec::new();
+    let mut held = None;
+    for _ in 0..256 {
+        let (id, handle) = state
+            .create_task(region, Budget::INFINITE, std::future::pending::<()>())
+            .unwrap();
+        let task = state.task(id).unwrap();
+        if held.is_none() {
+            held = task.cx_inner.clone();
+        }
+        task.cx
+            .as_ref()
+            .unwrap()
+            .checkpoint_with("large task checkpoint".repeat(200))
+            .unwrap();
+        handles.push(handle);
+    }
+    let clock = Arc::new(Clock {
+        armed: std::sync::atomic::AtomicBool::new(false),
+    });
+    state.set_timer_driver(TimerDriverHandle::new(Arc::new(TimerDriver::with_clock(
+        clock.clone(),
+    ))));
+    clock.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    let inspector = TaskInspector::new(Arc::new(state), None);
+    let lock = held.unwrap();
+    // The real TaskRecord's CxInner write lock, not a diagnostic helper lock.
+    let guard = lock.write();
+    let limits = SnapshotLimits {
+        max_tasks: 8,
+        max_regions: 2,
+        max_bytes: 2048,
+        time_cap: Duration::from_millis(5),
+        observed_at: None,
+    };
+    let began = Instant::now();
+    let bounded = inspector.bounded_snapshot(limits, &[region]);
+    let elapsed = began.elapsed();
+    drop(guard);
+    assert!(
+        elapsed < limits.time_cap,
+        "collection waited on task lock: {elapsed:?}"
+    );
+    assert!(bounded.partial);
+    assert!(bounded.json.len() <= limits.max_bytes);
+    let snapshot: serde_json::Value = serde_json::from_str(&bounded.json).unwrap();
+    assert_eq!(snapshot["partial"], true);
+    assert_eq!(snapshot["truncated"], true);
+    assert!(snapshot["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason == "checkpoint_contention"));
+    assert!(snapshot["tasks"].as_array().unwrap().len() <= limits.max_tasks);
+    assert!(snapshot["regions"].as_array().unwrap().len() <= limits.max_regions);
+    println!(
+        "bounded_snapshot tasks={} regions={} bytes={} elapsed_us={} reasons={}",
+        snapshot["tasks"].as_array().unwrap().len(),
+        snapshot["regions"].as_array().unwrap().len(),
+        bounded.json.len(),
+        elapsed.as_micros(),
+        snapshot["reasons"]
+    );
+    let tiny = inspector.bounded_snapshot(
+        SnapshotLimits {
+            max_bytes: 0,
+            ..limits
+        },
+        &[region],
+    );
+    assert!(tiny.partial && tiny.json.is_empty());
+    let expired = inspector.bounded_snapshot(
+        SnapshotLimits {
+            time_cap: Duration::ZERO,
+            ..limits
+        },
+        &[region],
+    );
+    assert!(expired.partial && expired.json.contains("time_limit"));
+    let counts = inspector.bounded_snapshot(
+        SnapshotLimits {
+            max_tasks: 2,
+            max_regions: 0,
+            max_bytes: 4096,
+            ..limits
+        },
+        &[region],
+    );
+    let counts: serde_json::Value = serde_json::from_str(&counts.json).unwrap();
+    assert_eq!(counts["tasks"].as_array().unwrap().len(), 2);
+    assert!(counts["regions"].as_array().unwrap().is_empty());
+    assert!(counts["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason == "task_limit"));
+    assert!(counts["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reason| reason == "region_limit"));
+    clock
+        .armed
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    drop(handles);
+}
+
+#[test]
+fn socket_stderr_keeps_attribution_and_shutdown_budget() {
+    use std::{
+        io::Read,
+        os::{fd::OwnedFd, unix::net::UnixStream},
+    };
+    let (mut reader, writer) = UnixStream::pair().unwrap();
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "native_runtime::shutdown_tests::blocked_storage_task_names_outstanding_work_and_preserves_both_failures", "--nocapture"])
+        .env(CHILD, "worker").stdout(std::process::Stdio::piped())
+        .stderr(OwnedFd::from(writer)).spawn().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            child.kill().unwrap();
+            panic!(
+                "socket diagnostic hung: {:?}",
+                child.wait_with_output().unwrap()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let mut stderr = String::new();
+    reader.read_to_string(&mut stderr).unwrap();
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    let lines: Vec<_> = stderr.lines().collect();
+    assert_eq!(lines.len(), 2, "{stderr}");
+    for (line, failure) in lines.iter().zip([REGION_FAILURE, RUNTIME_FAILURE]) {
+        assert!(
+            line.starts_with(&format!("ERROR engine {failure}")),
+            "{line}"
+        );
+        assert!(
+            line.contains(STORAGE_SITE) && line.contains("age_ms"),
+            "{line}"
+        );
+        let snapshot: serde_json::Value =
+            serde_json::from_str(line.split_once(" outstanding=").unwrap().1).unwrap();
+        assert!(snapshot["regions"].as_array().unwrap().len() >= 3, "{line}");
+    }
+    use base64::Engine;
+    println!(
+        "FBT-P103C-PROBE-LOG {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("{stdout}\n{stderr}"))
+    );
+}

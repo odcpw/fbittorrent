@@ -13,6 +13,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Teardown logging must not wait on stderr's process lock or output device.
+pub(crate) fn log_teardown(line: String) {
+    let fallback = format!("{}\n", line.split(" error=").next().unwrap_or(&line));
+    shutdown_diagnostics::emit(format!("{line}\n"), fallback);
+}
+
 #[derive(Clone)]
 pub struct Handle {
     shared: Arc<RwLock<Option<Runtime>>>,
@@ -38,9 +44,11 @@ impl Handle {
 pub struct NativeRuntime {
     handle: Handle,
     region: Option<ChildRegion>,
+    diagnostics: shutdown_diagnostics::ShutdownDiagnostics,
 }
 impl NativeRuntime {
     pub fn new() -> Result<Self> {
+        shutdown_diagnostics::prepare_output();
         let runtime = RuntimeBuilder::new()
             .worker_threads(1)
             .thread_name_prefix("fbittorrent-engine")
@@ -50,12 +58,14 @@ impl NativeRuntime {
         let root = runtime.request_cx_with_budget(Budget::INFINITE);
         let region = runtime.block_on(root.open_child_region(ChildRegionSpec::inherit()))?;
         let cx = region.cx().clone();
+        let diagnostics = shutdown_diagnostics::ShutdownDiagnostics::new(&runtime, cx.region_id())?;
         Ok(Self {
             handle: Handle {
                 shared: Arc::new(RwLock::new(Some(runtime))),
                 cx,
             },
             region: Some(region),
+            diagnostics,
         })
     }
     pub fn handle(&self) -> Handle {
@@ -72,13 +82,10 @@ impl NativeRuntime {
     }
     fn drain_and_shutdown(&mut self, timeout: Duration) -> Result<()> {
         let began = Instant::now();
-        let diagnostics = {
-            let shared = self.handle.shared.read().unwrap();
-            let Some(runtime) = shared.as_ref() else {
-                return Ok(());
-            };
-            shutdown_diagnostics::ShutdownDiagnostics::new(runtime, self.handle.cx.region_id())
-        };
+        if self.handle.shared.read().unwrap().is_none() {
+            return Ok(());
+        }
+        let diagnostics = &self.diagnostics;
         #[cfg(feature = "chunk-diagnostics")]
         let emit_chunk_diagnostics = self.region.is_some();
         #[cfg(feature = "epoch-diagnostics")]
@@ -161,9 +168,9 @@ impl NativeRuntime {
 impl Drop for NativeRuntime {
     fn drop(&mut self) {
         if let Err(error) = self.drain_and_shutdown(Duration::from_secs(2)) {
-            eprintln!(
-                "ERROR engine closing native runtime: error={:?}",
-                format!("{error:#}")
+            shutdown_diagnostics::emit(
+                format!("ERROR engine closing native runtime: error={:?}\n", format!("{error:#}")),
+                "ERROR engine closing native runtime: teardown failed; diagnostic output unavailable\n".into(),
             );
         }
     }
