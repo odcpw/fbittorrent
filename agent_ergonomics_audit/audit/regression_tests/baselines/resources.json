@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "reference": {
+    "host": "t14",
+    "machine": "x86_64",
+    "cpu": "Intel(R) Core(TM) Ultra 7 258V",
+    "idle_seconds": 10,
+    "active_mib": 32,
+    "active_mib_s": 4,
+    "ratings_fixture": "fresh empty TSV; active title lookup negatively cached",
+    "binary_sha256": "c78605da44957ced3a4f16e21cfc9fb55065cf7e8670c29e34746c4237722f88"
+  },
+  "configs": {
+    "idle": {
+      "cpu_s": [
+        0.03,
+        0.03,
+        0.03
+      ],
+      "rss_kb": [
+        15508,
+        15468,
+        15480
+      ]
+    },
+    "active": {
+      "cpu_s": [
+        0.53,
+        0.51,
+        0.55
+      ],
+      "rss_kb": [
+        19212.0,
+        19172.0,
+        19104.0
+      ]
+    }
+  }
+}

@@ -1,0 +1,202 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '27 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_fail:
+        description: 'Optional harness suite/case to force red (for example native/quit_restart_down)'
+        default: ''
+        type: string
+      audit:
+        description: 'Also run the weekly dependency audit'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_BUILD_JOBS: '4'
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: '1'
+  FBT_TEST_FORCE_FAIL: ${{ inputs.force_fail || '' }}
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: test
+      - name: Clear scheduled case logs after cache restore
+        run: python3 scripts/testlog-summary.py --reset --suite ci_unit --suite fbtlog_test --suite qs_log_test --suite ci_gates --suite hygiene
+      - name: Unit tests and background-worker gate
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_unit --scan-workers -- cargo test --locked -p fbittorrent -p rqbit-runtime -- --nocapture
+      - name: Logging and CI regression tests
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/fbtlog_test.py
+          python3 plugin/tests/qs-log.py --self-test
+          python3 agent_ergonomics_audit/audit/regression_tests/ci_test.py
+          scripts/check-gitignore.sh
+          scripts/check-nova3-licences.sh
+      - name: Summarize cases
+        if: always()
+        run: python3 scripts/testlog-summary.py --suite ci_unit --suite fbtlog_test --suite qs_log_test --suite ci_gates --suite hygiene
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: test-logs-test
+          path: target/test-logs/
+          if-no-files-found: error
+          retention-days: 14
+
+  engine-libs:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: engine-libs
+      - name: Clear scheduled case logs after cache restore
+        run: python3 scripts/testlog-summary.py --reset --suite ci_engine_libs
+      - name: Engine library tests
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_engine_libs -- cargo test --locked -p librqbit-core -p librqbit --features librqbit/rust-tls --lib -- --nocapture
+      - name: Summarize cases
+        if: always()
+        run: python3 scripts/testlog-summary.py --suite ci_engine_libs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: test-logs-engine-libs
+          path: target/test-logs/
+          if-no-files-found: error
+          retention-days: 14
+
+  native:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: native
+      - name: Clear scheduled case logs after cache restore
+        run: python3 scripts/testlog-summary.py --reset --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native
+      - name: Install terminal fixture tools
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_native_apt -- sudo apt-get update
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_native_tools -- sudo apt-get install -y tmux util-linux
+      - name: Add swap for the optimized link on private-repository runners
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_native_memory -- sudo bash -euc '
+            fallocate -l 8G /mnt/fbittorrent-ci.swap
+            chmod 600 /mnt/fbittorrent-ci.swap
+            mkswap /mnt/fbittorrent-ci.swap
+            swapon /mnt/fbittorrent-ci.swap
+            free -h
+          '
+      - name: Build native app
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_native_build -- cargo build --release --locked
+      - name: Isolated native CLI and TUI cases
+        run: python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
+      # P1-07 adds daemon.py --no-systemd; P1-11 adds agent_contract.py and
+      # verify-determinism.sh; P4-10 adds the native tmux smoke.
+      - name: Summarize cases
+        if: always()
+        run: python3 scripts/testlog-summary.py --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: test-logs-native
+          path: target/test-logs/
+          if-no-files-found: error
+          retention-days: 14
+
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Clear scheduled case logs after cache restore
+        run: python3 scripts/testlog-summary.py --reset --suite ci_lint_tree --suite ci_lint_commits
+      - name: Check working tree and committed diff whitespace
+        env:
+          DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_tree -- git diff --check
+          base="$DIFF_BASE"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base=$(git rev-parse --verify HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_commits -- git diff --check "$base" HEAD
+      # Token, plugin-structure and size lints arrive in their named P1/P2/P4 beads.
+      - name: Summarize cases
+        if: always()
+        run: python3 scripts/testlog-summary.py --suite ci_lint_tree --suite ci_lint_commits
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: test-logs-lint
+          path: target/test-logs/
+          if-no-files-found: error
+          retention-days: 14
+
+  audit:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')" --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: audit
+      - name: Clear scheduled case logs after cache restore
+        run: python3 scripts/testlog-summary.py --reset --suite ci_audit_install --suite ci_audit
+      - name: Install RustSec audit tool
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_audit_install -- cargo install --locked cargo-audit
+      - name: Audit the lockfile
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_audit -- cargo audit --json
+      - name: Summarize cases
+        if: always()
+        run: python3 scripts/testlog-summary.py --suite ci_audit_install --suite ci_audit
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: test-logs-audit
+          path: target/test-logs/
+          if-no-files-found: error
+          retention-days: 14

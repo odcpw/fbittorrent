@@ -244,9 +244,43 @@ host, so both checks pass for it while a browser-originated request gets 401.
 
 ## Tests
 
+Run `agent_ergonomics_audit/audit/regression_tests/all.sh --help` for the local
+Quickshell, visual, widget, VPN and resource opt-ins. The default gate uses
+isolated app fixtures and finishes with the JSONL case summary. Run it before
+each merge, including when hosted Actions is unavailable. On this workstation,
+use the release lock and memory scope prescribed in `AGENTS.md`.
+
+`.github/workflows/ci.yml` runs unit/background-worker, engine-library, native
+CLI/TUI and whitespace jobs on pushes and pull requests, plus a weekly RustSec
+audit. Every job retains `target/test-logs/` even on failure. A manual run can
+set `force_fail` to `native/quit_restart_down` to verify the failing JSONL
+artifact. The workflow's presence is not proof that a hosted run has passed.
+
+The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
+reference host before each release. Its checked-in baseline contains three
+idle and three verified loopback-download measurements,
+with the reference machine and workload. Both use a local empty IMDb ratings
+fixture; the active transfer uses the existing plaintext loopback seed.
+Each CPU/RSS observation must stay at
+or below the baseline median plus the larger of 10% of that median and three
+times the baseline range. A different host is rejected. To deliberately record
+a new reference, build `release-perf`, then run the following under the same
+release lock. Review the measured values before committing them. Comparison
+runs never rewrite the baseline.
+
+```bash
+python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
+  --runs 3 \
+  --write-baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
+  --output target/test-logs/resources/measurement.json
 ```
-agent_ergonomics_audit/audit/regression_tests/all.sh   # everything below
-cargo test --release                                   # engine records, feeds/shows/search, TUI render/interactions, legacy client
+
+`python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
+dependency graph and screen mockups. They run by hand, outside CI.
+
+```
+agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; live suites below require opt-in
+cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
 …/regression_tests/tui_smoke.sh                        # drives the TUI in tmux: list, files modal, prompt toggles, screens, help, quit
