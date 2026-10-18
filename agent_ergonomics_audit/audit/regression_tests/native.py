@@ -560,6 +560,10 @@ def prepare_peer_label_fixture(env, torrent_name):
     """Install an offline provider before the TUI enumerates its plugins."""
     provider = Path(env["XDG_DATA_HOME"]) / "fbittorrent/nova3/engines/peer_labels.py"
     provider.parent.mkdir(parents=True, exist_ok=True)
+    # Planted fixtures must look like the app's own private files: the P0-14
+    # store_modes sweep stats everything under the store tree with umask 000.
+    for directory in (provider.parent, provider.parent.parent):
+        directory.chmod(0o700)
     provider.write_text('''from novaprinter import prettyPrinter
 class peer_labels:
     name = 'Local peer-label fixtures'
@@ -572,16 +576,22 @@ class peer_labels:
             size=1048576, seeds=-1 if unknown else 12, leech=-1 if unknown else 3,
             engine_url=self.url))
 ''')
+    provider.chmod(0o600)
     # The YTS JSON-to-result mapping is covered by browse's Rust unit test.
     # This Nova fixture exercises the same unknown SearchResult through the TUI.
     cache = Path(env["XDG_CACHE_HOME"]) / "fbittorrent"
     names = cache / "imdb/by-name-v2"
     names.mkdir(parents=True, exist_ok=True)
+    for directory in (cache, cache / "imdb", names):
+        directory.chmod(0o700)
     for name in [torrent_name, "Local YTS unknown counts", "Local seeded fixture"] + [f"Fixture episode {i}" for i in range(1, 46)]:
         safe = re.sub(r"[^a-z0-9]", "_", name.lower())[:120]
-        (names / (safe + ".json")).write_text('{"missing":true}')
+        target = names / (safe + ".json")
+        target.write_text('{"missing":true}')
+        target.chmod(0o600)
     if not (cache / "title.ratings.tsv").exists():
         (cache / "title.ratings.tsv").write_text("tconst\taverageRating\tnumVotes\n")
+        (cache / "title.ratings.tsv").chmod(0o600)
 
 def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session):
     """P0-11: real TUI captures; local provider fixtures, never public swarms."""
