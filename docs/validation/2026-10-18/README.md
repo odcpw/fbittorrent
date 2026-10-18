@@ -184,3 +184,7 @@ Receipt: [P6-12.md](P6-12.md) (branch ntm/fbittorrent/cod_3-p6-12-hn4, commits f
 ## P1-19
 
 Receipt: [P1-19.md](P1-19.md) (branch ntm/fbittorrent/cod_2, commits 9e60087 and 57f2832; merged by the orchestrator after two Astra reviews, the first returning two findings (a wildcard arm in the state derivation, changed member order in parked/queue/settings responses) that the second verified closed by an independent engine-test run with the ten frozen old-code wire fixtures; batch gate on main follows).
+
+## P1-03
+
+Receipt: [P1-03.md](P1-03.md) (branch ntm/fbittorrent/cod_1, commits e320b68 and 8a1d4dd with the orchestrator's reconciliation merge a3c5fb3; merged by the orchestrator after two Astra reviews, the first returning two P2 findings (agent documentation, drain-failure log format), one P3 (plain second-owner hint) and a P1-19 reconciliation item, the second verifying all four closed with 44 unit tests and 7/7 daemon cases in both modes; batch gate on main follows).
