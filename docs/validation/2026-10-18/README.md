@@ -212,3 +212,7 @@ Receipt: [P1-16.md](P1-16.md) (branch ntm/fbittorrent/cod_4-p1-16-vi1, commits a
 ## P1-16c
 
 Receipt: [P1-16c.md](P1-16c.md) (branch ntm/fbittorrent/cod_4-p1-16c-yur, commit e7af809; merged by the orchestrator after an Astra review that re-ran the typed-seed tests; the queue-reconciliation defect it surfaced is bead P1-16d; batch gate on main follows).
+
+## P1-16d
+
+Receipt: [P1-16d.md](P1-16d.md) (branch ntm/fbittorrent/cod_4-p1-16d, commit b84e09b; merged by the orchestrator after an Astra review that re-ran the reconciliation regressions and the whole engine suite; batch gate on main follows).
