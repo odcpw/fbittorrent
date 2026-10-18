@@ -25,18 +25,7 @@ pub fn is_active(unit: &str) -> bool {
 /// Start the unit if it is not running and wait until the WebUI answers.
 pub fn ensure_running(cfg: &Config, client: &Client) -> Result<bool> {
     if cfg.native() {
-        if crate::ipc::is_running(cfg) { return Ok(false); }
-        if !cfg.autostart || NO_START.load(Ordering::Relaxed) {
-            return Err(crate::agent::AppError::new(crate::agent::Code::Backend, "fbittorrent is closed (automatic startup is disabled)")
-                .hint("fbittorrent up").into());
-        }
-        open_app()?;
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while Instant::now() < deadline {
-            if crate::ipc::is_running(cfg) { return Ok(true); }
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        bail!("opened fbittorrent but its native engine did not come up; check the app terminal for a startup or migration error");
+        return crate::api::client::ensure_daemon(cfg, !cfg.autostart || NO_START.load(Ordering::Relaxed));
     }
     if client.version().is_ok() { return Ok(false); }
     if !cfg.autostart || NO_START.load(Ordering::Relaxed) {
@@ -56,17 +45,32 @@ pub fn ensure_running(cfg: &Config, client: &Client) -> Result<bool> {
 
 pub fn stop(cfg: &Config) -> Result<()> {
     if cfg.native() {
-        if !crate::ipc::is_running(cfg) {
-            if engine_idle()? { return Ok(()); }
-            bail!("fbittorrent is still starting or closing; wait for the app to finish, then retry down");
-        }
-        crate::ipc::request(cfg, "POST", "app/shutdown", &[], None)?;
+        // A free instance lock during RestartSec does not mean the owner is
+        // stopped: cancel the manager's pending restart before probing the lock.
+        let managed = crate::api::client::stop_managed_daemon()?;
         let deadline = Instant::now() + Duration::from_secs(15);
-        while Instant::now() < deadline {
-            if !crate::ipc::is_running(cfg) && engine_idle()? { return Ok(()); }
-            std::thread::sleep(Duration::from_millis(150));
+        let mut sent = managed;
+        let mut request_cfg = cfg.clone();
+        request_cfg.timeout_secs = 1;
+        loop {
+            // Shutdown is an owner control and works while the engine slot is
+            // Starting. A version probe would wait for the session unnecessarily.
+            if !sent && crate::ipc::socket_path(cfg).exists() {
+                sent = crate::ipc::request(&request_cfg, "POST", "app/shutdown", &[], None).is_ok();
+            }
+            if engine_idle()? {
+                if !sent && NO_START.load(Ordering::Relaxed) {
+                    return Err(crate::agent::AppError::new(crate::agent::Code::Backend, "fbittorrent is closed")
+                        .hint("fbittorrent up").into());
+                }
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(crate::agent::AppError::new(crate::agent::Code::Timeout, "fbittorrent received the close request or is still starting; its owner has not stopped")
+                    .hint("fbittorrent status --json").into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
-        bail!("fbittorrent received the close request but its engine is still shutting down");
     }
     stop_legacy(cfg)
 }
@@ -162,4 +166,20 @@ pub fn start_for_legacy_migration(cfg: &Config, client: &Client) -> Result<bool>
         std::thread::sleep(Duration::from_millis(150));
     }
     bail!("started the existing legacy service for migration, but its WebUI did not come up; source preserved")
+}
+
+/// Open the shell panel when installed, otherwise open an attached TUI terminal.
+pub fn dashboard(view: Option<&str>, query: Option<&str>) -> Result<()> {
+    let manifest = dirs::config_dir().context("no config directory")?.join("omarchy/plugins/oliver.torrents/manifest.json");
+    let panel = std::fs::read(&manifest).ok().and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|value| value["kinds"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "panel")));
+    if panel {
+        let payload = serde_json::json!({"view": view.unwrap_or("torrents"), "query": query.unwrap_or("")}).to_string();
+        match Command::new("omarchy-shell").args(["shell", "summon", "oliver.torrents", &payload]).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            result => return Err(crate::agent::AppError::new(crate::agent::Code::Upstream, format!("could not summon torrent dashboard: {result:?}")).into()),
+        }
+    }
+    open_app()
 }
