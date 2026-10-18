@@ -1,0 +1,5 @@
+{
+  "q": "fixture",
+  "v": 1,
+  "d": [{"id": "tt1234001", "l": "Local Fixture", "y": 2026, "qid": "tvSeries", "s": "Fixture Actor", "i": {"imageUrl": "{base}/poster.png", "width": 1, "height": 1}}]
+}

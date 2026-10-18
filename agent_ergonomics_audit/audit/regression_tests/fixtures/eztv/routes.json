@@ -1,0 +1,3 @@
+{
+  "/api/get-torrents": {"file": "episodes.json", "content_type": "application/json"}
+}

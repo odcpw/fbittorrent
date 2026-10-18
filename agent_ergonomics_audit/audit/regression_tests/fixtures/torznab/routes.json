@@ -1,0 +1,5 @@
+{
+  "/api": {"file": "query.json", "field": "xml", "content_type": "application/rss+xml"},
+  "/redirect": {"json": {}, "status": 302, "headers": {"Location": "{base}/api"}},
+  "/loop": {"json": {}, "status": 302, "headers": {"Location": "{base}/loop"}}
+}
