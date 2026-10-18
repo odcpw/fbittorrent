@@ -488,10 +488,11 @@
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let (exited_tx, exited_rx) = std::sync::mpsc::channel();
-        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |_cx| async move {
+        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |cx| async move {
             resolver.await.unwrap();
             // Deliberately uncooperative cleanup, after a real resolver joined.
             // The owning test releases this barrier after observing the fuse.
+            cx.checkpoint_with("blocked_restore_cleanup at src/engine/tests/startup.rs").unwrap();
             entered_tx.send(()).unwrap();
             release_rx.recv().unwrap();
             exited_tx.send(()).unwrap();
@@ -590,19 +591,57 @@
             "timeout control failed: {stdout}\n{stderr}"
         );
         assert!(
-            stdout
-                .contains("drained=false present=true unfinished=true old_completion_assertion=false"),
+            stdout.contains(
+                "drained=false present=true unfinished=true old_completion_assertion=false"
+            ),
             "{stdout}"
         );
         assert!(stderr.contains("ERROR engine native torrent session did not drain before its deadline error=\"joining restore tasks\""), "{stderr}");
-        let expected_errors = [
-                "ERROR engine native torrent session did not drain before its deadline error=\"joining restore tasks\"",
-                "ERROR engine native torrent session did not drain before its deadline",
-                "ERROR engine closing native runtime: error=\"native runtime teardown exceeded its deadline\"",
-            ];
-        assert!(
-            stderr.lines().all(|line| expected_errors.contains(&line)),
+        let lines: Vec<_> = stderr.lines().collect();
+        assert_eq!(
+            lines.len(),
+            5,
             "unexpected worker diagnostic in timeout control: {stderr}"
+        );
+        assert_eq!(lines[0], "ERROR engine native torrent session did not drain before its deadline error=\"joining restore tasks\"");
+        assert_eq!(
+            lines[1],
+            "ERROR engine native torrent session did not drain before its deadline"
+        );
+        let failures = [
+            "native application region did not drain before its deadline",
+            "native runtime teardown exceeded its deadline",
+        ];
+        for (line, failure) in lines[2..4].iter().zip(failures) {
+            let suffix = line
+                .strip_prefix(&format!("ERROR engine {failure} elapsed_ms="))
+                .unwrap_or_else(|| panic!("wrong deadline format: {line}"));
+            let (elapsed, snapshot) = suffix.split_once(" outstanding=").unwrap();
+            assert!(elapsed.parse::<u128>().unwrap() < 250, "{line}");
+            let snapshot: serde_json::Value = serde_json::from_str(snapshot).unwrap();
+            assert!(
+                snapshot["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|task| task["checkpoint"]
+                        == "blocked_restore_cleanup at src/engine/tests/startup.rs"),
+                "{line}"
+            );
+        }
+        let returned: String = serde_json::from_str(
+            lines[4]
+                .strip_prefix("ERROR engine closing native runtime: error=")
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            failures.iter().all(|failure| returned.contains(failure)),
+            "both phase errors must reach AppEngine: {returned}"
+        );
+        assert!(
+            returned.contains("blocked_restore_cleanup at src/engine/tests/startup.rs"),
+            "{returned}"
         );
         use base64::Engine;
         println!(
