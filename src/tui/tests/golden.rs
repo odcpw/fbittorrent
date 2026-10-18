@@ -90,7 +90,33 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm);
+goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done);
+
+#[test]
+fn done_row_offers_seed_instead_of_resume() {
+    let mut app = fixture::app("torrents");
+    app.on_torrents_key(KeyEvent::new(KeyCode::Down));
+    let text = render(&app, 80, 24);
+    let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
+    println!("asserted footer: {footer}");
+    assert!(footer.contains("(U) Seed"));
+    assert!(!footer.contains("(P) Resume"));
+    assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('u'))), Cmd::Task(..)));
+}
+
+#[test]
+fn resume_unknown_completion_timestamp_keeps_incomplete_controls() {
+    for completion_on in [-1, 0] {
+        let mut app = fixture::app("torrents");
+        app.torrents[0].state = "stoppedDL".into();
+        app.torrents[0].completion_on = completion_on;
+        let text = render(&app, 80, 24);
+        let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
+        println!("completion_on={completion_on}, asserted footer: {footer}");
+        assert!(footer.contains("(P) Resume"));
+        assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('p'))), Cmd::Task(..)));
+    }
+}
 
 #[test]
 fn all_surfaces_render_at_60x20_without_panics() {

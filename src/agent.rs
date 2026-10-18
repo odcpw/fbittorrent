@@ -1,13 +1,13 @@
 //! Agent-facing surface: exit-code dictionary, typed errors, JSON envelopes,
 //! `capabilities`, `robot-docs`, and the `triage` mega-command.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub const CONTRACT_VERSION: &str = "1.1.0";
 
 /// Exit codes. Stable; documented by `capabilities --json` and `robot-docs`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(i32)]
 pub enum Code {
     Ok = 0,
@@ -60,7 +60,7 @@ impl Code {
 }
 
 /// An error with an exit code and a copy-pasteable next step.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppError {
     pub code: Code,
     pub message: String,

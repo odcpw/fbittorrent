@@ -2041,9 +2041,13 @@ impl TuiApp {
         } else { match self.screen {
             Screen::Torrents => {
                 let mut hints = if let Some(torrent) = self.selected_torrent() {
-                    vec!["(Enter) Files", "(O)pen", if torrent.is_stopped() { "(P) Resume" } else { "(P)ause" },
-                        "(D) Remove", "(Shift+D) Delete files",
-                        if torrent.seed_allowed() { "(U) Seed off" } else { "(U) Seed on" }]
+                    let mut hints = vec!["(Enter) Files", "(O)pen", if torrent.complete_no_seed() { "(U) Seed" }
+                        else if torrent.is_stopped() { "(P) Resume" } else { "(P)ause" },
+                        "(D) Remove", "(Shift+D) Delete files"];
+                    if !torrent.complete_no_seed() {
+                        hints.push(if torrent.seed_allowed() { "(U) Seed off" } else { "(U) Seed on" });
+                    }
+                    hints
                 } else { Vec::new() };
                 hints.extend(["(A)dd", "(C)lipboard"]);
                 if self.cfg.native() { hints.push("(F6) Settings"); }

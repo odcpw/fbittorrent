@@ -56,6 +56,7 @@ impl Torrent {
         matches!(self.state.as_str(), "stoppedDL" | "stoppedUP" | "pausedDL" | "pausedUP")
     }
     pub fn is_queued(&self) -> bool { self.state == "queuedDL" }
+    pub fn complete_no_seed(&self) -> bool { self.completion_on > 0 && self.ratio_limit == 0.0 }
     /// True when uploading is allowed (no default cap or explicitly tagged "seed").
     pub fn seed_allowed(&self) -> bool {
         self.has_tag(SEED_TAG) || self.up_limit != NO_UPLOAD_LIMIT
@@ -66,6 +67,18 @@ impl Torrent {
     pub fn is_seeding(&self) -> bool {
         matches!(self.state.as_str(), "uploading" | "stalledUP" | "forcedUP" | "queuedUP" | "checkingUP")
     }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct StartResult {
+    pub started: Vec<String>,
+    pub skipped: Vec<StartSkipped>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct StartSkipped {
+    pub hash: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -450,8 +463,19 @@ impl Client {
     }
 
     pub fn start(&self, hashes: &[String]) -> Result<()> {
-        self.post("torrents/start", &[("hashes", &hashes.join("|"))])?;
+        self.start_report(hashes, false)?;
         Ok(())
+    }
+    pub fn start_report(&self, hashes: &[String], skip_complete: bool) -> Result<StartResult> {
+        let mut result = StartResult::default();
+        for chunk in hashes.chunks(256) {
+            let body = self.post("torrents/start", &[("hashes", &chunk.join("|")), ("skip_complete", bool_s(skip_complete))])?;
+            let part = if self.cfg.native() { serde_json::from_str::<StartResult>(&body)? }
+                else { StartResult { started: chunk.to_vec(), skipped: Vec::new() } };
+            result.started.extend(part.started);
+            result.skipped.extend(part.skipped);
+        }
+        Ok(result)
     }
     pub fn stop(&self, hashes: &[String]) -> Result<()> {
         self.post("torrents/stop", &[("hashes", &hashes.join("|"))])?;
@@ -726,4 +750,19 @@ pub fn human_eta(secs: i64) -> String {
     if secs < 0 || secs >= 8640000 { return "∞".into(); }
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 { format!("{h}h{m:02}m") } else if m > 0 { format!("{m}m{s:02}s") } else { format!("{s}s") }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn resume_completion_requires_a_positive_timestamp() {
+        for completion_on in [-1, 0, 123] {
+            let torrent: Torrent = serde_json::from_value(serde_json::json!({
+                "completion_on": completion_on, "ratio_limit": 0.0,
+            })).unwrap();
+            assert_eq!(torrent.complete_no_seed(), completion_on > 0);
+        }
+    }
 }

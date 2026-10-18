@@ -574,7 +574,18 @@ fn run(cli: Cli) -> Result<Code> {
             let hs = resolve(&c, &selectors)?;
             wait_for(&c, hs, timeout, interval.max(1), json)
         }
-        Cmd::Start { selectors } => act(&cfg, &c, json, "start", &selectors, |c, hs| c.start(hs)),
+        Cmd::Start { selectors } => {
+            connect(&cfg, &c)?;
+            let ts = c.torrents()?;
+            let hs = resolve_in(&ts, &selectors)?;
+            let result = c.start_report(&hs, selectors == ["all"])?;
+            emit(json, serde_json::json!({"ok": true, "action": "start", "count": result.started.len(),
+                "hashes": result.started, "skipped": result.skipped}), || {
+                println!("start: {}", result.started.join(", "));
+                for skip in &result.skipped { println!("skipped {}: complete; seeding is off", skip.hash); }
+            });
+            Ok(Code::Ok)
+        },
         Cmd::Stop { selectors } => act(&cfg, &c, json, "stop", &selectors, |c, hs| c.stop(hs)),
         Cmd::Seq { selectors } => act(&cfg, &c, json, "toggle-sequential", &selectors, |c, hs| c.toggle_sequential(hs)),
         Cmd::FirstLast { selectors } => act(&cfg, &c, json, "toggle-first-last", &selectors, |c, hs| c.toggle_first_last(hs)),
