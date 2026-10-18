@@ -8,6 +8,7 @@ seed/leech follow-up waits for those items; no --serve-fixture capability is
 claimed by this skeleton. There is no --self-test mode.
 """
 import argparse
+import ctypes
 from contextlib import ExitStack
 import hashlib
 import json
@@ -28,6 +29,18 @@ import xml.etree.ElementTree as ET
 
 from fbtlog import Case, REPO, slug, suite_status
 import fixtures
+
+
+def process_state(pid):
+    try:
+        return (Path("/proc") / str(pid) / "stat").read_text().rsplit(") ", 1)[1].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def process_alive(pid):
+    state = process_state(pid)
+    return state is not None and state[0] not in ("Z", "X")
 
 
 class FutureDaemon:
@@ -72,6 +85,11 @@ class ManagedProcess:
         command = list(map(str, argv))
         environment = dict(sandbox.env, **{FutureDaemon.unit_variable: self.unit})
         launcher_env = environment.copy()
+        self.closed = False
+        # systemd's client must discover the real user bus even when no explicit
+        # DBUS_SESSION_BUS_ADDRESS exists. Only the service gets sandbox XDG paths.
+        self.control_env = dict(os.environ)
+        self.control_env.pop("NOTIFY_SOCKET", None)
         if systemd:
             self.systemctl = shutil.which("systemctl", path=os.defpath)
             runner = shutil.which("systemd-run", path=os.defpath)
@@ -79,11 +97,13 @@ class ManagedProcess:
                 raise RuntimeError("--systemd requires systemd-run and systemctl")
             command = [runner, "--user", "--quiet", "--wait", "--pipe", "--collect",
                        "--service-type=exec", "--unit=" + self.unit, "--property=TimeoutStopSec=10s",
+                       "--property=WorkingDirectory=" + str(sandbox.root),
+                       "--property=KillMode=control-group",
                        "--property=UnsetEnvironment=FBITTORRENT_NO_START WATCHDOG_PID WATCHDOG_USEC LISTEN_PID LISTEN_FDS LISTEN_FDNAMES TMUX",
                        *["--setenv=" + key + "=" + environment[key] for key in sandbox.keys], "--", *command]
             # systemd-run emits its own READY/RUN_UNIT if it inherits this value.
             # Only the actual service child should see our fake notify endpoint.
-            launcher_env.pop("NOTIFY_SOCKET", None)
+            launcher_env = self.control_env
         step = case.step("spawn " + shlex.join(list(map(str, argv))), "owned child starts with isolated XDG paths and captured stderr")
         with self.stdout.open("w") as output:
             self.child = case.popen(command, env=launcher_env, cwd=sandbox.root,
@@ -99,35 +119,94 @@ class ManagedProcess:
         except subprocess.TimeoutExpired:
             return step.fail(f"PID {self.child.pid} still running at deadline.", [self.stdout])
 
+    def control(self, *args, timeout=3):
+        child = self.case.popen([self.systemctl, "--user", *args], env=self.control_env,
+                               stdout=subprocess.PIPE, text=True)
+        try:
+            stdout, _ = child.communicate(timeout=timeout)
+            return child.returncode, stdout.strip()
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate(timeout=2)
+            return None, "systemctl timed out"
+
+    def unit_state(self):
+        code, output = self.control("show", self.unit, "--property=LoadState", "--property=ActiveState")
+        return code, dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+
+    def group_members(self):
+        members = []
+        for path in Path("/proc").iterdir():
+            if path.name.isdigit():
+                state = process_state(int(path.name))
+                if state is not None and state[0] not in ("Z", "X") and int(state[2]) == self.child.pid:
+                    members.append(int(path.name))
+        return members
+
+    def signal_group(self, number):
+        try:
+            os.killpg(self.child.pid, number)
+        except ProcessLookupError:
+            pass
+
     def close(self):
-        if self.child.poll() is not None:
+        if self.closed:
             return
-        step = self.case.step("stop owned process", "owned process and transient unit stop within 15 seconds")
+        step = self.case.step("stop owned process", "owned transient unit, live process group and launcher are all gone")
+        observations, failures = [], []
         if self.systemd:
-            stopper = self.case.popen([self.systemctl, "--user", "stop", self.unit],
-                                      stdout=subprocess.DEVNULL)
-            try:
-                code = stopper.wait(timeout=12)
-                if code:
-                    step.fail(f"Stopping disposable unit {self.unit} exited {code}.")
-                    step = self.case.step("reap systemd-run client", "client exits after failed unit cleanup")
-            except subprocess.TimeoutExpired:
-                stopper.kill()
-                stopper.wait(timeout=2)
-                step.fail(f"Timed out stopping disposable unit {self.unit}.")
-                step = self.case.step("reap systemd-run client", "client exits after failed unit cleanup")
-        else:
-            try:
-                os.killpg(self.child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            code, state = self.unit_state()
+            observations.append(f"unit before cleanup: exit {code}, {state}")
+            if code != 0 or state.get("LoadState") != "not-found":
+                stopped, output = self.control("stop", self.unit, timeout=12)
+                observations.append(f"stop unit: exit {stopped}, {output!r}")
+                if stopped != 0:
+                    # Even a dead systemd-run launcher can leave its service
+                    # alive. Escalate against that owned unit, never just its client.
+                    killed, output = self.control("kill", "--signal=KILL", "--kill-whom=all", self.unit)
+                    observations.append(f"kill unit: exit {killed}, {output!r}")
+                    code, state = self.unit_state()
+                    if code != 0 or state.get("LoadState") != "not-found":
+                        failures.append("unit stop failed")
+
+        # A reaped launcher is not evidence that its descendants have exited.
+        members = self.group_members()
+        observations.append(f"live group members before cleanup: {members}")
+        if members:
+            self.signal_group(signal.SIGTERM)
+            deadline = time.monotonic() + 3
+            while self.group_members() and time.monotonic() < deadline:
+                time.sleep(.02)
+            if self.group_members():
+                self.signal_group(signal.SIGKILL)
+                failures.append("process group required SIGKILL")
+                deadline = time.monotonic() + 2
+                while self.group_members() and time.monotonic() < deadline:
+                    time.sleep(.02)
         try:
             code = self.child.wait(timeout=3)
-            step.ok(f"PID {self.child.pid} reaped with exit {code}; unit={self.unit}.")
         except subprocess.TimeoutExpired:
-            os.killpg(self.child.pid, signal.SIGKILL)
-            self.child.wait(timeout=3)
-            step.fail(f"PID {self.child.pid} required SIGKILL; unit={self.unit}.")
+            self.signal_group(signal.SIGKILL)
+            code = self.child.wait(timeout=3)
+            failures.append("launcher required SIGKILL")
+        remaining = self.group_members()
+        observations.append(f"launcher exit {code}; live group members after cleanup: {remaining}")
+        if remaining:
+            failures.append("live process group remains")
+        unit_gone = True
+        if self.systemd:
+            deadline = time.monotonic() + 3
+            while True:
+                code, state = self.unit_state()
+                unit_gone = code == 0 and state.get("LoadState") == "not-found"
+                if unit_gone or time.monotonic() >= deadline:
+                    break
+                time.sleep(.02)
+            observations.append(f"unit after cleanup: exit {code}, {state}")
+            if not unit_gone:
+                failures.append("transient unit was not collected")
+        self.closed = not remaining and unit_gone
+        step.close(not failures, "; ".join(observations + failures) + ".")
 
 
 class Harness:
@@ -350,7 +429,7 @@ def notify_and_process(binary, systemd):
             Harness(case, binary, sandbox, systemd) as harness:
         notify = harness.notify_socket()
         program = ("import json,os,socket,sys,time; "
-                   "print(json.dumps({k:os.environ[k] for k in os.environ if k.startswith('XDG_') or k=='FBITTORRENT_UNIT'}),flush=True); "
+                   "print(json.dumps(dict({k:os.environ[k] for k in os.environ if k.startswith('XDG_') or k=='FBITTORRENT_UNIT'},cwd=os.getcwd())),flush=True); "
                    "sys.stderr.write('owned process diagnostic\\n'); "
                    "s=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM); s.sendto(b'READY=1\\nSTATUS=fixture child',os.environ['NOTIFY_SOCKET']); "
                    "s.close(); time.sleep(30)")
@@ -362,6 +441,8 @@ def notify_and_process(binary, systemd):
         case.check(all(value.get(key) == sandbox.env[key] for key in sandbox.keys if key.startswith("XDG_"))
                    and value[FutureDaemon.unit_variable] == sandbox.unit,
                    "child receives every isolated XDG path and the disposable unit name", f"Environment={value!r}.")
+        case.check(value.get("cwd") == str(sandbox.root),
+                   "actual child working directory is the sandbox root", f"cwd={value.get('cwd')!r}; root={sandbox.root}.")
         other = harness.spawn([sys.executable, "-c", "import os,sys; print(os.environ['FBITTORRENT_UNIT']); sys.stderr.write('second child diagnostic\\n'); sys.exit(7)"])
         other.wait(code=7)
         case.check(other.unit != process.unit and other.stdout.read_text().strip() == other.unit,
@@ -372,6 +453,92 @@ def notify_and_process(binary, systemd):
         case.check("owned process diagnostic" in case.suite.stderr_path.read_text()
                    and "second child diagnostic" in case.suite.stderr_path.read_text(),
                    "stderr from both real children is retained for the case's daemon.log slice")
+
+
+def launcher_exit_cleanup(binary, systemd):
+    with Case("daemon", "launcher_exit_cleanup") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        # Adopt and reap the foreground orphan in the regression itself. This
+        # avoids depending on PID 1's reaping policy in CI/container environments.
+        libc, prior = ctypes.CDLL(None, use_errno=True), ctypes.c_int()
+        if libc.prctl(37, ctypes.byref(prior), 0, 0, 0) or libc.prctl(36, 1, 0, 0, 0):
+            raise OSError(ctypes.get_errno(), "cannot establish regression child subreaper")
+        process, descendant, service_pid = None, None, None
+        control_env = dict(os.environ)
+        control_env.pop("NOTIFY_SOCKET", None)
+        systemctl = shutil.which("systemctl", path=os.defpath)
+        try:
+            program = ("import json,os,subprocess,sys,time; "
+                       "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)']); "
+                       "print(json.dumps(dict(pid=os.getpid(),descendant=p.pid)),flush=True); time.sleep(90)")
+            process = harness.spawn([sys.executable, "-u", "-c", program])
+            if not harness.wait_for(lambda: (process.stdout.stat().st_size > 0, process.stdout.read_text()),
+                                    "launcher reports a live descendant"):
+                return
+            value = json.loads(process.stdout.read_text())
+            descendant = value["descendant"]
+            service_pid = value["pid"]
+            process.child.kill()
+            process.child.wait(timeout=5)
+            case.check(process_alive(descendant), "descendant is still live after the launcher is killed",
+                       f"launcher exit={process.child.returncode}; service PID={value['pid']}; descendant={descendant}.")
+            process.close()
+
+            def gone():
+                try:
+                    os.waitpid(descendant, os.WNOHANG)
+                except ChildProcessError:
+                    pass
+                return not (Path("/proc") / str(descendant)).exists(), f"descendant state={process_state(descendant)!r}"
+
+            harness.wait_for(gone, "descendant is killed and reaped after launcher exit", timeout=5)
+            if systemd:
+                child = case.popen([systemctl, "--user", "show", process.unit, "--property=LoadState", "--value"],
+                                   env=control_env, stdout=subprocess.PIPE, text=True)
+                stdout, _ = child.communicate(timeout=5)
+                case.check(child.returncode == 0 and stdout.strip() == "not-found",
+                           "owned transient unit is collected even after its launcher was killed",
+                           f"exit={child.returncode}; LoadState={stdout!r}.")
+        finally:
+            # Contain the pre-fix regression too: never leave a failing test's
+            # known orphan/unit alive while it reports the original defect.
+            if process is not None and (process.child.poll() is None or
+                                        descendant is not None and process_alive(descendant) or
+                                        service_pid is not None and process_alive(service_pid)):
+                if systemd:
+                    child = case.popen([systemctl, "--user", "stop", process.unit], env=control_env,
+                                       stdout=subprocess.DEVNULL)
+                    child.wait(timeout=12)
+                else:
+                    try:
+                        os.killpg(process.child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            if descendant is not None:
+                try:
+                    os.waitpid(descendant, 0)
+                except ChildProcessError:
+                    pass
+            libc.prctl(36, prior.value, 0, 0, 0)
+
+
+def systemd_without_bus_address(binary, systemd):
+    with Case("daemon", "systemd_without_bus_address") as case:
+        address = os.environ.pop("DBUS_SESSION_BUS_ADDRESS", None)
+        parent_runtime = os.environ.get("XDG_RUNTIME_DIR")
+        try:
+            with fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox, systemd=True) as harness:
+                program = "import json,os; print(json.dumps(dict(cwd=os.getcwd(),runtime=os.environ['XDG_RUNTIME_DIR'])))"
+                process = harness.spawn([sys.executable, "-c", program])
+                if process.wait():
+                    value = json.loads(process.stdout.read_text())
+                    case.check(value == dict(cwd=str(sandbox.root), runtime=sandbox.env["XDG_RUNTIME_DIR"])
+                               and value["runtime"] != parent_runtime,
+                               "without a parent bus variable, systemd still launches a child in its isolated cwd/runtime",
+                               f"child={value!r}; parent runtime={parent_runtime!r}.")
+        finally:
+            if address is not None:
+                os.environ["DBUS_SESSION_BUS_ADDRESS"] = address
 
 
 def interim_engine_socket(binary, systemd):
@@ -413,23 +580,28 @@ def interim_engine_socket(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (fixture_payloads, fixture_servers, path_shims, notify_and_process, interim_engine_socket)}
+         (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+          systemd_without_bus_address, interim_engine_socket)}
+SYSTEMD_CASES = {"systemd_without_bus_address"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
-    parser.add_argument("--case", choices=CASES, help="run just one isolated named case")
+    parser.add_argument("--case", choices=CASES,
+                        help="run one named case; systemd_without_bus_address requires --systemd")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--systemd", action="store_true", help="use disposable transient user units, never installed owner units")
     mode.add_argument("--no-systemd", action="store_true", help="foreground children (default; CI mode)")
     args = parser.parse_args()
+    if args.case in SYSTEMD_CASES and not args.systemd:
+        parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else CASES):
+    for name in ([args.case] if args.case else [name for name in CASES if args.systemd or name not in SYSTEMD_CASES]):
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds; serve-fixture/peer pair deferred until P1-06")
     return suite_status("daemon")
