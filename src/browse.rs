@@ -53,7 +53,7 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
-fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T> {
+pub(crate) fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T> {
     let mut resp = agent().get(url).call().with_context(|| format!("GET {url}"))?;
     let code = resp.status().as_u16();
     if code != 200 { return Err(anyhow!("{url}: HTTP {code}")); }

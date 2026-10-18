@@ -2,12 +2,16 @@
 name = "fbittorrent"
 version = "0.1.0"
 edition = "2021"
-description = "Fast qBittorrent front-end for Omarchy: CLI, magnet handler, TUI"
+description = "Rust torrent app for Omarchy: CLI, magnet handler, TUI and local show feeds"
 license = "MIT"
 
 [[bin]]
 name = "fbittorrent"
 path = "src/main.rs"
+
+[features]
+epoch-diagnostics = ["asupersync/epoch-diagnostics"]
+chunk-diagnostics = ["librqbit/chunk-diagnostics"]
 
 [dependencies]
 ureq = { version = "3.4", features = ["json", "cookies"] }
@@ -24,9 +28,30 @@ unicode-width = "0.2"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 flate2 = "1"
+librqbit = { path = "vendor/rqbit/librqbit", default-features = false, features = ["rust-tls"] }
+rqbit-runtime = { path = "vendor/rqbit/rqbit-runtime" }
+asupersync = { version = "0.5.0", default-features = false, features = ["native-runtime", "tls", "tls-webpki-roots"] }
+quick-xml = { version = "0.38", features = ["encoding"] }
+url = "2"
 
 [profile.release]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Keep the same optimization settings while retaining symbols for measurements.
+[profile.release-perf]
+inherits = "release"
+debug = "line-tables-only"
+strip = false
+
+[patch.crates-io]
+# Asupersync 0.5.0 with bounded cleanup of cancelled timer entries. Keeping the
+# source local makes the profiled fix reproducible without editing the registry.
+asupersync = { path = "vendor/asupersync" }
+
+[workspace]
+resolver = "2"
+members = ["vendor/rqbit/*"]
+default-members = ["."]

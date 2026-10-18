@@ -1,4 +1,4 @@
-//! Minimal qBittorrent WebUI API v2 client (blocking, ureq).
+//! Shared client for the app-owned engine and the legacy qBittorrent WebUI.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub struct Torrent {
     pub name: String,
     pub state: String,
     pub progress: f64,
+    #[serde(default = "known_progress")]
+    pub progress_known: bool,
     pub size: i64,
     pub completed: i64,
     pub dlspeed: i64,
@@ -33,6 +35,8 @@ pub struct Torrent {
     pub tags: String,
 }
 
+fn known_progress() -> bool { true }
+
 /// Upload cap that means "no upload". Not literally zero: libtorrent charges protocol
 /// messages (piece and metadata requests) against the limit, and at 1 B/s a download
 /// never gets past fetching metadata. 32 KiB/s leaves room for the chatter while
@@ -44,14 +48,15 @@ impl Torrent {
     pub fn is_active(&self) -> bool {
         matches!(
             self.state.as_str(),
-            "downloading" | "metaDL" | "forcedDL" | "stalledDL" | "checkingDL" | "queuedDL"
+            "downloading" | "metaDL" | "forcedDL" | "stalledDL" | "checkingDL"
                 | "allocating" | "forcedMetaDL"
         )
     }
     pub fn is_stopped(&self) -> bool {
         matches!(self.state.as_str(), "stoppedDL" | "stoppedUP" | "pausedDL" | "pausedUP")
     }
-    /// True when uploading is allowed (no 1 B/s cap or explicitly tagged "seed").
+    pub fn is_queued(&self) -> bool { self.state == "queuedDL" }
+    /// True when uploading is allowed (no default cap or explicitly tagged "seed").
     pub fn seed_allowed(&self) -> bool {
         self.has_tag(SEED_TAG) || self.up_limit != NO_UPLOAD_LIMIT
     }
@@ -125,6 +130,8 @@ pub struct TorrentFile {
     pub name: String,
     pub size: i64,
     pub progress: f64,
+    #[serde(default = "known_progress")]
+    pub progress_known: bool,
     /// 0 = skip, 1 = normal, 6 = high, 7 = maximum
     pub priority: i64,
 }
@@ -135,6 +142,8 @@ pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub status: String,
     pub total: i64,
+    /// Source diagnostics can coexist with useful results from other providers.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -230,7 +239,7 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
 pub struct AddOptions {
     pub sequential: bool,
     pub first_last: bool,
-    /// Allow upload. When false the torrent is capped at 1 B/s and stops once complete.
+    /// Allow upload. When false the torrent is capped and stops once complete.
     pub seed: bool,
     pub stopped: bool,
     pub save_path: Option<String>,
@@ -238,6 +247,7 @@ pub struct AddOptions {
 }
 
 pub struct Client {
+    cfg: Config,
     agent: ureq::Agent,
     base: String,
     username: Option<String>,
@@ -252,6 +262,7 @@ impl Client {
             .build()
             .into();
         Self {
+            cfg: cfg.clone(),
             agent,
             base: cfg.url.trim_end_matches('/').to_string(),
             username: cfg.username.clone(),
@@ -265,6 +276,7 @@ impl Client {
 
     /// Log in when credentials are configured. Localhost with LocalHostAuth=false needs none.
     pub fn login(&self) -> Result<()> {
+        if self.cfg.native() { return Ok(()); }
         let (Some(u), Some(p)) = (&self.username, &self.password) else { return Ok(()) };
         let mut resp = self
             .agent
@@ -280,6 +292,7 @@ impl Client {
     }
 
     fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<String> {
+        if self.cfg.native() { return crate::ipc::request(&self.cfg, "GET", path, query, None); }
         let mut url = self.url(path);
         if !query.is_empty() {
             url.push('?');
@@ -302,6 +315,7 @@ impl Client {
 
     /// multipart/form-data POST with one file part (for `torrents/add` with a .torrent).
     fn post_multipart(&self, path: &str, fields: &[(&str, &str)], file_field: &str, filename: &str, bytes: &[u8]) -> Result<String> {
+        if self.cfg.native() { return crate::ipc::request(&self.cfg, "POST", path, fields, Some((filename, bytes))); }
         let boundary = format!("----fbittorrent{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
         let mut body: Vec<u8> = Vec::with_capacity(bytes.len() + 1024);
         for (k, v) in fields {
@@ -330,6 +344,7 @@ impl Client {
     }
 
     fn post(&self, path: &str, form: &[(&str, &str)]) -> Result<String> {
+        if self.cfg.native() { return crate::ipc::request(&self.cfg, "POST", path, form, None); }
         let url = self.url(path);
         let do_post = || -> Result<(u16, String)> {
             let mut resp = self
@@ -353,6 +368,14 @@ impl Client {
     // ---- app ----
     pub fn version(&self) -> Result<String> {
         Ok(self.get("app/version", &[])?.trim().to_string())
+    }
+    pub fn set_queue_limit(&self, limit: usize) -> Result<()> {
+        self.post("app/setQueue", &[("max_active_downloads", &limit.to_string())])?;
+        Ok(())
+    }
+    pub fn restart_app(&self) -> Result<()> {
+        self.post("app/restart", &[])?;
+        Ok(())
     }
     pub fn transfer_info(&self) -> Result<TransferInfo> {
         Ok(serde_json::from_str(&self.get("transfer/info", &[])?)?)
@@ -387,6 +410,24 @@ impl Client {
         let body = self.post("torrents/add", &form)?;
         add_response_ok(&body)
     }
+    /// Resolve a selected provider result and preserve the caller's add settings.
+    pub fn add_search_result(&self, result: &SearchResult, o: &AddOptions) -> Result<()> {
+        if self.cfg.native() && self.cfg.network_interface.is_some() {
+            // Provider download hooks run outside the engine's bound sockets.
+            // Direct links are fetched by the protected engine instead.
+            let source = result.file_url.trim();
+            let direct = source.starts_with("magnet:") || ((source.starts_with("https://") || source.starts_with("http://")) && source.split(['?', '#']).next().is_some_and(|path| path.to_ascii_lowercase().ends_with(".torrent")));
+            if direct { return self.add_url(source, o); }
+            let known_provider = crate::search::plugins()?.iter().any(|plugin| plugin.name == result.engine);
+            if !known_provider && (source.starts_with("https://") || source.starts_with("http://")) { return self.add_url(source, o); }
+            bail!("this provider needs an external download helper; use its magnet link or a .torrent URL with VPN binding enabled");
+        }
+        match crate::search::resolve_download(result, self.cfg.timeout_secs)? {
+            crate::search::ResolvedDownload::Url(url) => self.add_url(&url, o),
+            crate::search::ResolvedDownload::Torrent { filename, bytes } => self.add_file(&filename, &bytes, o),
+        }
+    }
+
     /// Add a .torrent file (bytes). Same defaults as `add_url`.
     pub fn add_file(&self, filename: &str, bytes: &[u8], o: &AddOptions) -> Result<()> {
         let no_up = NO_UPLOAD_LIMIT.to_string();
@@ -465,7 +506,7 @@ impl Client {
         self.set_share_limits(hashes, -2.0, "Default")?;
         self.add_tags(hashes, SEED_TAG)
     }
-    /// No upload: 1 B/s cap, stop when complete, and stop right away if it is only seeding.
+    /// Cap upload, stop when complete, and stop right away if it is only seeding.
     pub fn deny_seeding(&self, hashes: &[String]) -> Result<()> {
         self.set_upload_limit(hashes, NO_UPLOAD_LIMIT)?;
         self.set_share_limits(hashes, 0.0, "Stop")?;
@@ -504,27 +545,37 @@ impl Client {
 
     // ---- RSS ----
     pub fn rss_add_feed(&self, url: &str, name: Option<&str>) -> Result<()> {
+        if self.cfg.native() { return crate::rss::add(url, name, self.cfg.timeout_secs); }
         let mut form = vec![("url", url)];
         if let Some(n) = name { form.push(("path", n)); }
         self.post("rss/addFeed", &form)?;
         Ok(())
     }
     pub fn rss_remove(&self, path: &str) -> Result<()> {
+        if self.cfg.native() { return crate::rss::remove(path); }
         self.post("rss/removeItem", &[("path", path)])?;
         Ok(())
     }
     pub fn rss_refresh(&self, path: &str) -> Result<()> {
+        if self.cfg.native() { return crate::rss::refresh(path, self.cfg.timeout_secs); }
         self.post("rss/refreshItem", &[("itemPath", path)])?;
         Ok(())
     }
     pub fn rss_mark_read(&self, path: &str, article_id: Option<&str>) -> Result<()> {
+        if self.cfg.native() { return crate::rss::mark_read(path, article_id); }
         let mut form = vec![("itemPath", path)];
         if let Some(a) = article_id { form.push(("articleId", a)); }
         self.post("rss/markAsRead", &form)?;
         Ok(())
     }
-    /// Flattened list of feeds (folders are walked, names joined with '/').
+    pub fn rss_set_read(&self, path: &str, article_id: &str, read: bool) -> Result<()> {
+        if self.cfg.native() { return crate::rss::set_read(path, article_id, read); }
+        if !read { anyhow::bail!("marking RSS unread requires the native engine"); }
+        self.rss_mark_read(path, Some(article_id))
+    }
+    /// Flattened list of feeds using qBittorrent's backslash folder separator.
     pub fn rss_feeds(&self) -> Result<Vec<RssFeed>> {
+        if self.cfg.native() { return crate::rss::list(); }
         let body = self.get("rss/items", &[("withData", "true")])?;
         let root: serde_json::Value = serde_json::from_str(&body)?;
         let mut out = Vec::new();
@@ -534,37 +585,45 @@ impl Client {
 
     // ---- search ----
     pub fn search_plugins(&self) -> Result<Vec<SearchPlugin>> {
+        if self.cfg.native() { return crate::search::plugins(); }
         Ok(serde_json::from_str(&self.get("search/plugins", &[])?)?)
     }
     pub fn search_enable_all(&self) -> Result<()> {
         let names: Vec<String> = self.search_plugins()?.into_iter().map(|p| p.name).collect();
         if names.is_empty() { return Ok(()); }
+        if self.cfg.native() { for name in names { crate::search::set_enabled(&name, true)?; } return Ok(()); }
         self.post("search/enablePlugin", &[("names", &names.join("|")), ("enable", "true")])?;
         Ok(())
     }
     /// Install search plugins from URLs (qBittorrent fetches them itself).
     pub fn search_install_plugins(&self, sources: &[String]) -> Result<()> {
+        if self.cfg.native() { return crate::search::install(sources, self.cfg.timeout_secs); }
         self.post("search/installPlugin", &[("sources", &sources.join("|"))])?;
         Ok(())
     }
     pub fn search_set_plugin(&self, name: &str, enable: bool) -> Result<()> {
+        if self.cfg.native() { return crate::search::set_enabled(name, enable); }
         self.post("search/enablePlugin", &[("names", name), ("enable", bool_s(enable))])?;
         Ok(())
     }
     pub fn search_start(&self, pattern: &str) -> Result<i64> {
+        if self.cfg.native() { return crate::search::start(pattern); }
         let body = self.post("search/start", &[("pattern", pattern), ("plugins", "enabled"), ("category", "all")])?;
         let v: serde_json::Value = serde_json::from_str(&body)?;
         v.get("id").and_then(|i| i.as_i64()).ok_or_else(|| anyhow!("no search id in {body}"))
     }
     pub fn search_results(&self, id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
+        if self.cfg.native() { return crate::search::results(id, limit, offset); }
         let body = self.get("search/results", &[("id", &id.to_string()), ("limit", &limit.to_string()), ("offset", &offset.to_string())])?;
         Ok(serde_json::from_str(&body)?)
     }
     pub fn search_stop(&self, id: i64) -> Result<()> {
+        if self.cfg.native() { return crate::search::stop(id); }
         self.post("search/stop", &[("id", &id.to_string())])?;
         Ok(())
     }
     pub fn search_delete(&self, id: i64) -> Result<()> {
+        if self.cfg.native() { return crate::search::delete(id); }
         self.post("search/delete", &[("id", &id.to_string())])?;
         Ok(())
     }
@@ -573,7 +632,7 @@ impl Client {
 fn walk_rss(node: &serde_json::Value, prefix: &str, out: &mut Vec<RssFeed>) {
     let Some(obj) = node.as_object() else { return };
     for (name, v) in obj {
-        let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}/{name}") };
+        let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}\\{name}") };
         if v.get("uid").is_some() {
             let mut articles = v.get("articles")
                 .and_then(|a| serde_json::from_value::<Vec<RssArticle>>(a.clone()).ok())

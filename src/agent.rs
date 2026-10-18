@@ -4,7 +4,7 @@
 use serde::Serialize;
 use std::fmt;
 
-pub const CONTRACT_VERSION: &str = "1.0.0";
+pub const CONTRACT_VERSION: &str = "1.1.0";
 
 /// Exit codes. Stable; documented by `capabilities --json` and `robot-docs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,9 +17,9 @@ pub enum Code {
     Usage = 2,
     /// Refused for safety; the hint names the flag that overrides.
     Safety = 3,
-    /// qBittorrent is not installed, not running, or would not start.
+    /// The torrent engine or app is unavailable or would not start.
     Backend = 4,
-    /// qBittorrent or a network provider answered with an error.
+    /// The torrent engine or a network provider answered with an error.
     Upstream = 5,
     /// No torrent / feed / plugin matched the given selector.
     NotFound = 6,
@@ -49,8 +49,8 @@ impl Code {
             Code::Failure => "unexpected failure (bug or I/O); retrying rarely helps",
             Code::Usage => "invalid arguments or input; the message names the exact fix",
             Code::Safety => "refused for safety; re-run with the flag named in the hint",
-            Code::Backend => "qBittorrent unavailable; run `fbittorrent up` or `fbittorrent setup`",
-            Code::Upstream => "qBittorrent or a provider returned an error; retry later",
+            Code::Backend => "torrent app unavailable; run `fbittorrent up` or `fbittorrent setup`",
+            Code::Upstream => "torrent engine or a provider returned an error; inspect the message before retrying",
             Code::NotFound => "no torrent, feed or plugin matched; `fbittorrent list --json` shows what exists",
             Code::Ambiguous => "selector matched several items; use a longer hash prefix",
             Code::Timeout => "`wait` timed out; the torrent is still there, poll `show <hash> --json`",
@@ -90,8 +90,8 @@ pub fn classify(e: &anyhow::Error) -> (Code, String, Option<String>) {
     }
     let msg = format!("{e:#}");
     let low = msg.to_ascii_lowercase();
-    if low.contains("connecting to qbittorrent") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
-        return (Code::Backend, msg, Some("fbittorrent up   # starts qbittorrent-nox; `fbittorrent setup` if it was never installed".into()));
+    if low.contains("connecting to qbittorrent") || low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
+        return (Code::Backend, msg, Some("fbittorrent up   # opens the app; `fbittorrent setup` configures its download folder".into()));
     }
     if low.contains("returned http") || low.contains("qbittorrent ") || low.contains("http ") || low.contains("timed out") || low.contains("dns") || low.contains("connection") {
         return (Code::Upstream, msg, Some("fbittorrent status --json   # confirm the backend answers, then retry".into()));
@@ -137,26 +137,28 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "status", aliases: &[], summary: "Rates and counts; never starts the backend", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "show", aliases: &["info"], summary: "One torrent in full, including its files and the path to open", json: true, mutating: false, needs_backend: true },
-        CommandDoc { name: "search", aliases: &["find"], summary: "Search the enabled providers; results carry magnet links", json: true, mutating: false, needs_backend: true },
+        CommandDoc { name: "search", aliases: &["find"], summary: "Search local providers; results carry magnet links; native mode does not open the app", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; returns the hash; --wait blocks until complete", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "wait", aliases: &[], summary: "Block until torrents complete (or --timeout); progress on stderr", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "start", aliases: &["resume"], summary: "Start torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "stop", aliases: &["pause"], summary: "Stop torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "delete", aliases: &["rm", "remove"], summary: "Remove torrents; --files deletes data and needs --yes; --dry-run previews", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "seed", aliases: &[], summary: "Allow upload for torrents", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "noseed", aliases: &[], summary: "Forbid upload (default for new torrents)", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "seq", aliases: &[], summary: "Toggle sequential download", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last piece priority", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "noseed", aliases: &[], summary: "Cap upload and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "seq", aliases: &[], summary: "Toggle sequential download in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last priority in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "reconcile", aliases: &[], summary: "Apply default flags to torrents added elsewhere", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "rss", aliases: &[], summary: "list | add | remove | refresh | items | grab", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "up", aliases: &[], summary: "Start qbittorrent-nox", json: true, mutating: true, needs_backend: false },
-        CommandDoc { name: "down", aliases: &[], summary: "Stop qbittorrent-nox", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "up", aliases: &[], summary: "Open or focus the app; legacy mode starts its service", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "down", aliases: &[], summary: "Close the app and wait for its engine to stop; legacy mode stops its service", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
+        CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text", json: false, mutating: false, needs_backend: false },
-        CommandDoc { name: "setup", aliases: &[], summary: "First-run install of the backend service and magnet handler", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
     let exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
@@ -167,17 +169,22 @@ pub fn capabilities_json() -> serde_json::Value {
         "tool": "fbittorrent",
         "version": env!("CARGO_PKG_VERSION"),
         "contract_version": CONTRACT_VERSION,
-        "description": "qBittorrent front-end for Omarchy: CLI, TUI, bar widget. Downloads are sequential, first/last piece first, upload off by default.",
+        "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, and bar widget. Downloads run while the app is open.",
+        "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": "open app only; closing it stops downloads, peers, sockets and provider searches", "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
+        "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
+        "backend_subcommands": ["rss grab", "shows grab"],
         "conventions": {
             "json": "pass --json (global flag) for a JSON object on stdout; errors become {ok:false,code,code_name,error,hint} on stdout with the same exit code",
             "stdout": "data only; diagnostics and progress go to stderr",
             "selectors": "torrents are selected by hash prefix (>= 4 hex chars) or a unique case-insensitive substring of the name; `all` selects every torrent",
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
+            "native_connect": "torrent commands open the app when closed unless autostart=false; status and triage never launch it",
+            "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
         },
         "defaults": {
-            "sequential": true, "first_last_piece": true, "upload": "off (32 KiB/s cap, stops when complete)",
-            "save_path": "qBittorrent's default, ~/Downloads after setup",
+            "sequential": true, "first_last_piece": true, "upload": "limited (native: 1 B/s; legacy: 32 KiB/s); stops when complete unless seed enabled",
+            "save_path": "the configured folder, or the desktop Downloads folder",
         },
         "commands": cmds,
         "exit_codes": exit_codes,
@@ -189,6 +196,8 @@ pub fn capabilities_json() -> serde_json::Value {
         "files": {
             "config": crate::config::config_path().display().to_string(),
             "cache": crate::imdb::cache_dir().display().to_string(),
+            "data": crate::config::data_dir().display().to_string(),
+            "socket": crate::ipc::socket_path(&crate::config::Config::default()).display().to_string(),
         },
         "agent_workflow": [
             "fbittorrent triage --json",
@@ -202,13 +211,16 @@ pub fn capabilities_json() -> serde_json::Value {
 
 // ---------------------------------------------------------------- robot docs
 
-pub const ROBOT_GUIDE: &str = r#"fbittorrent — agent handbook (contract 1.0.0)
+pub const ROBOT_GUIDE: &str = r#"fbittorrent — agent handbook (contract 1.1.0)
 
 WHAT IT IS
-  A qBittorrent front-end. qbittorrent-nox runs as a systemd user service and is
-  started on demand by any command that needs it. Every add is sequential,
-  first/last piece first, and upload is OFF (32 KiB/s cap, torrent stops when
-  complete). Files land in ~/Downloads unless configured otherwise.
+  A native Rust torrent app. The engine runs in the open TUI process; closing
+  the app stops downloading, peers, listeners, and provider processes. Torrent
+  commands open the app when needed. Status and triage never open it. Search,
+  RSS browsing, and Shows tracking work locally without starting downloads.
+  Upload is capped at 1 B/s and stops at completion unless seeding is enabled.
+  Files land in the configured download folder or the desktop Downloads folder.
+  Explicit engine = "qbittorrent" retains the legacy WebUI/service path.
 
 RULES
   - Pass --json (global) for machine output. Every command then prints ONE JSON
@@ -221,6 +233,23 @@ RULES
   - Destructive: `delete --files` needs --yes. `delete --dry-run` previews.
   - Bare `fbittorrent` opens the TUI on a TTY. Without a TTY it prints
     `triage --json`, so agents can always call it safely.
+  - `up` opens or focuses the app; `down` closes it and waits for engine cleanup.
+  - Native sequential and first/last scheduling are intrinsic. Toggle commands
+    and --no-seq/--no-first-last require legacy mode; native file priority only
+    supports skip/normal. Peer encryption defaults to prefer; require refuses
+    plaintext peers. F6 or `settings` changes encryption, queue limit and VPN.
+  - Three downloads run at once by default. Extra downloads wait in FIFO order.
+    Manual pause remains paused. Completed seeders do not consume queue slots.
+  - `settings --vpn proton` requires ProtonVPN's proton0 tunnel. Missing/down
+    tunnel blocks engine traffic and the app waits. Feed/search/title websites
+    use the usual connection; external torrent download hooks are refused.
+  - RSS read state is local. Shows read state is independent of download state;
+    `episodes --new` lists unread releases including S01 season bundles.
+  - First launch imports available local legacy torrents paused, plus RSS and
+    provider preferences. An installed stopped legacy service may run once to
+    export saved state. Its login startup is disabled and the service stops only
+    after successful import; legacy config and backup files remain for rollback.
+    Migration errors preserve the source and keep native imported files paused.
 
 EXIT CODES
   0 ok            1 failure       2 usage         3 safety (needs --yes)
@@ -242,18 +271,23 @@ OTHER USEFUL CALLS
   fbittorrent seed <sel> --json                   # allow upload for one torrent
   fbittorrent search --plugins --json             # providers and whether enabled
   fbittorrent rss list --json / rss items <feed> --json / rss grab <feed> <id> --json
+  fbittorrent shows follow "<title|tt id>" --json      # follow a TV show (local list, no service)
+  fbittorrent shows check --json                       # fetch episodes from EZTV, list what is new
+  fbittorrent shows grab <show> S01E02 --json          # add the best torrent for an episode
   fbittorrent imdb "<release name>" --json        # rating, blurb, poster path
   fbittorrent capabilities --json                 # this contract, machine readable
-  fbittorrent down                                # stop the backend when done
+  fbittorrent down                                # close the app and stop downloads
 
 JSON SHAPES (stable within contract 1.x)
-  torrent: {hash,name,state,progress(0..1),size,completed,dlspeed,upspeed,eta,
+  torrent: {hash,name,state,progress(0..1),progress_known,size,completed,dlspeed,upspeed,eta,
             num_seeds,num_leechs,ratio,seq_dl,f_l_piece_prio,save_path,
             content_path,category,tags,added_on,completion_on,up_limit,ratio_limit}
   search result: {fileName,fileUrl,fileSize,nbSeeders,nbLeechers,siteUrl,
                   descrLink,engineName,imdb,pubDate}
   states: downloading, metaDL, stalledDL, queuedDL, stoppedDL, uploading,
-          stalledUP, stoppedUP (= done), checkingDL, error, missingFiles
+          stalledUP, stoppedUP (= done), checkingDL, waitingVPN, error, missingFiles
+  When progress_known=false, do not interpret progress/completed as measured.
+  `show.complete` is null while progress is unknown.
 "#;
 
 // ---------------------------------------------------------------- triage
@@ -261,14 +295,17 @@ JSON SHAPES (stable within contract 1.x)
 /// The mega-command payload. Everything an agent wants before deciding what to do.
 pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json::Value {
     let running = c.version().is_ok();
-    let unit_active = crate::backend::is_active(&cfg.backend_unit);
+    let unit_active = !cfg.native() && crate::backend::is_active(&cfg.backend_unit);
     let mut warnings: Vec<String> = Vec::new();
     let mut next: Vec<String> = Vec::new();
     let mut torrents = serde_json::Value::Array(vec![]);
     let mut transfer = serde_json::Value::Null;
-    let mut counts = serde_json::json!({"active": 0, "seeding": 0, "stopped": 0, "done": 0, "error": 0, "total": 0});
+    let mut counts = serde_json::json!({"available": false, "active": 0, "queued": 0, "seeding": 0, "stopped": 0, "done": 0, "error": 0, "total": 0});
 
-    if !std::path::Path::new("/usr/bin/qbittorrent-nox").exists() {
+    if cfg.native() && !running {
+        warnings.push("fbittorrent is closed; the native engine is stopped".into());
+        next.push("fbittorrent up".into());
+    } else if !cfg.native() && !std::path::Path::new("/usr/bin/qbittorrent-nox").exists() {
         warnings.push("qbittorrent-nox is not installed".into());
         next.push("omarchy pkg add qbittorrent-nox && fbittorrent setup --magnet".into());
     } else if !running {
@@ -278,15 +315,16 @@ pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json
         let _ = c.login();
         if let Ok(ts) = c.torrents() {
             let active = ts.iter().filter(|t| t.is_active()).count();
+            let queued = ts.iter().filter(|t| t.is_queued()).count();
             let seeding = ts.iter().filter(|t| t.is_seeding()).count();
             let stopped = ts.iter().filter(|t| t.is_stopped() && t.progress < 1.0).count();
             let done = ts.iter().filter(|t| t.progress >= 1.0).count();
             let errors = ts.iter().filter(|t| t.state == "error" || t.state == "missingFiles").count();
-            counts = serde_json::json!({"active": active, "seeding": seeding, "stopped": stopped, "done": done, "error": errors, "total": ts.len()});
+            counts = serde_json::json!({"available": true, "active": active, "queued": queued, "seeding": seeding, "stopped": stopped, "done": done, "error": errors, "total": ts.len()});
             if errors > 0 { warnings.push(format!("{errors} torrent(s) in error state")); }
             if stopped > 0 { next.push("fbittorrent start <hash> --json   # resume a stopped download".into()); }
             torrents = serde_json::json!(ts.iter().map(|t| serde_json::json!({
-                "hash": t.hash, "name": t.name, "state": t.state, "progress": t.progress,
+                "hash": t.hash, "name": t.name, "state": t.state, "progress": t.progress, "progress_known": t.progress_known,
                 "size": t.size, "dlspeed": t.dlspeed, "eta": t.eta, "seed_allowed": t.seed_allowed(),
                 "open_target": crate::qbt::open_target(t),
             })).collect::<Vec<_>>());
@@ -294,12 +332,37 @@ pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json
         if let Ok(ti) = c.transfer_info() {
             transfer = serde_json::json!({"dl": ti.dl_info_speed, "up": ti.up_info_speed, "connection": ti.connection_status});
         }
+        if cfg.native() {
+            let network = crate::network_app::state(cfg);
+            if !network.ready { warnings.push(network.message); }
+        }
+    }
+    if cfg.native() || running {
         match c.search_plugins() {
             Ok(ps) if ps.is_empty() => { warnings.push("no search providers installed".into()); next.push("fbittorrent search --install".into()); }
             Ok(ps) if !ps.iter().any(|p| p.enabled) => { warnings.push("all search providers are disabled".into()); }
             _ => {}
         }
     }
+    let rss_json = if cfg.native() || running {
+        match c.rss_feeds() {
+            Ok(feeds) => {
+                for feed in &feeds {
+                    if feed.has_error { warnings.push(format!("RSS feed {} has a refresh error; cached articles are retained", feed.name)); }
+                }
+                serde_json::json!({"feeds": feeds.len(), "unread": feeds.iter().flat_map(|feed| &feed.articles).filter(|article| !article.is_read).count()})
+            }
+            Err(error) => { warnings.push(format!("RSS store unreadable: {error}")); serde_json::Value::Null }
+        }
+    } else { serde_json::Value::Null };
+    let shows_json = match crate::shows::Shows::load() {
+        Ok(all) => {
+            let new = all.new_total();
+            if new > 0 { next.push("fbittorrent shows check --json   # new episodes of followed shows".into()); }
+            serde_json::json!({"followed": all.shows.len(), "new": new, "stale": all.shows.iter().filter(|s| s.is_stale(crate::shows::now())).count()})
+        }
+        Err(e) => { warnings.push(format!("shows list unreadable: {e}")); serde_json::Value::Null }
+    };
     if crate::imdb::ratings_stale() { warnings.push("IMDb ratings dataset missing or older than a day (refreshed automatically on first lookup)".into()); }
     next.push("fbittorrent search \"<title>\" --json".into());
     next.push("fbittorrent add \"<magnet>\" --wait --json".into());
@@ -307,11 +370,13 @@ pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json
     serde_json::json!({
         "ok": true,
         "contract_version": CONTRACT_VERSION,
-        "backend": { "running": running, "unit": cfg.backend_unit, "unit_active": unit_active, "url": cfg.url, "autostart": cfg.autostart },
-        "defaults": { "sequential": cfg.sequential, "first_last": cfg.first_last, "seed_by_default": cfg.seed_by_default, "save_path": cfg.save_path },
+        "backend": { "engine": cfg.engine, "running": running, "app_open": cfg.native() && running, "unit": if cfg.native() { None } else { Some(&cfg.backend_unit) }, "unit_active": unit_active, "url": if cfg.native() { None } else { Some(&cfg.url) }, "socket": if cfg.native() { Some(crate::ipc::socket_path(cfg)) } else { None }, "autostart": cfg.autostart },
+        "defaults": { "sequential": cfg.native() || cfg.sequential, "first_last": cfg.native() || cfg.first_last, "seed_by_default": cfg.seed_by_default, "save_path": cfg.save_path, "max_active_downloads": cfg.max_active_downloads, "peer_encryption": cfg.peer_encryption, "network_interface": cfg.network_interface },
         "transfer": transfer,
         "counts": counts,
         "torrents": torrents,
+        "shows": shows_json,
+        "rss": rss_json,
         "warnings": warnings,
         "next_commands": next,
         "docs": "fbittorrent robot-docs",

@@ -250,10 +250,13 @@ pub fn wiki_blurb(t: &Title) -> Result<(String, String)> {
 }
 
 // ---------- disk cache ----------
-// by-name/<key>.json  -> {"id": "tt…"} or {"missing": true}   (release name -> id)
+// by-name-v2/<key>.json -> {"id": "tt…"} or {"missing": true} (matched release name -> id)
 // by-id/<tt…>.json    -> Title + fetched_at                    (full card)
 
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+// Old by-name entries accepted the first suggestion without checking its title.
+// Leave those files alone and resolve each name once with the matching rule below.
+const NAME_CACHE_KIND: &str = "by-name-v2";
 
 fn cache_file(kind: &str, key: &str) -> PathBuf {
     let safe: String = key.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).take(120).collect();
@@ -296,7 +299,7 @@ pub fn lookup_id(id: &str) -> Result<Option<Title>> {
 /// Cheap id resolution for a release name: one suggestion call, cached by name.
 /// No rating, blurb or poster fetch. Used to fill the ratings column of search results.
 pub fn resolve_id(release_name: &str) -> Option<String> {
-    if let Some(v) = cache_read("by-name", release_name) {
+    if let Some(v) = cache_read(NAME_CACHE_KIND, release_name) {
         if v.get("missing").and_then(|m| m.as_bool()) == Some(true) { return None; }
         return v.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
     }
@@ -304,30 +307,59 @@ pub fn resolve_id(release_name: &str) -> Option<String> {
     if r.title.is_empty() { return None; }
     let mut cands = candidates(&r).ok()?;
     if cands.is_empty() {
-        cache_write("by-name", release_name, &serde_json::json!({"missing": true}));
+        cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"missing": true}));
         return None;
     }
     let t = cands.remove(0);
-    cache_write("by-name", release_name, &serde_json::json!({"id": t.id}));
+    cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"id": t.id}));
     Some(t.id)
 }
 
-/// IMDb suggestions for a parsed release. An episode number means a show, so TV
-/// titles go first: "The Ghost in the Shell S01E09" must not land on a film.
+/// IMDb suggestions must match the parsed title. IMDb also returns popular titles
+/// sharing only a prefix ("Dark" can suggest "Dark Matter" first).
 fn candidates(r: &crate::release::Release) -> Result<Vec<Title>> {
-    let mut out = search(&r.title, r.year)?;
-    if r.episode.is_some() {
-        let (tv, rest): (Vec<_>, Vec<_>) = out.into_iter().partition(|t| t.kind.to_ascii_lowercase().starts_with("tv"));
-        out = tv; out.extend(rest);
+    Ok(matching_candidates(r, r.episode.is_some(), search(&r.title, r.year)?))
+}
+
+fn title_key(title: &str, omit_article: bool) -> String {
+    let mut words = title.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty());
+    let mut key = String::new();
+    if let Some(first) = words.next() {
+        if !(omit_article && first.eq_ignore_ascii_case("the")) {
+            key.extend(first.chars().flat_map(char::to_lowercase));
+        }
     }
-    Ok(out)
+    for word in words { key.extend(word.chars().flat_map(char::to_lowercase)); }
+    key
+}
+
+/// Shared title gate for release cards and manual show following. A show follow
+/// prefers TV even when the user supplied a plain title without an episode tag.
+pub(crate) fn matching_candidates(r: &crate::release::Release, prefer_tv: bool, titles: Vec<Title>) -> Vec<Title> {
+    let exact = title_key(&r.title, false);
+    if exact.is_empty() { return Vec::new(); }
+    let article_free = title_key(&r.title, true);
+    let mut matches: Vec<_> = titles.into_iter().filter_map(|t| {
+        let rank = if title_key(&t.name, false) == exact { 0 }
+            else if !article_free.is_empty() && title_key(&t.name, true) == article_free { 1 }
+            else { return None; };
+        Some((rank, t))
+    }).collect();
+    // Retain the existing TV and year preferences, then prefer the exact title
+    // over an optional leading "The". Stable ordering keeps IMDb's tie-breaks.
+    matches.sort_by_key(|(rank, t)| (
+        prefer_tv && !t.kind.to_ascii_lowercase().starts_with("tv"),
+        r.year.is_some_and(|year| t.year != Some(year)),
+        *rank,
+    ));
+    matches.into_iter().map(|(_, t)| t).collect()
 }
 
 /// Best-effort full lookup for a release name: title + rating + blurb.
 /// Cached on disk for a week, by name and by id, so the same show under
 /// several release names costs one network round trip.
 pub fn lookup(release_name: &str) -> Result<Option<Title>> {
-    if let Some(v) = cache_read("by-name", release_name) {
+    if let Some(v) = cache_read(NAME_CACHE_KIND, release_name) {
         if v.get("missing").and_then(|m| m.as_bool()) == Some(true) { return Ok(None); }
         if let Some(id) = v.get("id").and_then(|i| i.as_str()) {
             if let Some(t) = cached_title(id) { return Ok(Some(t)); }
@@ -338,11 +370,11 @@ pub fn lookup(release_name: &str) -> Result<Option<Title>> {
     if r.title.is_empty() { return Ok(None); }
     let mut cands = candidates(&r)?;
     if cands.is_empty() {
-        cache_write("by-name", release_name, &serde_json::json!({"missing": true}));
+        cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"missing": true}));
         return Ok(None);
     }
     let mut t = cands.remove(0);
-    cache_write("by-name", release_name, &serde_json::json!({"id": t.id}));
+    cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"id": t.id}));
     if let Some(full) = cached_title(&t.id) { return Ok(Some(full)); }
     enrich(&mut t);
     store_title(&t);
@@ -352,4 +384,91 @@ pub fn lookup(release_name: &str) -> Result<Option<Title>> {
 pub fn enrich(t: &mut Title) {
     if let Ok(Some((r, v))) = rating_for(&t.id) { t.rating = Some(r); t.votes = Some(v); }
     if let Ok((blurb, url)) = wiki_blurb(t) { t.blurb = blurb; t.wiki_url = url; }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn title(id: &str, name: &str, year: u16, kind: &str) -> Title {
+        Title { id: id.into(), name: name.into(), year: Some(year), kind: kind.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn release_title_rejects_unrelated_suggestions_and_prefixes() {
+        let r = crate::release::parse("Dark.S01E01.1080p.WEB-DL");
+        // IMDb's live suggestion order for "dark" on 2026-10-10.
+        let matched = matching_candidates(&r, true, vec![
+            title("tt19231492", "Dark Matter", 2024, "TV series"),
+            title("tt5753856", "Dark", 2017, "TV series"),
+            title("tt15017118", "Dark Winds", 2022, "TV series"),
+        ]);
+        assert_eq!(matched.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["tt5753856"]);
+
+        let synthetic = crate::release::parse("CUA.Season.Pack.Long.title.END");
+        assert!(matching_candidates(&synthetic, false, vec![title("tt16300962", "When Evil Lurks", 2023, "feature")]).is_empty());
+    }
+
+    #[test]
+    fn release_punctuation_and_year_keep_the_intended_movie() {
+        let r = crate::release::parse("Dune.Part.Two.2024.1080p.WEB-DL.DDP5.1.H.264-FLUX");
+        let matched = matching_candidates(&r, false, vec![
+            title("tt31378509", "Dune: Part Three", 2026, "feature"),
+            title("tt15239678", "Dune: Part Two", 2024, "feature"),
+        ]);
+        assert_eq!(matched[0].id, "tt15239678");
+        assert_eq!(title_key("Schindler's List", false), title_key("SCHINDLERS.LIST", false));
+
+        let r = crate::release::parse("The.Bear.1988.1080p.BluRay");
+        let matched = matching_candidates(&r, false, vec![
+            title("tt14452776", "The Bear", 2022, "TV series"),
+            title("tt0095800", "The Bear", 1988, "feature"),
+        ]);
+        assert_eq!(matched[0].id, "tt0095800");
+    }
+
+    #[test]
+    fn episodes_prefer_matching_tv_titles_and_allow_a_leading_the() {
+        let r = crate::release::parse("[Ironclad] THE GHOST IN THE SHELL - S01E09 [WEB.1080p.AV1]");
+        let matched = matching_candidates(&r, true, vec![
+            title("tt1219827", "Ghost in the Shell", 2017, "feature"),
+            title("tt0346314", "Ghost in the Shell: Stand Alone Complex", 2002, "TV series"),
+            title("tt36517689", "The Ghost in the Shell", 2026, "TV series"),
+        ]);
+        assert_eq!(matched[0].id, "tt36517689");
+        assert_eq!(matched.len(), 2);
+
+        let r = crate::release::parse("The.Bear.S03E04.1080p.WEB.h264-ETHEL[TGx]");
+        let matched = matching_candidates(&r, true, vec![
+            title("tt0095800", "The Bear", 1988, "feature"),
+            title("tt14452776", "The Bear", 2022, "TV series"),
+        ]);
+        assert_eq!(matched[0].id, "tt14452776");
+    }
+
+    #[test]
+    fn manual_show_names_match_before_preferring_series_and_year() {
+        let r = crate::release::parse("Dark");
+        assert!(r.episode.is_none());
+        let matched = matching_candidates(&r, true, vec![
+            title("tt19231492", "Dark Matter", 2024, "TV series"),
+            title("tt5753856", "Dark", 2017, "TV series"),
+        ]);
+        assert_eq!(matched[0].id, "tt5753856");
+
+        let r = crate::release::parse("One Piece (2023)");
+        let matched = matching_candidates(&r, true, vec![
+            title("tt0388629", "One Piece", 1999, "TV series"),
+            title("tt11737520", "One Piece", 2023, "TV series"),
+        ]);
+        assert_eq!(matched[0].id, "tt11737520");
+
+        let r = crate::release::parse("The Bear");
+        let matched = matching_candidates(&r, true, vec![
+            title("tt0095800", "The Bear", 1988, "feature"),
+            title("tt14452776", "The Bear", 2022, "TV series"),
+        ]);
+        assert_eq!(matched[0].id, "tt14452776");
+        assert!(matching_candidates(&r, true, vec![title("tt38578088", "I Kill the Bear", 2026, "TV series")]).is_empty());
+    }
 }

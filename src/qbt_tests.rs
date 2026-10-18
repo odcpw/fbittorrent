@@ -66,7 +66,7 @@ fn serve(routes: Vec<Route>) -> (String, Arc<Mutex<Vec<Captured>>>) {
 }
 
 fn client(url: &str) -> Client {
-    let cfg = Config { url: url.to_string(), timeout_secs: 5, ..Config::default() };
+    let cfg = Config { engine: "qbittorrent".into(), url: url.to_string(), timeout_secs: 5, ..Config::default() };
     Client::from_config(&cfg)
 }
 
@@ -177,6 +177,24 @@ fn rfc2822_dates_parse_and_sort_newest_first() {
     assert!(a > b);
     assert_eq!(ymd(a), "2026-09-02");
     assert_eq!(parse_rfc2822("garbage"), 0);
+}
+
+#[test]
+fn nested_rss_feed_uses_the_backend_path_for_refresh_and_read() {
+    let (url, log) = serve(vec![
+        route("/api/v2/rss/items", 200, r#"{"Shows":{"TV":{"uid":"feed-id","url":"https://example.com/rss","articles":[{"id":"episode","title":"New episode","date":"02 Sep 2026 03:58:00 +0000"}]}}}"#),
+        route("/api/v2/rss/refreshItem", 200, ""),
+        route("/api/v2/rss/markAsRead", 200, ""),
+    ]);
+    let c = client(&url);
+    let feeds = c.rss_feeds().unwrap();
+    assert_eq!(feeds[0].name, "Shows\\TV");
+    c.rss_refresh(&feeds[0].name).unwrap();
+    c.rss_mark_read(&feeds[0].name, Some("episode")).unwrap();
+    let requests = log.lock().unwrap();
+    assert!(body_str(&requests[1]).contains("itemPath=Shows%5CTV"));
+    assert!(body_str(&requests[2]).contains("itemPath=Shows%5CTV"));
+    assert!(body_str(&requests[2]).contains("articleId=episode"));
 }
 
 #[test]

@@ -1,0 +1,18 @@
+fbittorrent
+Copyright (c) 2026 Oliver (odcpw). MIT licence, see LICENSE. This covers the
+code outside vendor/; the vendored trees keep their own licences:
+
+- vendor/rqbit/: the rqbit 9.0.1 crate family (Copyright 2021 and 2025 Igor
+  Katson), Apache License 2.0, see vendor/rqbit/LICENSE and
+  vendor/rqbit/librqbit-dualstack-sockets/LICENSE. fbittorrent modified it
+  (Asupersync runtime port, MSE, interface binding); vendor/rqbit/README.md
+  lists the changes, and vendor/rqbit/librqbit/src/mse/README.md the adapted
+  urtorrent-mse (Apache-2.0, with its NOTICE) and RustCrypto rc4 (MIT) sources.
+- vendor/asupersync/: Asupersync 0.5.0 (Copyright (c) 2026 Jeffrey Emanuel)
+  plus the fbittorrent patch (vendor/asupersync/FBITTORRENT_PATCH.md), under
+  "MIT License (with OpenAI/Anthropic Rider)", see vendor/asupersync/LICENSE.
+  Every distribution must carry that rider unmodified.
+- vendor/nova3/: qBittorrent's nova3 search runtime (Christophe Dumez, Fabien
+  Devaux and contributors; socks.py Copyright 2006 Dan-Haim), 3-clause BSD,
+  notices in each file header and the per-file table in vendor/nova3/README.md.
+  The binary embeds these files verbatim.
