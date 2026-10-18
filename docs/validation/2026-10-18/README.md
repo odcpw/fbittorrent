@@ -120,3 +120,7 @@ hits, all reviewed. By area: `vendor/asupersync` 7,922, `vendor/rqbit` 148,
 ## P0-12
 
 Receipt: [P0-12.md](P0-12.md) (branch ntm/fbittorrent/cod_3, commit 4a07691; merged by the orchestrator after an independent test run).
+
+## P0-16
+
+Receipt: [P0-16.md](P0-16.md) (branch ntm/fbittorrent/cod_2, commit fe18858; merged by the orchestrator after an independent test run and an Astra review).
