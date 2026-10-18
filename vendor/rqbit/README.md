@@ -18,6 +18,16 @@ storage. Task factories receive the owning context, and pause/close paths
 cancel and drain their regions. The app owns durable torrent metadata and
 records, rather than rqbit's upstream persistence implementation.
 
+`ManagedTorrent::have_pieces_snapshot()` returns an owned, in-memory
+`Option<Box<dyn BitV>>` for watch-readiness and piece displays; `BitV` is exported
+at the crate root. The bitfield is copied while the existing tracker read locks
+are held and keeps the protocol's MSB-first byte order and final-byte padding.
+Use metadata's piece count to interpret the meaningful bits. Initializing or
+tracker-less states return `None`; initialized paused torrents retain their
+verified bitfield. Snapshots can be mutated or dropped independently and never
+flush or modify the source tracker. Native unit tests cover verified live bits,
+paused/absent trackers, clone independence and a 10,000-piece clone below 1 ms.
+
 The app uses TCP peer transport, DHT, HTTP/HTTPS and UDP trackers, local peer
 discovery, file inclusion, sequential piece scheduling, and upload limits.
 The maintained engine also supports MSE peer encryption in both directions,
