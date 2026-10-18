@@ -220,3 +220,7 @@ Receipt: [P1-16d.md](P1-16d.md) (branch ntm/fbittorrent/cod_4-p1-16d, commit b84
 ## P1-05
 
 Receipt: [P1-05.md](P1-05.md) (branch ntm/fbittorrent/cod_3-p1-05-2qa, commits 5052283, 573dc12, 7044f6f, b87e031 and 3a4caac, the last three applied by cod_3, cod_4 and cod_2 in turn; merged by the orchestrator after five Astra reviews that progressively enforced the bead's literal operation list, the app.info shape, complete fixture coverage, required pending refs, value validation, watch-gated playable fields and events, and the append-only events topic; batch gate on main follows).
+
+## P1-03b
+
+Receipt: [P1-03b.md](P1-03b.md) (branch ntm/fbittorrent/cod_3-p1-03b, commits abe3dad and 95291d4; merged by the orchestrator after two Astra reviews, the first returning two P2 findings (a 25 ms scheduling window in the regression, unfinished handles dropped on join timeout) that the second verified closed with 3/3 runs of each of the five startup tests; the historical cause stays open in P1-03c; batch gate on main follows).
