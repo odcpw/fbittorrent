@@ -32,8 +32,10 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 1. You work on exactly the bead you were assigned, in the pane you were given. Read it fully:
    `br show <id> --json`. It names the files you own, the API messages, tokens, thresholds,
    fixtures, acceptance criteria and the tests with their JSONL logging.
-2. Claim: `br update <id> --status in_progress --assignee <your pane name>`. If the claim fails
-   or the bead is already in progress, stop and report; never steal work.
+2. Claiming is the orchestrator's job: your bead arrives already `in_progress` and assigned to
+   your pane, with its full text in the marching orders. In a worktree never run `br` at all
+   (each checkout would grow its own database and the JSONL would diverge); read the bead text
+   you were sent. Never work on a bead you were not sent.
 3. Stay inside the bead's owned files. If you must touch a file another bead owns, stop and
    report the exact file and reason instead of editing it.
 4. Real code plus real tests in the same change. Acceptance criteria are frozen: never weaken a
@@ -52,7 +54,8 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
    - anything unmet or deviating from the bead, with the reason;
    - follow-ups you noticed but did not do (do not create beads for them).
    The orchestrator verifies on `main` and closes with evidence.
-8. `br` only for bead state; never edit `.beads/` by hand. Never create or delete beads.
+8. Never edit `.beads/` by hand and never commit anything under `.beads/`. Never create or
+   delete beads. Follow-ups go in your report.
 
 ## Honest credit
 
