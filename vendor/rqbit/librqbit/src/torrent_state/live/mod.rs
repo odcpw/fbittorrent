@@ -85,7 +85,6 @@ use crate::{
     Error,
     chunk_tracker::{ChunkMarkingResult, ChunkTracker, HaveNeededSelected},
     file_ops::FileOps,
-    limits::Limits,
     peer_connection::{
         PeerConnection, PeerConnectionHandler, PeerConnectionOptions, WriteBuffer, WriterRequest,
         read_owned_upload,
@@ -218,7 +217,6 @@ pub struct TorrentStateLive {
         rqbit_runtime::channel::mpsc::UnboundedSender<WriterRequest>,
         ChunkInfo,
     )>,
-    ratelimits: Limits,
 }
 
 impl TorrentStateLive {
@@ -262,7 +260,6 @@ impl TorrentStateLive {
                 rqbit_runtime::channel::mpsc::UnboundedSender<WriterRequest>,
                 ChunkInfo,
             )>();
-        let ratelimits = Limits::new(paused.shared.options.ratelimits);
 
         let state = Arc::new(TorrentStateLive {
             cx: cx.clone(),
@@ -303,7 +300,6 @@ impl TorrentStateLive {
                 .map(|_| RwLock::new(()))
                 .collect(),
             ratelimit_upload_tx,
-            ratelimits,
         });
 
         state.spawn(
@@ -452,7 +448,7 @@ impl TorrentStateLive {
             if tx.is_closed() {
                 continue;
             }
-            self.ratelimits
+            self.shared.options.ratelimits
                 .prepare_for_upload(cx, NonZeroU32::new(ci.size).unwrap())
                 .await?;
             if let Some(session) = self.shared.session.upgrade() {
@@ -1810,7 +1806,7 @@ impl PeerHandler {
                 aframe!(self.wait_for_request_slot(cx)).await;
 
                 self.state
-                    .ratelimits
+                    .shared.options.ratelimits
                     .prepare_for_download(cx, NonZeroU32::new(request.length).unwrap())
                     .await?;
 

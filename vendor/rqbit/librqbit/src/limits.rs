@@ -33,18 +33,27 @@ impl Limit {
     }
 
     async fn acquire(&self, cx: &Cx, size: NonZeroU32) -> crate::Result<()> {
-        let lim = self.limiter.load().clone();
-        if let Some(rl) = lim.as_ref() {
-            loop {
-                cx.checkpoint()?;
+        loop {
+            cx.checkpoint()?;
+            // Re-read after waiting: an in-flight chunk must observe a live
+            // replacement rather than keep consuming the old limiter forever.
+            let lim = self.limiter.load_full();
+            if let Some(rl) = lim.as_ref() {
                 match rl.check_n(size) {
-                    Ok(Ok(())) => break,
-                    Ok(Err(wait)) => rqbit_runtime::time::sleep(cx, wait.wait_time_from(governor::clock::Clock::now(rl.clock()))).await,
+                    Ok(Ok(())) => return Ok(()),
+                    Ok(Err(wait)) => {
+                        rqbit_runtime::time::sleep(
+                            cx,
+                            wait.wait_time_from(governor::clock::Clock::now(rl.clock())),
+                        )
+                        .await
+                    }
                     Err(e) => return Err(e.into()),
                 }
+            } else {
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     fn set(&self, limit: Option<NonZeroU32>) {
@@ -64,6 +73,12 @@ impl Limit {
 pub struct Limits {
     down: Limit,
     up: Limit,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self::new(LimitsConfig::default())
+    }
 }
 
 impl Limits {
