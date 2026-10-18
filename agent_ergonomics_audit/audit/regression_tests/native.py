@@ -42,6 +42,69 @@ def bencode(value):
     return b"l" + b"".join(bencode(item) for item in value) + b"e"
 
 
+class NativeHarness:
+    """Record native CLI calls and retain only the asserted polling captures."""
+
+    def __init__(self, get_case, binary, env):
+        self.get_case, self.binary, self.env = get_case, binary, env
+        self.polling, self.poll_records = False, []
+
+    def record(self, action, expect, observed, ok=True, started=None):
+        if self.polling and action == "capture terminal pane" and ok:
+            self.poll_records.append((action, expect, observed, ok, started))
+            if os.environ.get("FBT_TEST_VERBOSE") != "1":
+                return
+        step = self.get_case().step(action, expect)
+        if started is not None:
+            step.started = started
+        step.close(ok, observed)
+
+    def wait_for(self, check, label, seconds=10):
+        started = time.monotonic()
+        end = started + seconds
+        while time.monotonic() < end:
+            self.poll_records.clear()
+            self.polling = True
+            try:
+                result = check()
+            finally:
+                self.polling = False
+            if result:
+                break
+            time.sleep(0.1)
+        else:
+            result = False
+        if os.environ.get("FBT_TEST_VERBOSE") != "1":
+            for observation in self.poll_records:
+                self.record(*observation)
+        self.record("wait for " + label, f"{label} within {seconds} seconds",
+                    f"Condition {'satisfied' if result else 'timed out'} after {time.monotonic()-started:.3f} seconds.",
+                    bool(result), started)
+        return result
+
+    def cli(self, *args, code=0):
+        started = time.monotonic()
+        child = self.get_case().popen([self.binary, *args, "--json"], env=self.env,
+                                      stdout=subprocess.PIPE, text=True)
+        try:
+            stdout, _ = child.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            self.record("CLI " + shlex.join(args), f"exit {code} with JSON within 20 seconds",
+                        "CLI timed out and was killed.", False, started)
+            raise
+        try:
+            value = json.loads(stdout)
+        except ValueError:
+            self.record("CLI " + shlex.join(args), f"exit {code} with JSON",
+                        f"Exit {child.returncode}; invalid JSON: {stdout}", False, started)
+            raise
+        self.record("CLI " + shlex.join(args), f"exit {code} with JSON",
+                    f"Exit {child.returncode}; stdout: {stdout.strip()}", child.returncode == code, started)
+        return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
@@ -53,42 +116,6 @@ def main():
         print("\n".join(CASES))
         return 0
     binary = str(Path(options.binary).resolve())
-    polling, poll_records = False, []
-
-    def record(action, expect, observed, ok=True, started=None):
-        if polling:
-            poll_records.append((action, expect, observed, ok, started))
-            if os.environ.get("FBT_TEST_VERBOSE") != "1":
-                return
-        step = case.step(action, expect)
-        if started is not None:
-            step.started = started
-        step.close(ok, observed)
-
-    def wait_for(check, label, seconds=10):
-        nonlocal polling
-        started = time.monotonic()
-        end = started + seconds
-        while time.monotonic() < end:
-            poll_records.clear()
-            polling = True
-            try:
-                result = check()
-            finally:
-                polling = False
-            if result:
-                break
-            time.sleep(0.1)
-        else:
-            result = False
-        if os.environ.get("FBT_TEST_VERBOSE") != "1":
-            for observation in poll_records:
-                record(*observation)
-        record("wait for " + label, f"{label} within {seconds} seconds",
-               f"Condition {'satisfied' if result else 'timed out'} after {time.monotonic()-started:.3f} seconds.",
-               bool(result), started)
-        return result
-
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
@@ -108,27 +135,8 @@ def main():
             f'url = "http://127.0.0.1:9"\npeer_port = {peer_port}\n'
             f'save_path = {json.dumps(str(root / "downloads"))}\n')
 
-        def cli(*args, code=0):
-            started = time.monotonic()
-            child = case.popen([binary, *args, "--json"], env=env,
-                               stdout=subprocess.PIPE, text=True)
-            try:
-                stdout, _ = child.communicate(timeout=20)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.communicate()
-                record("CLI " + shlex.join(args), f"exit {code} with JSON within 20 seconds",
-                       "CLI timed out and was killed.", False, started)
-                raise
-            try:
-                value = json.loads(stdout)
-            except ValueError:
-                record("CLI " + shlex.join(args), f"exit {code} with JSON",
-                       f"Exit {child.returncode}; invalid JSON: {stdout}", False, started)
-                raise
-            record("CLI " + shlex.join(args), f"exit {code} with JSON",
-                   f"Exit {child.returncode}; stdout: {stdout.strip()}", child.returncode == code, started)
-            return value
+        harness = NativeHarness(lambda: case, binary, env)
+        cli, record, wait_for = harness.cli, harness.record, harness.wait_for
 
         name = "Fixture.with.a.long.filename." + "readable." * 14 + "END.txt"
         content = b"Local torrent lifecycle fixture.\n"

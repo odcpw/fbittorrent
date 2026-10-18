@@ -5,12 +5,18 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.." || exit 1
 export PATH="$HOME/.rch/shims:$HOME/.cargo/bin:$PATH"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+# Reset all scheduled JSONL suites before any gate can fail. Archived bead
+# evidence and unrelated suites are neither removed nor included in this run.
+summary_args=(--suite fbtlog_test --suite qs_log_test --suite hygiene --suite native)
+python3 scripts/testlog-summary.py --reset "${summary_args[@]}"
 test_log=$(mktemp)
 finish() {
   local status=$?
   trap - EXIT
   rm -f "$test_log"
-  python3 scripts/testlog-summary.py || status=1
+  if ! python3 scripts/testlog-summary.py "${summary_args[@]}"; then
+    if [[ "$status" == 0 ]]; then status=1; fi
+  fi
   exit "$status"
 }
 trap finish EXIT

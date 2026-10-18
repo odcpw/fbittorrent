@@ -3,6 +3,8 @@
 import argparse
 import json
 from pathlib import Path
+import re
+import shutil
 import sys
 
 
@@ -10,11 +12,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", type=Path,
                         default=Path(__file__).resolve().parents[1] / "target/test-logs")
+    parser.add_argument("--suite", action="append", help="summarize only this scheduled suite (repeatable)")
+    parser.add_argument("--reset", action="store_true", help="clear only the explicitly selected suites, then exit")
     args = parser.parse_args()
+    if args.reset and not args.suite:
+        parser.error("--reset requires at least one explicit --suite")
+    if any(not re.fullmatch(r"[a-z0-9]+(?:_[a-z0-9]+)*", name) for name in args.suite or []):
+        parser.error("suite names must be snake_case slugs")
+    directories = ([args.root / name for name in args.suite] if args.suite else
+                   sorted(args.root.iterdir()) if args.root.exists() else [])
+    if args.reset:
+        for directory in directories:
+            if directory.exists():
+                shutil.rmtree(directory)
+        return 0
     bad = False
     print("suite                    cases  passes  failures  slowest five (ms)")
-    for directory in sorted(args.root.iterdir()) if args.root.exists() else []:
-        if not directory.is_dir():
+    for directory in directories:
+        if not directory.is_dir() and not args.suite:
             continue
         cases = []
         for path in sorted(directory.glob("*.jsonl")):
@@ -28,6 +43,9 @@ def main():
                 print(f"{path}: invalid case log: {error}", file=sys.stderr)
                 cases.append(dict(case=path.stem, ok=False, ms=0))
         if not cases:
+            if args.suite:
+                print(f"{directory.name:<24}     -       -         -  not run")
+                bad = True
             continue
         failed = sum(not row["ok"] for row in cases)
         slowest = sorted(cases, key=lambda row: row["ms"], reverse=True)[:5]
