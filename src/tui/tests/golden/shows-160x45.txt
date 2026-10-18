@@ -1,0 +1,45 @@
+  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+╭ Shows (2) ──────────────────────────────────────╮╭ All unread · 2 releases · newest first ───────────────────────────────────────────────────────────────────╮
+│                                                 ││                                                                                                           │
+│ ▌ All unread                                  2 ││ Cached releases · (R) Check all · (←) Browse shows                                                        │
+│   The Diplomat                                1 ││      RELEASE SHOW                                                      QUAL       SIZE  SEEDS        DATE │
+│   Breaking Bad                                1 ││ ▌ ●  S05E16  Breaking Bad · Breaking Bad.S05E16.1080p.WEB-DL          1080p  768.0 MiB     42  2026-10-18 │
+│                                                 ││   ●↓ S04E01  The Diplomat · The Diplomat.S04E01.1080p.WEB-DL          1080p  768.0 MiB     42  2026-10-18 │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+╰─────────────────────────────────────────────────╯│                                                                                                           │
+╭ IMDb ───────────────────────────────────────────╮│                                                                                                           │
+│                                                 ││                                                                                                           │
+│  IMDb card appears when the cursor rests here   ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+│                                                 ││                                                                                                           │
+╰─────────────────────────────────────────────────╯╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[Unread] (Enter) Download  (M)ark read  (←) Shows  (R) Check all                                                                                        (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

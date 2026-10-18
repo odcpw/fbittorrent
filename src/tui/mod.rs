@@ -3,6 +3,10 @@
 mod poster;
 mod theme;
 
+#[cfg(test)]
+#[path = "tests/golden.rs"]
+mod golden;
+
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;

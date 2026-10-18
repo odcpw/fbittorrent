@@ -1,0 +1,24 @@
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS  ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+╭ Search ──────────────────────────────────────────────────────────────────────╮
+│ Sintel                                                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭ Results (10) · 2/3 providers ────────────────────────────────────────────────╮
+│                                                                              │
+│   NAME                                                 IMDB  SEEDS      SIZE │
+│ ▌ Sintel                                                       124 512.0 MiB │
+│   Sintel - 2010 - Multisubs mkv                                123 512.0 MiB │
+│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD                       122 512.0 MiB │
+│   Sintel (2010) [720p] [x264] [bluray] [YTS]                   121 512.0 MiB │
+│   Sintel 2010 x264 DMRip 1080p mkv                             120 512.0 MiB │
+│   Sintel 2010 820p H264                                        119 512.0 MiB │
+│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                      118 512.0 MiB │
+│   Sintel.2010.720p.WEB.H264-CLASSiCALHD                        117 512.0 MiB │
+│   Sintel [辛特尔] Cafe                                         116 512.0 MiB │
+│   [philosophy-raws][è¾›ç‰¹å°”][sint…0bitåŽ‹åˆ¶][2Kç..          115 512.0 MiB │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Results] (Enter) Download  (Shift+O) Source  (F)ollow show  (/) Query  (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
