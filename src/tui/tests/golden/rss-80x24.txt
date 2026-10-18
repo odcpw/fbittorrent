@@ -1,0 +1,24 @@
+  1 Torrents    2 Search    3 Shows (2)  [ 4 RSS ]↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+╭ Feeds (1) ──────────────╮╭ Blender releases ─────────────────────────────────╮
+│                         ││                                                   │
+│ ▌ Blender releases  2/3 ││ ▌ ● Sintel.2010.1080p       512.0 MiB  2026-10-18 │
+│                         ││   ● Big.Buck.Bunny…08.1080p 512.0 MiB  2026-10-18 │
+│                         ││     Elephants.Drea…06.1080p 512.0 MiB  2026-10-18 │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+│                         ││                                                   │
+╰─────────────────────────╯╰───────────────────────────────────────────────────╯
+[Items] (Enter) Download  (M)ark read  (Shift+M) All read  (←) Feeds    (?) Help
+(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move

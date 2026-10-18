@@ -1,0 +1,24 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS  ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+╭ Torrents (3) ────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│╭ Download settings ─────────────────────────────────────────────────────────╮│
+││ ▌ Simultaneous downloads   3                                               ││
+││   Peer encryption          Prefer encryption                               ││
+││   VPN connection           Off · ordinary connection                       ││
+││ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          ││
+││                                                                            ││
+││ Extra downloads wait their turn. Encryption protects peer traffic; your IP ││
+││ remains visible.                                                           ││
+││                                                                            ││
+││ A required VPN blocks torrent transfers when disconnected. Feed and search ││
+││ websites use your usual connection.                                        ││
+││                                                                            ││
+││ VPN binding off                                                            ││
+││ Changing encryption or VPN reopens the app's engine.                       ││
+││                                                                            ││
+││                                                                            ││
+││                                                                            ││
+│╰────────────────────────────────────────────────────────────────────────────╯│
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Settings] (↑↓) Choose  (←→) Change  (Enter) Save                   (Esc) Cancel
+

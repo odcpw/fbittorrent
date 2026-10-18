@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
+│ ▌ The Diplomat S04E01 1080p WEB-DL H264-GROUP ████░░░░░░   42.0%   2.0 MiB/s   4m57s SF·  ││                                                                 │
+│   Sintel.2010.1080p                 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮                                     │
+│   Other.Movie.2026.1080p            │                                                                                  │ of 1.0 GiB                          │
+│                                     │ GLOBAL   (1) Torrents · (2) Search · (3) Shows · (4) RSS                         │1.0 KiB/s                            │
+│                                     │          (Tab/Shift+Tab) Next/previous screen                                    │                                     │
+│                                     │          (?) Help · (Esc) Leave input, close a dialog or return                  │hers                                 │
+│                                     │          Letters in parentheses use lowercase; Shift is explicit.                │                                     │
+│                                     │          (F6) Download queue, encryption and VPN (native engine)                 │ty automatic                         │
+│                                     │          (Q)uit and stop the engine · Shift+Q also quits                         │tops when complete  (u to seed)      │
+│                                     │          (A)dd URL/magnet · F4 toggles seeding in the add prompt                 │ds                                   │
+│                                     │          (C)lipboard · arrows or j/k move · g/Shift+G first/last                 │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ TORRENTS (Enter) Files · (O)pen downloaded file/folder                           │ cursor rests here                   │
+│                                     │          (P)ause/resume · (U) Allow/stop seeding                                 │                                     │
+│                                     │          (D) Remove, keep files · (Shift+D) Delete with files                    │                                     │
+│                                     │          (I) IMDb · (W)ikipedia · (Shift+F) Follow this show                     │                                     │
+│                                     │          Streaming priority is automatic; file selection supports include/skip.  │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ SEARCH   Query: type + (Enter) Search; empty query browses lists                 │                                     │
+│                                     │          (Down/Esc) Leave query · (/) Edit query from results                    │                                     │
+│                                     │          Results: (Enter) Download · (Shift+O) Source page                       │                                     │
+│                                     │          (S) Providers · (B)rowse lists · (F)ollow show                          │                                     │
+│                                     │          (I) IMDb · (W)ikipedia; press Esc before ? in the query                 │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ BROWSE   (Enter) Load selected list or open a browser-only site                  │                                     │
+│                                     │          (Esc) Results · (/) Query                                               │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ PROVIDERS (Space) Toggle · (A)ll · (N)one · (O)pen site                          │                                     │
+│                                     │           (Esc/Enter) Close; choices are saved                                   │                                     │
+│                                     │                                                                                  │                                     │
+│                                     │ FILES    (Space) Include/skip · (1) Include                                      │                                     │
+│                                     │          (A)ll files · (N)one · (Esc/Enter) Close                                │                                     │
+│                                     │ j/k ↑/↓ wheel scroll · PgUp/PgDn · Esc or click close                            │                                     │
+│                                     │                                                                                  │                                     │
+│                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Help] (↑↓) Scroll  (PgUp/PgDn) Page                                                                                                                 (Esc) Close
+
