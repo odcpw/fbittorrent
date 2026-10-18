@@ -126,6 +126,12 @@ def umbrella_flags():
             p = root / "scripts" / name
             p.write_text("#!/bin/bash\n" + "exec python3 - <<'PY'\n" + write_suite("hygiene") + "PY\n")
             p.chmod(0o700)
+        # all.sh also runs the widget lint (P0-11) and the online-declaration check
+        # (P0-07) unconditionally; they are dispatch-only fixtures here as well.
+        lint = root / "plugin/tests/lint.sh"
+        lint.write_text("#!/bin/bash\n" + "exec python3 - <<'PY'\n" + write_suite("widget_lint") + "PY\n")
+        lint.chmod(0o700)
+        (root / "scripts/check-widget-online.py").write_text(write_suite("widget_online"))
         home = root / "fixture-home"
         shims = home / ".rch/shims"
         shims.mkdir(parents=True)
