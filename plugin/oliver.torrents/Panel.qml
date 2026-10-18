@@ -18,7 +18,7 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color barIconColor: svc.online && (svc.activeTorrents.length > 0 || svc.transferring) ? barForeground : Qt.darker(barForeground, 1.55)
-  readonly property string tuiCommand: String(setting("tuiCommand", "omarchy-launch-or-focus-tui --app-id=fbittorrent fbittorrent tui"))
+  readonly property string tuiCommand: String(setting("tuiCommand", "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"))
 
   // Cursor model: one highlight across header actions and torrent rows.
   property bool cursorActive: false
@@ -144,7 +144,7 @@ Panel {
     bar: root.bar
     text: svc.online && svc.activeTorrents.length > 0 ? "󰇚" : "󰕒"
     foreground: root.barIconColor
-    tooltipText: svc.online ? Model.heroMeta(svc.status) : "qBittorrent offline"
+    tooltipText: svc.online ? Model.heroMeta(svc.status) : "fbittorrent is closed"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) svc.addFromClipboard()
       else if (buttonCode === Qt.MiddleButton) root.openTui()
@@ -223,12 +223,13 @@ Panel {
                 HeaderAction { index: 0; iconText: "󰐕"; tooltipText: "Add magnet from clipboard (a)"; onClicked: svc.addFromClipboard() }
                 HeaderAction { index: 1; iconText: "󰆍"; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
                 HeaderAction { index: 2; iconText: "󰑐"; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
-                HeaderAction { index: 3; iconText: "󰐥"; tooltipText: "Stop qBittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
+                HeaderAction { index: 3; iconText: "󰐥"; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
               }
             }
           }
 
           Text {
+            id: actionText
             textFormat: Text.PlainText
             visible: svc.actionStatus !== "" || svc.lastError !== ""
             width: parent.width
@@ -239,13 +240,19 @@ Panel {
             wrapMode: Text.WordWrap
             elide: Text.ElideRight
             maximumLineCount: 2
+            HoverHandler { id: actionHover }
+            FullTextTip {
+              parent: actionText
+              visible: actionHover.hovered && actionText.truncated
+              text: actionText.text
+            }
           }
 
           Text {
             textFormat: Text.PlainText
             visible: !svc.online
             width: parent.width
-            text: "qBittorrent is not running."
+            text: "fbittorrent is closed."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -301,6 +308,27 @@ Panel {
     onHovered: function(on) { if (on) root.setHeaderCursor(index) }
   }
 
+  component FullTextTip: PanelToolTip {
+    id: tip
+    delay: 500
+    width: panelFlick.width
+    x: 0
+    y: parent ? parent.height + Style.space(6) : 0
+    fontFamily: root.fontFamily
+    contentItem: Text {
+      textFormat: Text.PlainText
+      text: tip.text
+      color: tip.panelForeground
+      font.family: tip.fontFamily
+      font.pixelSize: tip.fontSize
+      wrapMode: Text.Wrap
+      leftPadding: Border.left(tip.panelBorderSpec) + Style.spacing.controlPaddingX
+      rightPadding: Border.right(tip.panelBorderSpec) + Style.spacing.controlPaddingX
+      topPadding: Border.top(tip.panelBorderSpec) + Style.spacing.controlPaddingY
+      bottomPadding: Border.bottom(tip.panelBorderSpec) + Style.spacing.controlPaddingY
+    }
+  }
+
   component TorrentRow: CursorSurface {
     id: row
     property var torrent: null
@@ -348,6 +376,7 @@ Panel {
         spacing: Style.space(3)
 
         Text {
+          id: nameText
           textFormat: Text.PlainText
           Layout.fillWidth: true
           text: row.torrent ? row.torrent.name : ""
@@ -355,6 +384,12 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
           elide: Text.ElideMiddle
+          HoverHandler { id: nameHover }
+          FullTextTip {
+            parent: nameText
+            visible: nameHover.hovered && nameText.truncated
+            text: nameText.text + "\n" + metaText.text
+          }
         }
 
         // Thin progress rule, only while there is progress worth showing.
@@ -377,6 +412,7 @@ Panel {
         }
 
         Text {
+          id: metaText
           textFormat: Text.PlainText
           Layout.fillWidth: true
           text: row.torrent ? Model.stateLabel(row.torrent) + " · " + Model.meta(row.torrent) : ""
@@ -384,6 +420,12 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
+          HoverHandler { id: metaHover }
+          FullTextTip {
+            parent: metaText
+            visible: metaHover.hovered && metaText.truncated
+            text: nameText.text + "\n" + metaText.text
+          }
         }
       }
 

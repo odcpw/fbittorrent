@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// Talks to qBittorrent through the `fbittorrent` CLI. One JSON poll per tick; the
+// Talks to the open app through the `fbittorrent` CLI. One JSON poll per tick; the
 // panel derives everything else from `status`.
 Item {
   id: root
@@ -66,15 +66,15 @@ Item {
   function toggleSeeding(t) {
     if (!t) return
     var allow = !Model.seedAllowed(t)
-    runAction([allow ? "seed" : "noseed", t.hash], (allow ? "Allowing upload for " : "Stopping upload for ") + t.name)
+    runAction([allow ? "seed" : "noseed", t.hash], (allow ? "Allowing seeding for " : "Stopping seeding for ") + t.name)
   }
   function openTorrent(t) {
     if (!t) return
     runAction(["open", t.hash], "Opening " + t.name)
   }
   function addFromClipboard() { runAction(["add-clipboard"], "Adding from clipboard…") }
-  function stopBackend() { runAction(["down"], "Stopping qBittorrent…") }
-  function startBackend() { runAction(["up"], "Starting qBittorrent…") }
+  function stopBackend() { runAction(["down"], "Closing fbittorrent…") }
+  function startBackend() { runAction(["up"], "Opening fbittorrent…") }
   function reconcile() { runAction(["reconcile", "--recent", "180", "--json"], "") }
 
   Process {

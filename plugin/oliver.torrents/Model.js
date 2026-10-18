@@ -30,12 +30,12 @@ function eta(secs) {
 }
 
 function isActive(t) {
-  return ["downloading", "metaDL", "forcedDL", "stalledDL", "checkingDL", "queuedDL", "allocating", "forcedMetaDL"].indexOf(t.state) >= 0
+  return ["downloading", "metaDL", "forcedDL", "stalledDL", "checkingDL", "allocating", "forcedMetaDL"].indexOf(t.state) >= 0
 }
 function isStopped(t) {
   return ["stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].indexOf(t.state) >= 0
 }
-function isDone(t) { return Number(t.progress) >= 1 }
+function isDone(t) { return t.progress_known !== false && Number(t.progress) >= 1 }
 
 function stateLabel(t) {
   switch (t.state) {
@@ -43,6 +43,7 @@ function stateLabel(t) {
     case "metaDL": case "forcedMetaDL": return "Fetching metadata"
     case "stalledDL": return "Stalled"
     case "queuedDL": return "Queued"
+    case "waitingVPN": return "Waiting for VPN"
     case "checkingDL": case "checkingUP": case "checkingResumeData": return "Checking"
     case "uploading": case "forcedUP": return "Seeding"
     case "stalledUP": return "Seeding · idle"
@@ -66,7 +67,12 @@ function glyph(t) {
 function meta(t) {
   var pct = (Number(t.progress) * 100).toFixed(pctDigits(t))
   var parts = []
-  if (isActive(t)) {
+  if (t.progress_known === false) return stateLabel(t) + " · progress checked after connection"
+  if (t.state === "queuedDL") {
+    parts.push("Queued")
+    parts.push(pct + "%")
+    parts.push(bytes(t.size))
+  } else if (isActive(t)) {
     parts.push(pct + "%")
     parts.push(rate(t.dlspeed))
     parts.push(eta(t.eta))
@@ -81,7 +87,7 @@ function meta(t) {
   }
   var flags = (t.seq_dl ? "S" : "") + (t.f_l_piece_prio ? "F" : "")
   if (flags !== "" && !isDone(t)) parts.push(flags)
-  parts.push(seedAllowed(t) ? "seeding" : "no upload")
+  parts.push(seedAllowed(t) ? "seeding allowed" : "seed off")
   return parts.join(" · ")
 }
 
@@ -94,6 +100,7 @@ function pctDigits(t) { return Number(t.progress) < 0.1 ? 2 : 1 }
 
 function heroMeta(s) {
   if (!s.ok) return "Backend offline"
+  if (s.connection === "vpn_waiting") return "Waiting for VPN"
   if (s.active > 0 || Number(s.up) > 0 || Number(s.dl) > 0) return "↓ " + rate(s.dl) + "   ↑ " + rate(s.up)
   if (s.total === 0) return "No torrents"
   return "Idle"
@@ -103,5 +110,6 @@ function detailPill(s) {
   if (!s.ok) return ""
   if (s.active > 0) return s.active + " ACTIVE"
   if (s.seeding > 0) return s.seeding + " SEEDING"
+  if (s.queued > 0) return s.queued + " QUEUED"
   return ""
 }

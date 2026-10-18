@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Oliver",
   "license": "MIT",
-  "description": "qBittorrent status, transfer rates and quick actions via fbittorrent.",
+  "description": "Torrent status, transfer rates and quick actions in the open fbittorrent app.",
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "Panel.qml" },
   "barWidget": {
@@ -18,13 +18,13 @@
       "refreshIntervalSec": 2,
       "idleRefreshIntervalSec": 10,
       "binary": "fbittorrent",
-      "tuiCommand": "omarchy-launch-or-focus-tui --app-id=fbittorrent fbittorrent tui"
+      "tuiCommand": "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"
     },
     "schema": [
       { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh while open (seconds)", "min": 1, "max": 60, "step": 1, "defaultValue": 2 },
       { "key": "idleRefreshIntervalSec", "type": "integer", "label": "Refresh while closed (seconds)", "min": 2, "max": 600, "step": 1, "defaultValue": 10 },
       { "key": "binary", "type": "string", "label": "fbittorrent binary", "defaultValue": "fbittorrent" },
-      { "key": "tuiCommand", "type": "string", "label": "TUI launch command", "defaultValue": "omarchy-launch-or-focus-tui --app-id=fbittorrent fbittorrent tui" }
+      { "key": "tuiCommand", "type": "string", "label": "TUI launch command", "defaultValue": "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui" }
     ]
   }
 }
