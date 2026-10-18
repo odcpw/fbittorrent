@@ -164,3 +164,7 @@ Receipt: [P0-07.md](P0-07.md) (branch ntm/fbittorrent/cod_3, commits 10672b7..87
 ## P0-06
 
 Receipt: [P0-06.md](P0-06.md) (branch ntm/fbittorrent/cod_1, commits 15d73df..59ba0f4; merged by the orchestrator after an Astra review; hosted CI run checked after the push).
+
+## P1-07 (harness half)
+
+Receipt: [P1-07.md](P1-07.md) (branch ntm/fbittorrent/cod_1, commits 64d131b..846d05d; merged by the orchestrator after an Astra review; the fixture-serving half waits for P1-06).
