@@ -2,12 +2,14 @@
 """Shared daemon integration harness, using real serve processes and private XDG.
 
 Run locally or in CI with --no-systemd (default), or use --systemd for disposable
-transient user units. No installed unit or owner XDG directory is used.
+transient units and disposable static-unit links. Static-unit fixtures verify
+all private XDG paths and working directory before launch and in the child.
 P1-06 adds ApiConn. P1-07's fixture-serving and daemon
 seed/leech follow-up waits for those items; no --serve-fixture capability is
 claimed by this skeleton. There is no --self-test mode.
 """
 import argparse
+import base64
 import ctypes
 import fcntl
 from contextlib import ExitStack
@@ -313,8 +315,8 @@ class Harness:
         except OSError as error:
             return step.fail(f"Lock unavailable: {error}.")
 
-    def cli(self, *args, code=0, timeout=10):
-        command = [self.binary, "--no-start", *args, "--json"]
+    def cli(self, *args, code=0, timeout=10, start=False):
+        command = [self.binary, *([] if start else ["--no-start"]), *args, "--json"]
         step = self.case.step("CLI " + shlex.join(command), f"exit {code} with one JSON object")
         child = self.case.popen(command, env=self.sandbox.env, stdout=subprocess.PIPE, text=True)
         try:
@@ -330,6 +332,8 @@ class Harness:
             value = None
         step.close(child.returncode == code and isinstance(value, dict),
                    f"Exit {child.returncode}; stdout={stdout!r}.")
+        if getattr(self, "installed_unit", None) is not None:
+            self.installed_unit.verify_child()
         return value if isinstance(value, dict) else {}
 
     def wait_for(self, check, label, timeout=10):
@@ -828,11 +832,420 @@ def shutdown_inflight_add(binary, systemd):
                     harness.lock_free()
 
 
+class InstalledUnit:
+    """Real static notify unit linked only into the manager's runtime search path."""
+    def __init__(self, harness):
+        self.h, self.case, self.sandbox = harness, harness.case, harness.sandbox
+        self.systemctl = shutil.which("systemctl", path=os.defpath)
+        self.control_env = dict(os.environ)
+        self.control_env.pop("NOTIFY_SOCKET", None)
+        self.control_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.geteuid()}"
+        self.control_env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.geteuid()}/bus")
+        self.sandbox.env["DBUS_SESSION_BUS_ADDRESS"] = os.environ.get(
+            "DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.geteuid()}/bus")
+        self.path = Path(self.sandbox.env["XDG_CONFIG_HOME"]) / "systemd/user" / self.sandbox.unit
+        self.launcher = fixtures.path_shim("omarchy-launch-or-focus-tui", "exit 0", self.sandbox.root)
+        fixtures.path_shim("systemctl", "exec " + shlex.quote(self.systemctl) + ' "$@"', self.sandbox.root)
+        self.linked = False
+
+    def control(self, *args, codes=(0,), timeout=25):
+        step = self.case.step("systemctl --user " + shlex.join(args), f"exit in {codes} within {timeout}s on the disposable unit")
+        child = self.case.popen([self.systemctl, "--user", *args], env=self.control_env,
+                               stdout=subprocess.PIPE, text=True)
+        try:
+            stdout, _ = child.communicate(timeout=timeout)
+            step.close(child.returncode in codes, f"Exit {child.returncode}; stdout={stdout!r}.")
+            return stdout.strip()
+        except subprocess.TimeoutExpired:
+            child.kill(); child.communicate(timeout=2)
+            step.fail("Owned systemctl command timed out.")
+            return ""
+
+    def __enter__(self):
+        try:
+            self.h.cli("setup")
+            self.case.check(self.path.exists(), "setup writes the selected private static unit", str(self.path))
+            self.drop = Path(f"/run/user/{os.geteuid()}/systemd/user") / (self.sandbox.unit + ".d")
+            self.drop.mkdir()
+            drop = self.drop
+            def quote(value):
+                return json.dumps(str(value).replace("%", "%%"), ensure_ascii=False)
+            environment = "\n".join("Environment=" + quote(key + "=" + self.sandbox.env[key])
+                                     for key in self.sandbox.keys if key in self.sandbox.env)
+            (drop / "fixture.conf").write_text("[Service]\n" + environment +
+                "\nEnvironment=" + quote("DBUS_SESSION_BUS_ADDRESS=" + self.sandbox.env["DBUS_SESSION_BUS_ADDRESS"]) +
+                "\nWorkingDirectory=" + str(self.sandbox.root) +
+                "\nStandardOutput=append:" + str(self.case.path.with_suffix(".unit.stdout.log")) +
+                "\nStandardError=append:" + str(self.case.suite.stderr_path) + "\n")
+            self.control("link", "--runtime", str(self.path))
+            self.linked = True
+            self.control("daemon-reload")
+            loaded = self.control("show", self.sandbox.unit, "--property=DropInPaths", "--value")
+            environment = self.control("show", self.sandbox.unit, "--property=Environment", "--value")
+            # systemctl's shell-style display escapes literal dollars even
+            # inside quotes; shlex retains that escape. The child check below
+            # independently compares the raw /proc environment byte strings.
+            fields = [field.replace("\\$", "$") for field in shlex.split(environment)]
+            working_directory = self.control("show", self.sandbox.unit, "--property=WorkingDirectory", "--value")
+            isolated = working_directory == str(self.sandbox.root) and str(drop / "fixture.conf") in loaded and all(
+                key + "=" + self.sandbox.env[key] in fields for key in self.sandbox.keys)
+            if not self.case.check(isolated, "manager loaded every private fixture environment value before any start",
+                                   f"DropInPaths={loaded}; WorkingDirectory={working_directory}; isolated={isolated}"):
+                raise RuntimeError("refusing to start a unit without verified sandbox environment")
+            self.h.installed_unit = self
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self):
+        if self.linked:
+            self.control("stop", self.sandbox.unit, codes=(0, 5))
+            self.control("disable", self.sandbox.unit)
+            self.control("disable", "--runtime", self.sandbox.unit)
+            self.control("reset-failed", self.sandbox.unit, codes=(0, 1))
+            self.linked = False
+        if getattr(self, "drop", None) is not None and self.drop.exists():
+            shutil.rmtree(self.drop)
+            self.control("daemon-reload")
+        self.h.installed_unit = None
+        for name in ("systemctl", "omarchy-launch-or-focus-tui", "omarchy-shell", "xdg-mime"):
+            log = self.sandbox.root / "shims" / (name + ".log")
+            if log.exists():
+                shutil.copyfile(log, self.case.path.with_suffix("." + name + ".log"))
+
+    def verify_child(self):
+        pid = self.pid()
+        if pid > 1:
+            try:
+                fields = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+                isolated = all((key + "=" + self.sandbox.env[key]).encode() in fields for key in self.sandbox.keys)
+                cwd = Path(f"/proc/{pid}/cwd").resolve()
+                if not self.case.check(isolated and cwd == self.sandbox.root,
+                                       "actual owned child keeps every private environment path and working directory", f"pid={pid}; isolated={isolated}; cwd={cwd}"):
+                    self.control("stop", self.sandbox.unit)
+                    raise RuntimeError("stopped owned unit after failed child isolation verification")
+            except FileNotFoundError:
+                self.case.check(False, "owned child remains available for isolation verification", f"pid={pid} exited during verification")
+
+    def state(self):
+        return self.control("show", self.sandbox.unit, "--property=ActiveState", "--value")
+
+    def pid(self):
+        return int(self.control("show", self.sandbox.unit, "--property=MainPID", "--value") or 0)
+
+    def autostart(self, enabled=True):
+        config = Path(self.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        config.write_text(config.read_text().replace("autostart = false", "autostart = true") if enabled
+                          else config.read_text().replace("autostart = true", "autostart = false"))
+
+    def no_launcher(self):
+        log = self.launcher.with_name(self.launcher.name + ".log")
+        calls = log.read_text().splitlines() if log.exists() else []
+        self.case.check(not calls, "headless operations make zero terminal-launcher calls", f"launcher call count={len(calls)}")
+
+
+def unit_is_static(binary, systemd):
+    with Case("daemon", "unit_is_static") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        unit.control("enable", sandbox.unit)
+        roots = [Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd/user",
+                 Path(f"/run/user/{os.geteuid()}/systemd/user"), unit.path.parent]
+        links = [str(path) for root in roots for path in root.glob("*.wants/" + sandbox.unit)]
+        state = unit.control("show", sandbox.unit, "--property=UnitFileState", "--value")
+        case.check(not links and state in ("static", "linked", "linked-runtime"), "enable creates no wants link for the static unit", f"state={state}; links={links}")
+        h.cli("setup", "--uninstall")
+        case.check(not unit.path.exists(), "setup --uninstall removes only the selected unit")
+
+
+def add_starts_unit_no_launcher(binary, systemd):
+    with Case("daemon", "add_starts_unit_no_launcher") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        unit.autostart()
+        # Resolve the magnet through a real second, isolated librqbit engine.
+        # rqbit ignores magnet xs= HTTP sources, so an HTTP-only fixture cannot
+        # prove this path. The local tracker advertises the seed's loopback port.
+        with fixtures.magnet_fixture(sandbox.root) as fixture, fixtures.Sandbox() as seedbox, Harness(case, binary, seedbox) as seed:
+            # P6-12 deliberately refuses BEP 9 for private torrents. Use a
+            # non-private info dictionary for metadata exchange; both engines
+            # remain bound to lo and every supplied tracker/peer is loopback.
+            info = dict(fixture.info)
+            info.pop("private", None)
+            tracker_url = urllib.parse.parse_qs(urllib.parse.urlsplit(fixture.magnet).query)["tr"][0]
+            fixture.torrent.write_bytes(fixtures.bencode(dict(info=info, announce=tracker_url)))
+            fixture.info = info
+            fixture.info_hash = hashlib.sha1(fixtures.bencode(info)).hexdigest()
+            source = seed.start_serve()
+            if not (seed.receive_ready() and seed.wait_engine()):
+                return
+            seed.cli("add", str(fixture.torrent), "--seed", "--save", str(fixture.files[0].parent))
+            seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True,
+                                  f"Seed state={row.get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture")
+            config = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+            port = int(re.search(r"peer_port = (\d+)", config.read_text()).group(1))
+            step = case.step("connect real seed peer", "loopback seed accepts a BitTorrent handshake for the fixture hash")
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+                    handshake = b"\x13BitTorrent protocol" + b"\0" * 8 + bytes.fromhex(fixture.info_hash) + b"-FT104-" + b"0" * 13
+                    connection.sendall(handshake)
+                    reply = bytearray()
+                    while len(reply) < 68:
+                        part = connection.recv(68 - len(reply))
+                        if not part: break
+                        reply.extend(part)
+                    step.close(len(reply) == 68 and reply[28:48] == bytes.fromhex(fixture.info_hash), f"peer port={port}; handshake bytes={len(reply)}")
+            except OSError as error:
+                step.fail(f"peer port={port}; error={error}")
+            tracker = fixtures.bencode(dict(interval=30, complete=1, incomplete=0,
+                peers=socket.inet_aton("127.0.0.1") + struct.pack(">H", port)))
+            # Supply the tracker route on the magnet fixture's real HTTP server.
+            # Its context owns the server, so find it through an explicit local
+            # tracker fixture rather than relying on hidden magnet internals.
+            with fixtures.HttpFixture(sandbox.root, {"/announce": dict(base64=base64.b64encode(tracker).decode())}) as tracker_server:
+                magnet = "magnet:?" + urllib.parse.urlencode(dict(xt="urn:btih:" + fixture.info_hash,
+                            tr=tracker_server.base + "/announce", dn=fixture.info["name"]))
+                value = h.cli("add", magnet, start=True, timeout=30)
+                case.check(bool(tracker_server.requests), "real loopback tracker receives metadata-discovery requests", str(tracker_server.requests))
+                case.check(value.get("hash") == fixture.info_hash and unit.state() == "active", "magnet add starts the static unit and resolves real local peer metadata", str(value))
+                saved = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
+                records = json.loads(saved.read_text())["records"] if saved.exists() else []
+                case.check(any(record["hash"] == fixture.info_hash for record in records),
+                           "magnet add durably saves the fixture torrent record", str(records))
+                unit.no_launcher()
+                unit.control("stop", sandbox.unit)
+                h.lock_free()
+            seed.stop_serve(source)
+
+
+def status_never_starts(binary, systemd):
+    with Case("daemon", "status_never_starts") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        unit.autostart()
+        value = h.cli("status", start=True)
+        case.check(value.get("app_open") is False and unit.state() == "inactive", "status leaves the disposable unit inactive", str(value))
+        for args in (("list",), ("show", "abcd"), ("stop", "all"), ("delete", "all")):
+            value = h.cli(*args, start=True, code=4)
+            case.check(value.get("hint") == "fbittorrent up" and unit.state() == "inactive", "read/offline-intent command does not start the daemon", str(value))
+        unit.no_launcher()
+
+
+def down_stops(binary, systemd):
+    with Case("daemon", "down_stops") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        h.cli("up", start=True)
+        case.check(unit.state() == "active", "explicit up starts despite persistent autostart=false")
+        h.cli("down", start=True)
+        h.wait_for(lambda: (unit.state() == "inactive", "unit state observed"), "unit becomes inactive")
+        case.check(not h.engine_path.exists(), "down removes the owned engine socket")
+        h.lock_free(); unit.no_launcher()
+
+
+def kill9_restarts(binary, systemd):
+    with Case("daemon", "kill9_restarts") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        h.cli("up", start=True)
+        before = unit.pid()
+        if not case.check(before > 1 and h.daemon_pid() == before,
+                          "kill target is the verified owned daemon PID, never zero or a process group", str(before)):
+            return
+        began = time.monotonic()
+        os.kill(before, signal.SIGKILL)
+        h.wait_for(lambda: ((pid := unit.pid()) > 0 and pid != before and h.engine_call("app/version").get("error") is None,
+                            f"old pid={before}; new pid={pid}"), "systemd restarts killed daemon", timeout=3)
+        case.check(time.monotonic() - began < 3, "replacement daemon answers within three seconds", f"elapsed={time.monotonic()-began:.3f}s")
+        unit.no_launcher()
+
+
+def killmode_mixed(binary, systemd):
+    with Case("daemon", "killmode_mixed") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        value = unit.control("show", sandbox.unit, "--property=KillMode")
+        case.check(value == "KillMode=mixed", "manager loads KillMode=mixed", value)
+
+
+def start_limit_not_hit(binary, systemd):
+    with Case("daemon", "start_limit_not_hit") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        began = time.monotonic()
+        for _ in range(10):
+            h.cli("up", start=True)
+            h.cli("down", start=True)
+        elapsed = time.monotonic() - began
+        h.cli("up", start=True)
+        case.check(elapsed < 30 and unit.state() == "active", "ten up/down cycles in thirty seconds leave the unit startable", f"ten cycles={elapsed:.3f}s")
+        unit.no_launcher()
+
+
+def start_while_deactivating(binary, systemd):
+    with Case("daemon", "start_while_deactivating") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        h.cli("up", start=True)
+        drop = unit.drop / "slow-stop.conf"
+        drop.write_text("[Service]\nExecStopPost=/usr/bin/sleep 0.8\n")
+        unit.control("daemon-reload")
+        first = sandbox.root / "first-start"
+        pid = unit.pid()
+        if not case.check(pid > 1 and h.daemon_pid() == pid, "race target is the verified owned daemon PID", str(pid)):
+            return
+        # Force the exact race after the first active-unit start returns. All
+        # unit transitions/probes remain real; this seam controls interleaving.
+        script = f'''import os,subprocess,sys,time
+from pathlib import Path
+args=sys.argv[1:]
+if "start" in args and not Path({str(first)!r}).exists():
+ os.kill({pid}, {int(signal.SIGCONT)})
+ Path({str(first)!r}).touch()
+ subprocess.run([{unit.systemctl!r},*args],check=True)
+ subprocess.run([{unit.systemctl!r},"--user","--no-block","stop",{sandbox.unit!r}],check=True)
+ time.sleep(.15)
+ sys.exit(0)
+os.execv({unit.systemctl!r},[{unit.systemctl!r},*args])
+'''
+        shim = sandbox.root / "shims/systemctl"
+        shim.write_text("#!/usr/bin/python3\n" + script); shim.chmod(0o700)
+        # The initial liveness probe times out while the process is stopped.
+        os.kill(pid, signal.SIGSTOP)
+        try:
+            h.cli("up", start=True, timeout=15)
+        finally:
+            if unit.pid() == pid:
+                os.kill(pid, signal.SIGCONT)
+        case.check(first.exists() and unit.state() == "active" and unit.pid() != pid,
+                   "deactivating start is retried once and a new owner answers", f"old pid={pid}; new pid={unit.pid()}")
+        unit.no_launcher()
+
+
+def startup_failure_hint(binary, systemd):
+    with Case("daemon", "startup_failure_hint") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        (unit.drop / "failure.conf").write_text("[Service]\nExecStart=\nExecStart=/usr/bin/false\n")
+        unit.control("daemon-reload")
+        value = h.cli("up", start=True, code=4)
+        expected = "journalctl --user -u " + sandbox.unit.removesuffix(".service") + " -n 50"
+        case.check(value.get("hint") == expected and not h.engine_path.exists(),
+                   "failed start exits 4 with the selected unit's journal hint", str(value))
+        unit.no_launcher()
+
+
+def no_manager(binary, systemd):
+    with Case("daemon", "no_manager") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h:
+        # setup can write its real unit using a successful recording reload shim;
+        # the same shim then reports that no manager is available to start it.
+        fixtures.path_shim("systemctl", 'case "$*" in *daemon-reload*) exit 0;; *) exit 1;; esac', sandbox.root)
+        h.cli("setup")
+        value = h.cli("up", start=True, code=4)
+        case.check(value.get("hint") == "fbittorrent serve" and not h.engine_path.exists(),
+                   "missing user manager exits 4 with foreground serve hint and no self-daemonization", str(value))
+        value = h.cli("serve", code=4)
+        case.check(value.get("hint") == "fbittorrent up" and not h.engine_path.exists(),
+                   "explicit --no-start also prevents serve from becoming an owner", str(value))
+        process = h.start_serve()
+        if h.receive_ready() and h.wait_engine():
+            h.cli("up", start=True)
+            h.stop_serve(process)
+        original = sandbox.env["FBITTORRENT_UNIT"]
+        for invalid in ("../fbittorrent.service", "bad\udcff.service"):
+            sandbox.env["FBITTORRENT_UNIT"] = invalid
+            h.cli("up", start=True, code=2)
+        sandbox.env["FBITTORRENT_UNIT"] = original
+
+
+
+def dashboard_routes(binary, systemd):
+    with Case("daemon", "dashboard_routes") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        shell = fixtures.path_shim("omarchy-shell", "exit 0", sandbox.root)
+        manifest = Path(sandbox.env["XDG_CONFIG_HOME"]) / "omarchy/plugins/oliver.torrents/manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps(dict(kinds=["panel"])))
+        query = "literal spaces; $variable 'quotes'"
+        h.cli("dashboard", "--view", "search", "--query", query, start=True)
+        calls = [json.loads(line) for line in shell.with_name("omarchy-shell.log").read_text().splitlines()]
+        case.check(calls[-1][:3] == ["shell", "summon", "oliver.torrents"] and
+                   json.loads(calls[-1][3]) == dict(view="search", query=query),
+                   "dashboard passes one literal JSON payload to the installed panel", str(calls))
+        unit.no_launcher()
+        manifest.unlink()
+        h.cli("up", "--ui", start=True)
+        calls = [json.loads(line) for line in unit.launcher.with_name(unit.launcher.name + ".log").read_text().splitlines()]
+        case.check(len(calls) == 1 and calls[0][-1] == "tui", "explicit up --ui falls back to the TUI launcher when no panel is installed", str(calls))
+
+
+def setup_desktop_handlers(binary, systemd):
+    with Case("daemon", "setup_desktop_handlers") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h:
+        fixtures.path_shim("systemctl", "exit 0", sandbox.root)
+        fixtures.path_shim("xdg-mime", "exit 0", sandbox.root)
+        fixtures.path_shim("update-desktop-database", "exit 0", sandbox.root)
+        h.cli("setup", "--magnet")
+        apps = Path(sandbox.env["XDG_DATA_HOME"]) / "applications"
+        app, magnet = [(apps / name).read_text() for name in ("fbittorrent.desktop", "fbittorrent-magnet.desktop")]
+        case.check(" dashboard\n" in app and " add %u\n" in magnet and "Terminal=false" in magnet,
+                   "setup writes dashboard and direct headless magnet desktop entries", app + magnet)
+        calls = [json.loads(line) for line in (sandbox.root / "shims/xdg-mime.log").read_text().splitlines()]
+        case.check(len(calls) == 2 and all(call[:2] == ["default", "fbittorrent-magnet.desktop"] for call in calls),
+                   "both magnet and torrent-file MIME registrations use the direct add handler", str(calls))
+
+
+def unit_exec_path(binary, systemd):
+    with Case("daemon", "unit_exec_path") as case, fixtures.Sandbox() as sandbox, Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+        executable = sandbox.root / "binary with % $ spaces"
+        # Prefer a hard link; /tmp may be a separate filesystem.
+        try:
+            os.link(binary, executable)
+        except OSError as error:
+            if error.errno != 18:
+                raise
+            shutil.copy2(binary, executable)
+        h.binary = str(executable)
+        h.cli("setup")
+        h.cli("up", start=True)
+        case.check(unit.state() == "active", "current_exe path with spaces, percent and dollar executes as one literal path")
+        h.cli("down", start=True)
+        h.lock_free()
+
+
+def install_atomic(binary, systemd):
+    with Case("daemon", "install_atomic") as case, fixtures.Sandbox() as sandbox:
+        home = sandbox.root / "home with % $ spaces"
+        home.mkdir(mode=0o700)
+        sandbox.env["HOME"] = str(home)
+        with Harness(case, binary, sandbox) as h, InstalledUnit(h) as unit:
+            fixtures.path_shim("xdg-mime", "exit 0", sandbox.root)
+            fixtures.path_shim("update-desktop-database", "exit 0", sandbox.root)
+            installed = home / ".local/bin/fbittorrent"
+            installed.parent.mkdir(parents=True)
+            shutil.copy2(binary, installed)
+            h.binary = str(installed)
+            h.cli("setup")
+            h.cli("up", start=True)
+            pid, inode = unit.pid(), installed.stat().st_ino
+            if not case.check(pid > 1 and h.daemon_pid() == pid, "atomic-install target is the verified owned daemon", str(pid)):
+                return
+            environment = dict(sandbox.env, CARGO_BUILD_JOBS="4",
+                               RUSTUP_HOME=os.environ.get("RUSTUP_HOME", str(Path(os.environ["HOME"]) / ".rustup")),
+                               CARGO_HOME=os.environ.get("CARGO_HOME", str(Path(os.environ["HOME"]) / ".cargo")))
+            step = case.step("bash scripts/install.sh (inside the outer release lock and memory scope)", "real locked release build, atomic replacement and setup --magnet exit 0")
+            child = case.popen(["bash", "scripts/install.sh"], cwd=REPO, env=environment, stdout=subprocess.PIPE, text=True)
+            try:
+                stdout, _ = child.communicate(timeout=1200)
+                artifact = case.path.with_suffix(".install.stdout.log")
+                artifact.write_text(stdout)
+                step.close(child.returncode == 0, f"Exit {child.returncode}; stdout={stdout[-1600:]!r}", [artifact])
+            except subprocess.TimeoutExpired:
+                child.kill(); child.communicate(timeout=5)
+                step.fail("Installer exceeded its deadline.")
+            new_inode = installed.stat().st_ino
+            running_inode = Path(f"/proc/{pid}/exe").stat().st_ino
+            case.check(new_inode != inode and running_inode == inode and unit.pid() == pid and
+                       h.engine_call("app/version").get("error") is None,
+                       "atomic mv replaces the executable while its old inode continues serving",
+                       f"old inode={inode}; installed inode={new_inode}; process inode={running_inode}; pid={pid}")
+            case.check(not installed.with_suffix(".tmp").exists(), "installer leaves no temporary executable")
+            h.cli("down", start=True)
+
+
 CASES = {function.__name__: function for function in
          (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
-          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add)}
-SYSTEMD_CASES = {"systemd_without_bus_address"}
+          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
+          unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
+          killmode_mixed, start_limit_not_hit, start_while_deactivating, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic, startup_failure_hint, unit_exec_path)}
+SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
+                 "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
+                 "start_limit_not_hit", "start_while_deactivating", "dashboard_routes", "install_atomic", "startup_failure_hint", "unit_exec_path"}
 
 
 def main():
@@ -845,15 +1258,17 @@ def main():
     mode.add_argument("--systemd", action="store_true", help="use disposable transient user units, never installed owner units")
     mode.add_argument("--no-systemd", action="store_true", help="foreground children (default; CI mode)")
     args = parser.parse_args()
+    if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":
+        parser.error("install_atomic requires FBT_TEST_INSTALL=1 and the outer release-lock/memory-scope wrapper")
     if args.case in SYSTEMD_CASES and not args.systemd:
         parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else [name for name in CASES if args.systemd or name not in SYSTEMD_CASES]):
+    for name in ([args.case] if args.case else [name for name in CASES if name != "install_atomic" and (args.systemd or name not in SYSTEMD_CASES)]):
         CASES[name](args.binary.resolve(), args.systemd)
-    print(f"daemon harness: {time.monotonic() - started:.3f} seconds; serve-fixture/peer pair deferred until P1-06")
+    print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")
 
 

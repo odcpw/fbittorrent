@@ -31,7 +31,8 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
         let path = crate::config::config_path();
         cfg.save()?;
         eprintln!("config at {}; downloads in {save}", path.display());
-        eprintln!("the native engine runs while the fbittorrent app is open");
+        install_unit()?;
+        eprintln!("the native daemon starts on demand; nothing is enabled at login");
         return Ok(());
     }
     let nox = PathBuf::from("/usr/bin/qbittorrent-nox");
@@ -93,15 +94,74 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     Ok(())
 }
 
+
+/// Static on-demand unit: deliberately no Install section or login enablement.
+pub fn daemon_unit(exe: &std::path::Path) -> Result<String> {
+    let path = exe.to_str().context("executable path is not UTF-8")?;
+    if !exe.is_absolute() || path.chars().any(char::is_control) { bail!("invalid daemon executable path"); }
+    // Specifiers expand in the executable word; environment variables do not.
+    // Escape percent while retaining a literal dollar in current_exe's path.
+    let path = path.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
+    Ok(format!(r#"[Unit]
+Description=fbittorrent torrent engine (started on demand)
+Documentation=https://github.com/odcpw/fbittorrent
+# On-demand units start often; avoid wedging after normal idle/upgrade cycles.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart="{path}" serve
+KillSignal=SIGTERM
+# Signal the owner first; kill any remaining children only at the deadline.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+RestartForceExitStatus=75
+SuccessExitStatus=75
+NoNewPrivileges=yes
+# Static by design: no login enablement links.
+"#))
+}
+
+fn reload_manager() -> Result<()> {
+    if !crate::api::client::manager_status(&["daemon-reload"], std::time::Duration::from_secs(10))? {
+        bail!("systemctl --user daemon-reload failed");
+    }
+    Ok(())
+}
+
+fn install_unit() -> Result<()> {
+    let unit = crate::api::client::unit_path()?;
+    std::fs::create_dir_all(unit.parent().unwrap())?;
+    std::fs::write(&unit, daemon_unit(&std::env::current_exe()?)?)?;
+    reload_manager()?;
+    eprintln!("wrote {} (static, not enabled)", unit.display());
+    Ok(())
+}
+
+pub fn uninstall() -> Result<()> {
+    let unit = crate::api::client::unit_path()?;
+    match std::fs::remove_file(&unit) {
+        Ok(()) => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(error.into()),
+    }
+    reload_manager()?;
+    eprintln!("removed {}; saved data is kept", unit.display());
+    Ok(())
+}
+
 /// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
 pub fn register_magnet_handler() -> Result<()> {
     let exe = std::env::current_exe()?;
     let command = desktop_executable(&exe.to_string_lossy())?;
-    let home = dirs::home_dir().context("no home dir")?;
-    let apps = home.join(".local/share/applications");
+    let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
     std::fs::create_dir_all(&apps)?;
     std::fs::write(apps.join("fbittorrent.desktop"), format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} up\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
     let desktop = apps.join("fbittorrent-magnet.desktop");
     std::fs::write(&desktop, format!(
         "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add %u\nIcon=qbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
@@ -130,6 +190,18 @@ fn desktop_executable(path: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn static_daemon_unit_policy_and_exec_escaping() {
+        let unit = super::daemon_unit(std::path::Path::new("/tmp/a path/%/$/fbittorrent")).unwrap();
+        for line in ["Type=notify", "NotifyAccess=main", "KillMode=mixed", "TimeoutStopSec=20", "Restart=on-failure", "RestartSec=2", "RestartForceExitStatus=75", "SuccessExitStatus=75", "StartLimitIntervalSec=60", "StartLimitBurst=20", "NoNewPrivileges=yes"] {
+            assert!(unit.lines().any(|actual| actual == line), "missing {line}");
+        }
+        assert!(unit.contains("ExecStart=\"/tmp/a path/%%/$/fbittorrent\" serve"));
+        assert!(!unit.contains("[Install]"));
+        assert!(super::daemon_unit(std::path::Path::new("relative")).is_err());
+        println!("static notify unit: policy and escaped absolute executable verified");
+    }
+
     #[test]
     fn desktop_handler_command_preserves_paths_and_generic_launcher_compatibility() {
         assert_eq!(super::desktop_executable("/home/oliver/.local/bin/fbittorrent").unwrap(),
