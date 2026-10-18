@@ -1405,11 +1405,15 @@ impl Session {
             trackers.clear();
         }
 
-        if is_private && trackers.len() > 1 {
-            warn!(
-                ?info_hash,
-                "private trackers are not fully implemented, so using only the first tracker"
-            );
+        if is_private {
+            if trackers.len() > 1 {
+                warn!(
+                    ?info_hash,
+                    "private trackers are not fully implemented, so using only the first tracker"
+                );
+            }
+            // BEP 27: never add public/session trackers, including when the
+            // private metainfo has only one tracker (or none).
             trackers.truncate(1);
         } else if !self.disable_trackers {
             trackers.extend(self.trackers.iter().cloned());
