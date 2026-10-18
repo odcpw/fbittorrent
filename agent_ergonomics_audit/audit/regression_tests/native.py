@@ -111,27 +111,68 @@ class NativeHarness:
         # alive between sessions so session absence cannot race server exit.
         tmux("set-option", "-s", "exit-empty", "off")
 
-    def cli(self, *args, code=0):
+    def wait_for_reopen(self, socket_path, hash_, seconds=10):
         started = time.monotonic()
+        end = started + seconds
+        restored, ready = {}, False
+        observed = "No status response before the deadline."
+        while time.monotonic() < end:
+            try:
+                # A closed engine (exit 4) is expected only in these readiness
+                # probes. Every response is logged; other exits still fail.
+                status_exit, status = self.cli_result("status", code=(0, 4), timeout=max(.001, end-time.monotonic()))
+                status = status if isinstance(status, dict) else {}
+                present = socket_path.exists()
+                observed = (f"socket={present}; status exit {status_exit}, ok={status.get('ok')}, "
+                            f"app_open={status.get('app_open')}, connection={status.get('connection')}")
+                if (status_exit == 0 and status.get("ok") is True and status.get("app_open") is True
+                        and status.get("connection") == "connected" and present and time.monotonic() < end):
+                    show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
+                    show = show if isinstance(show, dict) else {}
+                    present = socket_path.exists()
+                    ready = show_exit == 0 and show.get("ok") is True and present
+                    observed += (f"; show exit {show_exit}, ok={show.get('ok')}, state={show.get('state')}; "
+                                 f"socket={present} after show")
+                    if ready:
+                        restored = show
+                        break
+            except subprocess.TimeoutExpired:
+                observed += "; CLI probe timed out at the readiness deadline."
+                break
+            time.sleep(max(0, min(.1, end-time.monotonic())))
+        self.record("wait for settings safely reopen engine",
+                    f"Socket present, status ok/app_open/connected and show {hash_} exit 0 within {seconds} seconds",
+                    f"{'Ready' if ready else 'Timed out'} after {time.monotonic()-started:.3f} seconds; {observed}",
+                    ready, started)
+        return restored
+
+    def cli(self, *args, code=0, timeout=20):
+        return self.cli_result(*args, code=code, timeout=timeout)[1]
+
+    def cli_result(self, *args, code=0, timeout=20):
+        started = time.monotonic()
+        end = started + timeout
+        codes = (code,) if isinstance(code, int) else tuple(code)
+        expected = " or ".join(map(str, codes))
         child = self.get_case().popen([self.binary, *args, "--json"], env=self.env,
                                       stdout=subprocess.PIPE, text=True)
         try:
-            stdout, _ = child.communicate(timeout=20)
+            stdout, _ = child.communicate(timeout=max(0, end-time.monotonic()))
         except subprocess.TimeoutExpired:
             child.kill()
             child.communicate()
-            self.record("CLI " + shlex.join(args), f"exit {code} with JSON within 20 seconds",
+            self.record("CLI " + shlex.join(args), f"exit {expected} with JSON within {timeout} seconds",
                         "CLI timed out and was killed.", False, started)
             raise
         try:
             value = json.loads(stdout)
         except ValueError:
-            self.record("CLI " + shlex.join(args), f"exit {code} with JSON",
+            self.record("CLI " + shlex.join(args), f"exit {expected} with JSON",
                         f"Exit {child.returncode}; invalid JSON: {stdout}", False, started)
             raise
-        self.record("CLI " + shlex.join(args), f"exit {code} with JSON",
-                    f"Exit {child.returncode}; stdout: {stdout.strip()}", child.returncode == code, started)
-        return value
+        self.record("CLI " + shlex.join(args), f"exit {expected} with JSON",
+                    f"Exit {child.returncode}; stdout: {stdout.strip()}", child.returncode in codes, started)
+        return child.returncode, value
 
 
 def main():
@@ -441,9 +482,9 @@ def main():
                 case.check("VPN connection" in capture(), 'Download settings display VPN binding.')
                 keys("Left", "Enter")
                 wait_for(lambda: "Download settings" not in capture(), "settings save closes panel")
-                case.check(cli("settings")["max_active_downloads"] == 2, 'The settings panel persists a two-download limit.')
+                case.check(cli("settings").get("max_active_downloads") == 2, 'The settings panel persists a two-download limit.')
                 keys("F6", "Right", "Enter")
-                wait_for(lambda: "Download settings" not in capture() and cli("settings")["max_active_downloads"] == 3,
+                wait_for(lambda: "Download settings" not in capture() and cli("settings").get("max_active_downloads") == 3,
                          "settings panel changes queue limit and persists it")
                 extra_hashes = []
                 for index in range(4):
@@ -460,19 +501,20 @@ def main():
                 import tomllib
                 case.check(tomllib.loads((config_dir / "config.toml").read_text())["max_active_downloads"] == 1, 'The one-download limit is durable in the isolated config file.')
                 cli("settings", "--max-downloads", "0", code=1)
-                case.check(cli("settings")["max_active_downloads"] == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
+                case.check(cli("settings").get("max_active_downloads") == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
                 for hash_ in extra_hashes:
                     cli("delete", hash_)
                 cli("settings", "--max-downloads", "3")
                 cli("settings", "--vpn", "fbmissing0")
                 wait_for(lambda: cli("status").get("connection") == "vpn_waiting", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
-                case.check(cli("show", expected_hash)["progress_known"] is False, 'Progress is unknown while the required VPN is absent.')
+                case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)
                 cli("settings", "--vpn", "off", "--encryption", "require")
-                wait_for(lambda: cli("status").get("connection") != "vpn_waiting", "settings safely reopen engine")
-                case.check(cli("show", expected_hash)["state"] == "stoppedDL", 'Engine reopening preserves the manual pause.')
-                case.check(cli("settings")["peer_encryption"] == "require", 'Required peer encryption persists after engine reopening.')
+                restored = harness.wait_for_reopen(socket_path, expected_hash)
+                case.check(restored.get("state") == "stoppedDL", 'Engine reopening preserves the manual pause.',
+                           f"Reopened torrent response: {restored}")
+                case.check(cli("settings").get("peer_encryption") == "require", 'Required peer encryption persists after engine reopening.')
             if options.case == "settings_queue_vpn_restart":
                 return suite_status("native")
             with Case("native", "quit_restart_down", enabled=options.case in (None, "quit_restart_down")) as case:

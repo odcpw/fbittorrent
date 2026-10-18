@@ -18,6 +18,94 @@ from fbtlog import Case, REPO, suite_status
 from native import NativeHarness
 
 
+def settings_reopen():
+    with Case("fbtlog_test", "settings_reopen") as test:
+        fixtures = test.suite.directory / "fixtures/reopen"
+        fixtures.mkdir(parents=True)
+        binary = fixtures / "cli.py"
+        binary.write_text(f"#!{sys.executable}\n" + '''import json, os, sys, time
+from pathlib import Path
+root = Path(os.environ["FBT_REOPEN_ROOT"])
+mode = os.environ["FBT_REOPEN_MODE"]
+verb = sys.argv[1]
+if mode == "slow": time.sleep(3)
+def count(name):
+    p = root / name
+    n = int(p.read_text()) + 1 if p.exists() else 1
+    p.write_text(str(n))
+    return n
+sock = root / "engine.sock"
+code = 0
+if verb == "status":
+    n = count("status")
+    sock.unlink(missing_ok=True)
+    if mode == "timeout" or n == 1:
+        value = dict(ok=False, app_open=False)
+    else:
+        value = dict(ok=True, app_open=True)
+        if n != 2: value["connection"] = "connected"
+        if n != 3: sock.touch()
+else:
+    n = count("show")
+    code = (1 if mode == "unexpected" else 4) if n == 1 else 0
+    value = dict(ok=False, code=code, error="engine reopening") if code else dict(ok=True, state="downloading" if mode == "wrong_state" else "stoppedDL")
+with (root / "calls.jsonl").open("a") as output:
+    output.write(json.dumps(dict(verb=verb, code=code, status=int((root / "status").read_text()) if (root / "status").exists() else 0)) + "\\n")
+print(json.dumps(value))
+sys.exit(code)
+''')
+        binary.chmod(0o700)
+        test.check({"ok": False, "app_open": False}.get("connection") != "vpn_waiting",
+                   "the old connection-only predicate incorrectly accepts the closed status shape")
+        for mode in ("ready", "unexpected", "timeout", "slow", "failed_show", "wrong_state"):
+            root = fixtures / mode
+            root.mkdir()
+            diagnostics = io.StringIO()
+            with patch.object(fbtlog, "LOG_ROOT", fixtures), contextlib.redirect_stderr(diagnostics), \
+                    contextlib.redirect_stdout(diagnostics):
+                with Case("reopen_" + mode, "engine") as case:
+                    harness = NativeHarness(lambda: case, str(binary), dict(
+                        os.environ, FBT_REOPEN_ROOT=str(root), FBT_REOPEN_MODE=mode))
+                    restored = (harness.cli("show", "fixture") if mode == "failed_show" else
+                                harness.wait_for_reopen(root / "engine.sock", "fixture",
+                                                        seconds=.2 if mode in ("timeout", "slow") else 10))
+                    case.check(restored.get("state") == "stoppedDL", "engine reopening preserves the manual pause")
+                    case.check(True, "later case checks still execute")
+            (root / "diagnostics.txt").write_text(diagnostics.getvalue())
+            rows = [json.loads(line) for line in case.path.read_text().splitlines()]
+            calls = [row for row in rows if row.get("action", "").startswith("CLI ")]
+            waits = [row for row in rows if row.get("action") == "wait for settings safely reopen engine"]
+            if mode == "ready":
+                actual = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
+                shows = [row for row in actual if row["verb"] == "show"]
+                test.check(rows[-1]["ok"] and [r["code"] for r in shows] == [4, 0]
+                           and all(r["status"] >= 4 for r in shows)
+                           and len(waits) == 1 and waits[0]["ok"]
+                           and "show exit 0" in waits[0]["observed"] and "socket=True" in waits[0]["observed"],
+                           "readiness rejects closed, incomplete and socket-less status before retrying show 4 then 0")
+                test.check(len(calls) == len(actual) and all(r["ok"] for r in calls),
+                           "every readiness CLI result is logged, including explicitly expected transient exit 4")
+            elif mode == "unexpected":
+                shows = [row for row in calls if row["action"] == "CLI show fixture"]
+                test.check(not rows[-1]["ok"] and len(shows) == 2 and not shows[0]["ok"] and shows[1]["ok"]
+                           and waits[0]["ok"], "an unexpected exit 1 still fails the case after readiness succeeds")
+            elif mode == "failed_show":
+                test.check(not rows[-1]["ok"] and rows[-1]["failed"] == [1, 2]
+                           and rows[-2]["ok"] and not any(r.get("action") == "finish case" for r in rows),
+                           "a failed show result fails the pause check cleanly without KeyError and later checks run")
+            elif mode == "wrong_state":
+                test.check(not rows[-1]["ok"] and waits[0]["ok"] and restored.get("state") == "downloading"
+                           and rows[-2]["ok"], "an engine that answers but loses the pause still fails the original assertion")
+            else:
+                test.check(not rows[-1]["ok"] and len(waits) == 1 and not waits[0]["ok"]
+                           and "Timed out" in waits[0]["observed"] and rows[-2]["ok"]
+                           and not any(r.get("action") == "finish case" for r in rows),
+                           f"{mode}: readiness times out with its final observation and later checks run")
+                if mode == "slow":
+                    test.check(len(calls) == 1 and not calls[0]["ok"] and "timed out" in calls[0]["observed"],
+                               "the CLI subprocess uses the remaining readiness deadline instead of its usual 20 seconds")
+
+
 def tmux_relaunch():
     with Case("fbtlog_test", "tmux_relaunch") as test:
         fixtures = test.suite.directory / "fixtures/tmux"
@@ -293,6 +381,7 @@ def main():
             if original_force is not None:
                 os.environ["FBT_TEST_FORCE_FAIL"] = original_force
     polling_cli_exits()
+    settings_reopen()
     tmux_relaunch()
     early_abort_summary()
     return suite_status("fbtlog_test")
