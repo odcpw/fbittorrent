@@ -194,8 +194,8 @@ impl Validate for Reply {
 }
 
 /// Output rules that require the connection's hello capabilities, in addition
-/// to the context-free shape/bounds checks above. Playable fields require watch
-/// in a successful hello.
+/// to the context-free shape/bounds checks above. Playable fields and events
+/// require watch in a successful hello.
 #[derive(Debug, Default)]
 pub struct NegotiatedCaps {
     watch: bool,
@@ -237,23 +237,29 @@ impl NegotiatedCaps {
             _ => Ok(()),
         }
     }
-    fn items(&self, values: &[Item]) -> Checked {
-        for value in values {
-            match value {
-                Item::Torrent(torrent) => self.torrent(torrent)?,
-                Item::Event(event) => self.event(event)?,
-                Item::File(_) => {}
-            }
+    fn items(&self, values: &[Item], field: &str) -> Checked {
+        for (index, value) in values.iter().enumerate() {
+            let result = match value {
+                Item::Torrent(torrent) => self.torrent(torrent),
+                Item::Event(event) => self.event(event),
+                Item::File(_) => Ok(()),
+            };
+            result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
         Ok(())
     }
     pub fn event(&self, value: &Event) -> Checked {
         match value {
+            Event::TorrentPlayable { .. } => require(
+                self.watch,
+                "ev",
+                "torrent.playable requires the watch capability",
+            ),
             Event::State {
                 data: StateData::Summary(summary),
                 ..
             } => self.summary(summary),
-            Event::SnapshotChunk { items, .. } => self.items(items),
+            Event::SnapshotChunk { items, .. } => self.items(items, "items"),
             Event::Delta {
                 topic,
                 added,
@@ -261,7 +267,7 @@ impl NegotiatedCaps {
                 ..
             } => {
                 if let Some(items) = added {
-                    self.items(items)?;
+                    self.items(items, "added")?;
                 }
                 if *topic == Topic::Torrents {
                     if let Some(changed) = changed {

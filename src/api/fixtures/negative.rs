@@ -245,3 +245,79 @@ fn watch_capability_covers_torrent_replies_and_subscription_payloads() {
     let removal = json!({"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"torrents","rev":1,"changed":{hash:{"playable":null}}}});
     check_group("watch-deletion", &removal.to_string()).unwrap();
 }
+
+#[test]
+fn watch_capability_gates_playable_events_on_the_roundtrip_path() {
+    let mutations = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "mutations")
+        .unwrap()
+        .1;
+    check_group("mutations", mutations).unwrap();
+    let mut lines: Vec<Value> = mutations
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines[10]["frame"]["ev"], "torrent.playable");
+    let caps = lines[2]["frame"]["result"]["caps"].as_array_mut().unwrap();
+    assert!(caps.contains(&json!("watch")));
+    caps.retain(|cap| cap != "watch");
+    let no_watch = lines
+        .iter()
+        .map(|line| line.to_string() + "\n")
+        .collect::<String>();
+    let error = check_group("mutations", &no_watch).unwrap_err();
+    assert_eq!(
+        error,
+        "contracts/ipc/v1/mutations.ndjson:11: ev: torrent.playable requires the watch capability"
+    );
+    println!("playable event positive transcript passed; no-watch control rejected: {error}");
+}
+
+#[test]
+fn watch_capability_gates_playable_events_in_subscription_batches() {
+    let lines: Vec<Value> = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "mutations")
+        .unwrap()
+        .1
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let hello = format!("{}\n{}\n", lines[1], lines[2]);
+    let mut no_watch_hello = lines[2].clone();
+    no_watch_hello["frame"]["result"]["caps"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|cap| cap != "watch");
+    let no_watch_hello = format!("{}\n{no_watch_hello}\n", lines[1]);
+    let ordinary = lines[8]["frame"].clone();
+    assert_eq!(ordinary["ev"], "torrent.added");
+    let playable = lines[10]["frame"].clone();
+    assert_eq!(playable["ev"], "torrent.playable");
+    for (name, field, mut frame) in [
+        (
+            "snapshot",
+            "items",
+            json!({"ev":"snapshot.chunk","sub":1,"topic":"events","rev":1}),
+        ),
+        (
+            "delta",
+            "added",
+            json!({"ev":"delta","sub":1,"topic":"events","rev":1}),
+        ),
+    ] {
+        // The first item requires no watch cap. Check later batch members too.
+        frame[field] = json!([ordinary, playable]);
+        let payload = json!({"dir":"s2c","frame":frame}).to_string() + "\n";
+        check_group(name, &(hello.clone() + &payload)).unwrap();
+        let error = check_group(name, &(no_watch_hello.clone() + &payload)).unwrap_err();
+        assert_eq!(error, format!("contracts/ipc/v1/{name}.ndjson:3: {field}[1].ev: torrent.playable requires the watch capability"));
+        println!("playable {name} batch positive passed; no-watch control rejected: {error}");
+
+        // Ordinary event batches remain valid without watch.
+        frame[field] = json!([ordinary]);
+        let payload = json!({"dir":"s2c","frame":frame}).to_string() + "\n";
+        check_group(name, &(no_watch_hello.clone() + &payload)).unwrap();
+    }
+}
