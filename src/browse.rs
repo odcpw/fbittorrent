@@ -154,40 +154,66 @@ struct YtsTorrent {
     hash: String,
     #[serde(default)] quality: String,
     #[serde(default)] size_bytes: i64,
-    #[serde(default)] seeds: i64,
-    #[serde(default)] peers: i64,
+    #[serde(default)] seeds: Option<i64>,
+    #[serde(default)] peers: Option<i64>,
 }
 
 const YTS_HOSTS: [&str; 3] = ["yts.mx", "yts.lt", "yts.am"];
+
+fn yts_results(host: &str, response: YtsResp) -> Vec<SearchResult> {
+    let movies = response.data.map(|d| d.movies).unwrap_or_default();
+    movies.into_iter().filter_map(|m| {
+        // Prefer 1080p, then the largest available quality.
+        let t = m.torrents.iter().find(|t| t.quality == "1080p")
+            .or_else(|| m.torrents.iter().max_by_key(|t| t.size_bytes))?;
+        let name = format!("{} [{}] [YTS] ★{:.1}", m.title_long, t.quality, m.rating);
+        Some(SearchResult {
+            file_url: format!("magnet:?xt=urn:btih:{}&dn={}{TRACKERS}", t.hash.to_lowercase(), urlencode(&name)),
+            file_name: name,
+            file_size: t.size_bytes,
+            // SearchResult keeps Nova's existing numeric unknown sentinel;
+            // renderers omit it. A reported zero remains a real zero.
+            seeders: t.seeds.filter(|count| *count >= 0).unwrap_or(-1),
+            leechers: t.peers.filter(|count| *count >= 0).unwrap_or(-1),
+            site_url: format!("https://{host}"),
+            descr_link: m.url.clone().unwrap_or_default(),
+            engine: "yts".into(),
+            imdb: m.imdb_code.clone().unwrap_or_default(),
+            pub_date: m.date_uploaded_unix,
+        })
+    }).collect()
+}
 
 fn yts(sort: &str) -> Result<Vec<SearchResult>> {
     let mut last = anyhow!("YTS unreachable");
     for host in YTS_HOSTS {
         let url = format!("https://{host}/api/v2/list_movies.json?sort_by={sort}&limit=50");
         match get_json::<YtsResp>(&url) {
-            Ok(r) => {
-                let movies = r.data.map(|d| d.movies).unwrap_or_default();
-                return Ok(movies.into_iter().filter_map(|m| {
-                    // Prefer 1080p, then the largest available quality.
-                    let t = m.torrents.iter().find(|t| t.quality == "1080p")
-                        .or_else(|| m.torrents.iter().max_by_key(|t| t.size_bytes))?;
-                    let name = format!("{} [{}] [YTS] ★{:.1}", m.title_long, t.quality, m.rating);
-                    Some(SearchResult {
-                        file_url: format!("magnet:?xt=urn:btih:{}&dn={}{TRACKERS}", t.hash.to_lowercase(), urlencode(&name)),
-                        file_name: name,
-                        file_size: t.size_bytes,
-                        seeders: t.seeds,
-                        leechers: t.peers,
-                        site_url: format!("https://{host}"),
-                        descr_link: m.url.clone().unwrap_or_default(),
-                        engine: "yts".into(),
-                        imdb: m.imdb_code.clone().unwrap_or_default(),
-                        pub_date: m.date_uploaded_unix,
-                    })
-                }).collect());
-            }
+            Ok(response) => return Ok(yts_results(host, response)),
             Err(e) => last = e,
         }
     }
     Err(anyhow!("{last:#}. YTS is not reachable from this network; use 'Open site'."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yts_missing_counts_remain_unknown_and_reported_zero_is_preserved() {
+        for counts in [serde_json::json!({}), serde_json::json!({"seeds": null, "peers": null}),
+            serde_json::json!({"seeds": 0, "peers": 0}), serde_json::json!({"seeds": 23, "peers": 7})] {
+            let mut torrent = serde_json::json!({"hash": "1234567890123456789012345678901234567890",
+                "quality": "1080p", "size_bytes": 1024});
+            torrent.as_object_mut().unwrap().extend(counts.as_object().unwrap().clone());
+            let response = serde_json::from_value(serde_json::json!({"data": {"movies": [{
+                "title_long": "Local movie (2026)", "torrents": [torrent]}]}})).unwrap();
+            let results = yts_results("fixture.invalid", response);
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].seeders, counts["seeds"].as_i64().unwrap_or(-1));
+            assert_eq!(results[0].leechers, counts["peers"].as_i64().unwrap_or(-1));
+            println!("YTS source counts {counts}: seeds {}, peers {}", results[0].seeders, results[0].leechers);
+        }
+    }
 }

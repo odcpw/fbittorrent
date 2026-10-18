@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CONTRACT_VERSION: &str = "1.1.0";
+pub const CONTRACT_VERSION: &str = "1.1.1";
 
 /// Exit codes. Stable; documented by `capabilities --json` and `robot-docs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +176,14 @@ pub fn capabilities_json() -> serde_json::Value {
         "tool": "fbittorrent",
         "version": env!("CARGO_PKG_VERSION"),
         "contract_version": CONTRACT_VERSION,
+        "field_notes": {
+            "list[].num_seeds": "always 0 in native mode: unknown",
+            "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
+        },
+        "changes": [{
+            "version": "1.1.1", "field": "list[].num_seeds", "breaking": false,
+            "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
+        }],
         "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, and bar widget. Downloads run while the app is open.",
         "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": "open app only; closing it stops downloads, peers, sockets and provider searches", "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
         "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
@@ -229,7 +237,7 @@ impl fmt::Display for RobotGuide {
     }
 }
 
-const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract 1.1.0)
+const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract 1.1.1)
 
 WHAT IT IS
   A native Rust torrent app. The engine runs in the open TUI process; closing
@@ -306,11 +314,31 @@ JSON SHAPES (stable within contract 1.x)
           stalledUP, stoppedUP (= done), checkingDL, waitingVPN, error, missingFiles
   When progress_known=false, do not interpret progress/completed as measured.
   `show.complete` is null while progress is unknown.
+  Native `num_seeds` is always 0: unknown; `num_leechs` counts connected peers,
+  not leechers. Seed counts describe connected seeds, never a tracker scrape.
 "#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_seed_sentinel_is_documented_as_unknown() {
+        let capabilities = capabilities_json();
+        assert_eq!(capabilities["contract_version"], "1.1.1");
+        assert_eq!(capabilities["field_notes"]["list[].num_seeds"], "always 0 in native mode: unknown");
+        let change = capabilities["changes"].as_array().unwrap().iter()
+            .find(|change| change["field"] == "list[].num_seeds").unwrap();
+        assert_eq!(change["version"], CONTRACT_VERSION);
+        assert_eq!(change["breaking"], false);
+        assert!(change["note"].as_str().unwrap().contains("unknown"));
+        assert!(capabilities["field_notes"]["list[].num_leechs"].as_str().unwrap()
+            .contains("total connected peers"));
+        let guide = ROBOT_GUIDE.to_string();
+        assert!(guide.contains(&format!("contract {CONTRACT_VERSION}")));
+        assert!(guide.contains("Native `num_seeds` is always 0: unknown"));
+        println!("{}", capabilities["field_notes"]);
+    }
 
     #[test]
     fn upload_cap_text_from_constant() {

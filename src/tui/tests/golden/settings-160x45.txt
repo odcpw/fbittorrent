@@ -7,7 +7,7 @@
 │   Other.Movie.2026.1080p                    ░░░░░░░░░░       —       0 B/s      0s SF·    ││  progress  42.0%  430.1 MiB of 1.0 GiB                          │
 │                                                                                           ││  speed     ↓ 2.0 MiB/s   ↑ 1.0 KiB/s                            │
 │                                                                                           ││  eta       4m57s                                                │
-│                                                                                           ││  peers     12 seeds, 3 leechers                                 │
+│                                                                                           ││  peers     3 peers connected                                    │
 │                                                                                           ││  ratio     0.00                                                 │
 │                                                                                           ││  flags     streaming priority automatic                         │
 │                                                                                           ││  upload    32 KiB/s cap · stops when complete  (u to seed)      │

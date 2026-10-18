@@ -37,7 +37,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
         progress_known: i != 2, size: if i == 2 { 0 } else { 1_073_741_824 },
         completed: (progress * 1_073_741_824.0) as i64,
         dlspeed: if i == 0 { 2_097_152 } else { 0 }, upspeed: if i == 0 { 1024 } else { 0 },
-        eta: if i == 0 { 297 } else { 0 }, num_seeds: 12, num_leechs: 3,
+        eta: if i == 0 { 297 } else { 0 }, num_seeds: 0, num_leechs: 3,
         seq_dl: true, f_l_piece_prio: true,
         save_path: "/fixture/downloads".into(), up_limit: crate::qbt::NO_UPLOAD_LIMIT,
         completion_on: if i == 1 { 1_792_281_600 } else { 0 }, ratio_limit: 0.0,

@@ -1,0 +1,45 @@
+  1 Torrents    2 Search    3 Shows (3)  [ 4 RSS ]                                                                                   ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Feeds (1) ─────────────────────────────────────────╮╭ Local feed ────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    ││                                                                                                        │
+│ ▌ Local feed                                 42/45 ││   ● Fixture episode 38                                                                      2026-11-0↑ │
+│                                                    ││   ● Fixture episode 37                                                                      2026-11-06 │
+│                                                    ││   ● Fixture episode 36                                                                      2026-11-05 │
+│                                                    ││   ● Fixture episode 35                                                                      2026-11-04 │
+│                                                    ││   ● Fixture episode 34                                                                      2026-11-03 │
+│                                                    ││   ● Fixture episode 33                                                                      2026-11-02 │
+│                                                    ││   ● Fixture episode 32                                                                      2026-11-01 │
+│                                                    ││   ● Fixture episode 31                                                                      2026-10-31 │
+│                                                    ││   ● Fixture episode 30                                                                      2026-10-30 │
+│                                                    ││   ● Fixture episode 29                                                                      2026-10-29 │
+│                                                    ││   ● Fixture episode 28                                                                      2026-10-28 │
+│                                                    ││   ● Fixture episode 27                                                                      2026-10-27 │
+│                                                    ││   ● Fixture episode 26                                                                      2026-10-26 │
+│                                                    ││   ● Fixture episode 25                                                                      2026-10-25 │
+│                                                    ││   ● Fixture episode 24                                                                      2026-10-24 │
+│                                                    ││   ● Fixture episode 23                                                                      2026-10-23 │
+│                                                    ││   ● Fixture episode 22                                                                      2026-10-22 │
+│                                                    ││   ● Fixture episode 21                                                                      2026-10-21 │
+│                                                    ││   ● Fixture episode 20                                                                      2026-10-20 │
+│                                                    ││   ● Fixture episode 19                                                                      2026-10-19 │
+│                                                    ││   ● Fixture episode 18                                                                      2026-10-18 │
+│                                                    ││   ● Fixture episode 17                                                                      2026-10-17 │
+│                                                    ││   ● Fixture episode 16                                                                      2026-10-16 │
+│                                                    ││   ● Fixture episode 15                                                                      2026-10-15 │
+│                                                    ││   ● Fixture episode 14                                                                      2026-10-14 │
+│                                                    ││   ● Fixture episode 13                                                                      2026-10-13 │
+│                                                    ││   ● Fixture episode 12                                                                      2026-10-12 │
+│                                                    ││   ● Fixture episode 11                                                                      2026-10-11 │
+│                                                    ││   ● Fixture episode 10                                                                      2026-10-10 │
+│                                                    ││   ● Fixture episode 9                                                                       2026-10-09 │
+│                                                    ││   ● Fixture episode 8                                                                       2026-10-08 │
+│                                                    ││   ● Fixture episode 7                                                                       2026-10-07 │
+│                                                    ││ ▌ ● Fixture episode 6                                                                       2026-10-06 │
+│                                                    ││   ● Fixture episode 5                                                                       2026-10-05 │
+│                                                    ││   ● Fixture episode 4                                                                       2026-10-04 │
+│                                                    ││     Fixture episode 3                                                                       2026-10-03 │
+│                                                    ││     Fixture episode 2                                                                       2026-10-02 │
+│                                                    ││     Fixture episode 1                                                                       2026-10-01 │
+│                                                    ││                                                                                                        │
+╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[Items] (Enter) Download  (M)ark read  (Shift+M) All read  (←) Feeds  (R)efresh  (F)ollow show                                                          (?) Help
+1 result

@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (3)    4 RSS                                                                                     ↓ 0 B/s  ↑ 0 B/s  omarchy
+╭ Torrents (1) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│                                                                                           ││                                                                 │
+│   NAME                                                       DONE       SPEED     ETA SFU ││  Fixture.with.a.long.filename.readable.readable.readable.reada  │
+│ ▌ Fixture.with.a.long.filename…adable.END.txt ░░░░░░░░░░    0.0%        33 B         SF·  ││                                                                 │
+│                                                                                           ││  state     stopped                                              │
+│                                                                                           ││  progress  0.0%  0 B of 33 B                                    │
+│                                                                                           ││  speed     ↓ 0 B/s   ↑ 0 B/s                                    │
+│                                                                                           ││  eta       ∞                                                    │
+│                                                                                           ││  peers     0 peers connected                                    │
+│                                                                                           ││  ratio     0.00                                                 │
+│                                                                                           ││  flags     streaming priority automatic                         │
+│                                                                                           ││  upload    32 KiB/s cap · stops when complete  (u to seed)      │
+│                                                                                           ││  path      /tmp/fbittorrent-native-6st09xhi/downloads           │
+│                                                                                           ││  added     just now                                             │
+│                                                                                           ││                                                                 │
+│                                                                                           ││  IMDb card appears when the cursor rests here                   │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Torrents] (Enter) Files  (O)pen  (P) Resume  (D) Remove  (Shift+D) Delete files  (U) Seed on  (A)dd  (C)lipboard  (F6) Settings                        (?) Help
+item marked unread

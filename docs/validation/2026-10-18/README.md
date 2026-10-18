@@ -152,3 +152,7 @@ Receipt: [P0-15.md](P0-15.md) (branch ntm/fbittorrent/cod_1, commits 28f1244..ac
 ## P0-10
 
 Receipt: [P0-10.md](P0-10.md) (branch ntm/fbittorrent/cod_2, commits 842b15b..80d7ad9; merged by the orchestrator after a green full gate and an Astra review).
+
+## P0-11
+
+Receipt: [P0-11.md](P0-11.md) (branch ntm/fbittorrent/cod_4, commits a894543..4b3515c; merged by the orchestrator after an Astra review; batch gate on main follows).

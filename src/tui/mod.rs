@@ -2197,6 +2197,7 @@ impl TuiApp {
         };
         let upload = if t.seed_allowed() { "seeding allowed  (u to turn off)".to_string() }
             else { "32 KiB/s cap · stops when complete  (u to seed)".to_string() };
+        let peers = if self.cfg.native() { t.num_leechs } else { t.num_seeds + t.num_leechs };
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
@@ -2204,7 +2205,7 @@ impl TuiApp {
             kv("progress", if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else { "checked when the VPN connects".into() }),
             kv("speed", format!("↓ {}   ↑ {}", human_rate(t.dlspeed), human_rate(t.upspeed))),
             kv("eta", human_eta(t.eta)),
-            kv("peers", format!("{} seeds, {} leechers", t.num_seeds, t.num_leechs)),
+            kv("peers", format!("{peers} peers connected")),
             kv("ratio", format!("{:.2}", t.ratio)),
             kv("flags", flags),
             kv("upload", upload),
@@ -2303,15 +2304,20 @@ impl TuiApp {
         block.render(cols[1], frame);
         if let Some(r) = self.selected_result() {
             let kv = |k: &str, v: String| Line::from_spans([Span::styled(format!("{k:<10}"), th.dimmed()), Span::styled(v, th.text())]);
-            let lines = vec![
+            let mut lines = vec![
                 Line::styled(r.file_name.clone(), th.title()),
                 Line::raw(""),
                 kv("size", human_bytes(r.file_size)),
-                kv("peers", format!("{} seeds, {} leechers", r.seeders, r.leechers)),
+            ];
+            let peers = [(r.seeders, "seeds"), (r.leechers, "leechers")].into_iter()
+                .filter(|(count, _)| *count >= 0).map(|(count, label)| format!("{count} {label}"))
+                .collect::<Vec<_>>().join(", ");
+            if !peers.is_empty() { lines.push(kv("peers", peers)); }
+            lines.extend([
                 kv("uploaded", if r.pub_date > 0 { ymd(r.pub_date) } else { "unknown".into() }),
                 kv("source", format!("{}  {}", r.engine, r.site_url)),
                 Line::raw(""),
-            ];
+            ]);
             let inner = pad(inner);
             let rows = Flex::vertical().constraints([Constraint::Fixed(7), Constraint::Fill]).split(inner);
             Paragraph::new(Text::from_lines(lines)).wrap(WrapMode::Word).render(rows[0], frame);
@@ -3011,14 +3017,14 @@ fn result_tail_width(width: u16) -> usize {
 fn result_line(r: &SearchResult, rating: Option<f32>, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
     let stars = match rating { Some(v) => format!("{v:>5.1}"), None => "     ".into() };
     let star_style = match rating { Some(v) if v >= 7.5 => th.ok(), Some(v) if v >= 6.0 => th.warn(), Some(_) => th.dimmed(), None => th.dimmed() };
-    let seeds = format!("{:>6}", if r.seeders < 0 { "?".to_string() } else { r.seeders.to_string() });
+    let seeds = format!("{:>6}", if r.seeders < 0 { String::new() } else { r.seeders.to_string() });
     let size = format!(" {:>9}", human_bytes(r.file_size));
     let name_w = (width as usize).saturating_sub(result_tail_width(width) + 1);
     let seed_style = if r.seeders >= 20 { th.ok() } else if r.seeders > 0 { th.warn() } else { th.dimmed() };
     let mut spans = vec![Span::styled(readable_cell(&r.file_name, name_w, selected_for), th.text()), Span::raw(" ")];
     if width >= 60 { spans.extend([Span::styled(stars, star_style), Span::raw(" ")]); }
     spans.push(Span::styled(seeds, seed_style));
-    if width >= 88 { spans.push(Span::styled(format!(" {:>6}", if r.leechers < 0 { "?".to_string() } else { r.leechers.to_string() }), th.dimmed())); }
+    if width >= 88 { spans.push(Span::styled(format!(" {:>6}", if r.leechers < 0 { String::new() } else { r.leechers.to_string() }), th.dimmed())); }
     spans.push(Span::styled(size, th.text()));
     if width >= 88 {
         spans.extend([Span::styled(format!(" {:>10}", ymd(r.pub_date)), th.dimmed()), Span::styled(format!("  {}", cell(&r.engine, 14)), th.dimmed())]);
@@ -3129,6 +3135,41 @@ mod interaction_tests {
         app.view(&mut frame);
         (0..height).map(|y| (0..width).map(|x| frame.buffer.get(x, y).and_then(|cell| cell.content.as_char()).unwrap_or(' ')).collect::<String>())
             .collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn torrent_details_label_the_native_total_as_connected_peers() {
+        let mut app = app();
+        app.torrents.push(Torrent { name: "Peer label fixture".into(), num_seeds: 0,
+            num_leechs: 7, progress_known: true, ..Default::default() });
+        app.tor_list.borrow_mut().select(Some(0));
+        let native = render(&app, 160, 45);
+        assert!(native.contains("7 peers connected"));
+        assert!(!native.contains("0 seeds") && !native.contains("leechers"));
+        app.cfg.engine = "qbittorrent".into();
+        app.torrents[0].num_seeds = 3;
+        assert!(render(&app, 160, 45).contains("10 peers connected"));
+    }
+
+    #[test]
+    fn search_unknown_peer_counts_are_omitted_but_known_zero_is_retained() {
+        let mut app = app();
+        app.screen = Screen::Search;
+        app.search_focus_input = false;
+        app.search_list.borrow_mut().select(Some(0));
+        app.search_results.push(SearchResult { file_name: "YTS missing counts".into(),
+            engine: "yts".into(), seeders: -1, leechers: -1, ..Default::default() });
+        let unknown = render(&app, 160, 45);
+        assert!(!unknown.contains("seeds") && !unknown.contains("leechers"));
+        // Check only the seed column: names, dates and sizes may contain digits.
+        for width in [50, 80, 120] {
+            let line = result_line(&app.search_results[0], None, width, &app.theme, None);
+            assert_eq!(line.spans()[if width >= 60 { 4 } else { 2 }].content.as_ref(), "      ");
+        }
+        app.search_results[0].seeders = 0;
+        app.search_results[0].leechers = 4;
+        let known = render(&app, 160, 45);
+        assert!(known.contains("0 seeds, 4 leechers"));
     }
 
     fn episode(key: &str, released: i64) -> Episode {
