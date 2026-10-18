@@ -484,11 +484,12 @@ fn run(cli: Cli) -> Result<Code> {
             v["seed_allowed"] = serde_json::json!(t.seed_allowed());
             v["complete"] = if t.progress_known { serde_json::json!(t.progress >= 1.0) } else { serde_json::Value::Null };
             emit(json, v, || {
-                let progress = if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else { "checked when the VPN connects".into() };
+                let progress = if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else if t.state == "waitingVPN" { "checked when the VPN connects".into() } else { "waiting for metadata or verification".into() };
                 println!("{}\n  hash      {}\n  state     {}\n  progress  {}\n  speed     ↓ {}  ↑ {}\n  eta       {}\n  peers     {} seeds, {} leechers\n  flags     seq={} first/last={} upload={}\n  path      {}\n  open      {}",
                     t.name, t.hash, t.state, progress,
                     human_rate(t.dlspeed), human_rate(t.upspeed), human_eta(t.eta), t.num_seeds, t.num_leechs,
                     t.seq_dl, t.f_l_piece_prio, if t.seed_allowed() { "allowed" } else { "off" }, t.save_path, qbt::open_target(&t));
+                if let Some(message) = &t.error_message { println!("  error     {message}"); }
                 if !files.is_empty() {
                     println!("  files");
                     for f in &files {

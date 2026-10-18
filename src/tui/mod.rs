@@ -2201,7 +2201,7 @@ impl TuiApp {
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
             kv("state", state_label(t)),
-            kv("progress", if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else { "checked when the VPN connects".into() }),
+            kv("progress", if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else if t.state == "waitingVPN" { "checked when the VPN connects".into() } else { "waiting for metadata or verification".into() }),
             kv("speed", format!("↓ {}   ↑ {}", human_rate(t.dlspeed), human_rate(t.upspeed))),
             kv("eta", human_eta(t.eta)),
             kv("peers", format!("{} seeds, {} leechers", t.num_seeds, t.num_leechs)),
@@ -2211,6 +2211,9 @@ impl TuiApp {
             kv("path", t.save_path.clone()),
             kv("added", ago(t.added_on)),
         ];
+        if let Some(message) = &t.error_message {
+            lines.insert(3, Line::styled(format!("error     {message}"), th.err()));
+        }
         let head_h = lines.len() as u16;
         let mut text = Text::from_lines(lines.drain(..));
         text.push_line(Line::raw(""));
@@ -3129,6 +3132,16 @@ mod interaction_tests {
         app.view(&mut frame);
         (0..height).map(|y| (0..width).map(|x| frame.buffer.get(x, y).and_then(|cell| cell.content.as_char()).unwrap_or(' ')).collect::<String>())
             .collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn torrent_restore_error_is_visible_in_details() {
+        let mut app = app();
+        app.torrents = vec![Torrent { hash: "a".repeat(40), name: "failed fixture".into(),
+            state: "error".into(), error_message: Some("could not restore: corrupt cache".into()), ..Default::default() }];
+        app.tor_list.borrow_mut().select(Some(0));
+        let text = render(&app, 160, 40);
+        assert!(text.contains("could not restore: corrupt cache"), "{text}");
     }
 
     fn episode(key: &str, released: i64) -> Episode {

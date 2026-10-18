@@ -31,6 +31,7 @@ CASES = (
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety",
     "resume_done_refused", "bulk_start_requires_hashes", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
     "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp",
+    "startup_survives_bad_record",
 )
 
 
@@ -249,6 +250,150 @@ def resume_done_refused(harness, root):
                    code == 0 and (downloads / name).read_bytes() == content)
 
 
+def startup_survives_bad_record(binary):
+    """Open the real TUI with a corrupt cache and a local unresolved magnet."""
+    with Case("native", "startup_survives_bad_record") as case, \
+            tempfile.TemporaryDirectory(prefix="fbittorrent-bad-record-") as temporary:
+        root = Path(temporary)
+        env = dict(os.environ, TERM="xterm-256color")
+        for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                               ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
+                               ("XDG_STATE_HOME", "state")]:
+            path = root / directory
+            path.mkdir(mode=0o700)
+            env[key] = str(path)
+        harness = NativeHarness(lambda: case, binary, env)
+        downloads = root / "downloads"
+        downloads.mkdir()
+        store = root / "data/fbittorrent/engine"
+        store.mkdir(parents=True)
+        tracker_requests = []
+
+        class Tracker(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                tracker_requests.append(self.path)
+                body = bencode(dict(interval=3600, peers=b""))
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        tracker = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Tracker)
+        threading.Thread(target=tracker.serve_forever, daemon=True).start()
+
+        def cached(name):
+            content = b"P0-09 verified local bytes.\n"
+            (downloads / name).write_bytes(content)
+            info = dict(name=name, length=len(content), private=1,
+                        **{"piece length": 16384, "pieces": hashlib.sha1(content).digest()})
+            hash_ = hashlib.sha1(bencode(info)).hexdigest()
+            return hash_, bencode(dict(info=info))
+
+        valid, valid_bytes = cached("P0-09.valid.txt")
+        bad, repaired_bytes = cached("P0-09.corrupt.txt")
+        magnet = "a" * 40
+        records = [dict(hash=hash_, name=name, source=source, output_folder=str(downloads),
+                        only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                        added_on=100-index, completion_on=0, paused=False, resume_after_migration=False)
+                   for index, (hash_, name, source) in enumerate([
+                       (magnet, "P0-09.magnet", f"magnet:?xt=urn:btih:{magnet}&tr=http%3A%2F%2F127.0.0.1%3A{tracker.server_port}%2Fannounce"),
+                       (bad, "P0-09.corrupt.txt", ""), (valid, "P0-09.valid.txt", "")])]
+        ledger = store / "torrents.json"
+        ledger.write_text(json.dumps(dict(migrated_legacy=True, records=records)))
+        (store / f"{valid}.torrent").write_bytes(valid_bytes)
+        bad_cache = store / f"{bad}.torrent"
+        bad_cache.write_bytes(b"corrupt cache")
+        config = root / "config/fbittorrent/config.toml"
+        config.parent.mkdir()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        # Bind all engine networking to loopback; the tracker never supplies peers.
+        config.write_text(f'engine = "native"\nautostart = false\nnotify = false\n'
+                          f'peer_port = {port}\nnetwork_interface = "lo"\n'
+                          f'save_path = {json.dumps(str(downloads))}\n')
+        tmux_socket, session = f"fbt-fbt-p0-09-kzw-{os.getpid()}", "fbt-fbt-p0-09-kzw"
+
+        def tmux(*args, check=True, timeout=None):
+            return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
+                                  capture_output=True, text=True, check=check, timeout=timeout)
+
+        def rows():
+            return {row["hash"]: row for row in harness.cli("list")["torrents"]}
+
+        socket_path = root / "runtime/fbittorrent/engine.sock"
+        try:
+            app_launch = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
+            launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(root / 'terminal.typescript'))}"
+            began = time.monotonic()
+            harness.start_tmux(tmux, session, launch)
+            harness.wait_for(lambda: socket_path.exists() and "P0-09" in
+                             tmux("capture-pane", "-t", session, "-p", check=False).stdout,
+                             "startup socket and first TUI frame open", seconds=9)
+            opened = time.monotonic() - began
+            case.check(opened < 10 and socket_path.exists(), "App opens in under 10 seconds with an unresolved saved magnet.",
+                       f"Socket {'present' if socket_path.exists() else 'absent'} after {opened:.3f} seconds.")
+            initial = rows()
+            case.check(set(initial) == {valid, bad, magnet}, "All three ledger records are listed.", json.dumps(initial))
+            case.check(initial[magnet]["state"] == "metaDL" and "error_message" not in initial[magnet],
+                       "Unresolved magnet is metadata in progress without a premature error.", json.dumps(initial[magnet]))
+            harness.wait_for(lambda: rows()[bad]["state"] == "error", "corrupt cache fails independently")
+            failed = harness.cli("show", bad)
+            case.check(bool(failed["error_message"]) and "could not restore" in failed["error_message"],
+                       "show --json preserves the corrupt-cache restore failure message.", json.dumps(failed))
+            harness.wait_for(lambda: rows()[valid]["completion_on"] > 0, "valid cache verifies despite unresolved magnet")
+            # The details column appears at 140+ columns; inspect its real UI.
+            tmux("resize-window", "-t", session, "-x", "160", "-y", "40")
+            tmux("send-keys", "-t", session, "Home", "Down")
+            harness.wait_for(lambda: "could not restore" in tmux("capture-pane", "-t", session, "-p").stdout,
+                             "TUI details display the selected restore failure")
+            pane = tmux("capture-pane", "-t", session, "-p").stdout
+            case.check("could not restore" in pane, "The wide TUI details show the restore error in text.", pane)
+            bad_cache.write_bytes(repaired_bytes)
+            harness.cli("start", bad)
+            harness.wait_for(lambda: rows()[bad]["completion_on"] > 0 and
+                             "error_message" not in rows()[bad], "start retries the repaired cache successfully")
+            # Keep the production 90-second bound: prove timeout becomes error,
+            # rather than declaring an unresolved magnet failed at startup.
+            seen = []
+
+            def magnet_failed():
+                row = harness.cli("show", magnet)
+                seen.append((row["state"], row.get("error_message")))
+                if row["state"] != "error":
+                    time.sleep(.9)
+                return row if row["state"] == "error" else None
+
+            failure = harness.wait_for(magnet_failed, "unresolved local magnet reaches its real 90-second timeout", seconds=100)
+            case.check(bool(failure) and "timed out" in failure["error_message"] and
+                       all(state == "metaDL" and message is None for state, message in seen[:-1]),
+                       "Magnet stays metadata until the real timeout, then shows error_message.", json.dumps(seen))
+            case.check(bool(tracker_requests), "The real engine queried the local tracker fixture.",
+                       f"Local tracker received {len(tracker_requests)} requests; engine is bound to lo.")
+            harness.cli("start", magnet)
+            retry = harness.cli("show", magnet)
+            case.check(retry["state"] == "metaDL" and "error_message" not in retry,
+                       "Start retries a timed-out magnet and clears its old error.", json.dumps(retry))
+            harness.cli("stop", magnet)
+            case.check(harness.cli("show", magnet)["state"] == "stoppedDL", "Stop cancels metadata resolution.")
+            harness.cli("start", magnet)
+            harness.cli("delete", magnet)
+            case.check(magnet not in rows(), "Delete removes an unresolved record without needing a handle.")
+            harness.cli("down")
+            harness.wait_for(lambda: not socket_path.exists(), "bad-record app closes", seconds=6)
+            harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
+                             "bad-record app process exits after session cleanup", seconds=6)
+            stderr = case.suite.stderr_path.read_text()
+            case.check(not stderr.strip(), "The fixture app and its CLI close without unexpected stderr.",
+                       stderr or "No stderr was emitted.")
+        finally:
+            tmux("kill-server", check=False)
+            tracker.shutdown()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
@@ -260,6 +405,10 @@ def main():
         print("\n".join(CASES))
         return 0
     binary = str(Path(options.binary).resolve())
+    if options.case in (None, "startup_survives_bad_record"):
+        startup_survives_bad_record(binary)
+        if options.case == "startup_survives_bad_record":
+            return suite_status("native")
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
