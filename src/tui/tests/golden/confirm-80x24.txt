@@ -1,0 +1,24 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS  ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+╭ Torrents (3) ────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│   NAME                                          DONE       SPEED     ETA SFU │
+│ ▌ The Diplomat S04E01…H264-GROUP ████░░░░░░   42.0%   2.0 MiB/s   4m57s SF·  │
+│   Sintel.2010.1080p              ██████████  100.0%     1.0 GiB         SF·  │
+│   Other.Movie.2026.1080p       ░░░░░░░░░░       —       0 B/s      0s SF·    │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭DELETE 'The Diplomat S04E01 1080p WEB-DL H264-GROUP' AND ITS FILES? y/N───────╮
+│ y / N (default: No)                                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Confirm] (y) Remove                                                (Esc) Cancel
+

@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import qs.Ui as Ui
 import "Model.js" as Model
 
 Panel {
@@ -30,6 +31,23 @@ Panel {
   // it up, stopping the backend makes it leave the bar again.
   visible: svc.online
   readonly property var rows: svc.activeTorrents.concat(svc.otherTorrents)
+  property var pendingRemoval: null
+
+  function requestRemoval(t) {
+    if (!t || svc.busy || pendingRemoval) return
+    pendingRemoval = { hash: t.hash, name: t.name }
+    Qt.callLater(function() { cancelRemoval.forceActiveFocus() })
+  }
+  function cancelRemove() {
+    pendingRemoval = null
+    keyCatcher.forceActiveFocus()
+  }
+  function confirmRemove() {
+    var target = pendingRemoval
+    if (!target || svc.busy) return
+    cancelRemove()
+    svc.removeTorrent(target)
+  }
 
   function ensureCursor() {
     if (rows.length === 0) { focusSection = "header"; rowIndex = 0; return }
@@ -98,6 +116,7 @@ Panel {
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: {
+    pendingRemoval = null
     svc.opened = opened
     if (opened) {
       cursorActive = false
@@ -110,6 +129,7 @@ Panel {
     }
   }
   onRowsChanged: {
+    if (pendingRemoval && !rows.some(function(t) { return t.hash === pendingRemoval.hash })) cancelRemove()
     // Rows usually land a moment after the popup opens; until the user has moved
     // the cursor, keep it parked on the list so the first j goes down the torrents.
     if (!cursorActive && rows.length > 0 && focusSection === "header") focusSection = "rows"
@@ -134,7 +154,8 @@ Panel {
     // Test hook: where the keyboard cursor is. Lets a script verify key handling
     // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
     function cursor(): string {
-      return JSON.stringify({ section: root.focusSection, row: root.rowIndex, header: root.headerIndex, active: root.cursorActive, rows: root.rows.length, opened: root.opened })
+      return JSON.stringify({ section: root.focusSection, row: root.rowIndex, header: root.headerIndex, active: root.cursorActive, rows: root.rows.length, opened: root.opened,
+        hashes: root.rows.map(function(t) { return t.hash }), confirming: !!root.pendingRemoval, confirmFocused: cancelRemoval.activeFocus ? "cancel" : "other", pendingHash: root.pendingRemoval ? root.pendingRemoval.hash : "" })
     }
   }
 
@@ -166,19 +187,21 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
+        if (root.pendingRemoval) return
         if (!root.cursorActive) { root.cursorActive = true; return }
         root.moveCursor(dx, dy)
       }
-      onActivateRequested: if (root.cursorActive) root.activateCursor()
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onActivateRequested: { if (root.pendingRemoval) root.cancelRemove(); else if (root.cursorActive) root.activateCursor() }
+      onCloseRequested: { if (root.pendingRemoval) root.cancelRemove(); else root.close() }
+      onTabRequested: function(direction) { if (!root.pendingRemoval) root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (root.pendingRemoval) { if (t === "y" || t === "Y") root.confirmRemove(); return }
         if (t === "a" || t === "A") svc.addFromClipboard()
         else if (t === "t" || t === "T") root.openTui()
         else if (t === "r" || t === "R") svc.refresh()
         else if (t === "q" || t === "Q") { svc.stopBackend(); root.close() }
         else if (t === "p" || t === "P" || t === " ") { if (root.focusSection === "rows") svc.toggleTorrent(root.selectedTorrent()) }
-        else if (t === "d" || t === "D") { if (root.focusSection === "rows") svc.removeTorrent(root.selectedTorrent()) }
+        else if (t === "d" || t === "D") { if (root.focusSection === "rows") root.requestRemoval(root.selectedTorrent()) }
         else if (t === "u" || t === "U") { if (root.focusSection === "rows") svc.toggleSeeding(root.selectedTorrent()) }
         else if (t === "o" || t === "O") { if (root.focusSection === "rows") svc.openTorrent(root.selectedTorrent()) }
       }
@@ -224,6 +247,40 @@ Panel {
                 HeaderAction { index: 1; iconText: "󰆍"; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
                 HeaderAction { index: 2; iconText: "󰑐"; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
                 HeaderAction { index: 3; iconText: "󰐥"; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
+              }
+            }
+          }
+
+          Column {
+            visible: !!root.pendingRemoval
+            width: parent.width
+            spacing: Style.space(6)
+            Text {
+              objectName: "removal-question"
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.pendingRemoval ? "Remove '" + root.pendingRemoval.name + "'? Files are kept." : ""
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+            }
+            Row {
+              spacing: Style.space(6)
+              Ui.Button {
+                id: cancelRemoval
+                objectName: "cancel-removal"
+                text: "Cancel"
+                focusable: true
+                bordered: true
+                onClicked: root.cancelRemove()
+              }
+              Ui.Button {
+                objectName: "confirm-removal"
+                text: "Remove"
+                bordered: true
+                enabled: !svc.busy
+                onClicked: root.confirmRemove()
               }
             }
           }
@@ -279,6 +336,7 @@ Panel {
 
           Column {
             id: rowColumn
+            objectName: "torrent-rows"
             visible: svc.online && root.rows.length > 0
             width: parent.width
             spacing: Style.space(6)
@@ -448,6 +506,7 @@ Panel {
         onClicked: svc.openTorrent(row.torrent)
       }
       PanelActionButton {
+        objectName: "trash-" + (row.torrent ? row.torrent.hash : "")
         iconText: "󰆴"
         tooltipText: "Remove torrent, keep files (d)"
         foreground: root.foreground
@@ -455,7 +514,7 @@ Panel {
         fontFamily: root.fontFamily
         enabled: !svc.busy
         Layout.alignment: Qt.AlignVCenter
-        onClicked: svc.removeTorrent(row.torrent)
+        onClicked: root.requestRemoval(row.torrent)
       }
     }
   }

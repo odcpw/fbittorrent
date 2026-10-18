@@ -4,7 +4,11 @@ Generated from the unsplit `src/tui/mod.rs` at base revision `dd65e2c` using
 FrankenTUI 0.6.0. These capture existing behavior, including clipped labels;
 they are not the later P4 redesign mockups.
 
-The nine surfaces each have 80×24, 120×30 and 160×45 baselines. Text comes
+The original nine surfaces each have 80×24, 120×30 and 160×45 baselines. P0-13
+adds `confirm` at those three sizes using the real delete-files key path,
+showing `y/N`, `default: No` and `(y) Remove` / `(Esc) Cancel`. These three
+baselines follow the P0-13 confirmation change on base revision `5b94243`;
+the original 27 are unchanged. Text comes
 directly from frame cells, resolving pooled graphemes and skipping continuation
 cells of wide characters. Blank cells become spaces; right padding is trimmed
 so the files pass `git diff --check`. Every row ends with a newline, including
@@ -37,5 +41,5 @@ git diff -- src/tui/tests/golden/
 ```
 
 A mismatch names the golden file and prints a unified diff. Never set the
-update variable in CI. The 60×20 meta-test renders all nine surfaces without
+update variable in CI. The 60×20 meta-test renders all ten surfaces without
 creating extra goldens. The Unicode check verifies wide and combining text.
