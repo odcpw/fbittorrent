@@ -136,6 +136,7 @@ version = "0.15"
 [dependencies.librqbit-core]
 version = "9.0.1"
 default-features = false
+features = ["sha1-ring"]
 path = "../librqbit-core"
 
 

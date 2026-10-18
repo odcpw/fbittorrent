@@ -1526,13 +1526,49 @@ mod tests {
 
     use super::*;
 
+    fn engine_test_diagnostic(action: &str, expect: &str, observed: serde_json::Value, ok: bool) {
+        // The P0-17 runner adds the E.1 UTC timestamp, case and step and retains
+        // this structured observation alongside the unmodified test output.
+        eprintln!(
+            "FBT-P017-STEP {}",
+            serde_json::json!({
+                "action": action, "expect": expect,
+                "observed": observed.to_string(), "ok": ok,
+            })
+        );
+    }
+
     fn test_app(
         directory: &Path,
         downloads: &Path,
         ledger: Ledger,
         port: Option<u16>,
     ) -> AppEngine {
-        let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+        let instance =
+            InstanceLock::acquire_in(directory.join("runtime")).unwrap_or_else(|error| {
+                use std::os::unix::fs::MetadataExt;
+                let path = directory.join("runtime/engine.lock");
+                let inode = std::fs::metadata(&path).map(|metadata| metadata.ino()).ok();
+                let locks = std::fs::read_to_string("/proc/locks").ok().map(|locks| {
+                    locks
+                        .lines()
+                        .filter(|line| {
+                            inode.is_some_and(|inode| line.contains(&format!(":{inode} ")))
+                        })
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                });
+                engine_test_diagnostic(
+                    "acquire isolated engine instance lock",
+                    "The lock for this test's runtime directory is available.",
+                    serde_json::json!({
+                        "path": path, "inode": inode, "pid": std::process::id(),
+                        "kernel_locks": locks, "error": format!("{error:#}"),
+                    }),
+                    false,
+                );
+                panic!("acquiring {}: {error:#}", path.display());
+            });
         std::fs::create_dir_all(directory).unwrap();
         std::fs::create_dir_all(downloads).unwrap();
         let runtime = NativeRuntime::new().unwrap();
@@ -1611,6 +1647,87 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn instance_lock_excludes_the_same_directory_but_allows_another() {
+        let directory = review_directory("instance-lock-directories");
+        let first = InstanceLock::acquire_in(directory.join("first")).unwrap();
+        let same = InstanceLock::acquire_in(directory.join("first"));
+        let other = InstanceLock::acquire_in(directory.join("other"));
+        engine_test_diagnostic(
+            "check instance lock directory scope",
+            "The same directory is excluded while another directory remains available.",
+            serde_json::json!({"same_directory_excluded": same.is_err(),
+                "other_directory_available": other.is_ok()}),
+            same.is_err() && other.is_ok(),
+        );
+        assert!(same.is_err());
+        assert!(other.is_ok());
+        drop(first);
+        drop(other);
+        let reopened = InstanceLock::acquire_in(directory.join("first")).unwrap();
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn dropping_instance_lock_releases_a_fork_inherited_descriptor() {
+        use std::io::{Read, Write};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let directory = review_directory("instance-lock-inheritance");
+        let instance = InstanceLock::acquire_in(directory.clone()).unwrap();
+        let (mut parent, child) = UnixStream::pair().unwrap();
+        parent
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let parent_fd = parent.as_raw_fd();
+        let child_fd = child.as_raw_fd();
+        // Model a parallel provider spawn parked between fork and exec. In the
+        // child, use only async-signal-safe syscalls and _exit: other libtest
+        // threads may have held allocator or runtime locks when fork happened.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed: {}", std::io::Error::last_os_error());
+        if pid == 0 {
+            unsafe {
+                libc::close(parent_fd);
+                let mut byte = 1u8;
+                if libc::write(child_fd, (&byte as *const u8).cast(), 1) != 1 {
+                    libc::_exit(1);
+                }
+                let read = libc::read(child_fd, (&mut byte as *mut u8).cast(), 1);
+                libc::_exit(if read == 1 { 0 } else { 1 });
+            }
+        }
+        drop(child);
+        let mut ready = [0u8];
+        parent.read_exact(&mut ready).unwrap();
+        assert_eq!(ready, [1]);
+        drop(instance);
+        let reopened = InstanceLock::acquire_in(directory.clone());
+        // Reap the child before asserting, including on the pre-fix failure.
+        parent.write_all(&[1]).unwrap();
+        let mut status = 0;
+        let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
+        engine_test_diagnostic(
+            "release instance lock while a forked child retains its descriptor",
+            "Dropping the owner permits immediate reacquisition before the child exits.",
+            serde_json::json!({"reacquired": reopened.is_ok(),
+                "error": reopened.as_ref().err().map(|error| format!("{error:#}")),
+                "child_pid": pid, "child_waited": waited, "child_status": status}),
+            reopened.is_ok() && waited == pid && status == 0,
+        );
+        assert_eq!(waited, pid);
+        assert_eq!(status, 0);
+        assert!(
+            reopened.is_ok(),
+            "owner dropped but inherited lock remained: {:?}",
+            reopened.err()
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn review_record(hash: &str, downloads: &Path) -> Record {
@@ -2556,6 +2673,17 @@ mod tests {
             ))
             .unwrap()
             .unwrap();
+        let effective_upload_limit = seed.dispatcher.runtime.block_on(async {
+            OwnedMutexGuard::lock(seed.dispatcher.inner.ledger.clone(), &test_cx())
+                .await
+                .unwrap()
+                .records[0]
+                .options(false)
+                .unwrap()
+                .ratelimits
+                .upload_bps
+                .map(|limit| limit.get())
+        });
         let addr = seed.dispatcher.inner.session.listen_addr().unwrap();
         let retained = seed.dispatcher.inner.session.clone();
         let dispatcher = seed.dispatcher();
@@ -2581,37 +2709,78 @@ mod tests {
             ))
             .unwrap();
         let began = Instant::now();
-        let handle = client_runtime.block_on(async {
-            let handle = client
-                .add_torrent(
-                    &test_cx(),
-                    // Resolve real BEP 9 metadata from the seed before payload.
-                    AddTorrent::from_url(format!("magnet:?xt=urn:btih:{hash}")),
-                    Some(AddTorrentOptions {
-                        overwrite: true,
-                        initial_peers: Some(vec![addr]),
-                        ..Default::default()
-                    }),
-                )
-                .await
-                .unwrap()
-                .into_handle()
-                .unwrap();
-            time::timeout(&test_cx(), Duration::from_secs(15), async {
-                while handle.stats().progress_bytes < 64 * 1024 {
-                    time::sleep(&test_cx(), Duration::from_millis(25)).await;
-                }
-            })
-            .await
-            .unwrap();
-            handle
+        let (handle, partial, sample_before, elapsed, observations) =
+            client_runtime.block_on(async {
+                let handle = client
+                    .add_torrent(
+                        &test_cx(),
+                        // Resolve real BEP 9 metadata from the seed before payload.
+                        AddTorrent::from_url(format!("magnet:?xt=urn:btih:{hash}")),
+                        Some(AddTorrentOptions {
+                            overwrite: true,
+                            initial_peers: Some(vec![addr]),
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .unwrap()
+                    .into_handle()
+                    .unwrap();
+                let mut observations = Vec::new();
+                let (partial, sample_before, elapsed) =
+                    time::timeout(&test_cx(), Duration::from_secs(15), async {
+                        // During initialization progress_bytes counts disk bytes checked,
+                        // including invalid/missing payload. Wait for the engine's state
+                        // notification before interpreting it as downloaded payload.
+                        // Otherwise a full hash-check scan looks like an uncapped transfer.
+                        handle.wait_until_initialized(&test_cx()).await.unwrap();
+                        loop {
+                            let before = began.elapsed().as_secs_f64();
+                            let stats = handle.stats();
+                            let after = began.elapsed().as_secs_f64();
+                            observations.push(serde_json::json!({
+                                "before_s": before, "after_s": after,
+                                "state": format!("{:?}", stats.state),
+                                "progress_bytes": stats.progress_bytes,
+                            }));
+                            if stats.progress_bytes >= 64 * 1024 {
+                                // Retain this sample and its bracketing monotonic times;
+                                // resampling after block_on returns can race later payload.
+                                break (stats.progress_bytes, before, after);
+                            }
+                            time::sleep(&test_cx(), Duration::from_millis(25)).await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                (handle, partial, sample_before, elapsed, observations)
+            });
+        let observed = serde_json::json!({
+            "partial": partial, "payload_len": payload.len(),
+            "configured_upload_limit_bps": NO_UPLOAD_LIMIT,
+            "effective_upload_limit_bps": effective_upload_limit,
+            "sample_before_s": sample_before, "sample_after_s": elapsed,
+            "observer_timestamps": observations,
         });
-        let partial = handle.stats().progress_bytes;
-        assert!(partial < payload.len() as u64);
+        let is_partial = partial < payload.len() as u64;
+        let within_cap = partial as f64 <= NO_UPLOAD_LIMIT as f64 * (elapsed + 1.5);
+        engine_test_diagnostic(
+            "observe partial loopback payload",
+            "The first observation is smaller than the full payload.",
+            observed.clone(),
+            is_partial,
+        );
+        engine_test_diagnostic(
+            "check loopback upload cap allowance",
+            "Payload bytes do not exceed cap * (monotonic elapsed seconds + 1.5).",
+            observed,
+            within_cap,
+        );
         assert!(
-            partial as f64 <= NO_UPLOAD_LIMIT as f64 * (began.elapsed().as_secs_f64() + 1.5),
+            within_cap,
             "payload rate exceeded the configured cap, allowing its initial token burst"
         );
+        assert!(is_partial);
         let closed = Instant::now();
         drop(seed);
         assert!(closed.elapsed() < Duration::from_secs(5));

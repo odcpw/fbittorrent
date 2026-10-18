@@ -41,12 +41,45 @@ was deleted on 2026-10-18, owner decision Q4).
 ## Tests
 
 The published package is not test-complete: `cargo test --lib` on this tree
-does not compile, because the package omits the test-only module files that
-`#[cfg(test)]` declarations name (for example `src/actor_conformance_tests.rs`)
-and the tests that use them. The wheel tests last ran on 2026-10-11 through a
-dedicated runner that included `src/time/wheel.rs` by path (63 passed); that
-runner is retired (plan P0-02 step 5). The patched code is exercised by
-fbittorrent's own suites (`cargo test --locked -p fbittorrent -p rqbit-runtime`).
+does not compile, because the package omits test-only modules such as
+`src/actor_conformance_tests.rs`. Test the patch using the complete upstream
+Git source at `78b64636e99fea4ea2d868096576021dd3b8e519`: overlay the eight
+differing Rust files listed above (the metamorphic file already matches),
+retain upstream's workspace manifest and lockfile, and add only
+`epoch-diagnostics = []` to its `[features]`. Every shared `src/` file must
+then be byte-identical to this vendored tree; the licence must match too.
+
+From that prepared source checkout, using the rch cargo shim:
+
+```bash
+export PATH="$HOME/.rch/shims:$HOME/.cargo/bin:$PATH"
+export RUSTUP_TOOLCHAIN=1.98.0 CARGO_BUILD_JOBS=4
+export CARGO_INCREMENTAL=0 CARGO_PROFILE_TEST_DEBUG=0
+export RUSTFLAGS='-C debuginfo=0'
+export CARGO_TARGET_DIR=/absolute/path/to/fbittorrent/target/asupersync-patch-tests
+cargo test --locked -p asupersync --lib --no-default-features \
+  --features proc-macros,native-runtime,tls,tls-webpki-roots,epoch-diagnostics \
+  time::wheel -- --nocapture --test-threads=4
+cargo test --locked -p asupersync --lib --no-default-features \
+  --features proc-macros,native-runtime,tls,tls-webpki-roots,epoch-diagnostics \
+  region_owner_tests -- --nocapture --test-threads=4
+```
+
+On 2026-10-18 these commands passed **63 wheel tests** (including all four
+pruning regressions and the metamorphic tests) and **2 region-owner tests**,
+with no failures, ignored tests, or worker-panic scan matches. The upstream
+lockfile remained unchanged. Its conformance dev dependency additionally
+enables `fuzz`, `metrics`, `test-internals`, and `tracing-integration` in this
+test harness. This is scoped patch evidence, not an all-features or full-suite
+result: `--all-features` enables the nightly-only feature and
+`messaging-fabric`, which excludes `region_owner_tests`.
+
+See `docs/validation/2026-10-18/P0-02.md` for provenance and
+`target/test-logs/asupersync/{build,test,fork_test}.jsonl` for the retained
+command receipts. The retired standalone wheel runner was not restored.
+The refreshed fbittorrent gate also passed 91 app tests, 14 runtime tests
+(1 existing throughput test ignored), its background-panic scan, the release
+build, and isolated native integration.
 
 When upgrading Asupersync, check whether upstream includes these changes and
 rerun the timer, transfer and shutdown checks before removing the patch.

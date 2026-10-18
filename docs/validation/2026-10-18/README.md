@@ -128,3 +128,23 @@ Receipt: [P0-16.md](P0-16.md) (branch ntm/fbittorrent/cod_2, commit fe18858; mer
 ## P0-13
 
 Receipt: [P0-13.md](P0-13.md) (branch ntm/fbittorrent/cod_2, commit ea13ef3; merged by the orchestrator after an independent test run).
+
+## P0-05
+
+Receipt: [P0-05.md](P0-05.md) (branch ntm/fbittorrent/cod_4, commit d4eb8fa; merged by the orchestrator after an independent test run).
+
+## P0-02
+
+Receipt: [P0-02.md](P0-02.md) (branch ntm/fbittorrent/cod_3, commit cf92a57; merged by the orchestrator after re-running the 63 timer-wheel tests in the prepared upstream checkout).
+
+## Incident: swarm killed by systemd-oomd
+
+Report: [incident-tmux-death.md](incident-tmux-death.md) (orchestrator investigation, 2026-10-18).
+
+## P0-17
+
+Receipt: [P0-17.md](P0-17.md) (branch ntm/fbittorrent/cod_4, commit da37f93; merged by the orchestrator after five full-suite runs and an Astra review).
+
+## P0-15
+
+Receipt: [P0-15.md](P0-15.md) (branch ntm/fbittorrent/cod_1, commits 28f1244..acb0953; merged by the orchestrator after a green full gate and an Astra review).
