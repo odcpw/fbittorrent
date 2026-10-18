@@ -297,15 +297,17 @@ impl ManagedTorrent {
     /// }
     /// ```
     pub fn have_pieces_snapshot(&self) -> Option<Box<dyn BitV>> {
+        // The critical section allocates only the bitfield copy. Box the trait
+        // object after with_chunk_tracker releases the tracker read guards.
         self.with_chunk_tracker(|tracker| {
             tracker
                 .get_have_pieces()
                 .as_slice()
                 .to_bitvec()
                 .into_boxed_bitslice()
-                .into_dyn()
         })
         .ok()
+        .map(|bits| bits.into_dyn())
     }
 
     /// Get the live state if the torrent is live.
