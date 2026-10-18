@@ -38,6 +38,7 @@ use tracing::trace;
 use tracing::warn;
 
 use crate::Session;
+use crate::BitV;
 use crate::chunk_tracker::ChunkTracker;
 use crate::file_info::FileInfo;
 use crate::limits::LimitsConfig;
@@ -278,6 +279,33 @@ impl ManagedTorrent {
                 .context("error getting chunks")?)),
             _ => bail!("no chunk tracker, torrent neither paused nor live"),
         }
+    }
+
+    /// Copy the verified have-bitfield into an independent in-memory snapshot.
+    ///
+    /// The copy is made while holding the tracker read locks. It retains the
+    /// tracker's MSB-first byte layout, including zero padding in the last byte;
+    /// metadata's piece count determines which bits are meaningful. Mutating or
+    /// dropping the snapshot never changes the tracker or its persisted state.
+    /// Returns `None` during initialization or whenever no tracker is available.
+    /// A paused torrent with an initialized tracker still returns a snapshot.
+    ///
+    /// ```
+    /// use librqbit::{BitV, ManagedTorrent};
+    /// fn snapshot(torrent: &ManagedTorrent) -> Option<Box<dyn BitV>> {
+    ///     torrent.have_pieces_snapshot()
+    /// }
+    /// ```
+    pub fn have_pieces_snapshot(&self) -> Option<Box<dyn BitV>> {
+        self.with_chunk_tracker(|tracker| {
+            tracker
+                .get_have_pieces()
+                .as_slice()
+                .to_bitvec()
+                .into_boxed_bitslice()
+                .into_dyn()
+        })
+        .ok()
     }
 
     /// Get the live state if the torrent is live.
