@@ -228,3 +228,7 @@ Receipt: [P1-03b.md](P1-03b.md) (branch ntm/fbittorrent/cod_3-p1-03b, commits ab
 ## P1-04
 
 Receipt: [P1-04.md](P1-04.md) (branch ntm/fbittorrent/cod_1, commits 5a2fba2, f8bf0ab and 3061ee0 with the orchestrator's reconciliation merge eba7d2c; merged by the orchestrator after three Astra reviews. The receipt's incident section records that during development five disposable units started the daemon with the manager's default environment (22:16, 2026-10-18); the orchestrator's assessment: no file under ~/.local/share/fbittorrent changed, the installed binary and unit directories are untouched, seven new payload files appeared under ~/Downloads for the owner's one live torrent (two empty, three sparse shells, two with a few hundred KiB downloaded) and the pre-existing E08 file verifies 710/710 fully contained pieces against the torrent hashes; nothing was deleted; batch gate on main follows).
+
+## P1-02b
+
+Receipt: [P1-02b.md](P1-02b.md) (branch ntm/fbittorrent/cod_3-p1-02b, commit efe36ca; test-only fix of a pre-existing fixture readiness race in the transfer tests, merged by the orchestrator after an Astra review that recomputed the retained timelines and re-ran the transfer tests; batch gate on main follows).
