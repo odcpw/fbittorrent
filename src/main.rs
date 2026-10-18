@@ -318,7 +318,12 @@ fn main() {
                     let mut error = AppError::new(Code::Failure, message);
                     error.hint = hint;
                     agent::report(&error.into(), true)
-                } else { 1 }
+                } else {
+                    if let Some(hint) = hint {
+                        eprintln!("ERROR daemon startup hint={hint:?}");
+                    }
+                    1
+                }
             }),
             Err(_) => 70,
         });

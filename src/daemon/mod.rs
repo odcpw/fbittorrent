@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::Result;
 use lifecycle::{Lifecycle, Request as LifecycleRequest, StopReason};
-use slot::{EngineSlot, ParkedLedger, Slot, State};
+use slot::{EngineSlot, Slot, State};
 use std::io::Read;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -102,15 +102,16 @@ impl Daemon {
                         });
                 }
                 Slot::Parked(ledger) => {
-                    return ledger.dispatch(request).unwrap_or_else(|| {
+                    let interface = network.interface.as_deref().unwrap_or("configured interface");
+                    return slot::dispatch_parked(ledger, request, interface).unwrap_or_else(|| {
                         Err(AppError::new(
                             Code::Backend,
                             format!(
                                 "engine_unavailable state=parked; Waiting for {}",
-                                ledger.interface
+                                interface
                             ),
                         )
-                        .hint(format!("connect {} then retry", ledger.interface))
+                        .hint(format!("connect {} then retry", interface))
                         .into())
                     })
                 }
@@ -160,10 +161,10 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
     daemon.lifecycle.set_expected_network(Some(network.clone()));
     if !network.ready {
         eprintln!("INFO network {}", network.message);
-        daemon.replace(Slot::Parked(ParkedLedger {
-            interface: network.interface.unwrap_or_default(),
-            lifecycle: daemon.lifecycle.clone(),
-        }))?;
+        daemon.replace(Slot::Parked(engine::ParkedLedger::new(
+            crate::config::data_dir().join("engine"),
+            daemon.lifecycle.clone(),
+        )))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface;

@@ -698,7 +698,10 @@ def parked_start(binary, systemd):
                        "interface wording replacement never changes saved torrent data", f"Saved title={rows[0].get('name')!r}.")
             harness.cli("start", digest)
             harness.cli("stop", digest)
-            response = harness.engine_call("torrents/add", method="POST")
+            # Typed parsing validates add input before slot availability. Send a
+            # valid disposable magnet so this check exercises the parked engine.
+            response = harness.engine_call("torrents/add", method="POST",
+                                           args=[("urls", "magnet:?xt=urn:btih:" + digest)])
             case.check("engine_unavailable" in str(response.get("error")) and "fbmissing0" in str(response.get("error")),
                        "add while parked fails with engine_unavailable and the configured interface", f"Response={response!r}.")
             response = harness.engine_call("torrents/delete", method="POST", args=[("hashes", digest), ("deleteFiles", "false")])
@@ -753,6 +756,15 @@ def second_serve_refused(binary, systemd):
             case.check("already_running" in value.get("error", "") and value.get("code") == 1 and
                        value.get("hint") == "fbittorrent status --json" and harness.engine_path.stat().st_ino == inode,
                        "second serve waits at most five seconds then fails without replacing the owner's socket", f"Response={value!r}; socket inode={inode}.")
+            # A plain invocation must carry the same actionable hint as JSON.
+            offset = len(harness.stderr())
+            plain = harness.spawn(DaemonContract.command(binary), "second_plain")
+            plain.wait(timeout=8, code=1)
+            diagnostic = harness.stderr()[offset:]
+            case.check("already_running" in diagnostic and "fbittorrent status --json" in diagnostic
+                       and plain.stdout.read_text() == "" and harness.engine_path.stat().st_ino == inode,
+                       "plain second serve exits 1 with already_running and the status hint, retaining the owner's socket",
+                       f"Plain startup stderr={diagnostic!r}; socket inode={inode}.")
             harness.wait_engine()
             harness.stop_serve(first)
             harness.lock_free()

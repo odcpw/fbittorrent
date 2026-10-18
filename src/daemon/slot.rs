@@ -1,47 +1,39 @@
 //! Replaceable engine state; the daemon owns the listener, lock and lifecycle.
-use super::lifecycle::Lifecycle;
-use crate::{engine::AppEngine, ipc::Request};
+use crate::{engine::{AppEngine, ParkedLedger}, ipc::Request};
 use anyhow::{bail, Result};
 
-pub struct ParkedLedger {
-    pub interface: String,
-    pub lifecycle: Lifecycle,
-}
-
-impl ParkedLedger {
-    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
-        crate::engine::dispatch_parked(request, &self.lifecycle).map(|result| {
-            // The existing TUI adapter retains its legacy wording. The daemon
-            // always names the configured device, including in legacy replies.
-            result
-                .map(|text| {
-                    if request.path == "app/version" {
-                        text.replace("ProtonVPN", &self.interface)
-                    } else {
-                        text
-                    }
-                })
-                .map_err(|error| {
-                    let message = format!("{error:#}");
-                    if message.starts_with("connect ProtonVPN")
-                        || message
-                            .starts_with("saved torrent metadata is unavailable; connect ProtonVPN")
-                    {
-                        crate::agent::AppError::new(
-                            crate::agent::Code::Backend,
-                            format!(
-                                "engine_unavailable state=parked; {}",
-                                message.replace("ProtonVPN", &self.interface)
-                            ),
-                        )
-                        .hint(format!("connect {} then retry", self.interface))
-                        .into()
-                    } else {
-                        error
-                    }
-                })
-        })
-    }
+// Only legacy wording is adapted here. The typed engine ledger retains saved
+// intent execution and one generation/Condvar across every parked request.
+pub fn dispatch_parked(
+    ledger: &ParkedLedger,
+    request: &Request,
+    interface: &str,
+) -> Option<Result<String>> {
+    ledger.dispatch(request).map(|result| {
+        result
+            .map(|text| {
+                if request.path == "app/version" {
+                    text.replace("ProtonVPN", interface)
+                } else {
+                    text
+                }
+            })
+            .map_err(|error| {
+                let message = format!("{error:#}");
+                if message.starts_with("connect ProtonVPN")
+                    || message.starts_with("saved torrent metadata is unavailable; connect ProtonVPN")
+                {
+                    crate::agent::AppError::new(
+                        crate::agent::Code::Backend,
+                        format!("engine_unavailable state=parked; {}", message.replace("ProtonVPN", interface)),
+                    )
+                    .hint(format!("connect {interface} then retry"))
+                    .into()
+                } else {
+                    error
+                }
+            })
+    })
 }
 
 pub enum Slot {
@@ -118,6 +110,25 @@ impl EngineSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parked_adapter_retains_typed_generation() {
+        let directory = std::env::temp_dir().join(format!("fbt-parked-adapter-{}-{}",
+            std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let ledger = ParkedLedger::new(directory.clone(), crate::daemon::lifecycle::Lifecycle::default());
+        let generation = ledger.ledger_generation();
+        for expected in 1..=2 {
+            let stop = Request { method: "POST".into(), path: "torrents/stop".into(),
+                args: vec![("hashes".into(), "all".into())], file: None };
+            dispatch_parked(&ledger, &stop, "fbmissing0").unwrap().unwrap();
+            let read = Request { method: "GET".into(), path: "torrents/info".into(), args: vec![], file: None };
+            assert_eq!(dispatch_parked(&ledger, &read, "fbmissing0").unwrap().unwrap(), "[]");
+            assert_eq!(generation.wait_after(expected - 1, std::time::Duration::ZERO), Some(expected));
+            println!("parked adapter durable save/read: expected generation={expected} observed={}", generation.current());
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn transitions_table() {
         use State::*;
