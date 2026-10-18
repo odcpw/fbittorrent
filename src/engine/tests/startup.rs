@@ -260,3 +260,354 @@
         server.join().unwrap();
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    // The tracker is reachable at the socket layer but never answers its UDP
+    // connect request, so no metadata or peers can arrive during shutdown.
+    fn peerless_resolver_fixture() -> (AppEngine, PathBuf, Record, std::net::UdpSocket) {
+        use std::net::UdpSocket;
+
+        let directory = review_directory("resolver-teardown");
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&directory).unwrap();
+        let tracker = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        tracker
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut record = review_record(hash, &downloads);
+        record.source = format!(
+            "magnet:?xt=urn:btih:{hash}&tr=udp%3A%2F%2F127.0.0.1%3A{}%2Fannounce",
+            tracker.local_addr().unwrap().port()
+        );
+        std::fs::write(
+            directory.join("torrents.json"),
+            serde_json::to_vec(&Ledger {
+                generation: Default::default(),
+                migrated_legacy: true,
+                records: vec![record.clone()],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let cfg = Config {
+            save_path: Some(downloads.to_string_lossy().into()),
+            ..Default::default()
+        };
+        let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+        let app = start_in(
+            &cfg,
+            Lifecycle::default(),
+            directory.clone(),
+            instance,
+            SessionOptions {
+                dht: None,
+                disable_local_service_discovery: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut packet = [0; 2048];
+        let (length, _) = tracker.recv_from(&mut packet).unwrap();
+        assert_eq!(
+            length, 16,
+            "the real resolver sent a UDP tracker connect request"
+        );
+        assert_eq!(&packet[8..12], &0_u32.to_be_bytes());
+        (app, directory, record, tracker)
+    }
+
+    struct ResolverCleanupPhase(Arc<AtomicUsize>);
+    impl Drop for ResolverCleanupPhase {
+        fn drop(&mut self) {
+            if self.0.load(Ordering::Acquire) != 2 {
+                self.0.store(3, Ordering::Release);
+            }
+        }
+    }
+
+    // Negative-control path: the former production order, with no restore join.
+    // This switch only makes the regression fail; it cannot bypass an assertion.
+    fn drain_with_former_order(app: &mut AppEngine, bound: Duration) -> bool {
+        let began = std::time::Instant::now();
+        app.dispatcher.inner.stopping.store(true, Ordering::Release);
+        for restore in app.dispatcher.inner.restores.lock().unwrap().values() {
+            restore.cancel.cancel();
+        }
+        let runtime = app.runtime.take().unwrap();
+        let cx = runtime.cx();
+        let stopped = matches!(
+            runtime.block_on(time::timeout(
+                cx,
+                bound,
+                app.dispatcher.inner.session.stop(cx)
+            )),
+            Ok(Ok(()))
+        );
+        let closed = runtime
+            .shutdown_timeout(bound.saturating_sub(began.elapsed()))
+            .is_ok();
+        stopped && closed
+    }
+
+    fn assert_peerless_resolver_drains(retire: Option<bool>) {
+        use std::time::Instant;
+        let (mut app, directory, record, _tracker) = peerless_resolver_fixture();
+        let dispatcher = app.dispatcher();
+        let hash = record.hash.as_str();
+        let cancel = dispatcher.inner.restores.lock().unwrap()[hash]
+            .cancel
+            .clone();
+        assert!(!cancel.is_cancelled());
+        assert_eq!(
+            dispatcher.restore_outcomes()[hash],
+            RestoreOutcome::Metadata
+        );
+        let joining = CancellationToken::new();
+        *dispatcher.inner.restore_join_started.lock().unwrap() = Some(joining.clone());
+
+        // The real resolver's epilogue waits for the join owner's explicit
+        // signal. Application cancellation before that rendezvous gives phase
+        // 3, even if cancellation drops the future before its final stores.
+        // No sleep, resolver, tracker response or runtime is mocked.
+        let resolver = dispatcher
+            .inner
+            .restores
+            .lock()
+            .unwrap()
+            .get_mut(hash)
+            .unwrap()
+            .task
+            .take()
+            .unwrap();
+        let phase = Arc::new(AtomicUsize::new(0));
+        let cleanup_phase = phase.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |cx| async move {
+            let _phase_guard = ResolverCleanupPhase(cleanup_phase.clone());
+            started_tx.send(()).unwrap();
+            let joined = resolver.await;
+            cleanup_phase.store(1, Ordering::Release);
+            joining.cancelled_with(&cx).await;
+            cleanup_phase.store(
+                if joined.is_ok() && joining.is_cancelled() && cx.checkpoint().is_ok() {
+                    2
+                } else {
+                    3
+                },
+                Ordering::Release,
+            );
+        })
+        .unwrap();
+        dispatcher
+            .inner
+            .restores
+            .lock()
+            .unwrap()
+            .get_mut(hash)
+            .unwrap()
+            .task = Some(task);
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        if let Some(remove) = retire {
+            dispatcher.inner.cancel_restore(hash, remove);
+            if !remove {
+                dispatcher
+                    .inner
+                    .spawn_restore(dispatcher.runtime.cx(), record.clone())
+                    .unwrap();
+            }
+        }
+        println!("resolver before drain: tracker=unanswered_udp_connect restore={:?} cleanup_phase={} retired={retire:?}",
+                        dispatcher.restore_outcomes().get(hash), phase.load(Ordering::Acquire));
+        let budget = Duration::from_millis(250);
+        let began = Instant::now();
+        let drained = if std::env::var_os("FBT_P103B_FORMER_ORDER").is_some() {
+            drain_with_former_order(&mut app, budget)
+        } else {
+            app.drain(budget)
+        };
+        let elapsed = began.elapsed();
+        println!("resolver after drain: cancelled={} restore={:?} cleanup_phase={} elapsed={elapsed:?} drained={drained}",
+                        cancel.is_cancelled(), dispatcher.restore_outcomes().get(hash), phase.load(Ordering::Acquire));
+        assert!(
+            drained,
+            "session and runtime must drain without their teardown deadline"
+        );
+        assert!(
+            elapsed < budget,
+            "resolver shutdown exceeded the short drain budget: {elapsed:?}"
+        );
+        assert!(
+            cancel.is_cancelled(),
+            "drop must cancel the in-flight resolver"
+        );
+        assert_eq!(
+            phase.load(Ordering::Acquire),
+            2,
+            "the real resolver and its cleanup must join before application-region cancellation"
+        );
+        assert!(
+            dispatcher
+                .inner
+                .restores
+                .lock()
+                .unwrap()
+                .values()
+                .all(|restore| restore.task.as_ref().is_some_and(|task| task.is_finished())),
+            "retained restores keep their finished join handles"
+        );
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn peerless_resolver_drains_before_runtime_deadline() {
+        assert_peerless_resolver_drains(None);
+    }
+
+    #[test]
+    fn removed_and_retried_resolvers_are_joined() {
+        assert_peerless_resolver_drains(Some(true));
+        assert_peerless_resolver_drains(Some(false));
+    }
+
+    fn join_timeout_probe() {
+        use std::time::Instant;
+        let (mut app, directory, record, _tracker) = peerless_resolver_fixture();
+        let dispatcher = app.dispatcher();
+        let hash = record.hash.as_str();
+        let resolver = dispatcher
+            .inner
+            .restores
+            .lock()
+            .unwrap()
+            .get_mut(hash)
+            .unwrap()
+            .task
+            .take()
+            .unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (exited_tx, exited_rx) = std::sync::mpsc::channel();
+        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |_cx| async move {
+            resolver.await.unwrap();
+            // Deliberately uncooperative cleanup, after a real resolver joined.
+            // The owning test releases this barrier after observing the fuse.
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            exited_tx.send(()).unwrap();
+        })
+        .unwrap();
+        {
+            let mut restores = dispatcher.inner.restores.lock().unwrap();
+            let restore = restores.get_mut(hash).unwrap();
+            restore.task = Some(task);
+            restore.cancel.cancel();
+        }
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let budget = Duration::from_millis(50);
+        let began = Instant::now();
+        let drained = app.drain(budget);
+        let elapsed = began.elapsed();
+        let (present, unfinished, old_completion_assertion) = {
+            let restores = dispatcher.inner.restores.lock().unwrap();
+            let task = restores[hash].task.as_ref();
+            (
+                task.is_some(),
+                task.is_some_and(|task| !task.is_finished()),
+                restores
+                    .values()
+                    .all(|restore| restore.task.as_ref().is_none_or(|task| task.is_finished())),
+            )
+        };
+        // Release our own worker before any assertion can panic.
+        release_tx.send(()).unwrap();
+        exited_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while dispatcher.inner.restores.lock().unwrap()[hash]
+            .task
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
+        {
+            assert!(Instant::now() < deadline, "released cleanup must finish");
+            std::thread::yield_now();
+        }
+        println!("timeout probe: drained={drained} present={present} unfinished={unfinished} old_completion_assertion={old_completion_assertion} elapsed_ms={}", elapsed.as_millis());
+        assert!(!drained, "the full teardown must report its join failure");
+        // Permit scheduler/syscall overhead around the 50 ms fuse, never a 4 s wait.
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "teardown exceeded its short fuse: {elapsed:?}"
+        );
+        assert!(
+            present && unfinished,
+            "timeout must preserve the unfinished current handle"
+        );
+        assert!(
+            !old_completion_assertion,
+            "the original completion assertion must remain non-vacuous"
+        );
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn join_timeout_preserves_unfinished_restore() {
+        const CHILD: &str = "FBT_P103B_TIMEOUT_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            join_timeout_probe();
+            return;
+        }
+        // Expected engine error lines stay in a captured subprocess artifact;
+        // unexpected panics/leaks still fail this test and the ordinary gate.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "engine::tests::join_timeout_preserves_unfinished_restore",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!(
+                    "timeout-control subprocess hung: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let output = child.wait_with_output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "timeout control failed: {stdout}\n{stderr}"
+        );
+        assert!(
+            stdout
+                .contains("drained=false present=true unfinished=true old_completion_assertion=false"),
+            "{stdout}"
+        );
+        assert!(stderr.contains("ERROR engine native torrent session did not drain before its deadline error=\"joining restore tasks\""), "{stderr}");
+        let expected_errors = [
+                "ERROR engine native torrent session did not drain before its deadline error=\"joining restore tasks\"",
+                "ERROR engine native torrent session did not drain before its deadline",
+                "ERROR engine closing native runtime: error=\"native runtime teardown exceeded its deadline\"",
+            ];
+        assert!(
+            stderr.lines().all(|line| expected_errors.contains(&line)),
+            "unexpected worker diagnostic in timeout control: {stderr}"
+        );
+        use base64::Engine;
+        println!(
+            "FBT-E3E-TIMEOUT-LOG {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("{stdout}\n{stderr}"))
+        );
+        println!("Expected bounded join failure logged; unfinished current handle remained observable; cleanup barrier released.");
+    }
