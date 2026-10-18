@@ -264,7 +264,7 @@ fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
         });
     }
     if let Some(op) = raw.get("op").and_then(Value::as_str) {
-        if !ops::TABLE.iter().any(|row| row.name == op) {
+        if !implemented(op) {
             let mut failure = error(
                 ErrorCode::UnknownOp,
                 &format!(
@@ -275,7 +275,7 @@ fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
             );
             let nearest: Vec<_> = ops::TABLE
                 .iter()
-                .filter(|row| distance(op, row.name) <= 2)
+                .filter(|row| implemented(row.name) && distance(op, row.name) <= 2)
                 .take(3)
                 .map(|row| row.name)
                 .collect();
@@ -283,9 +283,11 @@ fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
                 "nearest".into(),
                 json!(nearest),
             )]));
-            if !nearest.is_empty() {
-                failure.hint = Some(format!("try {}", nearest.join(", ")));
-            }
+            failure.hint = Some(if nearest.is_empty() {
+                "no supported operation within two edits; inspect hello capabilities".into()
+            } else {
+                format!("try {}", nearest.join(", "))
+            });
             return Err(Invalid {
                 id: Some(id),
                 error: failure,
@@ -325,6 +327,11 @@ fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
             close: false,
         }
     })
+}
+// TABLE remains the frozen full contract. Availability follows the phase's
+// negotiated capabilities; P1-08 installs subscription routing.
+fn implemented(op: &str) -> bool {
+    !matches!(op, "subscribe" | "unsubscribe") && ops::TABLE.iter().any(|row| row.name == op)
 }
 fn distance(a: &str, b: &str) -> usize {
     if a.len() > 128 {
@@ -495,10 +502,25 @@ impl Connection {
         } else {
             result
         };
-        self.send(match result {
+        let frame = match result {
             Ok(result) => json!({"id":id,"ok":true,"result":result}),
             Err(failure) => response(Some(id), failure),
-        });
+        };
+        // A collection that cannot fit is a request failure, not malformed
+        // client input. Keep its ID and the connection usable (P1-06 ruling 2).
+        let frame = if encode_frame(&frame).is_err() {
+            let mut failure = error(
+                ErrorCode::InvalidMessage,
+                "response exceeds the 1048576-byte frame cap",
+                None,
+            );
+            failure.hint =
+                Some("request a smaller collection; chunked subscriptions follow in P1-08".into());
+            response(Some(id), failure)
+        } else {
+            frame
+        };
+        self.send(frame);
         timely
     }
     fn expire(&self) {
@@ -1148,6 +1170,9 @@ fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stream: UnixStr
     connection.ready.notify_one();
 }
 fn write_frame(stream: &mut UnixStream, frame: &Frame) -> io::Result<()> {
+    stream.write_all(&encode_frame(frame)?)
+}
+fn encode_frame(frame: &Frame) -> io::Result<Vec<u8>> {
     struct Capped(Vec<u8>);
     impl Write for Capped {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -1168,7 +1193,7 @@ fn write_frame(stream: &mut UnixStream, frame: &Frame) -> io::Result<()> {
     serde_json::to_writer(&mut encoded, frame)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     encoded.0.push(b'\n');
-    stream.write_all(&encoded.0)
+    Ok(encoded.0)
 }
 fn write_client(shared: Arc<Shared>, connection: Arc<Connection>, mut stream: UnixStream) {
     let mut last = Instant::now();
@@ -1473,6 +1498,93 @@ mod admission_tests {
 mod argument_tests {
     use super::*;
     #[test]
+    fn subscription_operations_are_unknown_until_p1_08() {
+        for (op, args) in [
+            ("subscribe", json!({"topics":["torrents"]})),
+            ("unsubscribe", json!({"sub":1})),
+        ] {
+            let failure =
+                decode(&serde_json::to_vec(&json!({"id":1,"op":op,"args":args})).unwrap())
+                    .unwrap_err();
+            assert_eq!(failure.error.code, ErrorCode::UnknownOp);
+            assert!(failure.error.hint.is_some());
+            assert_eq!(failure.error.details.unwrap()["nearest"], json!([]));
+            assert!(!failure.close);
+            println!("{op}: unknown_op, nearest=[], hint present, connection kept");
+        }
+        let failure = decode(br#"{"id":1,"op":"torrents.lis"}"#).unwrap_err();
+        assert_eq!(
+            failure.error.details.unwrap()["nearest"],
+            json!(["torrents.list"])
+        );
+    }
+
+    #[test]
+    fn oversized_collection_is_an_id_bearing_error_and_does_not_end_connection() {
+        let (connection, _) = super::tests::connection();
+        let request = decode(br#"{"id":1,"op":"torrents.files","args":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#).unwrap();
+        let generation = connection.reserve(&request).unwrap();
+        let files = (0..2000)
+            .map(|index| File {
+                index,
+                path: "x".repeat(1024),
+                sort_key: "x".repeat(1024),
+                size: 1,
+                progress: 0.0,
+                included: true,
+                ready: None,
+            })
+            .collect();
+        connection.complete(
+            1,
+            generation,
+            Ok(Reply::TorrentsFiles(FilesResult { files })),
+        );
+        let next = decode(br#"{"id":2,"op":"app.client","args":{}}"#).unwrap();
+        let generation = connection.reserve(&next).unwrap();
+        connection.complete(2, generation, Ok(Reply::AppClient(EmptyResult {})));
+        let out = connection.out.lock().unwrap();
+        assert!(!out.ending);
+        assert!(out.terminal.is_none());
+        assert_eq!(out.frames.len(), 2);
+        assert_eq!(out.frames[0]["id"], 1);
+        assert_eq!(out.frames[0]["error"]["code"], "invalid_message");
+        assert_eq!(out.frames[1]["id"], 2);
+        assert_eq!(out.frames[1]["ok"], true);
+        println!("oversized files: id=1 invalid_message; id=2 succeeds; no bye or close");
+    }
+
+    // Python owns process lifecycle and E.1 records. This opt-in adapter only
+    // runs the frozen P1-05 Rust decoder/validator on captured live frames.
+    #[test]
+    #[ignore = "invoked by daemon.py with FBT_API_CONTRACT_TRACE"]
+    fn validate_live_transcript() {
+        let path = std::env::var("FBT_API_CONTRACT_TRACE").expect("live transcript path");
+        let text = std::fs::read_to_string(&path).unwrap();
+        crate::api::fixtures::check_group("live-P1-06", &text).unwrap();
+        println!("P1-05 types, bounds, negotiated capabilities and canonical round trips validated: {path}");
+    }
+
+    #[test]
+    fn live_transcript_validator_rejects_invalid_payloads() {
+        let request = json!({"dir":"c2s","frame":{"id":1,"op":"torrents.list","args":{}}});
+        for frame in [
+            json!({"id":1,"ok":true,"result":{"torrents":[]}}),
+            json!({"id":1,"ok":false,"error":{"code":"not_found","message":"missing","retryable":false}}),
+        ] {
+            let text = format!("{request}\n{}\n", json!({"dir":"s2c","frame":frame}));
+            crate::api::fixtures::check_group("live-P1-06", &text).unwrap();
+        }
+        for frame in [
+            json!({"id":1,"ok":true,"result":{"torrents":42}}),
+            json!({"id":1,"ok":false,"error":{"code":"not_found","message":"missing"}}),
+        ] {
+            let text = format!("{request}\n{}\n", json!({"dir":"s2c","frame":frame}));
+            assert!(crate::api::fixtures::check_group("live-P1-06", &text).is_err());
+        }
+    }
+
+    #[test]
     fn strict_type_errors_name_the_argument() {
         for (op, args, key) in [
             ("app.client", json!({"interactive":"yes"}), "interactive"),
@@ -1483,7 +1595,6 @@ mod argument_tests {
                 json!({"hashes":["ab".repeat(20)],"bps":4}),
                 "bps",
             ),
-            ("subscribe", json!({"topics":[]}), "topics"),
             ("app.restart", json!({"scope":"unknown"}), "scope"),
             ("app.info", Value::Null, "args"),
         ] {
