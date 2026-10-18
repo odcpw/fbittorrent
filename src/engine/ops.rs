@@ -264,9 +264,6 @@ impl EngineDispatcher {
                 EngineOp::SetUploadLimit { limit, .. } => {
                     record.upload_limit = *limit;
                     record.options(record.paused)?;
-                    if record.upload_limit != old.upload_limit {
-                        self.inner.rebuild(cx, &old, &record).await?;
-                    }
                 }
                 EngineOp::SetShareLimits { ratio, .. } => {
                     record.ratio_limit = *ratio;
@@ -302,6 +299,13 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
+            }
+            if matches!(op, EngineOp::SetUploadLimit { .. }) {
+                // Validate before saving, then apply synchronously under the
+                // ledger lock. A failed save leaves the live limiter unchanged.
+                let limit = ledger.records[index].upload_limit;
+                handle.as_ref().expect("validated upload-cap handle")
+                    .set_upload_bps((limit != 0).then_some(limit as u64))?;
             }
             if matches!(op, EngineOp::Stop { .. }) {
                 self.inner.cancel_restore(&hash, false);

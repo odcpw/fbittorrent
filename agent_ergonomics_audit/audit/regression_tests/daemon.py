@@ -8,9 +8,10 @@ seed/leech follow-up waits for those items; no --serve-fixture capability is
 claimed by this skeleton. There is no --self-test mode.
 """
 import argparse
+import base64
 import ctypes
 import fcntl
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
 import os
@@ -23,7 +24,9 @@ import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -350,14 +353,32 @@ class Harness:
 # Keep the original TUI-hosted socket case as a compatibility regression while
 # P1-15 moves TUI attachment. It shares the legacy wire helper with serve cases.
 class InterimEngine:
-    def __init__(self, harness):
+    def __init__(self, harness, bead="fbt-p1-03-ghy"):
         self.harness = harness
         self.path = Path(harness.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
-        self.server = "fbt-fbt-p1-03-ghy-" + harness.sandbox.root.name
-        self.session = "fbt-fbt-p1-03-ghy"
+        self.server = "fbt-" + bead + "-" + harness.sandbox.root.name
+        self.session = "fbt-" + bead
 
-    def call(self, path):
-        return self.harness.engine_call(path, timeout=.5)
+    def call(self, path, args=(), method="GET"):
+        request = json.dumps(dict(method=method, path=path, args=list(args), file=None)).encode()
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(.5)
+            connection.connect(str(self.path))
+            connection.sendall(struct.pack(">I", len(request)) + request)
+
+            def read(size):
+                value = bytearray()
+                while len(value) < size:
+                    part = connection.recv(size - len(value))
+                    if not part:
+                        raise EOFError("engine socket closed during frame")
+                    value.extend(part)
+                return value
+
+            size = struct.unpack(">I", read(4))[0]
+            if size > 1024 * 1024:
+                raise ValueError(f"interim probe frame too large: {size}")
+            return json.loads(read(size))
 
     def start(self):
         # Keep a foreground owner for the detached tmux server in either mode.
@@ -387,6 +408,155 @@ finally:
             except (OSError, ValueError, EOFError):
                 pass
         # The generic spawner reaps its owner after this callback returns.
+
+
+def cap_engine(harness):
+    """Real current-engine adapter, not a claim of a serve/v1 endpoint."""
+    engine = InterimEngine(harness, "fbt-p6-07-9bt")
+    engine.start()
+    if not harness.wait_for(lambda: (str(engine.call("app/version").get("value", "")).startswith("native librqbit"),
+                                     "current engine socket answered"), "isolated engine socket"):
+        raise RuntimeError("current engine did not become available")
+    return engine
+
+
+def engine_value(engine, path, args=(), method="GET"):
+    response = engine.call(path, args, method)
+    if response.get("error") or response.get("value") is None:
+        raise ValueError(f"{path}: {response!r}")
+    return json.loads(response["value"])
+
+
+def engine_row(engine, hash_):
+    return next(row for row in engine_value(engine, "torrents/info") if row["hash"] == hash_)
+
+
+@contextmanager
+def cap_observations(case, engines, hash_):
+    """Poll actual engine states and assert the cached metainfo was not rebuilt."""
+    stop, observations, errors = threading.Event(), [], []
+    began = time.monotonic()
+    metadata = Path(engines["seed"].harness.sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine" / (hash_ + ".torrent")
+    fingerprint = lambda: (metadata.stat().st_ino, metadata.stat().st_mtime_ns)
+    before = fingerprint()
+
+    def sample_once():
+        try:
+            for name, engine in engines.items():
+                row = engine_row(engine, hash_)
+                observations.append(dict(after_s=time.monotonic()-began, engine=name,
+                                         state=row["state"], completed=row["completed"],
+                                         dl_bps=row["dlspeed"], ul_bps=row["upspeed"],
+                                         metadata_token=fingerprint() if name == "seed" else None))
+        except (OSError, ValueError, EOFError, StopIteration) as error:
+            errors.append(str(error))
+
+    def sample():
+        while not stop.is_set():
+            sample_once()
+            stop.wait(.02)
+
+    thread = threading.Thread(target=sample, daemon=True)
+    thread.start()
+    try:
+        yield sample_once
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+        artifact = case.path.with_suffix(".states.json")
+        artifact.write_text(json.dumps(observations, indent=2) + "\n")
+        sequences = {name: [row["state"] for row in observations if row["engine"] == name]
+                     for name in engines}
+        step = case.step("observe state sequences during cap edits",
+                         "every real engine stays out of checking, with no observer errors or metadata replacement")
+        step.started = began
+        step.close(
+            not thread.is_alive() and not errors and all(sequences.values()) and
+            not any(state.startswith("checking") for seq in sequences.values() for state in seq) and
+            all(row["metadata_token"] == before for row in observations if row["engine"] == "seed") and
+            fingerprint() == before,
+            f"Per-engine states={sequences}; errors={errors}; metainfo before={before}, after={fingerprint()}.",
+            artifacts=[artifact])
+
+
+def cap_change_no_check(binary, systemd):
+    with Case("daemon", "cap_change_no_check") as case, fixtures.Sandbox() as seedbox, \
+            fixtures.Sandbox() as leechbox, Harness(case, binary, seedbox, systemd) as seedh, \
+            Harness(case, binary, leechbox, systemd) as leechh:
+        # A real local tracker advertises only the isolated seed's port. Payload
+        # then travels between two real fbittorrent engines, never through HTTP.
+        config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
+        peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
+        tracker_body = fixtures.bencode(dict(interval=1, peers=peer))
+        with fixtures.HttpFixture(seedbox.root, {"/announce": dict(base64=base64.b64encode(tracker_body).decode())}) as tracker:
+            payload = seedbox.downloads / "daemon-fixture.bin"
+            payload.write_bytes(os.urandom(8 * 1024 * 1024))
+            fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
+            seed, leech = cap_engine(seedh), cap_engine(leechh)
+            seedh.cli("add", str(fixture.torrent), "--seed", "--quiet")
+            if not seedh.wait_for(lambda: (engine_row(seed, fixture.info_hash)["state"] == "uploading",
+                                          str(engine_row(seed, fixture.info_hash))), "verified seed"):
+                return
+
+            def set_cap(bps):
+                step = case.step(f"set live upload cap to {bps}", "synchronous success from the real engine")
+                reply = seed.call("torrents/setUploadLimit", [("hashes", fixture.info_hash), ("limit", str(bps))], "POST")
+                step.close(reply.get("value") == "Ok." and not reply.get("error"), str(reply))
+
+            set_cap(32768)
+            leechh.cli("add", str(fixture.torrent), "--quiet")
+            if not leechh.wait_for(lambda: ((row := engine_row(leech, fixture.info_hash))["completed"] >= 32768 and
+                                           not row["state"].startswith("checking"), str(row)), "real leecher payload", timeout=15):
+                return
+            with cap_observations(case, dict(seed=seed, leech=leech), fixture.info_hash):
+                for bps, lower, upper in [(131072, 65536, 262144), (32768, 1, 65536)]:
+                    began = time.monotonic()
+                    set_cap(bps)
+                    samples, matched = [], False
+                    while time.monotonic()-began < 5:
+                        start, before = time.monotonic(), engine_row(leech, fixture.info_hash)["completed"]
+                        time.sleep(1)
+                        row = engine_row(leech, fixture.info_hash)
+                        elapsed = time.monotonic()-start
+                        rate = (row["completed"]-before)/elapsed
+                        samples.append(dict(after_s=time.monotonic()-began, measured_bps=rate,
+                                            reported_dl_bps=row["dlspeed"], completed=row["completed"]))
+                        if lower <= rate <= upper and .75*bps <= row["dlspeed"] <= 1.25*bps and time.monotonic()-began < 5:
+                            matched = True
+                            break
+                    step = case.step(f"measure leecher after cap {bps}",
+                                     f"measured rate in [{lower}, {upper}] B/s and reported rate within 25% of {bps} B/s within 5 seconds")
+                    step.started = began
+                    step.close(
+                        matched, f"Samples={samples}; tracker requests={tracker.requests}.")
+
+
+def seed_toggle_no_check(binary, systemd):
+    with Case("daemon", "seed_toggle_no_check") as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        payload = sandbox.downloads / "daemon-fixture.bin"
+        payload.write_bytes(os.urandom(1024 * 1024))
+        fixture = fixtures.torrent_fixture(sandbox.root, [payload])
+        engine = cap_engine(harness)
+        harness.cli("add", str(fixture.torrent), "--quiet")
+        if not harness.wait_for(lambda: ((row := engine_row(engine, fixture.info_hash))["completion_on"] > 0 and
+                                         row["state"] == "stoppedUP", str(row)), "verified stop-on-complete fixture"):
+            return
+        policies = []
+        with cap_observations(case, dict(seed=engine), fixture.info_hash) as sample:
+            for verb, expected in [(None, "default_cap"), ("seed", "unlimited"), ("noseed", "default_cap")]:
+                if verb:
+                    harness.cli(verb, fixture.info_hash)
+                row = engine_row(engine, fixture.info_hash)
+                policy = "unlimited" if row["up_limit"] == 0 and row["ratio_limit"] == -2 else \
+                    "default_cap" if row["up_limit"] == 32768 and row["ratio_limit"] == 0 else "custom"
+                policies.append(policy)
+                sample()
+                case.step(f"observe upload policy after {verb or 'initial completion'}", expected).close(
+                    policy == expected and row["state"] in ("stoppedUP", "uploading"),
+                    f"Policy={policy}; torrent={row}; transfer.info={engine_value(engine, 'transfer/info')}.")
+        case.check(policies == ["default_cap", "unlimited", "default_cap"],
+                   "seed then noseed restores the default policy", str(policies))
 
 
 def fixture_payloads(binary, systemd):
@@ -831,7 +1001,8 @@ def shutdown_inflight_add(binary, systemd):
 CASES = {function.__name__: function for function in
          (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
-          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add)}
+          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
+          cap_change_no_check, seed_toggle_no_check)}
 SYSTEMD_CASES = {"systemd_without_bus_address"}
 
 
