@@ -131,6 +131,13 @@ pub fn stdout_is_tty() -> bool {
 #[derive(Serialize)]
 struct CommandDoc { name: &'static str, aliases: &'static [&'static str], summary: &'static str, json: bool, mutating: bool, needs_backend: bool }
 
+fn upload_cap_text() -> String {
+    format!(
+        "{} KiB/s while downloading (non-zero caps must be at least 16 KiB/s); stops when complete unless seeding is enabled",
+        crate::qbt::NO_UPLOAD_LIMIT / 1024,
+    )
+}
+
 pub fn capabilities_json() -> serde_json::Value {
     let cmds = [
         CommandDoc { name: "triage", aliases: &["robot-triage"], summary: "One-call overview: backend, rates, torrents, warnings, next commands", json: true, mutating: false, needs_backend: false },
@@ -181,9 +188,10 @@ pub fn capabilities_json() -> serde_json::Value {
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
             "native_connect": "torrent commands open the app when closed unless autostart=false; status and triage never launch it",
             "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
+            "native_upload": upload_cap_text(),
         },
         "defaults": {
-            "sequential": true, "first_last_piece": true, "upload": "limited (native: 1 B/s; legacy: 32 KiB/s); stops when complete unless seed enabled",
+            "sequential": true, "first_last_piece": true, "upload": upload_cap_text(),
             "save_path": "the configured folder, or the desktop Downloads folder",
         },
         "commands": cmds,
@@ -211,14 +219,24 @@ pub fn capabilities_json() -> serde_json::Value {
 
 // ---------------------------------------------------------------- robot docs
 
-pub const ROBOT_GUIDE: &str = r#"fbittorrent — agent handbook (contract 1.1.0)
+// Keep the existing printable guide interface while deriving the cap at display time.
+pub struct RobotGuide;
+pub const ROBOT_GUIDE: RobotGuide = RobotGuide;
+
+impl fmt::Display for RobotGuide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()))
+    }
+}
+
+const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract 1.1.0)
 
 WHAT IT IS
   A native Rust torrent app. The engine runs in the open TUI process; closing
   the app stops downloading, peers, listeners, and provider processes. Torrent
   commands open the app when needed. Status and triage never open it. Search,
   RSS browsing, and Shows tracking work locally without starting downloads.
-  Upload is capped at 1 B/s and stops at completion unless seeding is enabled.
+  Upload is capped at {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
   Explicit engine = "qbittorrent" retains the legacy WebUI/service path.
 
@@ -289,6 +307,28 @@ JSON SHAPES (stable within contract 1.x)
   When progress_known=false, do not interpret progress/completed as measured.
   `show.complete` is null while progress is unknown.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upload_cap_text_from_constant() {
+        let cap = crate::qbt::NO_UPLOAD_LIMIT;
+        let expected = format!(
+            "{} KiB/s while downloading (non-zero caps must be at least 16 KiB/s); stops when complete unless seeding is enabled",
+            cap / 1024,
+        );
+        println!("NO_UPLOAD_LIMIT={cap} B/s; derived upload text: {expected}");
+        let capabilities = capabilities_json();
+        assert_eq!(capabilities["defaults"]["upload"], expected);
+        assert_eq!(capabilities["conventions"]["native_upload"], expected);
+        let guide = ROBOT_GUIDE.to_string();
+        assert!(guide.contains(&format!("Upload is capped at {expected}.")));
+        assert!(!guide.contains("{upload_policy}"));
+        assert!(!guide.contains("1 B/s"));
+    }
+}
 
 // ---------------------------------------------------------------- triage
 
