@@ -385,11 +385,16 @@ impl Validate for Event {
                     }
                 }
                 if let Some(changed) = changed {
+                    require(
+                        *topic != Topic::Events || changed.is_empty(),
+                        "changed",
+                        "events topic is append-only",
+                    )?;
                     for (key, fields) in changed {
                         require(
                             match topic {
                                 Topic::Torrents => lower_hex(key, 40),
-                                Topic::Files(_) | Topic::Events => key.parse::<u64>().is_ok(),
+                                Topic::Files(_) => key.parse::<u64>().is_ok(),
                                 _ => false,
                             },
                             "changed",

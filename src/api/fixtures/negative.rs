@@ -321,3 +321,45 @@ fn watch_capability_gates_playable_events_in_subscription_batches() {
         check_group(name, &(no_watch_hello.clone() + &payload)).unwrap();
     }
 }
+
+#[test]
+fn events_changed_entries_are_rejected_with_and_without_watch() {
+    let lines: Vec<Value> = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "mutations")
+        .unwrap()
+        .1
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let playable = lines[10]["frame"].clone();
+    assert_eq!(playable["ev"], "torrent.playable");
+    for watch in [true, false] {
+        let mut hello = lines[2].clone();
+        let caps = hello["frame"]["result"]["caps"].as_array_mut().unwrap();
+        assert!(caps.contains(&json!("watch")));
+        if !watch {
+            caps.retain(|cap| cap != "watch");
+        }
+        let prefix = format!("{}\n{hello}\n", lines[1]);
+        let group = if watch {
+            "events-changed-watch"
+        } else {
+            "events-changed-no-watch"
+        };
+        // Even an entry with no fields violates append-only event history.
+        for fields in [playable.clone(), json!({})] {
+            let frame = json!({"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"events","rev":1,"changed":{"3":fields}}});
+            let error =
+                check_group(group, &(prefix.clone() + &frame.to_string() + "\n")).unwrap_err();
+            assert_eq!(
+                error,
+                format!("contracts/ipc/v1/{group}.ndjson:3: changed: events topic is append-only")
+            );
+            println!("append-only event changes watch={watch}: rejected {error}");
+        }
+        // An explicitly empty map has no event updates and remains valid.
+        let empty = json!({"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"events","rev":1,"changed":{}}});
+        check_group(group, &(prefix + &empty.to_string() + "\n")).unwrap();
+    }
+}
