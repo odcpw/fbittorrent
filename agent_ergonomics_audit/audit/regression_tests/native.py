@@ -26,14 +26,12 @@ CASES = (
     "refresh_preserves_read_history", "rss_mouse_and_scoped_shortcuts",
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety",
     "shows_inbox_and_targets", "file_modal_shows_help_80x24",
-    "settings_queue_vpn_restart", "quit_restart_down",
+    "settings_queue_vpn_restart", "quit_restart_down", "launcher_never_called",
 )
 
 
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
-    from fbtlog import Case
-
     with Case("native", "launcher_never_called") as case, \
             tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary:
         root = Path(temporary)
@@ -99,10 +97,27 @@ def launcher_never_called(binary):
             step.close(child.returncode == code and expected and not calls.read_text(),
                        f"argv={argv!r}, env={overrides!r}; exit {child.returncode}; "
                        f"JSON={value!r}; launcher calls={calls.read_text()!r}.", [calls])
+        # Service.qml collects action errors from stderr without --json.
+        argv = [binary, "--no-start", "stop", "all"]
+        step = case.step("Widget action " + shlex.join(argv),
+                         "Exit 4, empty stdout, and 'fbittorrent is closed' on stderr; zero launcher calls.")
+        offset = case.suite.stderr_path.stat().st_size
+        child = case.popen(argv, env=env, stdout=subprocess.PIPE, text=True)
+        try:
+            stdout, _ = child.communicate(timeout=5)
+            stderr = case.suite.stderr_path.read_bytes()[offset:].decode(errors="replace")
+            step.close(child.returncode == 4 and not stdout and "fbittorrent is closed" in stderr
+                       and "fbittorrent up" in stderr and not calls.read_text(),
+                       f"argv={argv!r}; exit {child.returncode}; stdout={stdout!r}; "
+                       f"stderr={stderr!r}; launcher calls={calls.read_text()!r}.", [calls])
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            step.fail("The widget action timed out.", [calls])
         argv = [binary, "--no-start", "tui", "--json"]
         step = case.step("CLI in a real terminal: " + shlex.join(argv),
                          "Exit 4 with a closed-engine hint and zero launcher calls.")
-        tmux = ["tmux", "-L", f"fbt-no-start-{os.getpid()}"]
+        tmux = ["tmux", "-L", f"fbt-no-start-{os.getpid()}", "-f", "/dev/null"]
         session = "fbt-fbt-p0-07-563"
         exit_path = root / "tui.exit"
         transcript = case.path.with_suffix(".tui.log")
@@ -292,12 +307,16 @@ def main():
         print("\n".join(CASES))
         return 0
     binary = str(Path(options.binary).resolve())
+    if options.case == "launcher_never_called":
+        launcher_never_called(binary)
+        return suite_status("native")
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "runtime"),
                    XDG_CACHE_HOME=str(root / "cache"),
                    XDG_STATE_HOME=str(root / "state"), TERM="xterm-256color")
+        env.pop("FBITTORRENT_NO_START", None)
         for key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
             Path(env[key]).mkdir(mode=0o700)
         config_dir = Path(env["XDG_CONFIG_HOME"]) / "fbittorrent"
@@ -652,6 +671,10 @@ def main():
         finally:
             tmux("kill-server", check=False)
             server.shutdown()
+    # This case deliberately captures the widget's human error on stderr.
+    # Run it after the lifecycle cases' assertion of otherwise empty stderr.
+    if options.case is None:
+        launcher_never_called(binary)
     return suite_status("native")
 
 

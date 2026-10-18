@@ -148,3 +148,9 @@ Receipt: [P0-17.md](P0-17.md) (branch ntm/fbittorrent/cod_4, commit da37f93; mer
 ## P0-15
 
 Receipt: [P0-15.md](P0-15.md) (branch ntm/fbittorrent/cod_1, commits 28f1244..acb0953; merged by the orchestrator after a green full gate and an Astra review).
+
+## P0-07
+
+Receipt: [P0-07.md](P0-07.md) (branch ntm/fbittorrent/cod_3, implementation
+10672b7; focused launcher probe and full gate passed; awaiting orchestrator
+verification and merge).
