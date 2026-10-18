@@ -1,6 +1,6 @@
 //! Shared fixture format and contract checks. The daemon and UI replay runners
 //! consume these same files; this module makes no claim of live server proof.
-use super::validation::{self, Revisions, Validate};
+use super::validation::{self, NegotiatedCaps, Revisions, Validate};
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -86,6 +86,7 @@ fn canonical(mut value: Value) -> String {
 /// is checked as a contiguous server transcript, using the production tracker.
 pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
     let mut calls = BTreeMap::new();
+    let mut caps = NegotiatedCaps::default();
     let mut revisions = Revisions::default();
     let mut unsubscribes = BTreeMap::new();
     let mut expected_gaps = 0;
@@ -113,6 +114,10 @@ pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
                                 .ok_or("response has no request")?;
                             let reply = Reply::decode(op, frame.result.clone())
                                 .map_err(|e| format!("{op} result: {e}"))?;
+                            if let Reply::Hello(hello) = &reply {
+                                caps = NegotiatedCaps::from_hello(hello);
+                            }
+                            caps.reply(&reply).map_err(|e| e.to_string())?;
                             if *op == "unsubscribe" {
                                 if let Some(sub) = unsubscribes.remove(&frame.id.get()) {
                                     revisions.unsubscribe(sub);
@@ -134,6 +139,7 @@ pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
                         }
                         ServerFrame::Event(event) => {
                             event.validate().map_err(|e| e.to_string())?;
+                            caps.event(event).map_err(|e| e.to_string())?;
                             if let Event::MutationResult {
                                 op,
                                 result: Some(result),
@@ -177,10 +183,12 @@ pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
                     if let Some(torrents) = &model.torrents {
                         for t in torrents.values() {
                             t.validate().map_err(|e| e.to_string())?;
+                            caps.torrent(t).map_err(|e| e.to_string())?;
                         }
                     }
                     if let Some(summary) = &model.summary {
                         summary.validate().map_err(|e| e.to_string())?;
+                        caps.summary(summary).map_err(|e| e.to_string())?;
                     }
                 }
                 _ => {}

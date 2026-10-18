@@ -192,6 +192,96 @@ impl Validate for Reply {
         }
     }
 }
+
+/// Output rules that require the connection's hello capabilities, in addition
+/// to the context-free shape/bounds checks above. Playable fields require watch
+/// in a successful hello.
+#[derive(Debug, Default)]
+pub struct NegotiatedCaps {
+    watch: bool,
+}
+impl NegotiatedCaps {
+    pub fn from_hello(hello: &HelloResult) -> Self {
+        Self {
+            watch: hello.caps.iter().any(|cap| cap == "watch"),
+        }
+    }
+    fn playable(&self, present: bool, path: &str) -> Checked {
+        require(
+            !present || self.watch,
+            path,
+            "requires the watch capability",
+        )
+    }
+    pub fn torrent(&self, value: &Torrent) -> Checked {
+        self.playable(value.playable.is_some(), "torrent.playable")
+    }
+    pub fn summary(&self, value: &Summary) -> Checked {
+        for (index, top) in value.top.iter().enumerate() {
+            self.playable(
+                top.playable.is_some(),
+                &format!("summary.top[{index}].playable"),
+            )?;
+        }
+        Ok(())
+    }
+    pub fn reply(&self, value: &Reply) -> Checked {
+        match value {
+            Reply::TorrentsList(result) => {
+                for torrent in &result.torrents {
+                    self.torrent(torrent)?;
+                }
+                Ok(())
+            }
+            Reply::TorrentsGet(result) => self.torrent(&result.torrent.torrent),
+            _ => Ok(()),
+        }
+    }
+    fn items(&self, values: &[Item]) -> Checked {
+        for value in values {
+            match value {
+                Item::Torrent(torrent) => self.torrent(torrent)?,
+                Item::Event(event) => self.event(event)?,
+                Item::File(_) => {}
+            }
+        }
+        Ok(())
+    }
+    pub fn event(&self, value: &Event) -> Checked {
+        match value {
+            Event::State {
+                data: StateData::Summary(summary),
+                ..
+            } => self.summary(summary),
+            Event::SnapshotChunk { items, .. } => self.items(items),
+            Event::Delta {
+                topic,
+                added,
+                changed,
+                ..
+            } => {
+                if let Some(items) = added {
+                    self.items(items)?;
+                }
+                if *topic == Topic::Torrents {
+                    if let Some(changed) = changed {
+                        for (hash, fields) in changed {
+                            // Null removes an optional field; it does not
+                            // advertise playable data without the capability.
+                            self.playable(
+                                fields.get("playable").is_some_and(|v| !v.is_null()),
+                                &format!("changed.{hash}.playable"),
+                            )?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 fn items(topic: &Topic, values: &[Item]) -> Checked {
     for value in values {
         match (topic, value) {

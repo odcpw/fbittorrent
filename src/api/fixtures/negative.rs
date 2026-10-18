@@ -143,3 +143,105 @@ fn revision_and_typed_loss_checks_remain_on_roundtrip_path() {
         assert!(Reply::decode(op, json!({})).is_err());
     }
 }
+
+#[test]
+fn watch_capability_checks_are_on_the_roundtrip_path() {
+    let subscribe = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "subscribe")
+        .unwrap()
+        .1;
+    check_group("subscribe", subscribe).unwrap();
+    let mut lines: Vec<Value> = subscribe
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let caps = lines[2]["frame"]["result"]["caps"].as_array_mut().unwrap();
+    assert!(caps.contains(&json!("watch")));
+    caps.retain(|cap| cap != "watch");
+    let encode = |lines: &[Value]| {
+        lines
+            .iter()
+            .map(|line| line.to_string() + "\n")
+            .collect::<String>()
+    };
+    let error = check_group("watch-negative", &encode(&lines)).unwrap_err();
+    assert!(error.contains("watch-negative.ndjson:6:"), "{error}");
+    assert!(
+        error.contains("summary.top[0].playable: requires the watch capability"),
+        "{error}"
+    );
+    println!("watch capability negative control rejected: {error}");
+
+    assert!(lines[5]["frame"]["data"]["top"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("playable")
+        .is_some());
+    check_group("watch-omitted", &encode(&lines)).unwrap();
+    // Keep the actual no-watch transcript unchanged, including its deliberate
+    // revision gap. Its torrent snapshots/models omit playable throughout.
+    let gap = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "subscribe-gap")
+        .unwrap()
+        .1;
+    assert!(!gap.contains("\"watch\"") && !gap.contains("\"playable\""));
+    check_group("subscribe-gap", gap).unwrap();
+    println!("watch capability positives passed: negotiated watch; no watch with playable omitted; unchanged subscribe-gap");
+}
+
+#[test]
+fn watch_capability_covers_torrent_replies_and_subscription_payloads() {
+    let lines: Vec<Value> = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let hello = format!("{}\n{}\n", lines[1], lines[2]);
+    assert!(lines[2]["frame"]["result"]["caps"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("watch")));
+    let result = lines
+        .iter()
+        .find_map(|line| line["frame"]["result"].get("torrents"))
+        .unwrap();
+    let torrent = result[0].clone();
+    assert!(torrent.get("playable").is_some());
+    let detail = lines
+        .iter()
+        .find_map(|line| line["frame"]["result"].get("torrent"))
+        .unwrap();
+    assert!(detail.get("playable").is_some());
+    let hash = torrent["hash"].as_str().unwrap();
+    let get = format!(
+        "{}\n{}\n",
+        json!({"dir":"c2s","frame":{"id":1,"op":"torrents.get","args":{"hash":hash}}}),
+        json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":{"torrent":detail}}})
+    );
+    let mut payloads = vec![
+        transcript("torrents.list", json!({"torrents":[torrent.clone()]})),
+        get,
+    ];
+    for event in [
+        json!({"ev":"snapshot.chunk","sub":1,"topic":"torrents","rev":1,"items":[torrent.clone()]}),
+        json!({"ev":"delta","sub":1,"topic":"torrents","rev":1,"added":[torrent.clone()]}),
+        json!({"ev":"delta","sub":1,"topic":"torrents","rev":1,"changed":{hash:{"playable":torrent["playable"]}}}),
+    ] {
+        payloads.push(json!({"dir":"s2c","frame":event}).to_string() + "\n");
+    }
+    for payload in payloads {
+        check_group("watch-present", &(hello.clone() + &payload)).unwrap();
+        let error = check_group("watch-absent", &payload).unwrap_err();
+        assert!(
+            error.contains("playable") && error.contains("requires the watch capability"),
+            "{error}"
+        );
+    }
+    let removal = json!({"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"torrents","rev":1,"changed":{hash:{"playable":null}}}});
+    check_group("watch-deletion", &removal.to_string()).unwrap();
+}
