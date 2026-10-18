@@ -216,8 +216,80 @@ def child(binary, fixture):
         (fixture / "tui-output.txt").write_bytes(transcript)
 
 
+def headless_park_unpark(binary):
+    """P1-03's opt-in daemon case; every link belongs to this new netns."""
+    import daemon as harness_module
+    import fixtures
+    from fbtlog import Case, suite_status
+
+    assert os.readlink("/proc/self/ns/net") != os.environ["FBT_TEST_HOST_NETNS"]
+    with Case("daemon", "headless_park_unpark") as case, fixtures.Sandbox() as sandbox, \
+            harness_module.Harness(case, binary, sandbox) as harness:
+        def ip(*arguments):
+            subprocess.run(["ip", *arguments], check=True, capture_output=True)
+
+        ip("link", "set", "lo", "up")
+        config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        config.write_text(config.read_text().replace('network_interface = "lo"', 'network_interface = "fbtvpn0"'))
+        directory = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine"
+        directory.mkdir(parents=True)
+        records = []
+        for number, paused in [(1, False), (2, False), (3, True)]:
+            name = f"daemon-vpn-{number}.bin"
+            info = {b"name": name.encode(), b"length": 8, b"piece length": 16384,
+                    b"pieces": hashlib.sha1(b"fixture!").digest(), b"private": 1}
+            digest = hashlib.sha1(fixtures.bencode(info)).hexdigest()
+            (directory / f"{digest}.torrent").write_bytes(fixtures.bencode({b"info": info}))
+            records.append(dict(hash=digest, name=name, source="", output_folder=str(sandbox.downloads),
+                                only_files=None, upload_limit=32768, ratio_limit=0.0, category="fixture", tags="",
+                                added_on=number, completion_on=0, paused=paused, resume_after_migration=False))
+        ledger = directory / "torrents.json"
+        ledger.write_text(json.dumps(dict(migrated_legacy=True, records=records)))
+        expected = {row["hash"]: row["paused"] for row in records}
+        process = harness.start_serve()
+        if harness.receive_ready() and harness.wait_engine():
+            inode, pid = harness.engine_path.stat().st_ino, harness.daemon_pid()
+
+            def settle(label, ready, epoch, index=None):
+                def observed():
+                    network = json.loads(harness.engine_call("app/network").get("value") or "{}")
+                    rows = json.loads(harness.engine_call("torrents/info").get("value") or "[]")
+                    saved = {row["hash"]: row["paused"] for row in json.loads(ledger.read_text())["records"]}
+                    all_rows = len(rows) == 3 and saved == expected
+                    if not ready:
+                        all_rows = all_rows and all(row.get("progress_known") is False for row in rows)
+                    final_state = f"state={'running' if ready else 'parked'} engine_epoch={epoch}"
+                    settled = network.get("ready") is ready and (index is None or network.get("index") == index) and all_rows and final_state in harness.stderr()
+                    return settled, f"network={network!r}; rows={rows!r}; saved={saved!r}; expect {final_state}."
+                harness.wait_for(observed, label)
+                case.check(harness.engine_path.stat().st_ino == inode and harness.daemon_pid() == pid,
+                           "network transition retains the daemon listener and PID", f"inode={inode}; PID={pid}.")
+            settle("daemon starts parked", False, 1)
+            ip("link", "add", "fbtvpn0", "type", "dummy")
+            ip("address", "add", "198.18.0.1/32", "dev", "fbtvpn0")
+            ip("link", "set", "fbtvpn0", "up")
+            settle("interface return starts an engine", True, 2, socket.if_nametoindex("fbtvpn0"))
+            ip("link", "delete", "fbtvpn0")
+            settle("interface loss drains back to parked", False, 3)
+            ip("link", "add", "fbtvpn0", "type", "dummy")
+            ip("address", "add", "198.18.0.1/32", "dev", "fbtvpn0")
+            ip("link", "set", "fbtvpn0", "up")
+            settle("replacement interface resumes saved intent", True, 4, socket.if_nametoindex("fbtvpn0"))
+            harness.stop_serve(process)
+            harness.lock_free()
+    return suite_status("daemon")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--child":
+    if len(sys.argv) > 1 and sys.argv[1] == "--headless-child":
+        sys.exit(headless_park_unpark(sys.argv[2]))
+    elif len(sys.argv) > 1 and sys.argv[1] == "--headless":
+        if os.environ.get("FBT_TEST_VPN") != "1":
+            raise SystemExit("--headless requires explicit FBT_TEST_VPN=1 (owned user/network namespace only)")
+        binary = str(Path(sys.argv[2] if len(sys.argv) > 2 else "target/debug/fbittorrent").resolve())
+        sys.exit(subprocess.run(["unshare", "-Urn", "env", f"FBT_TEST_HOST_NETNS={os.readlink('/proc/self/ns/net')}",
+                                 sys.executable, str(Path(__file__).resolve()), "--headless-child", binary]).returncode)
+    elif len(sys.argv) > 1 and sys.argv[1] == "--child":
         child(sys.argv[2], sys.argv[3])
     else:
         binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else "target/debug/fbittorrent").resolve())

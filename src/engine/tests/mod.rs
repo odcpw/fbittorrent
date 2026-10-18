@@ -109,7 +109,7 @@
             dispatcher,
             runtime: Some(runtime),
             server: None,
-            instance,
+            instance: Arc::new(instance),
         }
     }
 

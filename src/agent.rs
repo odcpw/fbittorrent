@@ -140,6 +140,7 @@ fn upload_cap_text() -> String {
 
 pub fn capabilities_json() -> serde_json::Value {
     let cmds = [
+        CommandDoc { name: "serve", aliases: &[], summary: "Run the torrent engine daemon (other commands start it on demand)", json: false, mutating: true, needs_backend: false },
         CommandDoc { name: "triage", aliases: &["robot-triage"], summary: "One-call overview: backend, rates, torrents, warnings, next commands", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "status", aliases: &[], summary: "Rates and counts; never starts the backend", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
@@ -168,9 +169,13 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
-    let exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
+    let mut exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
         "code": *c as i32, "name": c.name(), "meaning": c.describe()
     })).collect();
+    exit_codes.extend([
+        serde_json::json!({"code": 70, "name": "panic", "scope": "serve unit", "meaning": "daemon panic; outside the CLI 0..8 dictionary"}),
+        serde_json::json!({"code": 75, "name": "upgrade", "scope": "serve unit", "meaning": "binary replaced while idle; outside the CLI 0..8 dictionary"}),
+    ]);
     serde_json::json!({
         "ok": true,
         "tool": "fbittorrent",

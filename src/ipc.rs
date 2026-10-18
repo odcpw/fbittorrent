@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -144,19 +144,37 @@ impl InstanceLock {
     pub(crate) fn acquire_in(directory: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&directory)?;
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        Self::acquire_wait(directory, Duration::ZERO)
+    }
+
+    /// The daemon validates the directory before this call. Do not repair or
+    /// follow an ambiguous path here; keep the same open file across retries.
+    pub(crate) fn acquire_wait(directory: PathBuf, timeout: Duration) -> Result<Self> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(directory.join("engine.lock"))?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.uid() != unsafe { libc::geteuid() } || metadata.nlink() != 1 {
+            bail!("engine.lock must be a regular private file owned by this uid");
+        }
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         // The stable lock file must never be unlinked while another app can open it.
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let began = std::time::Instant::now();
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let error = std::io::Error::last_os_error();
             if error.kind() == std::io::ErrorKind::WouldBlock {
-                bail!("fbittorrent is already open; use the existing app");
+                if began.elapsed() < timeout {
+                    std::thread::sleep(Duration::from_millis(20).min(timeout.saturating_sub(began.elapsed())));
+                    continue;
+                }
+                return Err(crate::agent::AppError::new(crate::agent::Code::Failure,
+                    "already_running: fbittorrent is already open; use the existing app")
+                    .hint("fbittorrent status --json").into());
             }
             return Err(error).context("locking the native torrent engine");
         }
@@ -182,7 +200,7 @@ pub struct Server {
     path: PathBuf,
     stopping: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
-    clients: Arc<Mutex<HashMap<u64, UnixStream>>>,
+    clients: Arc<Mutex<HashMap<u64, (UnixStream, Arc<AtomicBool>)>>>,
     workers: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
@@ -232,16 +250,20 @@ impl Server {
                         continue;
                     }
                     let client_id = client_sequence.fetch_add(1, Ordering::Relaxed);
+                    let read = Arc::new(AtomicBool::new(false));
                     if let Ok(clone) = stream.try_clone() {
-                        server_clients.lock().unwrap().insert(client_id, clone);
+                        server_clients.lock().unwrap().insert(client_id, (clone, read.clone()));
                     }
                     let handler = handler.clone();
                     let active = active.clone();
                     let clients = server_clients.clone();
                     let worker = std::thread::spawn(move || {
-                        let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                        let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
                         let result = read_frame::<Request>(&mut stream)
-                            .and_then(|request| handler(&request));
+                            .and_then(|request| {
+                                read.store(true, Ordering::Release);
+                                handler(&request)
+                            });
                         let response = match result {
                             Ok(value) => Response {
                                 value: Some(value),
@@ -286,9 +308,12 @@ impl Server {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        // Wake clients stuck in an incomplete read or a blocked write.
-        for (_, stream) in self.clients.lock().unwrap().drain() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+        // Wake incomplete readers, retaining their write half for the error
+        // reply. Already-read requests must still receive their handler result.
+        for (stream, read) in self.clients.lock().unwrap().values() {
+            if !read.load(Ordering::Acquire) {
+                let _ = stream.shutdown(std::net::Shutdown::Read);
+            }
         }
     }
 }
@@ -307,6 +332,53 @@ impl Drop for Server {
 mod tests {
     use super::*;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn quiesce_preserves_an_already_read_reply() {
+        let directory = std::env::temp_dir().join(format!("fbt-ipc-quiesce-{}", std::process::id()));
+        let lock = InstanceLock::acquire_in(directory.clone()).unwrap();
+        let (entered, has_entered) = std::sync::mpsc::channel();
+        let (resume, resume_rx) = std::sync::mpsc::channel();
+        let resume_rx = Mutex::new(resume_rx);
+        let mut server = Server::start(&Config::default(), &lock, move |_| {
+            entered.send(()).unwrap();
+            resume_rx.lock().unwrap().recv_timeout(Duration::from_secs(2))?;
+            Ok("read-before-quiesce".into())
+        }).unwrap();
+        let path = directory.join("engine.sock");
+        let client = std::thread::spawn(move || {
+            let mut stream = UnixStream::connect(path).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            write_frame(&mut stream, &Request { method: "GET".into(), path: "app/version".into(), args: vec![], file: None }).unwrap();
+            read_frame::<Response>(&mut stream).unwrap()
+        });
+        has_entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        server.stop_accepting();
+        resume.send(()).unwrap();
+        let response = client.join().unwrap();
+        println!("quiesced already-read request reply: {:?}", response.value);
+        assert_eq!(response.value.as_deref(), Some("read-before-quiesce"));
+        drop(server);
+        drop(lock);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn instance_lock_waits_for_a_short_offline_owner() {
+        let directory = std::env::temp_dir().join(format!("fbt-lock-wait-{}", std::process::id()));
+        let first = InstanceLock::acquire_in(directory.clone()).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(first);
+        });
+        let began = Instant::now();
+        let next = InstanceLock::acquire_wait(directory.clone(), Duration::from_secs(1)).unwrap();
+        println!("offline lock acquired after {} ms", began.elapsed().as_millis());
+        assert!(began.elapsed() >= Duration::from_millis(100));
+        release.join().unwrap();
+        drop(next);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn instance_lock_repairs_existing_permissions_without_replacing_the_file() {

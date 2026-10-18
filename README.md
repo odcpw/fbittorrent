@@ -105,7 +105,7 @@ Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 
 ## CLI
 
-Every command takes `--json` and prints one JSON object; errors become
+Ordinary CLI commands take `--json` and print one JSON object; errors become
 `{"ok":false,"code":N,"code_name":"…","error":"…","hint":"<runnable command>"}` with
 the same exit code. Torrents are selected by hash prefix, a unique part of the
 name, or `all`.
@@ -129,6 +129,7 @@ fbittorrent tui --search | --rss | --shows
 fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
 fbittorrent up | down                open/focus / close the app and engine
+fbittorrent serve                   run the native engine headlessly in the foreground
 fbittorrent status                   rates and counts; never opens the app
 fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
 fbittorrent settings --interfaces   current choices and available connections
@@ -137,6 +138,21 @@ fbittorrent config | setup [--magnet] | register-magnet
 
 Exit codes: 0 ok · 1 failure · 2 usage · 3 safety (needs `--yes`) · 4 backend down ·
 5 upstream · 6 not found · 7 ambiguous · 8 timeout.
+
+`fbittorrent serve` keeps the native engine available to the CLI without a TUI
+or a terminal window hosting it. It owns the same private `engine.sock` and
+instance lock as the current app; a second owner is refused. `down`, SIGTERM,
+SIGINT or SIGHUP drains the engine and removes its socket. A missing configured
+interface starts it parked, with saved history and start/stop/remove-keeping-files
+available; the engine reopens when that exact interface returns.
+
+`serve --no-notify` disables desktop notifications while retaining systemd
+readiness datagrams. `--idle-exit-secs N` defaults to 300 (0 means disabled) and
+is exposed in daemon policy metadata; the automatic idle policy and desktop
+start-on-demand integration follow in the next implementation stage. The current
+core runs until stopped. Daemon exits 70 (panic) and 75 (upgrade) belong to the
+unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
+stages; the current CLI uses the existing framed socket.
 
 ### For agents
 
@@ -200,7 +216,8 @@ inclusion/skipping.
 
 ```
 src/main.rs        CLI (clap)
-src/engine.rs      embedded librqbit engine, durable torrent records, legacy import
+src/engine/        embedded librqbit engine, durable torrent records, legacy import
+src/daemon/        headless owner, lifecycle, replaceable engine slot, signals, sd_notify
 src/ipc.rs         local Unix socket connecting CLI/widget to the open app
 src/qbt.rs         common client contract; native IPC or legacy WebUI
 src/backend.rs     open/focus/close the app; explicit legacy service control

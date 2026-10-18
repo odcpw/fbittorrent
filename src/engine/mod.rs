@@ -98,13 +98,19 @@ pub struct AppEngine {
     runtime: Option<NativeRuntime>,
     server: Option<Server>,
     // Released only after the socket, workers, session and runtime have stopped.
-    instance: InstanceLock,
+    instance: Arc<InstanceLock>,
 }
 
 pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
     cfg.validate()?;
-    let instance = InstanceLock::acquire()?;
-    start_in(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
+    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?))
+}
+
+/// Start one replaceable session under the daemon owner's existing lock. The
+/// listener and the owner's Arc stay alive while this engine drains/restarts.
+pub(crate) fn start_with_lock(cfg: &Config, lifecycle: Lifecycle, instance: Arc<InstanceLock>) -> Result<AppEngine> {
+    cfg.validate()?;
+    start_shared(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
         peer_encryption: match cfg.peer_encryption.as_str() {
             "off" => librqbit::PeerEncryption::Off,
             "require" => librqbit::PeerEncryption::Require,
@@ -127,7 +133,12 @@ pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
 }
 
 // The production startup path, with explicit paths/options for local-only tests.
+#[cfg(test)]
 fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: InstanceLock, options: SessionOptions) -> Result<AppEngine> {
+    start_shared(cfg, lifecycle, directory, Arc::new(instance), options)
+}
+
+fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, options: SessionOptions) -> Result<AppEngine> {
     std::fs::create_dir_all(&directory)?;
     let ledger_path = directory.join("torrents.json");
     let ledger = read_ledger(&ledger_path)?;
@@ -195,6 +206,19 @@ fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: In
 }
 
 impl AppEngine {
+    pub(crate) fn is_quiescing(&self) -> bool {
+        self.dispatcher.inner.stopping.load(Ordering::Acquire)
+    }
+    /// Interrupt in-flight legacy operations before waiting for the slot writer.
+    /// Their dispatch select observes this token, so an unresolved add cannot
+    /// hold shutdown behind its 90-second metadata timeout.
+    pub(crate) fn quiesce(&self) {
+        self.dispatcher.inner.stopping.store(true, Ordering::Release);
+        self.dispatcher.inner.session.cancellation_token().cancel();
+        for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
+            restore.cancel.cancel();
+        }
+    }
     pub fn dispatcher(&self) -> EngineDispatcher {
         self.dispatcher.clone()
     }
