@@ -155,7 +155,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "seq", aliases: &[], summary: "Toggle sequential download in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last priority in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
-        CommandDoc { name: "reconcile", aliases: &[], summary: "Apply default flags to torrents added elsewhere", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "reconcile", aliases: &[], summary: "Native scheduling stub (no connection); legacy mode applies default flags", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
@@ -184,6 +184,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "version": "1.1.1", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
+        "global_flags": ["--json", "--no-start"],
         "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, and bar widget. Downloads run while the app is open.",
         "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": "open app only; closing it stops downloads, peers, sockets and provider searches", "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
         "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
@@ -194,7 +195,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "selectors": "torrents are selected by hash prefix (>= 4 hex chars) or a unique case-insensitive substring of the name; `all` selects every torrent",
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
-            "native_connect": "torrent commands open the app when closed unless autostart=false; status and triage never launch it",
+            "native_connect": "torrent commands open the app when closed unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; status, triage and native reconcile never launch it",
             "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
             "native_upload": upload_cap_text(),
         },
@@ -205,6 +206,7 @@ pub fn capabilities_json() -> serde_json::Value {
         "commands": cmds,
         "exit_codes": exit_codes,
         "env": {
+            "FBITTORRENT_NO_START": "set to 1 to require an already open app, like --no-start; unavailable engine exits 4 with a hint",
             "XDG_CONFIG_HOME": "config at $XDG_CONFIG_HOME/fbittorrent/config.toml",
             "XDG_CACHE_HOME": "IMDb caches at $XDG_CACHE_HOME/fbittorrent",
             "NO_COLOR": "accepted; the CLI never emits colour anyway",
@@ -233,11 +235,11 @@ pub const ROBOT_GUIDE: RobotGuide = RobotGuide;
 
 impl fmt::Display for RobotGuide {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()))
+        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()).replace("{contract_version}", CONTRACT_VERSION))
     }
 }
 
-const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract 1.1.1)
+const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract {contract_version})
 
 WHAT IT IS
   A native Rust torrent app. The engine runs in the open TUI process; closing
@@ -260,6 +262,10 @@ RULES
   - Bare `fbittorrent` opens the TUI on a TTY. Without a TTY it prints
     `triage --json`, so agents can always call it safely.
   - `up` opens or focuses the app; `down` closes it and waits for engine cleanup.
+  - `--no-start` (global) or FBITTORRENT_NO_START=1 prevents engine startup,
+    including explicit `up` and `tui`. A closed engine returns exit 4 with a hint.
+    autostart=false is the persistent form for ordinary torrent commands.
+    Native `reconcile` is a no-op and never connects to the engine.
   - Native sequential and first/last scheduling are intrinsic. Toggle commands
     and --no-seq/--no-first-last require legacy mode; native file priority only
     supports skip/normal. Peer encryption defaults to prefer; require refuses
@@ -338,6 +344,15 @@ mod tests {
         assert!(guide.contains(&format!("contract {CONTRACT_VERSION}")));
         assert!(guide.contains("Native `num_seeds` is always 0: unknown"));
         println!("{}", capabilities["field_notes"]);
+    }
+
+    #[test]
+    fn no_start_contract_is_advertised() {
+        let capabilities = capabilities_json();
+        assert_eq!(capabilities["contract_version"], "1.1.1");
+        assert!(capabilities["global_flags"].as_array().unwrap().contains(&serde_json::json!("--no-start")));
+        assert!(capabilities["env"]["FBITTORRENT_NO_START"].is_string());
+        assert!(ROBOT_GUIDE.to_string().contains("contract 1.1.1"));
     }
 
     #[test]

@@ -37,6 +37,9 @@ struct Cli {
     /// Machine-readable JSON on stdout (errors too, with the same exit code)
     #[arg(long, global = true)]
     json: bool,
+    /// Require an already open app; never start the torrent engine
+    #[arg(long, global = true)]
+    no_start: bool,
     /// Shortcut for `triage --json`
     #[arg(long = "robot-triage", hide = true)]
     robot_triage: bool,
@@ -145,7 +148,7 @@ enum Cmd {
     Seed { selectors: Vec<String> },
     /// Limit uploading and stop when complete (default for new torrents)
     Noseed { selectors: Vec<String> },
-    /// Enforce default flags on torrents added outside fbittorrent
+    /// Native scheduling stub; legacy mode applies defaults to outside additions
     Reconcile {
         /// Only touch torrents added within the last N seconds (0 = all)
         #[arg(long, default_value_t = 0)]
@@ -303,6 +306,8 @@ fn run(cli: Cli) -> Result<Code> {
     let _search_cleanup = SearchCleanup;
     search::begin_session()?;
     let cfg = Config::load()?;
+    let no_start = no_start_requested(cli.no_start, std::env::var_os("FBITTORRENT_NO_START").as_deref());
+    if no_start { backend::prevent_start(); }
     let json = cli.json;
     let cmd = match cli.cmd {
         Some(c) => c,
@@ -327,6 +332,10 @@ fn run(cli: Cli) -> Result<Code> {
             return Ok(Code::Ok);
         }
         Cmd::Setup { port, save, magnet } => {
+            if no_start && !cfg.native() {
+                return Err(AppError::new(Code::Backend, "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active")
+                    .hint("fbittorrent up").into());
+            }
             setup::run(port, save)?;
             if magnet { setup::register_magnet_handler()?; }
             emit(json, serde_json::json!({"ok": true, "action": "setup", "engine": cfg.engine, "port": if cfg.native() { cfg.peer_port } else { port }, "magnet_handler": magnet}), || {});
@@ -432,11 +441,11 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Up => {
             let mut explicit = cfg.clone();
-            explicit.autostart = true;
+            explicit.autostart = !no_start;
             let started = backend::ensure_running(&explicit, &c)?;
-            if cfg.native() && !started { backend::open_app()?; }
+            if cfg.native() && !started && !no_start { backend::open_app()?; }
             emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": cfg.engine, "unit": if cfg.native() { None } else { Some(&cfg.backend_unit) }}), || {
-                if cfg.native() { println!("fbittorrent {}", if started { "opened" } else { "focused" }); }
+                if cfg.native() { println!("fbittorrent {}", if started { "opened" } else if no_start { "already open" } else { "focused" }); }
                 else { println!("{} {}", cfg.backend_unit, if started { "started" } else { "already running" }); }
             });
             Ok(Code::Ok)
@@ -454,7 +463,7 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() { run_native_app(cfg, screen)?; }
+            if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
             else { connect(&cfg, &c)?; tui::run(cfg, screen)?; }
             Ok(Code::Ok)
         }
@@ -636,9 +645,14 @@ fn run(cli: Cli) -> Result<Code> {
             Ok(Code::Ok)
         }
         Cmd::Reconcile { recent } => {
-            connect(&cfg, &c)?;
-            let n = c.reconcile(cfg.sequential, cfg.first_last, cfg.seed_by_default, recent)?;
-            emit(json, serde_json::json!({"ok": true, "action": "reconcile", "touched": n}), || println!("reconciled {n} torrent(s)"));
+            let result = reconcile_result(&cfg, || {
+                connect(&cfg, &c)?;
+                c.reconcile(cfg.sequential, cfg.first_last, cfg.seed_by_default, recent)
+            })?;
+            emit(json, result.clone(), || {
+                if cfg.native() { println!("native scheduling is intrinsic"); }
+                else { println!("reconciled {} torrent(s)", result["touched"]); }
+            });
             Ok(Code::Ok)
         }
         Cmd::Open { selector } => {
@@ -786,6 +800,17 @@ fn wait_for(c: &Client, hashes: Vec<String>, timeout: u64, interval: u64, json: 
 fn connect(cfg: &Config, c: &Client) -> Result<()> {
     backend::ensure_running(cfg, c)?;
     c.login()
+}
+
+fn no_start_requested(flag: bool, environment: Option<&std::ffi::OsStr>) -> bool {
+    flag || environment == Some(std::ffi::OsStr::new("1"))
+}
+
+fn reconcile_result(cfg: &Config, legacy: impl FnOnce() -> Result<usize>) -> Result<serde_json::Value> {
+    if cfg.native() {
+        return Ok(serde_json::json!({"ok": true, "touched": 0, "note": "native scheduling is intrinsic"}));
+    }
+    Ok(serde_json::json!({"ok": true, "action": "reconcile", "touched": legacy()?}))
 }
 
 /// Search providers belong to the invoking CLI or app process, including errors.
@@ -1284,6 +1309,28 @@ fn local_torrent_source(source: &str) -> Result<String> {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+
+    #[test]
+    fn no_start_is_global_and_environment_requires_one() {
+        for args in [["fbittorrent", "--no-start", "list"], ["fbittorrent", "list", "--no-start"]] {
+            assert!(Cli::try_parse_from(args).unwrap().no_start);
+        }
+        for value in [None, Some(""), Some("0"), Some("true")] {
+            assert!(!no_start_requested(false, value.map(std::ffi::OsStr::new)));
+            assert!(no_start_requested(true, value.map(std::ffi::OsStr::new)));
+        }
+        assert!(no_start_requested(false, Some(std::ffi::OsStr::new("1"))));
+    }
+
+    #[test]
+    fn native_reconcile_returns_stub_without_connecting() {
+        let result = reconcile_result(&Config::default(), || panic!("native reconcile must not connect")).unwrap();
+        println!("native Cmd::Reconcile: {result}");
+        assert_eq!(result, serde_json::json!({"ok": true, "touched": 0, "note": "native scheduling is intrinsic"}));
+        let legacy = Config { engine: "qbittorrent".into(), ..Config::default() };
+        assert_eq!(reconcile_result(&legacy, || Ok(3)).unwrap(),
+                   serde_json::json!({"ok": true, "action": "reconcile", "touched": 3}));
+    }
 
     #[test]
     fn browser_file_urls_preserve_plus_spaces_and_unicode() {

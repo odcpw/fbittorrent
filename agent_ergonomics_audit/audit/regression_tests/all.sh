@@ -45,6 +45,7 @@ RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-1200}" cargo build --release --l
 echo "## Widget peer-label lint and model checks"
 plugin/tests/lint.sh
 echo "## Isolated native CLI/TUI and RSS checks"
+python3 scripts/check-widget-online.py --self-test
 python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
 if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
   echo "## Configured legacy CLI and TUI"
