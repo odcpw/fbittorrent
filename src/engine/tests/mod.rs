@@ -141,6 +141,7 @@
 
 include!("ownership.rs");
 include!("startup.rs");
+include!("dormant.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");

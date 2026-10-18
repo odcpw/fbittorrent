@@ -75,6 +75,9 @@ impl Inner {
     pub(super) fn cancel_restore(&self, hash: &str, remove: bool) {
         let mut restores = self.restores.lock().unwrap();
         if let Some(restore) = restores.get_mut(hash) {
+            if matches!(restore.outcome, RestoreOutcome::Dormant) && !remove {
+                return;
+            }
             // Invalidate the result before cancellation: a task completing at
             // the same time must not overwrite the user's stop/removal.
             restore.generation = RESTORE_GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -173,7 +176,13 @@ impl Inner {
 
     pub(super) fn begin_restores(self: &Arc<Self>, cx: &Cx, mut records: Vec<Record>) -> Result<()> {
         records.sort_by_cached_key(|record| !self.directory.join(format!("{}.torrent", record.hash)).exists());
-        for record in records { self.spawn_restore(cx, record)?; }
+        for record in records {
+            if record.dormant_on_restore() {
+                self.set_restore_outcome(&record.hash, RestoreOutcome::Dormant);
+            } else {
+                self.spawn_restore(cx, record)?;
+            }
+        }
         Ok(())
     }
 
