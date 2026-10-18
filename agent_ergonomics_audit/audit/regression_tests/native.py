@@ -5,8 +5,10 @@ Every config, download and socket belongs to a temporary directory. No user's
 service or torrents are touched. Requires tmux, util-linux script and Python 3.
 """
 import argparse
+import contextlib
 import hashlib
 import http.server
+import io
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -18,15 +20,17 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 
+import fbtlog
 from fbtlog import Case, REPO, suite_status
 
 CASES = (
     "dec_mouse_mode", "closed_status_stays_closed", "one_enter_adds_once",
     "refresh_preserves_read_history", "rss_mouse_and_scoped_shortcuts",
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety",
-    "resume_done_refused", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
-    "settings_queue_vpn_restart", "quit_restart_down",
+    "resume_done_refused", "bulk_start_requires_hashes", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
+    "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp",
 )
 
 
@@ -175,6 +179,43 @@ class NativeHarness:
         return child.returncode, value
 
 
+def record_bulk_start(harness, code, result, hash_):
+    harness.record("start all", "exit 0; list-valued hashes excludes the completed hash, which is reported skipped",
+                   json.dumps(result), code == 0 and isinstance(result.get("hashes"), list) and
+                   {"hash": hash_, "reason": "complete_no_seed"} in result["skipped"] and
+                   hash_ not in result["hashes"])
+
+
+def bulk_start_requires_hashes(case):
+    """Malformed contract fixtures must fail the same Case check as the live CLI."""
+    hash_ = "0000000000000000000000000000000000000001"
+    valid = dict(hashes=[], skipped=[dict(hash=hash_, reason="complete_no_seed")])
+    missing = {key: value for key, value in valid.items() if key != "hashes"}
+    directory = case.suite.directory / "fixtures/bulk_start_contract"
+    diagnostics = io.StringIO()
+    with patch.object(fbtlog, "LOG_ROOT", directory), contextlib.redirect_stdout(diagnostics), \
+            contextlib.redirect_stderr(diagnostics):
+        with Case("bulk_start_contract", "valid") as control:
+            record_bulk_start(NativeHarness(lambda: control, None, None), 0, valid, hash_)
+        with Case("bulk_start_contract", "missing_hashes") as negative:
+            record_bulk_start(NativeHarness(lambda: negative, None, None), 0, missing, hash_)
+        with Case("bulk_start_contract", "non_list_hashes") as wrong_type:
+            record_bulk_start(NativeHarness(lambda: wrong_type, None, None), 0,
+                              dict(valid, hashes="other_hash"), hash_)
+    diagnostic_path = directory / "diagnostics.log"
+    diagnostic_path.write_text(diagnostics.getvalue())
+    control_rows = [json.loads(line) for line in control.path.read_text().splitlines()]
+    negative_rows = [json.loads(line) for line in negative.path.read_text().splitlines()]
+    type_rows = [json.loads(line) for line in wrong_type.path.read_text().splitlines()]
+    case.step("remove hashes from an otherwise valid bulk response",
+              "valid response passes; missing or non-list hashes fails a step and the final Case verdict").close(
+        control_rows[-1]["ok"] is True and negative_rows[0]["ok"] is False and
+        negative_rows[-1]["final"] is True and negative_rows[-1]["ok"] is False and
+        type_rows[0]["ok"] is False and type_rows[-1]["final"] is True and type_rows[-1]["ok"] is False,
+        json.dumps(dict(control=control_rows, missing_hashes=negative_rows, non_list_hashes=type_rows)),
+        artifacts=[control.path, negative.path, negative.daemon_path, wrong_type.path, diagnostic_path])
+
+
 def resume_done_refused(harness, root):
     """Exercise the real CLI/socket/engine using the current shared Case."""
     name = "P0-10.complete.txt"
@@ -191,7 +232,7 @@ def resume_done_refused(harness, root):
 
     def completed():
         value = harness.cli("show", hash_)
-        return value if value.get("completion_on", 0) != 0 and value.get("state") == "stoppedUP" else None
+        return value if value.get("completion_on", 0) > 0 and value.get("state") == "stoppedUP" else None
 
     harness.wait_for(completed, "local bytes verify and stop on completion")
     code, envelope = harness.cli_result("start", hash_, code=1)
@@ -201,10 +242,7 @@ def resume_done_refused(harness, root):
                    "exit 1; code 1, code_name failure, exact refusal and seed hint",
                    json.dumps(envelope), code == 1 and envelope == expected)
     code, result = harness.cli_result("start", "all")
-    harness.record("start all", "exit 0; completed hash is skipped, never reported started",
-                   json.dumps(result), code == 0 and
-                   {"hash": hash_, "reason": "complete_no_seed"} in result.get("skipped", []) and
-                   hash_ not in result.get("hashes", []))
+    record_bulk_start(harness, code, result, hash_)
     code, result = harness.cli_result("delete", hash_)
     harness.record("remove disposable torrent, retaining verified bytes",
                    "exit 0; fixture removed and verified files retained", json.dumps(result),
@@ -452,6 +490,10 @@ def main():
                 cli("stop", expected_hash)
             if options.case == "resume_done_refused":
                 return suite_status("native")
+            with Case("native", "bulk_start_requires_hashes", enabled=options.case in (None, "bulk_start_requires_hashes")) as case:
+                bulk_start_requires_hashes(case)
+            if options.case == "bulk_start_requires_hashes":
+                return suite_status("native")
             with Case("native", "shows_inbox_and_targets", enabled=options.case in (None, "shows_inbox_and_targets")) as case:
                 keys("1")
                 wait_for(lambda: "P0-10.complete.txt" not in capture(), "completed fixture removed from TUI")
@@ -579,6 +621,72 @@ def main():
                 wait_for(lambda: not socket_path.exists(), "CLI down closes app", seconds=6)
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
             if options.case == "quit_restart_down":
+                return suite_status("native")
+            with Case("native", "resume_unknown_timestamp", enabled=options.case in (None, "resume_unknown_timestamp")) as case:
+                # Existing on-disk records deliberately retain legacy -1 dates.
+                # A separate root cannot race the preceding app's final save.
+                parked_root = root / "parked"
+                parked_root.mkdir(mode=0o700)
+                (parked_root / "downloads").mkdir(mode=0o700)
+                parked_env = dict(env)
+                for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                                       ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
+                                       ("XDG_STATE_HOME", "state")]:
+                    path = parked_root / directory
+                    path.mkdir(mode=0o700)
+                    parked_env[key] = str(path)
+                parked_harness = NativeHarness(lambda: case, binary, parked_env)
+                parked_cli = parked_harness.cli
+                records = [dict(hash=f"{index:040x}", name=f"P0-10.timestamp.{stamp}.fixture",
+                                source=f"magnet:?xt=urn:btih:{index:040x}", output_folder=str(parked_root / "downloads"),
+                                only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                                added_on=checked-index, completion_on=stamp, paused=True, resume_after_migration=False)
+                           for index, stamp in [(1, -1), (2, 0), (3, 123)]]
+                ledger = parked_root / "data/fbittorrent/engine/torrents.json"
+                ledger.parent.mkdir(parents=True)
+                ledger.write_text(json.dumps(dict(migrated_legacy=True, records=records)))
+                parked_config = parked_root / "config/fbittorrent/config.toml"
+                parked_config.parent.mkdir()
+                # The missing interface prevents any torrent networking.
+                parked_config.write_text(
+                    f'engine = "native"\nautostart = false\nnotify = false\npeer_port = {peer_port}\n'
+                    f'network_interface = "fbmissing0"\nsave_path = {json.dumps(str(parked_root / "downloads"))}\n')
+                record("restore existing records with completion dates -1, 0 and 123",
+                       "unknown dates remain unmodified on disk before startup", ledger.read_text())
+                environment = shlex.join([f"{key}={parked_env[key]}" for key in parked_env if key.startswith("XDG_")])
+                parked_launch = (f"exec env {environment} script -qef -c {shlex.quote(app_launch)} "
+                                 f"{shlex.quote(str(parked_root / 'terminal.typescript'))}")
+                harness.start_tmux(tmux, session, parked_launch)
+                parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
+                wait_for(lambda: parked_socket.exists() and parked_cli("status").get("connection") == "vpn_waiting",
+                         "parked engine fixture opens without a network session")
+                listed = {torrent["hash"]: torrent for torrent in parked_cli("list")["torrents"]}
+                unknown, zero, done = [item["hash"] for item in records]
+                case.check(listed[unknown]["completion_on"] == -1 and listed[unknown]["state"] == "stoppedDL",
+                           "A saved -1 record remains incomplete.", json.dumps(listed[unknown]))
+                keys("1")
+                wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
+                keys("Home")  # The -1 record has the newest added_on timestamp.
+                wait_for(lambda: "(P) Resume" in capture(),
+                         "unknown-date selection keeps the incomplete-row Resume control")
+                result = parked_cli("start", unknown)
+                case.check(result["hashes"] == [unknown] and result["skipped"] == [],
+                           "Explicit start accepts the existing -1 record.", json.dumps(result))
+                parked_cli("stop", unknown)
+                result = parked_cli("start", "all")
+                case.check(set(result["hashes"]) == {unknown, zero} and
+                           result["skipped"] == [dict(hash=done, reason="complete_no_seed")],
+                           "Bulk start accepts -1 and zero dates and skips only the positive date.", json.dumps(result))
+                result = parked_cli("start", done, code=1)
+                case.check(result == dict(ok=False, code=1, code_name="failure",
+                                         error="already complete; seeding is off for this torrent",
+                                         hint=f"fbittorrent seed {done}"),
+                           "A positive completion date still refuses explicit start with the seed hint.", json.dumps(result))
+                case.check(json.loads(ledger.read_text())["records"][0]["completion_on"] == -1,
+                           "Starting an unknown-date record does not invent a completion timestamp.")
+                parked_cli("down")
+                wait_for(lambda: not parked_socket.exists(), "parked fixture closes without a stale socket", seconds=6)
+            if options.case == "resume_unknown_timestamp":
                 return suite_status("native")
         except Exception:
             print(f"fixture state: {fixture}", file=sys.stderr)

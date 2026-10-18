@@ -56,7 +56,7 @@ impl Torrent {
         matches!(self.state.as_str(), "stoppedDL" | "stoppedUP" | "pausedDL" | "pausedUP")
     }
     pub fn is_queued(&self) -> bool { self.state == "queuedDL" }
-    pub fn complete_no_seed(&self) -> bool { self.completion_on != 0 && self.ratio_limit == 0.0 }
+    pub fn complete_no_seed(&self) -> bool { self.completion_on > 0 && self.ratio_limit == 0.0 }
     /// True when uploading is allowed (no default cap or explicitly tagged "seed").
     pub fn seed_allowed(&self) -> bool {
         self.has_tag(SEED_TAG) || self.up_limit != NO_UPLOAD_LIMIT
@@ -750,4 +750,19 @@ pub fn human_eta(secs: i64) -> String {
     if secs < 0 || secs >= 8640000 { return "∞".into(); }
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 { format!("{h}h{m:02}m") } else if m > 0 { format!("{m}m{s:02}s") } else { format!("{s}s") }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    #[test]
+    fn resume_completion_requires_a_positive_timestamp() {
+        for completion_on in [-1, 0, 123] {
+            let torrent: Torrent = serde_json::from_value(serde_json::json!({
+                "completion_on": completion_on, "ratio_limit": 0.0,
+            })).unwrap();
+            assert_eq!(torrent.complete_no_seed(), completion_on > 0);
+        }
+    }
 }

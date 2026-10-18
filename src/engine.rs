@@ -298,7 +298,7 @@ impl Inner {
                 continue;
             };
             let stats = handle.stats();
-            if stats.finished && record.completion_on == 0 {
+            if stats.finished && record.completion_on <= 0 {
                 record.completion_on = now();
                 changed = true;
             }
@@ -1393,7 +1393,8 @@ fn mutation_hashes(request: &Request, ledger: &Ledger) -> Result<(Vec<String>, O
     let bulk = request.arg("hashes") == Some("all") || request.arg("skip_complete") == Some("true");
     for hash in hashes {
         let record = ledger.records.iter().find(|r| r.hash == hash).expect("validated hash");
-        if record.completion_on != 0 && record.stop_on_complete() {
+        // Legacy records can contain -1 for an unknown completion date.
+        if record.completion_on > 0 && record.stop_on_complete() {
             if !bulk {
                 return Err(crate::agent::AppError::new(crate::agent::Code::Failure,
                     "already complete; seeding is off for this torrent")
@@ -2012,6 +2013,32 @@ mod tests {
     }
 
     #[test]
+    fn resume_unknown_completion_timestamp_explicitly_and_in_bulk() {
+        let directory = review_directory("resume-unknown-completion");
+        let hash = "0000000000000000000000000000000000000004";
+        for completion_on in [-1, 0] {
+            let mut record = review_record(hash, &directory);
+            record.completion_on = completion_on;
+            record.paused = true;
+            save_parked_ledger(&directory, &Ledger {
+                migrated_legacy: false, records: vec![record],
+            }).unwrap();
+            for selection in [hash, "all"] {
+                let result: serde_json::Value = serde_json::from_str(&dispatch_parked_in(
+                    &request("torrents/start", &[("hashes", selection)]), &directory)
+                    .unwrap().unwrap()).unwrap();
+                assert_eq!(result, serde_json::json!({"started": [hash], "skipped": []}));
+                let saved = read_ledger(&directory.join("torrents.json")).unwrap();
+                assert!(!saved.records[0].paused);
+                assert_eq!(saved.records[0].completion_on, completion_on);
+                dispatch_parked_in(&request("torrents/stop", &[("hashes", hash)]), &directory)
+                    .unwrap().unwrap();
+            }
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn resume_done_is_typed_and_bulk_start_reports_skips() {
         let directory = review_directory("resume-done");
         std::fs::create_dir_all(&directory).unwrap();
@@ -2316,7 +2343,7 @@ mod tests {
             })
             .unwrap()
             .unwrap();
-        let (hash, saved) = dispatcher.runtime.block_on(async {
+        let (hash, mut saved) = dispatcher.runtime.block_on(async {
             let record = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), &test_cx())
                 .await
                 .unwrap()
@@ -2379,6 +2406,10 @@ mod tests {
         drop(dispatcher);
         drop(app);
         assert!(old_session.cancellation_token().is_cancelled());
+        // Restoring an unknown legacy date may mark it complete only after
+        // the existing payload has passed the real hash check again.
+        saved.records[0].completion_on = -1;
+        save_parked_ledger(&directory, &saved).unwrap();
         let app = make_app(saved);
         app.dispatcher.runtime.block_on(async {
             let record = OwnedMutexGuard::lock(app.dispatcher.inner.ledger.clone(), &test_cx())
@@ -2398,6 +2429,9 @@ mod tests {
             app.dispatcher.inner.maintain(&test_cx()).await.unwrap();
             assert_eq!(handle.info_hash().as_string(), hash);
             assert!(handle.is_paused());
+            assert!(OwnedMutexGuard::lock(app.dispatcher.inner.ledger.clone(), &test_cx())
+                .await.unwrap().records[0].completion_on > 0);
+            assert!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].completion_on > 0);
             assert_eq!(
                 record
                     .options(record.paused)

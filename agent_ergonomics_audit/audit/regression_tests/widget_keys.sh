@@ -150,6 +150,10 @@ ShellRoot {
         def toggles(): return [ipc('toggleVisible',t['hash'],target='fixture') for t in torrents]
         wait(lambda:toggles()==['false','true'])
         record(current,'render done rows with seeding off and on','start hidden only for completed stop-on-complete torrent',json.dumps(toggles()),toggles()==['false','true'])
+        save([dict(torrents[0],completion_on=-1,ratio_limit=0),
+              dict(torrents[1],completion_on=0,ratio_limit=0)])
+        ipc('refresh'); wait(lambda:toggles()==['true','true'])
+        record(current,'render unknown completion timestamps -1 and 0','start remains visible for both incomplete rows',json.dumps(toggles()),toggles()==['true','true'])
         save(torrents); ipc('refresh'); wait(lambda:toggles()==['true','true'])
         record(current,'restore incomplete rows','start remains visible for both incomplete torrents',json.dumps(toggles()),toggles()==['true','true'],True)
         current='W-010'; ipc('open'); time.sleep(.2)
