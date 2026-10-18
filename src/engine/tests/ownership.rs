@@ -223,7 +223,7 @@
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    fn review_record(hash: &str, downloads: &Path) -> Record {
+    pub(super) fn review_record(hash: &str, downloads: &Path) -> Record {
         Record {
             hash: hash.into(),
             name: "saved fixture".into(),

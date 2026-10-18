@@ -269,7 +269,7 @@
             let mut record = review_record(hash, &directory);
             record.completion_on = completion_on;
             record.paused = true;
-            save_parked_ledger(&directory, &Ledger {
+            save_parked_ledger(&directory, &Ledger { generation: Default::default(),
                 migrated_legacy: false, records: vec![record],
             }).unwrap();
             for selection in [hash, "all"] {
@@ -302,7 +302,7 @@
         let mut seeder = done.clone();
         seeder.hash = seed_hash.into();
         seeder.ratio_limit = -2.0;
-        save_parked_ledger(&directory, &Ledger {
+        save_parked_ledger(&directory, &Ledger { generation: Default::default(),
             migrated_legacy: false, records: vec![done, download, seeder],
         }).unwrap();
         let before = std::fs::read(directory.join("torrents.json")).unwrap();

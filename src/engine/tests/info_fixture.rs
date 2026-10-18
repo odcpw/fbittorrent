@@ -22,7 +22,7 @@ fn fixture_info_json() -> String {
         record.tags = "alpha,beta".into();
         records.push(record);
     }
-    let app = test_app(&directory, &downloads, Ledger { migrated_legacy: true, records }, None);
+    let app = test_app(&directory, &downloads, Ledger { generation: Default::default(), migrated_legacy: true, records }, None);
     let dispatcher = app.dispatcher();
     dispatcher.runtime.block_on(async {
         let cx = dispatcher.runtime.cx();

@@ -1,5 +1,7 @@
 //! Saved torrent records and durable ledger/metadata writes.
 use super::*;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Condvar, Mutex as StdMutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Record {
@@ -61,6 +63,8 @@ impl Record {
 
 #[derive(Default, Serialize, Deserialize)]
 pub(super) struct Ledger {
+    #[serde(skip)]
+    pub(super) generation: Arc<LedgerGeneration>,
     #[serde(default)]
     pub(super) migrated_legacy: bool,
     pub(super) records: Vec<Record>,
@@ -122,16 +126,25 @@ impl Inner {
         Ok(self.directory.join(format!("{hash}.torrent")))
     }
     pub(super) async fn save(&self, cx: &Cx, ledger: &Ledger) -> Result<()> {
-        self.write_store(cx, "torrents.json", &serde_json::to_vec_pretty(ledger)?).await
+        self.write_store(cx, "torrents.json", &serde_json::to_vec_pretty(ledger)?)
+            .await?;
+        ledger.generation.bump();
+        Ok(())
     }
     pub(super) async fn write_store(&self, cx: &Cx, name: &str, bytes: &[u8]) -> Result<()> {
         cx.checkpoint()?;
         let temporary = self.directory.join(format!("{name}.tmp"));
         let final_path = self.directory.join(name);
         let mut file = rqbit_runtime::fs::OpenOptions::new()
-            .write(true).create(true).truncate(true).mode(0o600).open(&temporary).await?;
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&temporary)
+            .await?;
         // mode() only applies to creation; a pre-upgrade temporary may be 0644.
-        file.set_permissions(rqbit_runtime::fs::Permissions::from_mode(0o600)).await?;
+        file.set_permissions(rqbit_runtime::fs::Permissions::from_mode(0o600))
+            .await?;
         file.write_all(bytes).await?;
         file.sync_all().await?;
         drop(file);
@@ -154,7 +167,8 @@ impl Inner {
     }
     pub(super) async fn write_metadata(&self, cx: &Cx, hash: &str, bytes: &[u8]) -> Result<()> {
         validate_info_hash(hash)?;
-        self.write_store(cx, &format!("{hash}.torrent"), bytes).await
+        self.write_store(cx, &format!("{hash}.torrent"), bytes)
+            .await
     }
 }
 
@@ -163,12 +177,63 @@ pub(super) fn save_parked_ledger(directory: &Path, ledger: &Ledger) -> Result<()
     std::fs::create_dir_all(directory)?;
     let temporary = directory.join("torrents.json.tmp");
     let mut file = std::fs::OpenOptions::new()
-        .write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&temporary)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(&serde_json::to_vec_pretty(ledger)?)?;
     file.sync_all()?;
     drop(file);
     std::fs::rename(temporary, directory.join("torrents.json"))?;
     std::fs::File::open(directory)?.sync_all()?;
+    ledger.generation.bump();
     Ok(())
 }
+
+/// Share this handle with standard threads before starting their wait loop. It
+/// owns the ledger's single atomic generation and notification pair; waiting
+/// never takes the async records mutex. It is in-memory, not part of the store.
+#[derive(Debug, Default)]
+pub struct LedgerGeneration {
+    counter: AtomicU64,
+    condition: (StdMutex<()>, Condvar),
+}
+impl LedgerGeneration {
+    pub fn current(&self) -> u64 {
+        self.counter.load(Ordering::Acquire)
+    }
+    fn bump(&self) {
+        let _guard = self
+            .condition
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        self.counter.fetch_add(1, Ordering::Release);
+        self.condition.1.notify_all();
+    }
+    pub fn wait_after(&self, generation: u64, timeout: Duration) -> Option<u64> {
+        let guard = self
+            .condition
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let (_guard, _) = self
+            .condition
+            .1
+            .wait_timeout_while(guard, timeout, |_| self.current() == generation)
+            .unwrap_or_else(|error| error.into_inner());
+        let current = self.current();
+        (current != generation).then_some(current)
+    }
+}
+impl EngineDispatcher {
+    pub fn ledger_generation(&self) -> Arc<LedgerGeneration> {
+        self.generation.clone()
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/ledger.rs"]
+mod tests;
