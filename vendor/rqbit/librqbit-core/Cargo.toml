@@ -27,7 +27,8 @@ repository = "https://github.com/ikatson/rqbit"
 resolver = "2"
 
 [features]
-default = ["sha1-crypto-hash"]
+# Match librqbit's rust-tls backend when both packages are selected for tests.
+default = ["sha1-ring"]
 sha1-crypto-hash = ["sha1w/sha1-crypto-hash"]
 sha1-ring = ["sha1w/sha1-ring"]
 
