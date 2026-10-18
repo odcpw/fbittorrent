@@ -33,7 +33,7 @@ CASES = (
     "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety", "no_fake_seed_counts",
     "resume_done_refused", "bulk_start_requires_hashes", "shows_inbox_and_targets", "file_modal_shows_help_80x24",
     "settings_queue_vpn_restart", "quit_restart_down", "resume_unknown_timestamp", "launcher_never_called", "terminal_close_is_graceful",
-    "store_modes",
+    "store_modes", "startup_survives_bad_record", "stop_during_hashing",
 )
 
 
@@ -712,6 +712,298 @@ def store_modes(case, root, env, cli, base, fixture):
             f"{path}: stat exit {result.returncode}, mode {result.stdout.strip()!r}; {result.stderr.strip()}")
 
 
+def expected_shutdown_stderr(stderr):
+    return stderr == "" or re.fullmatch(r"INFO engine drained in [0-9]+ ms\n?", stderr) is not None
+
+
+def startup_survives_bad_record(binary):
+    """Open the real TUI with a corrupt cache and a local unresolved magnet."""
+    with Case("native", "startup_survives_bad_record") as case, \
+            tempfile.TemporaryDirectory(prefix="fbittorrent-bad-record-") as temporary:
+        root = Path(temporary)
+        env = dict(os.environ, TERM="xterm-256color")
+        for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                               ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
+                               ("XDG_STATE_HOME", "state")]:
+            path = root / directory
+            path.mkdir(mode=0o700)
+            env[key] = str(path)
+        harness = NativeHarness(lambda: case, binary, env)
+        downloads = root / "downloads"
+        downloads.mkdir()
+        store = root / "data/fbittorrent/engine"
+        store.mkdir(parents=True)
+        tracker_requests = []
+
+        class Tracker(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                tracker_requests.append(self.path)
+                body = bencode(dict(interval=3600, peers=b""))
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        tracker = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Tracker)
+        threading.Thread(target=tracker.serve_forever, daemon=True).start()
+
+        def cached(name):
+            content = b"P0-09 verified local bytes.\n"
+            (downloads / name).write_bytes(content)
+            info = dict(name=name, length=len(content), private=1,
+                        **{"piece length": 16384, "pieces": hashlib.sha1(content).digest()})
+            hash_ = hashlib.sha1(bencode(info)).hexdigest()
+            return hash_, bencode(dict(info=info))
+
+        valid, valid_bytes = cached("P0-09.valid.txt")
+        bad, repaired_bytes = cached("P0-09.corrupt.txt")
+        magnet = "a" * 40
+        records = [dict(hash=hash_, name=name, source=source, output_folder=str(downloads),
+                        only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                        added_on=100-index, completion_on=0, paused=False, resume_after_migration=False)
+                   for index, (hash_, name, source) in enumerate([
+                       (magnet, "P0-09.magnet", f"magnet:?xt=urn:btih:{magnet}&tr=http%3A%2F%2F127.0.0.1%3A{tracker.server_port}%2Fannounce"),
+                       (bad, "P0-09.corrupt.txt", f"magnet:?xt=urn:btih:{bad}&tr=http%3A%2F%2F127.0.0.1%3A{tracker.server_port}%2Fannounce"),
+                       (valid, "P0-09.valid.txt", "")])]
+        ledger = store / "torrents.json"
+        ledger.write_text(json.dumps(dict(migrated_legacy=True, records=records)))
+        (store / f"{valid}.torrent").write_bytes(valid_bytes)
+        bad_cache = store / f"{bad}.torrent"
+        bad_cache.write_bytes(b"corrupt cache")
+        config = root / "config/fbittorrent/config.toml"
+        config.parent.mkdir()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        # Bind all engine networking to loopback; the tracker never supplies peers.
+        config.write_text(f'engine = "native"\nautostart = false\nnotify = false\n'
+                          f'peer_port = {port}\nnetwork_interface = "lo"\n'
+                          f'save_path = {json.dumps(str(downloads))}\n')
+        tmux_socket, session = f"fbt-fbt-p0-09-kzw-{os.getpid()}", "fbt-fbt-p0-09-kzw"
+
+        def tmux(*args, check=True, timeout=None):
+            return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
+                                  capture_output=True, text=True, check=check, timeout=timeout)
+
+        def rows():
+            return {row["hash"]: row for row in harness.cli("list")["torrents"]}
+
+        socket_path = root / "runtime/fbittorrent/engine.sock"
+        try:
+            app_launch = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
+            launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(root / 'terminal.typescript'))}"
+            began = time.monotonic()
+            harness.start_tmux(tmux, session, launch)
+            harness.wait_for(lambda: socket_path.exists() and "P0-09" in
+                             tmux("capture-pane", "-t", session, "-p", check=False).stdout,
+                             "startup socket and first TUI frame open", seconds=9)
+            opened = time.monotonic() - began
+            case.check(opened < 10 and socket_path.exists(), "App opens in under 10 seconds with an unresolved saved magnet.",
+                       f"Socket {'present' if socket_path.exists() else 'absent'} after {opened:.3f} seconds.")
+            initial = rows()
+            case.check(set(initial) == {valid, bad, magnet}, "All three ledger records are listed.", json.dumps(initial))
+            case.check(initial[magnet]["state"] == "metaDL" and "error_message" not in initial[magnet],
+                       "Unresolved magnet is metadata in progress without a premature error.", json.dumps(initial[magnet]))
+            harness.wait_for(lambda: rows()[bad]["state"] == "error", "corrupt cache fails independently")
+            failed = harness.cli("show", bad)
+            case.check(bool(failed["error_message"]) and "could not restore" in failed["error_message"],
+                       "show --json preserves the corrupt-cache restore failure message.", json.dumps(failed))
+            harness.wait_for(lambda: rows()[valid]["completion_on"] > 0, "valid cache verifies despite unresolved magnet")
+            # The details column appears at 140+ columns; inspect its real UI.
+            tmux("resize-window", "-t", session, "-x", "160", "-y", "40")
+            tmux("send-keys", "-t", session, "Home", "Down")
+            harness.wait_for(lambda: "could not restore" in tmux("capture-pane", "-t", session, "-p").stdout,
+                             "TUI details display the selected restore failure")
+            pane = tmux("capture-pane", "-t", session, "-p").stdout
+            case.check("could not restore" in pane, "The wide TUI details show the restore error in text.", pane)
+            original_error = failed["error_message"]
+            bad_cache.unlink()
+            harness.cli("start", bad)
+            pending_retry = harness.cli("show", bad)
+            case.check(pending_retry["state"] == "metaDL" and pending_retry["error_message"] == original_error,
+                       "An unresolved retry retains the previous corruption diagnostic.", json.dumps(pending_retry))
+            harness.cli("stop", bad)
+            bad_cache.write_bytes(valid_bytes)  # Valid metainfo for the wrong saved hash.
+            harness.cli("start", bad)
+            harness.wait_for(lambda: rows()[bad]["state"] == "error", "retry with mismatched cache fails again")
+            failed_again = harness.cli("show", bad)
+            case.check("does not match saved record" in failed_again["error_message"],
+                       "A retry that fails again replaces the diagnostic with its new failure.", json.dumps(failed_again))
+            bad_cache.write_bytes(repaired_bytes)
+            harness.cli("start", bad)
+            harness.wait_for(lambda: rows()[bad]["completion_on"] > 0 and
+                             "error_message" not in rows()[bad], "start retries the repaired cache successfully")
+            # Keep the production 90-second bound: prove timeout becomes error,
+            # rather than declaring an unresolved magnet failed at startup.
+            seen = []
+
+            def magnet_failed():
+                row = harness.cli("show", magnet)
+                seen.append((row["state"], row.get("error_message")))
+                if row["state"] != "error":
+                    time.sleep(.9)
+                return row if row["state"] == "error" else None
+
+            failure = harness.wait_for(magnet_failed, "unresolved local magnet reaches its real 90-second timeout", seconds=100)
+            case.check(bool(failure) and "timed out" in failure["error_message"] and
+                       all(state == "metaDL" and message is None for state, message in seen[:-1]),
+                       "Magnet stays metadata until the real timeout, then shows error_message.", json.dumps(seen))
+            case.check(bool(tracker_requests), "The real engine queried the local tracker fixture.",
+                       f"Local tracker received {len(tracker_requests)} requests; engine is bound to lo.")
+            harness.cli("start", magnet)
+            retry = harness.cli("show", magnet)
+            case.check(retry["state"] == "metaDL" and retry["error_message"] == failure["error_message"],
+                       "Start retries a timed-out magnet while retaining the last failure until success.", json.dumps(retry))
+            harness.cli("stop", magnet)
+            case.check(harness.cli("show", magnet)["state"] == "stoppedDL", "Stop cancels metadata resolution.")
+            harness.cli("start", magnet)
+            harness.cli("delete", magnet)
+            case.check(magnet not in rows(), "Delete removes an unresolved record without needing a handle.")
+            harness.cli("down")
+            harness.wait_for(lambda: not socket_path.exists(), "bad-record app closes", seconds=6)
+            harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
+                             "bad-record app process exits after session cleanup", seconds=6)
+            stderr = case.suite.stderr_path.read_bytes()[case.stderr_offset:].decode("utf-8", errors="replace")
+            case.check(expected_shutdown_stderr(stderr),
+                       "Stderr is empty or exactly one successful engine-drained INFO line; nothing else is accepted.",
+                       stderr or "No stderr was emitted.")
+            stderr_examples = [("", True), ("INFO engine drained in 0 ms\n", True),
+                               ("INFO engine drained in 123 ms", True), ("\n", False),
+                               (" INFO engine drained in 1 ms\n", False),
+                               ("INFO engine drained in -1 ms\n", False),
+                               ("INFO engine drained in 1.5 ms\n", False),
+                               ("INFO engine drained in 1 ms\nWARNING unexpected\n", False),
+                               ("INFO engine drained in 1 ms\n\n", False)]
+            case.check(all(expected_shutdown_stderr(text) == expected for text, expected in stderr_examples),
+                       "The stderr predicate accepts the P0-08 success format and rejects malformed or additional lines.",
+                       json.dumps([dict(stderr=text, expected=expected, observed=expected_shutdown_stderr(text))
+                                   for text, expected in stderr_examples]))
+        finally:
+            tmux("kill-server", check=False)
+            tracker.shutdown()
+
+
+def stop_during_hashing(binary):
+    """Observe saved-paused verification, then Stop and Resume a real check."""
+    with Case("native", "stop_during_hashing") as case, \
+            tempfile.TemporaryDirectory(prefix="fbittorrent-hashing-") as temporary:
+        root = Path(temporary)
+        env = dict(os.environ, TERM="xterm-256color")
+        for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+                               ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
+                               ("XDG_STATE_HOME", "state")]:
+            path = root / directory
+            path.mkdir(mode=0o700)
+            env[key] = str(path)
+        harness = NativeHarness(lambda: case, binary, env)
+        downloads = root / "downloads"
+        downloads.mkdir()
+        name, length, piece_length = "P0-09.hashing.bin", 1024**3, 4*1024**2
+        with (downloads / name).open("wb") as payload:
+            payload.truncate(length)
+        piece_hash = hashlib.sha1(bytes(piece_length)).digest()
+        # The last hash intentionally differs, so finishing the recheck still
+        # leaves a download, with no P0-10 completed-torrent refusal involved.
+        pieces = piece_hash * (length // piece_length - 1) + bytes(20)
+        info = dict(name=name, length=length, private=1, **{"piece length": piece_length, "pieces": pieces})
+        hash_ = hashlib.sha1(bencode(info)).hexdigest()
+        store = root / "data/fbittorrent/engine"
+        store.mkdir(parents=True)
+        record = dict(hash=hash_, name=name, source="", output_folder=str(downloads),
+                      only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                      added_on=100, completion_on=0, paused=True, resume_after_migration=False)
+        ledger = store / "torrents.json"
+        ledger.write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
+        (store / f"{hash_}.torrent").write_bytes(bencode(dict(info=info)))
+        config = root / "config/fbittorrent/config.toml"
+        config.parent.mkdir()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        config.write_text(f'engine = "native"\nautostart = false\nnotify = false\n'
+                          f'peer_port = {port}\nnetwork_interface = "lo"\n'
+                          f'save_path = {json.dumps(str(downloads))}\n')
+        tmux_socket, session = f"fbt-fbt-p0-09-kzw-hash-{os.getpid()}", "fbt-fbt-p0-09-kzw"
+
+        def tmux(*args, check=True, timeout=None):
+            return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
+                                  capture_output=True, text=True, check=check, timeout=timeout)
+
+        def capture():
+            return tmux("capture-pane", "-t", session, "-p").stdout
+
+        socket_path = root / "runtime/fbittorrent/engine.sock"
+        stderr_offset = case.stderr_offset
+        try:
+            command = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
+            launch = f"exec script -qef -c {shlex.quote(command)} {shlex.quote(str(root / 'terminal.typescript'))}"
+            harness.start_tmux(tmux, session, launch)
+            harness.wait_for(lambda: socket_path.exists(), "hashing fixture opens its isolated socket")
+
+            def active_hashing():
+                row = harness.cli("show", hash_)
+                return row if row["state"] == "checkingDL" and 0 < row["completed"] < length else None
+
+            initial = harness.wait_for(active_hashing, "saved-paused startup verification is actively hashing")
+            case.check(bool(initial) and json.loads(ledger.read_text())["records"][0]["paused"] is True,
+                       "A saved-paused record lists checkingDL while real verification is active.", json.dumps(initial))
+
+            def finished_paused():
+                row = harness.cli("show", hash_)
+                return row if row["state"] == "stoppedDL" else None
+
+            finished = harness.wait_for(finished_paused, "saved-paused verification completes before listing stoppedDL", seconds=15)
+            case.check(bool(finished) and finished["completed"] == length-piece_length and
+                       json.loads(ledger.read_text())["records"][0]["paused"] is True,
+                       "The stopped state follows completed verification and preserves saved paused intent.", json.dumps(finished))
+            harness.cli("down")
+            harness.wait_for(lambda: not socket_path.exists(), "saved-paused verification app closes", seconds=6)
+            harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
+                             "saved-paused verification app drains and exits", seconds=6)
+            stderr_bytes = case.suite.stderr_path.read_bytes()
+            first_stderr = stderr_bytes[stderr_offset:].decode("utf-8", errors="replace")
+            case.check(expected_shutdown_stderr(first_stderr),
+                       "The verification run emits only its optional successful-drain INFO line.",
+                       first_stderr or "No stderr was emitted.")
+            stderr_offset = len(stderr_bytes)
+            # Restart with the same saved-paused intent, then explicitly Stop
+            # its fresh startup check before exercising the actual Resume key.
+            harness.start_tmux(tmux, session, launch)
+            harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
+            hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
+            case.check(bool(hashing), "Stop is issued while the real 1 GiB payload is being hashed.", json.dumps(hashing))
+            harness.cli("stop", hash_)
+            stopped = harness.cli("show", hash_)
+            case.check(stopped["state"] == "stoppedDL" and json.loads(ledger.read_text())["records"][0]["paused"] is True,
+                       "Stop during hashing lists a paused row and durably saves paused intent.", json.dumps(stopped))
+            harness.wait_for(lambda: "(P) Resume" in capture(), "the paused hash-check row offers Resume in the TUI")
+            pane = capture()
+            case.check("(P) Resume" in pane, "The actual TUI footer offers Resume.", pane)
+            tmux("send-keys", "-t", session, "-l", "p")
+            harness.wait_for(lambda: json.loads(ledger.read_text())["records"][0]["paused"] is False,
+                             "TUI Resume starts the saved torrent")
+
+            def resumed():
+                row = harness.cli("show", hash_)
+                return row if row["state"] == "stalledDL" and 0 < row["completed"] < length else None
+
+            restored = harness.wait_for(resumed, "resumed hash check finishes and admits the incomplete download", seconds=15)
+            case.check(bool(restored), "Resume completes the real recheck and admits the torrent.", json.dumps(restored))
+            harness.cli("down")
+            harness.wait_for(lambda: not socket_path.exists(), "hashing fixture closes", seconds=6)
+            harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
+                             "hashing fixture process drains and exits", seconds=6)
+            stderr = case.suite.stderr_path.read_bytes()[stderr_offset:].decode("utf-8", errors="replace")
+            case.check(expected_shutdown_stderr(stderr),
+                       "The hashing fixture emits only the optional successful-drain INFO line.",
+                       stderr or "No stderr was emitted.")
+        finally:
+            tmux("kill-server", check=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
@@ -723,6 +1015,14 @@ def main():
         print("\n".join(CASES))
         return 0
     binary = str(Path(options.binary).resolve())
+    if options.case in (None, "stop_during_hashing"):
+        stop_during_hashing(binary)
+        if options.case == "stop_during_hashing":
+            return suite_status("native")
+    if options.case in (None, "startup_survives_bad_record"):
+        startup_survives_bad_record(binary)
+        if options.case == "startup_survives_bad_record":
+            return suite_status("native")
     if options.case == "launcher_never_called":
         launcher_never_called(binary)
     if options.case == "terminal_close_is_graceful":

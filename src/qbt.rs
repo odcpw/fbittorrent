@@ -12,6 +12,8 @@ pub struct Torrent {
     pub hash: String,
     pub name: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
     pub progress: f64,
     #[serde(default = "known_progress")]
     pub progress_known: bool,
@@ -754,6 +756,17 @@ pub fn human_eta(secs: i64) -> String {
 
 #[cfg(test)]
 mod completion_tests {
+    #[test]
+    fn restore_error_message_is_optional_and_round_trips() {
+        let old: super::Torrent = serde_json::from_value(serde_json::json!({"hash":"old"})).unwrap();
+        assert!(old.error_message.is_none());
+        assert!(serde_json::to_value(old).unwrap().get("error_message").is_none());
+        let failed: super::Torrent = serde_json::from_value(serde_json::json!({
+            "hash":"failed", "state":"error", "error_message":"could not restore: corrupt cache"
+        })).unwrap();
+        assert_eq!(serde_json::to_value(failed).unwrap()["error_message"], "could not restore: corrupt cache");
+    }
+
     use super::*;
 
     #[test]
