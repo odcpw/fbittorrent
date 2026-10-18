@@ -2,10 +2,19 @@
 
 use anyhow::{bail, Context, Result};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::qbt::Client;
+
+// Invocation policy is separate from Config: interactive settings can reload
+// or save Config without losing --no-start or persisting it as autostart=false.
+static NO_START: AtomicBool = AtomicBool::new(false);
+
+pub fn prevent_start() {
+    NO_START.store(true, Ordering::Relaxed);
+}
 
 pub fn is_active(unit: &str) -> bool {
     Command::new("systemctl").args(["--user", "is-active", "--quiet", unit])
@@ -17,8 +26,9 @@ pub fn is_active(unit: &str) -> bool {
 pub fn ensure_running(cfg: &Config, client: &Client) -> Result<bool> {
     if cfg.native() {
         if crate::ipc::is_running(cfg) { return Ok(false); }
-        if !cfg.autostart {
-            bail!("fbittorrent is closed (autostart is off). Open the app or run: fbittorrent up");
+        if !cfg.autostart || NO_START.load(Ordering::Relaxed) {
+            return Err(crate::agent::AppError::new(crate::agent::Code::Backend, "fbittorrent is closed (automatic startup is disabled)")
+                .hint("fbittorrent up").into());
         }
         open_app()?;
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -29,7 +39,10 @@ pub fn ensure_running(cfg: &Config, client: &Client) -> Result<bool> {
         bail!("opened fbittorrent but its native engine did not come up; check the app terminal for a startup or migration error");
     }
     if client.version().is_ok() { return Ok(false); }
-    if !cfg.autostart { bail!("qBittorrent is not running (autostart is off). Run: fbittorrent up"); }
+    if !cfg.autostart || NO_START.load(Ordering::Relaxed) {
+        return Err(crate::agent::AppError::new(crate::agent::Code::Backend, "qBittorrent is not running (automatic startup is disabled)")
+            .hint("fbittorrent up").into());
+    }
     let st = Command::new("systemctl").args(["--user", "start", &cfg.backend_unit]).status()
         .context("running systemctl")?;
     if !st.success() { bail!("systemctl --user start {} failed", cfg.backend_unit); }

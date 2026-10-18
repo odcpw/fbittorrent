@@ -12,7 +12,7 @@ Item {
   property bool opened: false
 
   property var status: ({ ok: false, dl: 0, up: 0, active: 0, seeding: 0, stopped: 0, total: 0, torrents: [] })
-  readonly property bool online: status.ok === true
+  readonly property bool online: status.ok === true && status.running !== false
   readonly property string backendState: online ? "running" : String(status.backend || "stopped")
   readonly property var torrents: status.torrents || []
   readonly property var activeTorrents: torrents.filter(Model.isActive)
@@ -51,7 +51,7 @@ Item {
     if (actionProc.running || _queue.length === 0) return
     var next = _queue.shift()
     actionStatus = next.label
-    actionProc.command = [bin].concat(next.args)
+    actionProc.command = [bin, "--no-start"].concat(next.args)
     actionProc.running = true
   }
 
@@ -75,11 +75,10 @@ Item {
   function addFromClipboard() { runAction(["add-clipboard"], "Adding from clipboard…") }
   function stopBackend() { runAction(["down"], "Closing fbittorrent…") }
   function startBackend() { runAction(["up"], "Opening fbittorrent…") }
-  function reconcile() { runAction(["reconcile", "--recent", "180", "--json"], "") }
 
   Process {
     id: statusProc
-    command: [root.bin, "status", "--json"]
+    command: [root.bin, "--no-start", "status", "--json"]
     stdout: StdioCollector {
       onStreamFinished: {
         var parsed = Model.parseStatus(text)
@@ -115,13 +114,5 @@ Item {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refresh()
-  }
-
-  // Catch torrents added outside fbittorrent (RSS, WebUI) and give them the default flags.
-  Timer {
-    interval: 60000
-    running: root.online
-    repeat: true
-    onTriggered: root.reconcile()
   }
 }

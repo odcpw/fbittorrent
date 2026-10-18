@@ -19,6 +19,112 @@ import threading
 import time
 
 
+def launcher_never_called(binary):
+    """Probe the widget's closed-app paths with autostart enabled."""
+    from fbtlog import Case
+
+    with Case("native", "launcher_never_called") as case, \
+            tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary:
+        root = Path(temporary)
+        env = dict(os.environ)
+        env.pop("FBITTORRENT_NO_START", None)
+        for key in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
+                    "XDG_STATE_HOME", "XDG_CACHE_HOME"):
+            directory = root / key.lower()
+            directory.mkdir(mode=0o700)
+            env[key] = str(directory)
+        config = Path(env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        config.parent.mkdir()
+        config_text = ('engine = "native"\nautostart = true\nnotify = false\n'
+                       'network_interface = "fbmissing0"\n')
+        config.write_text(config_text)
+        shims = root / "shims"
+        shims.mkdir()
+        env["PATH"] = str(shims) + os.pathsep + env.get("PATH", "")
+        calls = case.path.with_suffix(".launcher.log")
+        calls.write_text("")
+        for name in ("omarchy-launch-or-focus-tui", "systemctl"):
+            shim = shims / name
+            shim.write_text("#!/bin/sh\nprintf '%s\\n' " + shlex.quote(name) +
+                            ' "$@" >> ' + shlex.quote(str(calls)) + "\nexit 99\n")
+            shim.chmod(0o700)
+
+        probes = (
+            (("status",), 0, {}, "stopped"),
+            (("reconcile", "--recent", "180"), 0, {}, "intrinsic"),
+            (("--no-start", "list"), 4, {}, "closed"),
+            (("list", "--no-start"), 4, {}, "closed"),
+            (("list",), 4, {"FBITTORRENT_NO_START": "1"}, "closed"),
+            (("--no-start", "stop", "all"), 4, {}, "closed"),
+            (("--no-start", "up"), 4, {}, "closed"),
+            (("up",), 4, {"FBITTORRENT_NO_START": "1"}, "closed"),
+        )
+        for args, code, overrides, outcome in probes:
+            argv = [binary, *args, "--json"]
+            step = case.step("CLI " + shlex.join(argv),
+                             f"Exit {code}, {outcome} JSON, and zero launcher calls.")
+            child = case.popen(argv, env=dict(env, **overrides),
+                               stdout=subprocess.PIPE, text=True)
+            try:
+                stdout, _ = child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                stdout, _ = child.communicate()
+                step.fail(f"argv={argv!r}, env={overrides!r}; timed out; stdout={stdout!r}", [calls])
+                continue
+            try:
+                value = json.loads(stdout)
+            except ValueError:
+                value = {}
+            if outcome == "stopped":
+                expected = value.get("backend") == "stopped" and value.get("app_open") is False
+            elif outcome == "intrinsic":
+                expected = value == dict(ok=True, touched=0, note="native scheduling is intrinsic")
+            else:
+                expected = (value.get("ok") is False and value.get("code") == 4 and
+                            value.get("code_name") == "backend" and
+                            "fbittorrent is closed" in value.get("error", "") and
+                            "fbittorrent up" in value.get("hint", ""))
+            step.close(child.returncode == code and expected and not calls.read_text(),
+                       f"argv={argv!r}, env={overrides!r}; exit {child.returncode}; "
+                       f"JSON={value!r}; launcher calls={calls.read_text()!r}.", [calls])
+        argv = [binary, "--no-start", "tui", "--json"]
+        step = case.step("CLI in a real terminal: " + shlex.join(argv),
+                         "Exit 4 with a closed-engine hint and zero launcher calls.")
+        tmux = ["tmux", "-L", f"fbt-no-start-{os.getpid()}"]
+        session = "fbt-fbt-p0-07-563"
+        exit_path = root / "tui.exit"
+        transcript = case.path.with_suffix(".tui.log")
+        command = (shlex.join(argv) + '\nprintf \'%s\' "$?" > ' +
+                   shlex.quote(str(exit_path)) + "\nsleep 15")
+        try:
+            child = case.popen([*tmux, "new-session", "-d", "-s", session,
+                                "-x", "160", "-y", "24", command], env=env)
+            child.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while not exit_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            capture = case.popen([*tmux, "capture-pane", "-pt", session], env=env,
+                                  stdout=subprocess.PIPE, text=True)
+            stdout, _ = capture.communicate(timeout=5)
+            transcript.write_text(stdout)
+            value = next((json.loads(line) for line in stdout.splitlines()
+                          if line.startswith("{")), {})
+            code = exit_path.read_text() if exit_path.exists() else "timed out"
+            step.close(code == "4" and value.get("code_name") == "backend" and
+                       "fbittorrent is closed" in value.get("error", "") and
+                       "fbittorrent up" in value.get("hint", "") and not calls.read_text(),
+                       f"argv={argv!r}; exit {code}; JSON={value!r}; "
+                       f"launcher calls={calls.read_text()!r}.", [calls, transcript])
+        finally:
+            cleanup = case.popen([*tmux, "kill-server"], env=env)
+            cleanup.wait(timeout=5)
+        case.check(config.read_text() == config_text,
+                   "Invocation flags leave the stored autostart setting enabled.")
+        case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock").exists(),
+                   "No probe has started a native engine socket.")
+
+
 def bencode(value):
     if isinstance(value, int):
         return b"i" + str(value).encode() + b"e"

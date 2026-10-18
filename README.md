@@ -14,8 +14,9 @@ search jobs, and feed checks. Torrent records and feed history stay on disk.
   or `fbittorrent seed <hash>`; that removes the cap and allows completed torrents
   to keep running.
   Flip the default with `seed_by_default = true` in the config.
-- **App lifetime.** CLI and widget actions open or focus the app when they need
-  its engine. Status queries never open it. Nothing runs at login. Closing the
+- **App lifetime.** CLI actions open or focus the app when they need its engine.
+  Widget actions require an already open app. Status queries never open it.
+  Nothing runs at login. Closing the
   terminal or quitting the TUI stops the native engine.
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
@@ -165,7 +166,12 @@ autostart = true
 # category = "movies"
 ```
 
-`autostart = false` makes commands require an already open app. Show/RSS lists,
+`--no-start` (a global flag) or `FBITTORRENT_NO_START=1` makes a command require
+an already open app; a closed engine returns exit 4 with an opening hint. This
+also prevents explicit `up` and `tui` from starting the engine. The widget uses
+`--no-start` for every action and never reopens an app you closed. Native
+`reconcile` is a no-op: it reports that scheduling is intrinsic without connecting.
+`autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
 read markers, provider choices, and torrent records live in
 `~/.local/share/fbittorrent`; none needs a third-party account.
 
