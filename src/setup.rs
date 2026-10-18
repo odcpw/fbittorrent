@@ -136,9 +136,72 @@ fn reload_manager() -> Result<()> {
 fn install_unit() -> Result<()> {
     let unit = crate::api::client::unit_path()?;
     std::fs::create_dir_all(unit.parent().unwrap())?;
-    std::fs::write(&unit, daemon_unit(&std::env::current_exe()?)?)?;
-    reload_manager()?;
+    replace_unit(&unit, daemon_unit(&std::env::current_exe()?)?.as_bytes(), reload_manager)?;
     eprintln!("wrote {} (static, not enabled)", unit.display());
+    Ok(())
+}
+
+struct UnitTemporary(PathBuf);
+
+impl Drop for UnitTemporary {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
+fn unit_temporary_path(unit: &std::path::Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    unit.with_file_name(format!(".{}.{}-{}.tmp", unit.file_name().unwrap().to_string_lossy(),
+        std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)))
+}
+
+/// Same-directory creation checks directory writability, unlike truncating an
+/// existing writable inode. Keep the old inode until reload succeeds so any
+/// subsequent failure can restore it by another atomic rename.
+fn replace_unit(unit: &std::path::Path, body: &[u8], reload: impl FnOnce() -> Result<()>) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let (temporary, mut file) = loop {
+        let path = unit_temporary_path(unit);
+        match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&path) {
+            Ok(file) => break (UnitTemporary(path), file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error).context("creating same-directory unit temporary"),
+        }
+    };
+    file.write_all(body)?;
+    file.sync_all()?;
+    let mut backup = match std::fs::symlink_metadata(unit) {
+        Ok(metadata) => {
+            if !metadata.is_file() { bail!("existing unit is not a regular file"); }
+            Some(loop {
+                let path = unit_temporary_path(unit);
+                match std::fs::hard_link(unit, &path) {
+                    Ok(()) => break UnitTemporary(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error).context("preserving previous unit"),
+                }
+            })
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let directory = std::fs::File::open(unit.parent().unwrap())?;
+    std::fs::rename(&temporary.0, unit)?;
+    if let Err(error) = directory.sync_all().map_err(anyhow::Error::from).and_then(|_| reload()) {
+        let rollback = match &backup {
+            Some(backup) => std::fs::rename(&backup.0, unit),
+            None => std::fs::remove_file(unit),
+        }.and_then(|_| directory.sync_all());
+        if let Err(rollback_error) = rollback {
+            let recovery = backup.take().map(|backup| {
+                let path = backup.0.clone();
+                std::mem::forget(backup);
+                path
+            });
+            bail!("{error:#}; restoring previous unit failed: {rollback_error}; previous inode retained at {recovery:?}");
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -190,6 +253,34 @@ fn desktop_executable(path: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_replacement_is_atomic_and_preserves_previous_on_failure() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let directory = std::env::temp_dir().join(format!("fbt-unit-atomic-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let unit = directory.join("fixture.service");
+        std::fs::write(&unit, "previous").unwrap();
+        let inode = std::fs::metadata(&unit).unwrap().ino();
+        let failure = super::replace_unit(&unit, b"replacement", || {
+            assert_eq!(std::fs::read(&unit).unwrap(), b"replacement");
+            anyhow::bail!("reload failed")
+        });
+        assert!(failure.unwrap_err().to_string().contains("reload failed"));
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read(&unit).unwrap(), b"previous");
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let refused = super::replace_unit(&unit, b"forbidden", || panic!("must not reload"));
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(refused.is_err(), "same-directory temporary must require directory write permission");
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read(&unit).unwrap(), b"previous");
+        super::replace_unit(&unit, b"installed", || Ok(())).unwrap();
+        assert_ne!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+        println!("atomic unit rename, failed reload rollback and 0500 directory refusal verified");
+    }
+
     #[test]
     fn static_daemon_unit_policy_and_exec_escaping() {
         let unit = super::daemon_unit(std::path::Path::new("/tmp/a path/%/$/fbittorrent")).unwrap();

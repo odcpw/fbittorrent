@@ -91,6 +91,58 @@ pub fn manager_status(args: &[&str], bound: Duration) -> Result<bool> {
     }
 }
 
+/// Small property replies only; keep manager control bounded even on a lost bus.
+pub fn manager_properties(unit: &str) -> Result<Option<std::collections::HashMap<String, String>>> {
+    let mut child = manager_command()
+        .args(["show", unit, "--property=LoadState,ActiveState,SubState,MainPID,Job"])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let status = loop {
+        if let Some(status) = child.try_wait()? { break status; }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("systemctl show {unit} timed out");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if !status.success() { return Ok(None); }
+    let mut output = String::new();
+    child.stdout.take().unwrap().take(4096).read_to_string(&mut output)?;
+    Ok(Some(output.lines().filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned())).collect()))
+}
+
+/// Cancel scheduled restarts as well as a currently running manager-owned daemon.
+/// No installed unit means a foreground owner; its socket shutdown remains valid.
+pub fn stop_managed_daemon() -> Result<bool> {
+    if !unit_path()?.is_file() { return Ok(false); }
+    let unit = unit_name()?;
+    let Some(before) = manager_properties(&unit)? else { return Ok(false); };
+    if before.get("LoadState").map(String::as_str) != Some("loaded") { return Ok(false); }
+    let was_running = !manager_stopped(&before);
+    if !manager_status(&["stop", &unit], Duration::from_secs(25))? {
+        return Err(backend_error(format!("systemctl --user stop {unit} failed"), "fbittorrent status --json"));
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let after = manager_properties(&unit)?;
+        if after.as_ref().is_some_and(manager_stopped) { return Ok(was_running); }
+        if Instant::now() >= deadline {
+            return Err(AppError::new(Code::Timeout, format!("{unit} has not stopped; observed {after:?}"))
+                .hint("fbittorrent status --json").into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn manager_stopped(state: &std::collections::HashMap<String, String>) -> bool {
+    matches!(state.get("ActiveState").map(String::as_str), Some("inactive" | "failed"))
+        && state.get("MainPID").map(String::as_str) == Some("0")
+        && state.get("Job").is_some_and(|job| job.is_empty() || job == "0")
+        && state.get("SubState").map(String::as_str) != Some("auto-restart")
+}
+
 fn deactivating(unit: &str) -> Result<bool> {
     let mut child = manager_command()
         .args(["is-active", unit])

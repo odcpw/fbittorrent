@@ -45,8 +45,11 @@ pub fn ensure_running(cfg: &Config, client: &Client) -> Result<bool> {
 
 pub fn stop(cfg: &Config) -> Result<()> {
     if cfg.native() {
+        // A free instance lock during RestartSec does not mean the owner is
+        // stopped: cancel the manager's pending restart before probing the lock.
+        let managed = crate::api::client::stop_managed_daemon()?;
         let deadline = Instant::now() + Duration::from_secs(15);
-        let mut sent = false;
+        let mut sent = managed;
         let mut request_cfg = cfg.clone();
         request_cfg.timeout_secs = 1;
         loop {
