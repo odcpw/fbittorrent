@@ -2,13 +2,8 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::ffi::CString;
-use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 
-use crate::{config::Config, ipc::{InstanceLock, Request, Server}};
-
-static RESTART: AtomicBool = AtomicBool::new(false);
-static CLOSE: AtomicBool = AtomicBool::new(false);
-static EXPECTED: Mutex<Option<NetworkState>> = Mutex::new(None);
+use crate::{config::Config, daemon::lifecycle::{Lifecycle, RestartReason, StopReason}, ipc::{InstanceLock, Request, Server}};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NetworkState {
@@ -53,29 +48,18 @@ pub fn interfaces() -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn initialize(snapshot: NetworkState) {
-    CLOSE.store(false, Ordering::Release);
-    RESTART.store(false, Ordering::Release);
-    *EXPECTED.lock().unwrap_or_else(|error| error.into_inner()) = Some(snapshot);
-}
-pub fn request_restart() { RESTART.store(true, Ordering::Release); }
-pub fn request_close() { CLOSE.store(true, Ordering::Release); }
-pub fn close_requested() -> bool { CLOSE.load(Ordering::Acquire) }
-pub fn restart_requested() -> bool { RESTART.load(Ordering::Acquire) }
-
-pub fn check_transition(cfg: &Config) -> bool {
-    if restart_requested() { return true; }
-    let expected = EXPECTED.lock().unwrap_or_else(|error| error.into_inner());
-    if let Some(expected) = expected.as_ref() {
-        if expected.selection.is_some() && *expected != state(cfg) {
-            request_restart();
+pub fn check_transition(cfg: &Config, lifecycle: &Lifecycle) -> bool {
+    if lifecycle.pending_request().is_some() { return true; }
+    if let Some(expected) = lifecycle.expected_network() {
+        if expected.selection.is_some() && expected != state(cfg) {
+            lifecycle.request_restart(RestartReason::Network);
             return true;
         }
     }
     false
 }
 
-pub fn controls(request: &Request, snapshot: &NetworkState) -> Option<Result<String>> {
+pub fn controls(request: &Request, snapshot: &NetworkState, lifecycle: &Lifecycle) -> Option<Result<String>> {
     match request.path.as_str() {
         "app/network" => Some(serde_json::to_string(snapshot).map_err(Into::into)),
         "app/settings" => Some(Config::load().and_then(|cfg| Ok(serde_json::json!({
@@ -83,8 +67,8 @@ pub fn controls(request: &Request, snapshot: &NetworkState) -> Option<Result<Str
             "peer_encryption": cfg.peer_encryption,
             "network_interface": cfg.network_interface,
         }).to_string()))),
-        "app/restart" if request.method == "POST" => { request_restart(); Some(Ok("Ok.".into())) },
-        "app/shutdown" if request.method == "POST" => { CLOSE.store(true, Ordering::Release); Some(Ok("Ok.".into())) },
+        "app/restart" if request.method == "POST" => { lifecycle.request_restart(RestartReason::Explicit); Some(Ok("Ok.".into())) },
+        "app/shutdown" if request.method == "POST" => { lifecycle.request_stop(StopReason::Quit); Some(Ok("Ok.".into())) },
         _ => None,
     }
 }
@@ -95,10 +79,10 @@ pub struct ParkedEngine {
     _instance: InstanceLock,
 }
 impl ParkedEngine {
-    pub fn start(cfg: &Config, snapshot: NetworkState) -> Result<Self> {
+    pub fn start(cfg: &Config, snapshot: NetworkState, lifecycle: Lifecycle) -> Result<Self> {
         let instance = InstanceLock::acquire()?;
         let server = Server::start(cfg, &instance, move |request| {
-            controls(request, &snapshot).or_else(|| crate::engine::dispatch_parked(request))
+            controls(request, &snapshot, &lifecycle).or_else(|| crate::engine::dispatch_parked(request, &lifecycle))
                 .unwrap_or_else(|| Err(anyhow::anyhow!("{}; connect the selected VPN before this action", snapshot.message)))
         }).context("opening the app while waiting for its VPN")?;
         Ok(Self { _server: server, _instance: instance })
@@ -122,5 +106,25 @@ mod tests {
         let mut cfg = Config::default();
         cfg.network_interface = Some("proton".into());
         assert_eq!(state(&cfg).interface.as_deref(), Some("proton0"));
+    }
+
+    #[test]
+    fn network_expectations_and_restart_requests_are_per_lifecycle() {
+        use crate::daemon::lifecycle::Request as LifecycleRequest;
+        let cfg = Config::default();
+        let first = Lifecycle::default();
+        let second = Lifecycle::default();
+        assert_eq!(first.expected_network(), None);
+        let missing = Config { network_interface: Some("fbmissing0".into()), ..Default::default() };
+        first.set_expected_network(Some(state(&missing)));
+        second.set_expected_network(Some(state(&cfg)));
+        assert!(check_transition(&cfg, &first));
+        assert!(!check_transition(&cfg, &second));
+        assert_eq!(first.wait(std::time::Duration::ZERO), Some(LifecycleRequest::Restart(RestartReason::Network)));
+        assert_eq!(second.pending_request(), None);
+        assert_eq!(first.expected_network(), Some(state(&missing)));
+        first.set_expected_network(None);
+        assert!(!check_transition(&cfg, &first));
+        assert_eq!(second.expected_network(), Some(state(&cfg)));
     }
 }

@@ -27,14 +27,11 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
+use crate::daemon::lifecycle::{Lifecycle, StopReason};
 use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 static RESTORE_GENERATION: AtomicUsize = AtomicUsize::new(0);
-static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
-pub fn quit_requested() -> bool {
-    QUIT_REQUESTED.load(Ordering::Acquire)
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
@@ -542,6 +539,7 @@ impl Inner {
 
 #[derive(Clone)]
 pub struct EngineDispatcher {
+    lifecycle: Lifecycle,
     inner: Arc<Inner>,
     runtime: Handle,
 }
@@ -554,11 +552,10 @@ pub struct AppEngine {
     instance: InstanceLock,
 }
 
-pub fn start(cfg: &Config) -> Result<AppEngine> {
+pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
     cfg.validate()?;
     let instance = InstanceLock::acquire()?;
-    QUIT_REQUESTED.store(false, Ordering::Release);
-    start_in(cfg, crate::config::data_dir().join("engine"), instance, SessionOptions {
+    start_in(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
         peer_encryption: match cfg.peer_encryption.as_str() {
             "off" => librqbit::PeerEncryption::Off,
             "require" => librqbit::PeerEncryption::Require,
@@ -581,7 +578,7 @@ pub fn start(cfg: &Config) -> Result<AppEngine> {
 }
 
 // The production startup path, with explicit paths/options for local-only tests.
-fn start_in(cfg: &Config, directory: PathBuf, instance: InstanceLock, options: SessionOptions) -> Result<AppEngine> {
+fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: InstanceLock, options: SessionOptions) -> Result<AppEngine> {
     std::fs::create_dir_all(&directory)?;
     let ledger_path = directory.join("torrents.json");
     let ledger = read_ledger(&ledger_path)?;
@@ -619,6 +616,7 @@ fn start_in(cfg: &Config, directory: PathBuf, instance: InstanceLock, options: S
     })?;
     inner.begin_restores(cx, records)?;
     let dispatcher = EngineDispatcher {
+        lifecycle,
         inner: inner.clone(),
         runtime: runtime.handle(),
     };
@@ -747,7 +745,7 @@ impl EngineDispatcher {
     async fn dispatch_async(&self, cx: &Cx, request: &Request) -> Result<String> {
         match request.path.as_str() {
             "app/version" => return Ok(format!("native librqbit {}", librqbit::version())),
-            "app/shutdown" => { QUIT_REQUESTED.store(true, Ordering::Release); return Ok("Ok.".into()); },
+            "app/shutdown" => { self.lifecycle.request_stop(StopReason::Quit); return Ok("Ok.".into()); },
             "app/queue" => {
                 let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
                 let mut active = 0;
@@ -1418,7 +1416,7 @@ fn parked_snapshot(record: &Record, directory: &Path) -> Result<serde_json::Valu
     Ok(value)
 }
 
-fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<String>> {
+fn dispatch_parked_in(request: &Request, directory: &Path, lifecycle: &Lifecycle) -> Option<Result<String>> {
     if !matches!(
         request.path.as_str(),
         "app/version"
@@ -1450,7 +1448,7 @@ fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<Stri
                 ))
             }
             "app/shutdown" => {
-                QUIT_REQUESTED.store(true, Ordering::Release);
+                lifecycle.request_stop(StopReason::Quit);
                 return Ok("Ok.".into());
             }
             "transfer/info" => {
@@ -1540,8 +1538,8 @@ fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<Stri
 }
 
 /// Serve saved history and durable intent while no VPN-bound session exists.
-pub fn dispatch_parked(request: &Request) -> Option<Result<String>> {
-    dispatch_parked_in(request, &crate::config::data_dir().join("engine"))
+pub fn dispatch_parked(request: &Request, lifecycle: &Lifecycle) -> Option<Result<String>> {
+    dispatch_parked_in(request, &crate::config::data_dir().join("engine"), lifecycle)
 }
 
 fn required<'a>(request: &'a Request, key: &str) -> Result<&'a str> {
@@ -1705,6 +1703,10 @@ fn snapshot(record: &Record, handle: &Arc<ManagedTorrent>, check_cancelled: bool
 
 #[cfg(test)]
 mod tests {
+    fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<String>> {
+        super::dispatch_parked_in(request, directory, &Lifecycle::default())
+    }
+
     fn test_cx() -> Cx {
         Cx::current().expect("native test runtime context")
     }
@@ -1802,6 +1804,7 @@ mod tests {
             inner.maintain(&test_cx()).await.unwrap();
         });
         let dispatcher = EngineDispatcher {
+            lifecycle: Lifecycle::default(),
             inner,
             runtime: runtime.handle(),
         };
@@ -1834,6 +1837,93 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn two_engines_one_process() {
+        use crate::daemon::lifecycle::{Request as LifecycleRequest, RestartReason};
+        use std::io::{Read, Write};
+        use std::os::unix::net::UnixStream;
+
+        fn open(label: &str, lifecycle: Lifecycle) -> (AppEngine, PathBuf, PathBuf) {
+            let directory = review_directory(label);
+            let socket = directory.join("runtime/engine.sock");
+            let cfg = Config {
+                save_path: Some(directory.join("downloads").to_string_lossy().into()),
+                ..Default::default()
+            };
+            let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+            let mut app = start_in(&cfg, lifecycle.clone(), directory.clone(), instance, SessionOptions {
+                dht: None,
+                disable_trackers: true,
+                disable_local_service_discovery: true,
+                ..Default::default()
+            }).unwrap();
+            let snapshot = crate::network_app::state(&cfg);
+            lifecycle.set_expected_network(Some(snapshot.clone()));
+            let dispatcher = app.dispatcher();
+            app.serve(&cfg, move |request| {
+                crate::network_app::controls(request, &snapshot, &lifecycle)
+                    .or_else(|| dispatcher.dispatch(request)).unwrap()
+            }).unwrap();
+            println!("engine {label}: directory={} socket={}", directory.display(), socket.display());
+            (app, directory, socket)
+        }
+
+        fn call(socket: &Path, path: &str) -> String {
+            let mut stream = UnixStream::connect(socket).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
+            let bytes = serde_json::to_vec(&request(path, &[])).unwrap();
+            stream.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
+            stream.write_all(&bytes).unwrap();
+            let mut header = [0; 4];
+            stream.read_exact(&mut header).unwrap();
+            let mut bytes = vec![0; u32::from_be_bytes(header) as usize];
+            stream.read_exact(&mut bytes).unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert!(response["error"].is_null(), "{response}");
+            response["value"].as_str().unwrap().to_owned()
+        }
+
+        let first = Lifecycle::default();
+        let second = Lifecycle::default();
+        let (app_a, directory_a, socket_a) = open("lifecycle-a", first.clone());
+        assert_eq!(call(&socket_a, "app/restart"), "Ok.");
+        // Starting another real session must not clear the first owner's request.
+        let (app_b, directory_b, socket_b) = open("lifecycle-b", second.clone());
+        assert_ne!(directory_a, directory_b);
+        assert_ne!(socket_a, socket_b);
+        assert_eq!(first.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Explicit)));
+        assert_eq!(second.wait(Duration::ZERO), None);
+        assert_eq!(call(&socket_a, "torrents/info"), "[]");
+        assert_eq!(call(&socket_b, "torrents/info"), "[]");
+
+        // Exercise the engine's own shutdown route as well as network_app's
+        // control handler: both must target only the lifecycle passed to them.
+        app_a.dispatcher().dispatch(&request("app/shutdown", &[])).unwrap().unwrap();
+        assert_eq!(first.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
+        assert_eq!(second.pending_request(), None);
+        drop(app_a);
+        assert!(!socket_a.exists());
+        assert_eq!(call(&socket_b, "torrents/info"), "[]");
+        assert_eq!(call(&socket_b, "app/shutdown"), "Ok.");
+        assert_eq!(second.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
+        assert_eq!(first.pending_request(), None);
+        drop(app_b);
+        assert!(!socket_b.exists());
+        std::fs::remove_dir_all(directory_a).unwrap();
+        std::fs::remove_dir_all(directory_b).unwrap();
+    }
+
+    #[test]
+    fn parked_shutdown_uses_its_lifecycle() {
+        use crate::daemon::lifecycle::Request as LifecycleRequest;
+        let directory = review_directory("parked-lifecycle");
+        let lifecycle = Lifecycle::default();
+        assert_eq!(super::dispatch_parked_in(&request("app/shutdown", &[]), &directory, &lifecycle)
+            .unwrap().unwrap(), "Ok.");
+        assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
     }
 
     #[test]
@@ -2018,7 +2108,7 @@ mod tests {
         }).unwrap()).unwrap();
         let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
         let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
-        let app = start_in(&cfg, directory.clone(), instance, SessionOptions {
+        let app = start_in(&cfg, Lifecycle::default(), directory.clone(), instance, SessionOptions {
             dht: None, disable_trackers: true, disable_local_service_discovery: true,
             concurrent_init_limit: Some(1), ..Default::default()
         }).unwrap();
@@ -2152,7 +2242,7 @@ mod tests {
         let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
         let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
         let began = Instant::now();
-        let app = start_in(&cfg, directory.clone(), instance, SessionOptions {
+        let app = start_in(&cfg, Lifecycle::default(), directory.clone(), instance, SessionOptions {
             dht: None, disable_local_service_discovery: true, concurrent_init_limit: Some(1), ..Default::default()
         }).unwrap();
         let duration = began.elapsed();
