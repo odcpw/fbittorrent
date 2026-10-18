@@ -192,3 +192,11 @@ Receipt: [P1-03.md](P1-03.md) (branch ntm/fbittorrent/cod_1, commits e320b68 and
 ## P5-06
 
 Receipt: [P5-06.md](P5-06.md) (branch ntm/fbittorrent/cod_2, commit cfda9b5; merged by the orchestrator after an Astra review that re-ran the three fork tests independently; the review's non-blocking P3, boxing the snapshot outside the chunk-tracker locks, is bead P5-06b; batch gate on main follows).
+
+## P6-07
+
+Receipt: [P6-07.md](P6-07.md) (branch ntm/fbittorrent/cod_4-p6-07-9bt, commit 73c22f9; merged by the orchestrator after an Astra review; the daemon.py conflict with P1-03's harness was resolved additively by the orchestrator; its 19-line docs/IPC.md note is folded into P1-05's document when that merges; the disclosed startup-teardown flake is bead P1-03b; batch gate on main follows).
+
+## P5-06b
+
+Receipt: [P5-06b.md](P5-06b.md) (branch ntm/fbittorrent/cod_2-p5-06b-vt1, commit 0c7ac31; the exact change prescribed by the P5-06 review, verified by the orchestrator from the diff; batch gate on main follows).
