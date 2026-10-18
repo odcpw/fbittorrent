@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -97,6 +97,7 @@ impl Store {
         std::fs::create_dir_all(parent)?;
         let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)
             .mode(0o600).open(self.path.with_extension("lock"))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         loop {
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
                 return Ok(FileLock(file));
@@ -130,6 +131,7 @@ impl Store {
         let tmp = self.path.with_extension(format!("{}.{}.tmp", std::process::id(), suffix));
         let result = (|| -> Result<()> {
             let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             serde_json::to_writer(&mut file, data)?;
             file.write_all(b"\n")?;
             file.sync_all()?;
@@ -527,6 +529,25 @@ mod tests {
         }
     }
     impl Drop for Scratch { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+
+    #[test]
+    fn rss_save_is_private_for_new_and_existing_stores() {
+        let (_scratch, store) = Scratch::store();
+        for replacement in [false, true] {
+            if replacement {
+                for path in [&store.path, &store.path.with_extension("lock")] {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            store.mutate(|data| { data.feeds.push(StoredFeed::default()); Ok(()) }).unwrap();
+            for path in [&store.path, &store.path.with_extension("lock")] {
+                let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "{}", path.display());
+                println!("{}: {mode:o} after RSS save", path.display());
+            }
+        }
+        assert_eq!(store.load().unwrap().feeds.len(), 2);
+    }
 
     const RSS: &str = r#"<?xml version="1.0"?><rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel>
         <title>Example &amp; releases</title><lastBuildDate>Fri, 09 Oct 2026 12:00:00 +0000</lastBuildDate>

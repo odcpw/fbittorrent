@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -94,6 +94,7 @@ impl ProviderStore {
             .truncate(false)
             .mode(0o600)
             .open(self.data.join("search.lock"))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         loop {
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
                 return Ok(PrefLock(file));
@@ -206,9 +207,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         file.write_all(bytes)?;
         file.sync_all()?;
         std::fs::rename(&temporary, path)?;
+        if let Some(parent) = path.parent() { File::open(parent)?.sync_all()?; }
         Ok(())
     })();
     if result.is_err() {
@@ -565,6 +568,7 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
                 return Err(error).context("invalid provider script");
             }
             std::fs::rename(&staged, &path)?;
+            File::open(path.parent().context("provider path has no parent")?)?.sync_all()?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -1011,6 +1015,29 @@ mod tests {
                 legacy: None,
             },
         )
+    }
+
+    #[test]
+    fn search_save_is_private_for_new_and_existing_stores() {
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        for replacement in [false, true] {
+            if replacement {
+                for path in [store.preferences(), store.data.join("search.lock")] {
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            let _lock = store.lock().unwrap();
+            let mut preferences = store.load().unwrap();
+            preferences.enabled.insert("private_fixture".into(), replacement);
+            store.save(&preferences).unwrap();
+            for path in [store.preferences(), store.data.join("search.lock")] {
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "{}", path.display());
+                println!("{}: {mode:o} after search save", path.display());
+            }
+            assert_eq!(store.load().unwrap().enabled["private_fixture"], replacement);
+        }
     }
 
     #[test]

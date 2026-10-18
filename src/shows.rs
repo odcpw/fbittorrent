@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -265,7 +266,9 @@ impl Shows {
             let mut f = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
+                .mode(0o600)
                 .open(&tmp)?;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             f.write_all(serde_json::to_string_pretty(&output)?.as_bytes())?;
             f.sync_all()?;
             std::fs::rename(&tmp, p).with_context(|| format!("writing {}", p.display()))?;
@@ -422,7 +425,9 @@ fn store_lock(p: &std::path::Path) -> Result<std::fs::File> {
         .truncate(false)
         .read(true)
         .write(true)
+        .mode(0o600)
         .open(p.with_extension("json.lock"))?;
+    lock.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     let start = Instant::now();
     loop {
         // flock is advisory and the file descriptor releases it on every exit.
@@ -765,6 +770,29 @@ pub fn refresh(show: &mut Show, default_quality: &str) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shows_save_is_private_for_new_and_existing_stores() {
+        let dir = std::env::temp_dir().join(format!("fbt-shows-private-{}", std::process::id()));
+        let path = dir.join("shows.json");
+        let mut shows = Shows::default();
+        shows.follow(&Title { id: "tt1234001".into(), name: "Private fixture".into(), ..Default::default() });
+        for replacement in [false, true] {
+            if replacement {
+                for file in [&path, &path.with_extension("json.lock")] {
+                    std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            shows.save_to(&path).unwrap();
+            for file in [&path, &path.with_extension("json.lock")] {
+                let mode = std::fs::metadata(file).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "{}", file.display());
+                println!("{}: {mode:o} after Shows save", file.display());
+            }
+            assert_eq!(Shows::load_from(&path).unwrap().shows[0].title, "Private fixture");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn raw(title: &str, s: i64, e: i64, seeds: i64) -> Raw {
         Raw {

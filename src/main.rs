@@ -886,11 +886,47 @@ impl LegacyMigration {
         let staged = path.with_extension("json.tmp");
         let mut file = std::fs::OpenOptions::new().create(true).truncate(true).write(true)
             .mode(0o600).open(&staged)?;
+        // Creation mode does not repair a temporary left by an earlier writer.
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         file.write_all(&serde_json::to_vec_pretty(self)?)?;
         file.sync_all()?;
         std::fs::rename(&staged, path)?;
         std::fs::File::open(directory)?.sync_all()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod migration_store_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn migration_save_is_private_for_new_and_reused_temporaries() {
+        let directory = std::env::temp_dir().join(format!("fbittorrent-migration-private-{}", std::process::id()));
+        let path = directory.join("legacy-migration.json");
+        let migration = LegacyMigration {
+            phase: "captured".into(), source_url: "http://127.0.0.1:9".into(),
+            source_unit: "private-fixture.service".into(), backup: directory.join("backup"),
+            torrents: Vec::new(), files: Default::default(), feeds: Vec::new(), plugins: Vec::new(),
+        };
+        for replacement in [false, true] {
+            if replacement {
+                for file in [&path, &path.with_extension("json.tmp")] {
+                    std::fs::write(file, b"old file").unwrap();
+                    std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            migration.save(&path).unwrap();
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+            let saved: LegacyMigration = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved.phase, "captured");
+            assert!(!path.with_extension("json.tmp").exists());
+            println!("{}: {mode:o} after migration save", path.display());
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
 

@@ -29,15 +29,7 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
         std::fs::create_dir_all(&save).context("creating the app download folder")?;
         cfg.save_path = Some(save.clone());
         let path = crate::config::config_path();
-        std::fs::create_dir_all(crate::config::config_dir())?;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let staged = path.with_extension("toml.tmp");
-        let mut file = std::fs::OpenOptions::new().create(true).truncate(true).write(true)
-            .mode(0o600).open(&staged)?;
-        file.write_all(toml::to_string_pretty(&cfg)?.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&staged, &path)?;
+        cfg.save()?;
         eprintln!("config at {}; downloads in {save}", path.display());
         eprintln!("the native engine runs while the fbittorrent app is open");
         return Ok(());

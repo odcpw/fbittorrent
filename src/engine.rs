@@ -20,6 +20,7 @@ use rqbit_runtime::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -166,12 +167,17 @@ impl Inner {
         Ok(self.directory.join(format!("{hash}.torrent")))
     }
     async fn save(&self, cx: &Cx, ledger: &Ledger) -> Result<()> {
+        self.write_store(cx, "torrents.json", &serde_json::to_vec_pretty(ledger)?).await
+    }
+    async fn write_store(&self, cx: &Cx, name: &str, bytes: &[u8]) -> Result<()> {
         cx.checkpoint()?;
-        let bytes = serde_json::to_vec_pretty(ledger)?;
-        let temporary = self.directory.join("torrents.json.tmp");
-        let final_path = self.directory.join("torrents.json");
-        let mut file = rqbit_runtime::fs::File::create(&temporary).await?;
-        file.write_all(&bytes).await?;
+        let temporary = self.directory.join(format!("{name}.tmp"));
+        let final_path = self.directory.join(name);
+        let mut file = rqbit_runtime::fs::OpenOptions::new()
+            .write(true).create(true).truncate(true).mode(0o600).open(&temporary).await?;
+        // mode() only applies to creation; a pre-upgrade temporary may be 0644.
+        file.set_permissions(rqbit_runtime::fs::Permissions::from_mode(0o600)).await?;
+        file.write_all(bytes).await?;
         file.sync_all().await?;
         drop(file);
         rqbit_runtime::fs::rename(&temporary, &final_path).await?;
@@ -249,15 +255,8 @@ impl Inner {
         Ok(())
     }
     async fn write_metadata(&self, cx: &Cx, hash: &str, bytes: &[u8]) -> Result<()> {
-        cx.checkpoint()?;
-        let final_path = self.torrent_path(hash)?;
-        let temporary = self.directory.join(format!("{hash}.torrent.tmp"));
-        let mut file = rqbit_runtime::fs::File::create(&temporary).await?;
-        file.write_all(bytes).await?;
-        file.sync_all().await?;
-        drop(file);
-        rqbit_runtime::fs::rename(temporary, final_path).await?;
-        Ok(())
+        validate_info_hash(hash)?;
+        self.write_store(cx, &format!("{hash}.torrent"), bytes).await
     }
     async fn rebuild(&self, cx: &Cx, old: &Record, changed: &Record) -> Result<()> {
         let handle = self.handle(&old.hash)?;
@@ -481,11 +480,7 @@ pub fn start(cfg: &Config) -> Result<AppEngine> {
             }
             if let Err(error) = inner.maintain(cx).await {
                 // Keep the failure available without writing over a running TUI.
-                let _ = rqbit_runtime::fs::write(
-                    inner.directory.join("last-error.txt"),
-                    format!("{error:#}\n"),
-                )
-                .await;
+                let _ = inner.write_store(cx, "last-error.txt", format!("{error:#}\n").as_bytes()).await;
             }
         }
     });
@@ -1165,7 +1160,9 @@ fn save_parked_ledger(directory: &Path, ledger: &Ledger) -> Result<()> {
     use std::io::Write;
     std::fs::create_dir_all(directory)?;
     let temporary = directory.join("torrents.json.tmp");
-    let mut file = std::fs::File::create(&temporary)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(&serde_json::to_vec_pretty(ledger)?)?;
     file.sync_all()?;
     drop(file);
@@ -1651,6 +1648,63 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn engine_store_saves_are_private_for_new_and_reused_temporaries() {
+        let directory = review_directory("private-engine");
+        let app = test_app(&directory, &directory.join("downloads"), Ledger::default(), None);
+        let hash = "1234567890123456789012345678901234567890";
+        let names = ["torrents.json".to_string(), format!("{hash}.torrent"), "last-error.txt".into()];
+        for replacement in [false, true] {
+            if replacement {
+                for name in &names {
+                    std::fs::set_permissions(directory.join(name), std::fs::Permissions::from_mode(0o644)).unwrap();
+                    let temporary = directory.join(format!("{name}.tmp"));
+                    std::fs::write(&temporary, b"old temporary").unwrap();
+                    std::fs::set_permissions(temporary, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            app.dispatcher.runtime.block_on(async {
+                let inner = &app.dispatcher.inner;
+                inner.save(&test_cx(), &Ledger::default()).await.unwrap();
+                inner.write_metadata(&test_cx(), hash, b"private metadata").await.unwrap();
+                inner.write_store(&test_cx(), "last-error.txt", b"private error\n").await.unwrap();
+            });
+            for name in &names {
+                let path = directory.join(name);
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "{}", path.display());
+                assert!(!directory.join(format!("{name}.tmp")).exists());
+                println!("{}: {mode:o} after live engine save", path.display());
+            }
+            assert_eq!(std::fs::read(directory.join(&names[1])).unwrap(), b"private metadata");
+            assert!(read_ledger(&directory.join("torrents.json")).unwrap().records.is_empty());
+        }
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn parked_ledger_save_is_private_for_new_and_reused_temporaries() {
+        let directory = review_directory("private-parked-ledger");
+        for replacement in [false, true] {
+            if replacement {
+                for name in ["torrents.json", "torrents.json.tmp"] {
+                    let path = directory.join(name);
+                    std::fs::write(&path, b"old file").unwrap();
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+                }
+            }
+            save_parked_ledger(&directory, &Ledger::default()).unwrap();
+            let path = directory.join("torrents.json");
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+            assert!(read_ledger(&path).unwrap().records.is_empty());
+            assert!(!directory.join("torrents.json.tmp").exists());
+            println!("{}: {mode:o} after parked engine save", path.display());
+        }
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
