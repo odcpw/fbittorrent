@@ -31,7 +31,8 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
         let path = crate::config::config_path();
         cfg.save()?;
         eprintln!("config at {}; downloads in {save}", path.display());
-        eprintln!("the native engine runs while the fbittorrent app is open");
+        install_unit()?;
+        eprintln!("the native daemon starts on demand; nothing is enabled at login");
         return Ok(());
     }
     let nox = PathBuf::from("/usr/bin/qbittorrent-nox");
@@ -93,15 +94,137 @@ pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     Ok(())
 }
 
+
+/// Static on-demand unit: deliberately no Install section or login enablement.
+pub fn daemon_unit(exe: &std::path::Path) -> Result<String> {
+    let path = exe.to_str().context("executable path is not UTF-8")?;
+    if !exe.is_absolute() || path.chars().any(char::is_control) { bail!("invalid daemon executable path"); }
+    // Specifiers expand in the executable word; environment variables do not.
+    // Escape percent while retaining a literal dollar in current_exe's path.
+    let path = path.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
+    Ok(format!(r#"[Unit]
+Description=fbittorrent torrent engine (started on demand)
+Documentation=https://github.com/odcpw/fbittorrent
+# On-demand units start often; avoid wedging after normal idle/upgrade cycles.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart="{path}" serve
+KillSignal=SIGTERM
+# Signal the owner first; kill any remaining children only at the deadline.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+RestartForceExitStatus=75
+SuccessExitStatus=75
+NoNewPrivileges=yes
+# Static by design: no login enablement links.
+"#))
+}
+
+fn reload_manager() -> Result<()> {
+    if !crate::api::client::manager_status(&["daemon-reload"], std::time::Duration::from_secs(10))? {
+        bail!("systemctl --user daemon-reload failed");
+    }
+    Ok(())
+}
+
+fn install_unit() -> Result<()> {
+    let unit = crate::api::client::unit_path()?;
+    std::fs::create_dir_all(unit.parent().unwrap())?;
+    replace_unit(&unit, daemon_unit(&std::env::current_exe()?)?.as_bytes(), reload_manager)?;
+    eprintln!("wrote {} (static, not enabled)", unit.display());
+    Ok(())
+}
+
+struct UnitTemporary(PathBuf);
+
+impl Drop for UnitTemporary {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
+fn unit_temporary_path(unit: &std::path::Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    unit.with_file_name(format!(".{}.{}-{}.tmp", unit.file_name().unwrap().to_string_lossy(),
+        std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)))
+}
+
+/// Same-directory creation checks directory writability, unlike truncating an
+/// existing writable inode. Keep the old inode until reload succeeds so any
+/// subsequent failure can restore it by another atomic rename.
+fn replace_unit(unit: &std::path::Path, body: &[u8], reload: impl FnOnce() -> Result<()>) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let (temporary, mut file) = loop {
+        let path = unit_temporary_path(unit);
+        match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).open(&path) {
+            Ok(file) => break (UnitTemporary(path), file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error).context("creating same-directory unit temporary"),
+        }
+    };
+    file.write_all(body)?;
+    file.sync_all()?;
+    let mut backup = match std::fs::symlink_metadata(unit) {
+        Ok(metadata) => {
+            if !metadata.is_file() { bail!("existing unit is not a regular file"); }
+            Some(loop {
+                let path = unit_temporary_path(unit);
+                match std::fs::hard_link(unit, &path) {
+                    Ok(()) => break UnitTemporary(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => return Err(error).context("preserving previous unit"),
+                }
+            })
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let directory = std::fs::File::open(unit.parent().unwrap())?;
+    std::fs::rename(&temporary.0, unit)?;
+    if let Err(error) = directory.sync_all().map_err(anyhow::Error::from).and_then(|_| reload()) {
+        let rollback = match &backup {
+            Some(backup) => std::fs::rename(&backup.0, unit),
+            None => std::fs::remove_file(unit),
+        }.and_then(|_| directory.sync_all());
+        if let Err(rollback_error) = rollback {
+            let recovery = backup.take().map(|backup| {
+                let path = backup.0.clone();
+                std::mem::forget(backup);
+                path
+            });
+            bail!("{error:#}; restoring previous unit failed: {rollback_error}; previous inode retained at {recovery:?}");
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+pub fn uninstall() -> Result<()> {
+    let unit = crate::api::client::unit_path()?;
+    match std::fs::remove_file(&unit) {
+        Ok(()) => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+        Err(error) => return Err(error.into()),
+    }
+    reload_manager()?;
+    eprintln!("removed {}; saved data is kept", unit.display());
+    Ok(())
+}
+
 /// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
 pub fn register_magnet_handler() -> Result<()> {
     let exe = std::env::current_exe()?;
     let command = desktop_executable(&exe.to_string_lossy())?;
-    let home = dirs::home_dir().context("no home dir")?;
-    let apps = home.join(".local/share/applications");
+    let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
     std::fs::create_dir_all(&apps)?;
     std::fs::write(apps.join("fbittorrent.desktop"), format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} up\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
     let desktop = apps.join("fbittorrent-magnet.desktop");
     std::fs::write(&desktop, format!(
         "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add %u\nIcon=qbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
@@ -130,6 +253,46 @@ fn desktop_executable(path: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_replacement_is_atomic_and_preserves_previous_on_failure() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let directory = std::env::temp_dir().join(format!("fbt-unit-atomic-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let unit = directory.join("fixture.service");
+        std::fs::write(&unit, "previous").unwrap();
+        let inode = std::fs::metadata(&unit).unwrap().ino();
+        let failure = super::replace_unit(&unit, b"replacement", || {
+            assert_eq!(std::fs::read(&unit).unwrap(), b"replacement");
+            anyhow::bail!("reload failed")
+        });
+        assert!(failure.unwrap_err().to_string().contains("reload failed"));
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read(&unit).unwrap(), b"previous");
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let refused = super::replace_unit(&unit, b"forbidden", || panic!("must not reload"));
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(refused.is_err(), "same-directory temporary must require directory write permission");
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read(&unit).unwrap(), b"previous");
+        super::replace_unit(&unit, b"installed", || Ok(())).unwrap();
+        assert_ne!(std::fs::metadata(&unit).unwrap().ino(), inode);
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+        println!("atomic unit rename, failed reload rollback and 0500 directory refusal verified");
+    }
+
+    #[test]
+    fn static_daemon_unit_policy_and_exec_escaping() {
+        let unit = super::daemon_unit(std::path::Path::new("/tmp/a path/%/$/fbittorrent")).unwrap();
+        for line in ["Type=notify", "NotifyAccess=main", "KillMode=mixed", "TimeoutStopSec=20", "Restart=on-failure", "RestartSec=2", "RestartForceExitStatus=75", "SuccessExitStatus=75", "StartLimitIntervalSec=60", "StartLimitBurst=20", "NoNewPrivileges=yes"] {
+            assert!(unit.lines().any(|actual| actual == line), "missing {line}");
+        }
+        assert!(unit.contains("ExecStart=\"/tmp/a path/%%/$/fbittorrent\" serve"));
+        assert!(!unit.contains("[Install]"));
+        assert!(super::daemon_unit(std::path::Path::new("relative")).is_err());
+        println!("static notify unit: policy and escaped absolute executable verified");
+    }
+
     #[test]
     fn desktop_handler_command_preserves_paths_and_generic_launcher_compatibility() {
         assert_eq!(super::desktop_executable("/home/oliver/.local/bin/fbittorrent").unwrap(),

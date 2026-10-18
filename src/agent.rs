@@ -7,7 +7,7 @@ use std::fmt;
 pub const CONTRACT_VERSION: &str = "1.1.1";
 
 const NATIVE_LIFETIME: &str = "The TUI owns its engine until quit; fbittorrent serve owns a headless engine until shutdown, independently of windows.";
-const SERVE_LIMITATIONS: &str = "serve currently has no idle exit yet and no start-on-demand yet; it uses the framed legacy socket (engine.sock), not API v1.";
+const SERVE_LIMITATIONS: &str = "serve currently has no idle exit yet; systemd starts it on demand for writes. It uses the framed legacy socket (engine.sock), not API v1.";
 const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
 const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
 
@@ -165,7 +165,9 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "up", aliases: &[], summary: "Open or focus the app; legacy mode starts its service", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "up", aliases: &[], summary: "Start the daemon; --ui also opens the dashboard or TUI", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "dashboard", aliases: &[], summary: "Start the daemon and summon the dashboard, falling back to the TUI", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "restart", aliases: &[], summary: "Restart the running engine; daemon upgrade handling follows", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "down", aliases: &[], summary: "Close the app and wait for its engine to stop; legacy mode stops its service", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
@@ -206,7 +208,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "selectors": "torrents are selected by hash prefix (>= 4 hex chars) or a unique case-insensitive substring of the name; `all` selects every torrent",
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
-            "native_connect": "torrent commands open the app when closed unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; status, triage and native reconcile never launch it",
+            "native_connect": "write commands start the static user unit on demand unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; up/dashboard override autostart=false. Reads, stop and delete-keeping-files never start it; offline mutations arrive in P1-11. Without a user manager run fbittorrent serve.",
             "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
             "native_upload": upload_cap_text(),
         },
@@ -217,6 +219,7 @@ pub fn capabilities_json() -> serde_json::Value {
         "commands": cmds,
         "exit_codes": exit_codes,
         "env": {
+            "FBITTORRENT_UNIT": "systemd user unit name; default fbittorrent.service (setup and startup share it)",
             "FBITTORRENT_NO_START": "set to 1 to require an already open app, like --no-start; unavailable engine exits 4 with a hint",
             "XDG_CONFIG_HOME": "config at $XDG_CONFIG_HOME/fbittorrent/config.toml",
             "XDG_CACHE_HOME": "IMDb caches at $XDG_CACHE_HOME/fbittorrent",
@@ -259,7 +262,8 @@ const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract {cont
 WHAT IT IS
   A native Rust torrent app. {native_lifetime}
   {serve_limitations}
-  Torrent commands still open the TUI when needed; they do not start serve yet.
+  Write commands start the systemd user unit without a terminal. Reads, stop and
+  delete-keeping-files never start it (offline mutations arrive in P1-11).
   Status and triage never open it. Search, RSS browsing, and Shows tracking work
   locally without starting downloads.
   Upload is capped at {upload_policy}.
@@ -274,7 +278,13 @@ RULES
   - Destructive: `delete --files` needs --yes. `delete --dry-run` previews.
   - Bare `fbittorrent` opens the TUI on a TTY. Without a TTY it prints
     `triage --json`, so agents can always call it safely.
-  - `up` opens or focuses the app; `down` closes it and waits for engine cleanup.
+  - `up` starts only the daemon; `up --ui` also opens the dashboard or TUI.
+    `dashboard --view <view> --query <query>` starts then summons the panel, with
+    a TUI fallback. `down` shuts down the owner and waits for engine cleanup.
+    `restart` currently requests an engine-slot restart; P1-17 adds upgrades.
+    Without a systemd user manager, run `fbittorrent serve` in a terminal/tmux.
+    `setup --magnet` writes the static unit and handlers; nothing starts at login.
+    `setup --uninstall` removes the unit and keeps saved data.
   - `--no-start` (global) or FBITTORRENT_NO_START=1 prevents engine startup,
     including explicit `up` and `tui`. A closed engine returns exit 4 with a hint.
     autostart=false is the persistent form for ordinary torrent commands.
@@ -384,7 +394,7 @@ mod tests {
             assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
         }
         assert!(guide.contains("fbittorrent serve"));
-        for limitation in ["no idle exit yet", "no start-on-demand yet", "framed legacy socket"] {
+        for limitation in ["no idle exit yet", "on demand", "framed legacy socket"] {
             assert!(guide.contains(limitation));
         }
         for (code, name) in [(70, "panic"), (75, "upgrade")] {

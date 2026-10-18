@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
     name = "fbittorrent",
     version,
     about = "Torrent app for Omarchy: native engine, CLI, TUI, bar widget.",
-    long_about = "Torrent app for Omarchy. The native engine runs while the app is open.\n\nBare `fbittorrent` opens the TUI on a terminal; without a TTY it prints `triage --json`.\nEvery command accepts --json. Agents: start with `fbittorrent robot-docs`.",
+    long_about = "Torrent app for Omarchy. Native writes start the headless daemon on demand.\n\nBare `fbittorrent` opens the TUI on a terminal; without a TTY it prints `triage --json`.\nOrdinary CLI commands accept --json; serve logs to stderr. Agents: start with `fbittorrent robot-docs`.",
     after_help = "Exit codes: 0 ok, 2 usage, 3 safety (needs --yes), 4 backend down, 5 upstream, 6 not found, 7 ambiguous, 8 timeout.\nSelect torrents by hash prefix or a unique part of the name; `all` selects every torrent."
 )]
 struct Cli {
@@ -78,8 +78,12 @@ enum Cmd {
     },
     /// Transfer rates and torrent counts (used by the bar widget). Never starts the backend.
     Status,
-    /// Open or focus the app (starts the service only in explicit legacy mode)
-    Up,
+    /// Start the daemon; --ui also opens the dashboard or TUI
+    Up { #[arg(long)] ui: bool },
+    /// Open the dashboard, falling back to the TUI when the panel is absent
+    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
+    /// Restart the running engine; daemon upgrade handling follows in P1-17
+    Restart,
     /// Close the app and stop its engine (legacy mode stops the service)
     Down,
     /// List torrents
@@ -209,6 +213,9 @@ enum Cmd {
         /// Also register fbittorrent as the magnet: handler
         #[arg(long)]
         magnet: bool,
+        /// Remove the static native systemd user unit; saved data is kept
+        #[arg(long, conflicts_with_all = ["magnet", "save"])]
+        uninstall: bool,
     },
     /// Register fbittorrent as the magnet: / .torrent handler
     RegisterMagnet,
@@ -307,6 +314,10 @@ fn main() {
     let cli = Cli::parse();
     let json = cli.json;
     if let Some(Cmd::Serve { idle_exit_secs, no_notify }) = &cli.cmd {
+        if no_start_requested(cli.no_start, std::env::var_os("FBITTORRENT_NO_START").as_deref()) {
+            let error = AppError::new(Code::Backend, "fbittorrent is closed (daemon startup is disabled)").hint("fbittorrent up");
+            std::process::exit(agent::report(&error.into(), json));
+        }
         // No search session, TUI signal owner or background thread may start
         // before serve has blocked its shutdown signals.
         let result = std::panic::catch_unwind(|| Config::load()
@@ -354,6 +365,9 @@ fn run(cli: Cli) -> Result<Code> {
         None if cli.robot_triage || !agent::stdout_is_tty() => Cmd::Triage,
         None => Cmd::Tui { search: false, rss: false, shows: false },
     };
+    // Read/offline-intent commands never cause an owner to be launched. Offline
+    // ledger mutations themselves are supplied by P1-11.
+    if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
@@ -371,7 +385,12 @@ fn run(cli: Cli) -> Result<Code> {
             print!("{}", agent::ROBOT_GUIDE);
             return Ok(Code::Ok);
         }
-        Cmd::Setup { port, save, magnet } => {
+        Cmd::Setup { port, save, magnet, uninstall } => {
+            if uninstall {
+                setup::uninstall()?;
+                emit(json, serde_json::json!({"ok":true,"action":"setup-uninstall"}), || {});
+                return Ok(Code::Ok);
+            }
             if no_start && !cfg.native() {
                 return Err(AppError::new(Code::Backend, "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active")
                     .hint("fbittorrent up").into());
@@ -479,15 +498,34 @@ fn run(cli: Cli) -> Result<Code> {
                 human_rate(ti.dl_info_speed), human_rate(ti.up_info_speed), active, seeding, stopped, ts.len()));
             Ok(Code::Ok)
         }
-        Cmd::Up => {
+        Cmd::Up { ui } => {
             let mut explicit = cfg.clone();
             explicit.autostart = !no_start;
             let started = backend::ensure_running(&explicit, &c)?;
-            if cfg.native() && !started && !no_start { backend::open_app()?; }
-            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": cfg.engine, "unit": if cfg.native() { None } else { Some(&cfg.backend_unit) }}), || {
-                if cfg.native() { println!("fbittorrent {}", if started { "opened" } else if no_start { "already open" } else { "focused" }); }
-                else { println!("{} {}", cfg.backend_unit, if started { "started" } else { "already running" }); }
-            });
+            if ui { backend::dashboard(None, None)?; }
+            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": cfg.engine,
+                "unit": if cfg.native() { api::client::unit_name()? } else { cfg.backend_unit.clone() }}),
+                || println!("fbittorrent {}", if started { "started" } else { "already running" }));
+            Ok(Code::Ok)
+        }
+        Cmd::Dashboard { view, query } => {
+            let mut explicit = cfg.clone();
+            explicit.autostart = !no_start;
+            backend::ensure_running(&explicit, &c)?;
+            backend::dashboard(view.as_deref(), query.as_deref())?;
+            emit(json, serde_json::json!({"ok":true,"action":"dashboard","count":0,"hashes":[]}), || {});
+            Ok(Code::Ok)
+        }
+        Cmd::Restart => {
+            if cfg.native() {
+                api::client::ensure_daemon(&cfg, true)?;
+                ipc::request(&cfg, "POST", "app/restart", &[], None)?;
+            } else {
+                backend::stop(&cfg)?;
+                let mut explicit = cfg.clone(); explicit.autostart = !no_start;
+                backend::ensure_running(&explicit, &c)?;
+            }
+            emit(json, serde_json::json!({"ok":true,"action":"restart","count":0,"hashes":[],"scope":"engine"}), || {});
             Ok(Code::Ok)
         }
         Cmd::Down => {
@@ -503,7 +541,8 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
+            if cfg.native() && ipc::is_running(&cfg) { tui::run(cfg, screen, Lifecycle::default())?; }
+            else if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
             else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
             Ok(Code::Ok)
         }
@@ -841,6 +880,13 @@ fn wait_for(c: &Client, hashes: Vec<String>, timeout: u64, interval: u64, json: 
 fn connect(cfg: &Config, c: &Client) -> Result<()> {
     backend::ensure_running(cfg, c)?;
     c.login()
+}
+
+fn native_may_start(cmd: &Cmd) -> bool {
+    matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+        | Cmd::Noseed { .. } | Cmd::Wait { .. } | Cmd::Delete { files: true, .. }
+        | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
+        | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
 }
 
 fn no_start_requested(flag: bool, environment: Option<&std::ffi::OsStr>) -> bool {
@@ -1252,6 +1298,19 @@ fn local_torrent_source(source: &str) -> Result<String> {
 #[cfg(test)]
 mod source_tests {
     use super::*;
+
+    #[test]
+    fn native_start_policy_matches_command_roles() {
+        for args in [vec!["list"], vec!["show", "abcd"], vec!["stop", "all"], vec!["delete", "all"], vec!["status"], vec!["config"]] {
+            let cli = Cli::try_parse_from(std::iter::once("fbittorrent").chain(args)).unwrap();
+            assert!(!native_may_start(&cli.cmd.unwrap()));
+        }
+        for args in [vec!["up"], vec!["up", "--ui"], vec!["dashboard", "--view", "rss"], vec!["start", "all"], vec!["delete", "--files", "all"]] {
+            let cli = Cli::try_parse_from(std::iter::once("fbittorrent").chain(args)).unwrap();
+            assert!(native_may_start(&cli.cmd.unwrap()));
+        }
+        println!("read/offline roles never start; writes and explicit UI/up roles may start");
+    }
 
     #[test]
     fn no_start_is_global_and_environment_requires_one() {

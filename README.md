@@ -2,8 +2,9 @@
 
 A small torrent app for Omarchy, with an embedded Rust engine, a native bar
 widget, a FrankenTUI app, and a CLI that doubles as the `magnet:` handler.
-The engine runs in the open app; closing it stops transfers, peer discovery,
-search jobs, and feed checks. Torrent records and feed history stay on disk.
+The native engine can run headlessly as `fbittorrent serve`. Write commands
+start its static systemd user unit on demand; closing a client window leaves
+the daemon running. `down` stops it. Torrent records and feed history stay on disk.
 
 - **Streaming priority is automatic.** The native engine downloads each file
   sequentially and prioritizes its first and last pieces. These policies cannot
@@ -14,14 +15,12 @@ search jobs, and feed checks. Torrent records and feed history stay on disk.
   or `fbittorrent seed <hash>`; that removes the cap and allows completed torrents
   to keep running.
   Flip the default with `seed_by_default = true` in the config.
-- **App lifetime.** CLI actions open or focus the app when they need its engine.
-  Widget torrent actions require an already open app. Explicit Open TUI actions
-  may open it. Status queries never open it. Nothing runs at login. Closing the
-  terminal or quitting the TUI stops the native engine.
-  Terminal hangups drain the engine and remove its socket before exiting with
-  the signal status (`128 + signal`, so SIGHUP exits 129). For diagnosis, set
-  `FBT_DEBUG_SIGNALS=1`: lifecycle events are appended to
-  `$XDG_STATE_HOME/fbittorrent/tui-signals.log` (normally `~/.local/state/...`).
+- **App lifetime.** CLI writes start the daemon on demand without opening a
+  terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
+  dashboard or TUI. Reads and status queries never start it. Nothing runs at
+  login: the user unit is static. `down` stops the owner and drains the engine.
+  The current standalone TUI can still own an engine when started first;
+  full daemon attachment and quit verbs arrive in P1-15.
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
   app is open. Hover clipped names or details to see their full text.
@@ -92,8 +91,7 @@ search jobs, and feed checks. Torrent records and feed history stay on disk.
 ## Install
 
 ```bash
-cargo build --release && cp target/release/fbittorrent ~/.local/bin/
-fbittorrent setup --magnet          # app config, download folder, magnet: handler
+scripts/install.sh                 # locked build, atomic binary replacement, setup --magnet
 fbittorrent search --install        # provider scripts; Python 3 is required
 ln -s "$PWD/plugin/oliver.torrents" ~/.config/omarchy/plugins/oliver.torrents
 omarchy plugin enable oliver.torrents
@@ -128,7 +126,9 @@ fbittorrent shows list|follow|unfollow|check|episodes|grab|seen
 fbittorrent tui --search | --rss | --shows
 fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
-fbittorrent up | down                open/focus / close the app and engine
+fbittorrent up [--ui] | down          start daemon / drain and stop owner
+fbittorrent dashboard [--view v] [--query q]   summon panel, or fall back to TUI
+fbittorrent restart                  restart engine slot (upgrade handling follows)
 fbittorrent serve                   run the native engine headlessly in the foreground
 fbittorrent status                   rates and counts; never opens the app
 fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
@@ -148,9 +148,13 @@ available; the engine reopens when that exact interface returns.
 
 `serve --no-notify` disables desktop notifications while retaining systemd
 readiness datagrams. `--idle-exit-secs N` defaults to 300 (0 means disabled) and
-is exposed in daemon policy metadata; the automatic idle policy and desktop
-start-on-demand integration follow in the next implementation stage. The current
-core runs until stopped. Daemon exits 70 (panic) and 75 (upgrade) belong to the
+is exposed in daemon policy metadata; the automatic idle policy follows in P1-12. The current core runs until stopped.
+`setup --magnet` writes the on-demand static `fbittorrent.service` using the
+current executable path, reloads the user manager and registers desktop handlers.
+It never enables or starts the unit. `setup --uninstall` removes the unit while
+keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
+harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
+run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
 unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
 stages; the current CLI uses the existing framed socket.
 
@@ -187,8 +191,8 @@ autostart = true
 ```
 
 `--no-start` (a global flag) or `FBITTORRENT_NO_START=1` prevents commands from
-starting the app or legacy service. Commands that need a closed engine return
-exit 4 with an opening hint. This also prevents explicit `up` and `tui` startup;
+starting the daemon or legacy service. Commands that need a closed engine return
+exit 4 with an opening hint. This also prevents explicit `up`, `dashboard`, `tui` and `serve` startup;
 legacy `setup` refuses because its workflow requests a service start. The widget uses
 `--no-start` for status polling and every torrent action. Explicit Open TUI
 requests may launch the app: middle-click, `t`/`T`, the TUI header button

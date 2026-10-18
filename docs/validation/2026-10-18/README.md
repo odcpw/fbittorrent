@@ -220,3 +220,15 @@ Receipt: [P1-16d.md](P1-16d.md) (branch ntm/fbittorrent/cod_4-p1-16d, commit b84
 ## P1-05
 
 Receipt: [P1-05.md](P1-05.md) (branch ntm/fbittorrent/cod_3-p1-05-2qa, commits 5052283, 573dc12, 7044f6f, b87e031 and 3a4caac, the last three applied by cod_3, cod_4 and cod_2 in turn; merged by the orchestrator after five Astra reviews that progressively enforced the bead's literal operation list, the app.info shape, complete fixture coverage, required pending refs, value validation, watch-gated playable fields and events, and the append-only events topic; batch gate on main follows).
+
+## P1-03b
+
+Receipt: [P1-03b.md](P1-03b.md) (branch ntm/fbittorrent/cod_3-p1-03b, commits abe3dad and 95291d4; merged by the orchestrator after two Astra reviews, the first returning two P2 findings (a 25 ms scheduling window in the regression, unfinished handles dropped on join timeout) that the second verified closed with 3/3 runs of each of the five startup tests; the historical cause stays open in P1-03c; batch gate on main follows).
+
+## P1-04
+
+Receipt: [P1-04.md](P1-04.md) (branch ntm/fbittorrent/cod_1, commits 5a2fba2, f8bf0ab and 3061ee0 with the orchestrator's reconciliation merge eba7d2c; merged by the orchestrator after three Astra reviews. The receipt's incident section records that during development five disposable units started the daemon with the manager's default environment (22:16, 2026-10-18); the orchestrator's assessment: no file under ~/.local/share/fbittorrent changed, the installed binary and unit directories are untouched, seven new payload files appeared under ~/Downloads for the owner's one live torrent (two empty, three sparse shells, two with a few hundred KiB downloaded) and the pre-existing E08 file verifies 710/710 fully contained pieces against the torrent hashes; nothing was deleted; batch gate on main follows).
+
+## P1-02b
+
+Receipt: [P1-02b.md](P1-02b.md) (branch ntm/fbittorrent/cod_3-p1-02b, commit efe36ca; test-only fix of a pre-existing fixture readiness race in the transfer tests, merged by the orchestrator after an Astra review that recomputed the retained timelines and re-ran the transfer tests; batch gate on main follows).

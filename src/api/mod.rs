@@ -3,6 +3,7 @@
 //! `contracts/ipc/v1`. The legacy IPC transport remains independent.
 #![allow(dead_code, unused_imports)] // Contract types/reexports precede their consumers.
 
+pub mod client;
 pub mod events;
 pub mod objects;
 pub mod ops;

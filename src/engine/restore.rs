@@ -1,7 +1,80 @@
 //! Cached-first restore work, cancellation and handle policy.
 use super::*;
 
+// A cancelled join future must not turn unfinished work into task: None.
+// Generation changes/removals return unfinished attempts to the retired list.
+type RestoreJoin = (Option<(String, usize)>, task::JoinHandle<()>);
+struct RestoreJoins<'a> {
+    inner: &'a Inner,
+    tasks: Vec<RestoreJoin>,
+}
+impl Drop for RestoreJoins<'_> {
+    fn drop(&mut self) {
+        let mut restores = self.inner.restores.lock().unwrap();
+        let mut retired = self.inner.retired_restores.lock().unwrap();
+        for (slot, task) in self.tasks.drain(..) {
+            if let Some((hash, generation)) = slot {
+                if let Some(restore) = restores.get_mut(&hash) {
+                    if restore.generation == generation && restore.task.is_none() {
+                        restore.task = Some(task);
+                        continue;
+                    }
+                }
+            }
+            if !task.is_finished() {
+                retired.push(task);
+            }
+        }
+    }
+}
+
 impl Inner {
+    fn retire_restore(&self, mut restore: RestoreTask) {
+        restore.cancel.cancel();
+        let mut retired = self.retired_restores.lock().unwrap();
+        retired.retain(|task| !task.is_finished());
+        if let Some(task) = restore.task.take().filter(|task| !task.is_finished()) {
+            retired.push(task);
+        }
+    }
+
+    pub(super) async fn drain_restores(&self) -> Result<()> {
+        // The guard returns every handle on normal completion, cancellation or
+        // timeout. No bookkeeping lock spans a join: tasks publish through it.
+        let mut joins = RestoreJoins {
+            inner: self,
+            tasks: Vec::new(),
+        };
+        {
+            let mut restores = self.restores.lock().unwrap();
+            for (hash, restore) in restores.iter_mut() {
+                restore.cancel.cancel();
+                if let Some(task) = restore.task.take() {
+                    joins
+                        .tasks
+                        .push((Some((hash.clone(), restore.generation)), task));
+                }
+            }
+        }
+        joins.tasks.extend(
+            std::mem::take(&mut *self.retired_restores.lock().unwrap())
+                .into_iter()
+                .map(|task| (None, task)),
+        );
+        // This test-only rendezvous releases the real resolver's epilogue only
+        // after teardown has acquired responsibility for joining its handle.
+        #[cfg(test)]
+        if let Some(signal) = self.restore_join_started.lock().unwrap().as_ref() {
+            signal.cancel();
+        }
+        let mut failure = None;
+        for (_, task) in &mut joins.tasks {
+            if let Err(error) = task.await {
+                failure.get_or_insert_with(|| anyhow!(error).context("joining torrent restore"));
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
     pub(super) fn handle(&self, hash: &str) -> Result<Arc<ManagedTorrent>> {
         self.session
             .with_torrents(|torrents| {
@@ -87,7 +160,9 @@ impl Inner {
             restore.outcome = RestoreOutcome::Stopped;
         }
         if remove {
-            restores.remove(hash);
+            if let Some(restore) = restores.remove(hash) {
+                self.retire_restore(restore);
+            }
             drop(restores);
             self.cancelled_checks.lock().unwrap().remove(hash);
         }
@@ -118,6 +193,9 @@ impl Inner {
     pub(super) fn spawn_restore(self: &Arc<Self>, cx: &Cx, record: Record) -> Result<()> {
         cx.checkpoint()?;
         let mut restores = self.restores.lock().unwrap();
+        if self.stopping.load(Ordering::Acquire) {
+            bail!("native engine is closing");
+        }
         if restores.get(&record.hash).is_some_and(|restore|
             matches!(restore.outcome, RestoreOutcome::Checking | RestoreOutcome::Metadata) &&
             restore.task.as_ref().is_some_and(|task| !task.is_finished())) {
@@ -137,8 +215,8 @@ impl Inner {
                 // Metadata lookup never owns the ledger. A single unresolved
                 // magnet cannot block reads, mutations, or another restore.
                 let metadata = rqbit_runtime::select! {
-                    result = inner.resolve_record(&cx, &record) => result?,
                     _ = task_cancel.cancelled() => bail!("torrent restore cancelled"),
+                    result = inner.resolve_record(&cx, &record) => result?,
                 };
                 let mut ledger = OwnedMutexGuard::lock(inner.ledger.clone(), &cx).await?;
                 cx.checkpoint()?;
@@ -170,7 +248,9 @@ impl Inner {
                 }
             }
         })?;
-        restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel });
+        if let Some(previous) = restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel }) {
+            self.retire_restore(previous);
+        }
         Ok(())
     }
 
