@@ -7,7 +7,7 @@
 │   Other.Movie.2026.1080p            │                                                                                  │ of 1.0 GiB                          │
 │                                     │ GLOBAL   (1) Torrents · (2) Search · (3) Shows · (4) RSS                         │1.0 KiB/s                            │
 │                                     │          (Tab/Shift+Tab) Next/previous screen                                    │                                     │
-│                                     │          (?) Help · (Esc) Leave input, close a dialog or return                  │hers                                 │
+│                                     │          (?) Help · (Esc) Leave input, close a dialog or return                  │d                                    │
 │                                     │          Letters in parentheses use lowercase; Shift is explicit.                │                                     │
 │                                     │          (F6) Download queue, encryption and VPN (native engine)                 │ty automatic                         │
 │                                     │          (Q)uit and stop the engine · Shift+Q also quits                         │tops when complete  (u to seed)      │

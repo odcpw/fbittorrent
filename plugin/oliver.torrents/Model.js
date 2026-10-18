@@ -76,7 +76,6 @@ function meta(t) {
     parts.push(pct + "%")
     parts.push(rate(t.dlspeed))
     parts.push(eta(t.eta))
-    parts.push(t.num_seeds + "s")
   } else if (isStopped(t)) {
     parts.push(pct + "%")
     parts.push(bytes(t.size))

@@ -8,6 +8,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shlex
@@ -39,6 +40,84 @@ def wait_for(check, label, seconds=10):
             return result
         time.sleep(0.1)
     raise AssertionError(f"timed out: {label}")
+
+
+def no_fake_seed_counts(root, env, cli, tmux, keys, capture):
+    """P0-11: real TUI captures; local provider fixtures, never public swarms."""
+    from fbtlog import Case
+
+    artifacts = Path(__file__).resolve().parents[3] / "target/test-logs/native"
+    provider = Path(env["XDG_DATA_HOME"]) / "fbittorrent/nova3/engines/peer_labels.py"
+    provider.parent.mkdir(parents=True, exist_ok=True)
+    provider.write_text('''from novaprinter import prettyPrinter
+class peer_labels:
+    name = 'Local peer-label fixtures'
+    url = 'https://fixture.invalid'
+    supported_categories = {'all': '0'}
+    def search(self, what, cat='all'):
+        unknown = 'unknown' in what
+        prettyPrinter(dict(link='magnet:?xt=urn:btih:' + ('2' if unknown else '1') * 40,
+            name='Local YTS unknown counts' if unknown else 'Local seeded fixture',
+            size=1048576, seeds=-1 if unknown else 12, leech=-1 if unknown else 3,
+            engine_url=self.url))
+''')
+    # The YTS JSON-to-result mapping is covered by browse's Rust unit test.
+    # This Nova fixture exercises the same unknown SearchResult through the TUI.
+    cache = Path(env["XDG_CACHE_HOME"]) / "fbittorrent"
+    names = cache / "imdb/by-name-v2"
+    names.mkdir(parents=True, exist_ok=True)
+    for name in ["Local YTS unknown counts", "Local seeded fixture"]:
+        safe = re.sub(r"[^a-z0-9]", "_", name.lower())[:120]
+        (names / (safe + ".json")).write_text('{"missing":true}')
+    if not (cache / "title.ratings.tsv").exists():
+        (cache / "title.ratings.tsv").write_text("tconst\taverageRating\tnumVotes\n")
+
+    with Case("native", "no_fake_seed_counts") as case:
+        def check_capture(filename, ready, extra=lambda pane: True):
+            step = case.step("Capture " + filename,
+                             "The populated pane has no fabricated seed count.")
+            try:
+                def poll():
+                    pane = capture()
+                    return pane if ready(pane) else None
+                pane = wait_for(poll, filename)
+                path = artifacts / ("no_fake_seed_counts." + filename)
+                path.write_text(pane)
+                valid = not re.search(r"\b0 seeds\b|\b0s\b", pane) and extra(pane)
+                (step.ok if valid else step.fail)(f"Captured {path}:\n{pane}")
+            except Exception as error:
+                step.fail(f"Capture failed: {error}; last pane:\n{capture()}")
+
+        if not cli("list")["torrents"]:
+            cli("add", str(root / "fixture.torrent"), "--quiet")
+        tmux("resize-window", "-x", "160", "-y", "45")
+        keys("1", "Home")
+        check_capture("01-torrents-160x45.txt", lambda pane: "peers connected" in pane)
+        keys("2", "/", "C-a")
+        tmux("send-keys", "-l", "known peers")
+        keys("Enter", "Down")
+        check_capture("08-search-results-selected.txt",
+                      lambda pane: "12 seeds, 3 leechers" in pane)
+        keys("/", "C-a")
+        tmux("send-keys", "-l", "unknown peers")
+        keys("Enter", "Down")
+
+        def blank_seed_column(pane):
+            header = next(line for line in pane.splitlines() if "NAME" in line and "SEEDS" in line)
+            row = next(line for line in pane.splitlines() if "Local YTS unknown counts" in line)
+            end = header.index("SEEDS") + len("SEEDS")
+            return not row[end - 6:end].strip() and "seeds" not in pane and "leechers" not in pane
+
+        check_capture("10-browse-yts-latest.txt",
+                      lambda pane: "Local YTS unknown counts" in pane, blank_seed_column)
+        keys("Escape", "4")
+        check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
+        step = case.step("Read capabilities --json", "The native zero seed sentinel is documented as unknown.")
+        capabilities = cli("capabilities")
+        note = capabilities.get("field_notes", {}).get("list[].num_seeds")
+        (step.ok if note == "always 0 in native mode: unknown" else step.fail)(f"Field note: {note}.")
+        keys("1")
+        tmux("resize-window", "-x", "120", "-y", "30")
 
 
 def main():
