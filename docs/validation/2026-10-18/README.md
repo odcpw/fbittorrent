@@ -116,3 +116,7 @@ hits, all reviewed. By area: `vendor/asupersync` 7,922, `vendor/rqbit` 148,
 - No files named like keys or credentials (`.env`, `*.pem`, `*.key`, `id_*`);
   no provider-format tokens (`ghp_`, `github_pat_`, `sk-`, `xox?-`, `AKIA`,
   `AIza`).
+
+## P0-12
+
+Receipt: [P0-12.md](P0-12.md) (branch ntm/fbittorrent/cod_3, commit 4a07691; merged by the orchestrator after an independent test run).
