@@ -53,5 +53,18 @@ asupersync = { path = "vendor/asupersync" }
 
 [workspace]
 resolver = "2"
-members = ["vendor/rqbit/*"]
+members = [
+    "vendor/rqbit/librqbit",
+    "vendor/rqbit/librqbit-bencode",
+    "vendor/rqbit/librqbit-buffers",
+    "vendor/rqbit/librqbit-clone-to-owned",
+    "vendor/rqbit/librqbit-core",
+    "vendor/rqbit/librqbit-dht",
+    "vendor/rqbit/librqbit-dualstack-sockets",
+    "vendor/rqbit/librqbit-lsd",
+    "vendor/rqbit/librqbit-peer-protocol",
+    "vendor/rqbit/librqbit-sha1-wrapper",
+    "vendor/rqbit/librqbit-tracker-comms",
+    "vendor/rqbit/rqbit-runtime",
+]
 default-members = ["."]
