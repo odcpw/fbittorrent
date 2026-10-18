@@ -1,3 +1,181 @@
+    fn resumed_transfer_observation(
+        seed: &AppEngine,
+        client: &ManagedTorrent,
+        hash: &str,
+        stage: &str,
+        elapsed: Duration,
+        ok: bool,
+    ) {
+        let peer_stats = |handle: &ManagedTorrent| {
+            handle.live().map(|live| {
+                live.per_peer_stats_snapshot(
+                    serde_json::from_value(serde_json::json!({"state": "all"})).unwrap(),
+                )
+            })
+        };
+        let seed_handle = seed.dispatcher.inner.handle(hash).ok();
+        engine_test_diagnostic(
+            "observe resumed loopback transfer",
+            "Record the client's identity/bytes and the seed/peer states through the unchanged completion deadline.",
+            serde_json::json!({
+                "stage": stage, "after_s": elapsed.as_secs_f64(), "hash": hash,
+                "unix_ms": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+                "client_id": client.id(), "client_stats": client.stats(),
+                "client_peers": peer_stats(client),
+                "client_live": client.live().map(|live| format!("{:p}", Arc::as_ptr(&live))),
+                "seed_id": seed_handle.as_ref().map(|handle| handle.id()),
+                "seed_stats": seed_handle.as_ref().map(|handle| handle.stats()),
+                "seed_peers": seed_handle.as_ref().and_then(|handle| peer_stats(handle)),
+                "seed_restores": format!("{:?}", seed.dispatcher.restore_outcomes()),
+                "runtime_region": format!("{:?}", Cx::current().unwrap().region_id()),
+            }),
+            ok,
+        );
+    }
+
+    async fn observe_resumed_completion(
+        cx: &Cx,
+        seed: &AppEngine,
+        client: &ManagedTorrent,
+        hash: &str,
+        began: std::time::Instant,
+    ) -> Result<()> {
+        let mut completion = client.wait_until_completed(cx);
+        let mut samples = time::interval(cx, Duration::from_millis(200));
+        loop {
+            rqbit_runtime::select! {
+                result = &mut completion => return result,
+                _ = samples.tick(cx) => resumed_transfer_observation(
+                    seed, client, hash, "completion_sample", began.elapsed(), true),
+            }
+        }
+    }
+
+    async fn wait_for_restored_seed(cx: &Cx, handle: &ManagedTorrent) -> Result<()> {
+        handle.wait_until_initialized(cx).await?;
+        // Negative control: model the former fixture's missing readiness gate.
+        // The dedicated regression must fail on its first-poll witness.
+        if std::env::var_os("FBT_P102B_FORMER_ORDER").is_some() {
+            return Ok(());
+        }
+        loop {
+            cx.checkpoint()?;
+            let stats = handle.stats();
+            if let Some(error) = stats.error {
+                bail!("restored seed failed: {error}");
+            }
+            // Verification can finish into Paused before the periodic queue
+            // reconciliation applies saved seeding intent. A listening socket
+            // and complete bytes alone do not mean it can accept this torrent.
+            if stats.finished
+                && matches!(stats.state, TorrentStatsState::Live)
+                && !handle.is_paused()
+            {
+                return Ok(());
+            }
+            time::sleep(cx, Duration::from_millis(25)).await;
+        }
+    }
+
+    #[test]
+    fn restored_seed_readiness_waits_for_running_state() {
+        use std::{future::Future, sync::mpsc};
+        let directory = review_directory("restored-seed-readiness");
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::write(downloads.join("hello.txt"), b"hello").unwrap();
+        let mut bytes =
+            b"d4:infod6:lengthi5e4:name9:hello.txt12:piece lengthi16384e6:pieces20:".to_vec();
+        bytes.extend_from_slice(&[
+            0xaa, 0xf4, 0xc6, 0x1d, 0xdc, 0xc5, 0xe8, 0xa2, 0xda, 0xbe, 0xde, 0x0f, 0x3b, 0x48,
+            0x2c, 0xd9, 0xae, 0xa9, 0x43, 0x4d,
+        ]);
+        bytes.extend_from_slice(b"7:privatei1eee");
+        let hash = librqbit::torrent_from_bytes(&bytes)
+            .unwrap()
+            .info_hash
+            .as_string();
+        std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
+        let mut record = review_record(&hash, &downloads);
+        record.ratio_limit = -2.0;
+        record.tags = SEED_TAG.into();
+        record.paused = false;
+        let app = test_app(
+            &directory,
+            &downloads,
+            Ledger {
+                records: vec![record],
+                ..Default::default()
+            },
+            None,
+        );
+        let dispatcher = app.dispatcher();
+        let handle = dispatcher.inner.handle(&hash).unwrap();
+        dispatcher.runtime.block_on(async {
+            time::timeout(
+                &test_cx(),
+                Duration::from_secs(5),
+                handle.wait_until_initialized(&test_cx()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        });
+        // Real queue policy holds the verified torrent paused. No scheduling
+        // delay is used to create or prove this state.
+        dispatcher.set_network_blocked(true).unwrap();
+        assert!(handle.stats().finished && handle.is_paused());
+        assert!(matches!(handle.stats().state, TorrentStatsState::Paused));
+        let (first_tx, first_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let observed = handle.clone();
+        let waiter = task::spawn_with(dispatcher.runtime.cx(), move |cx| async move {
+            let mut waiting = std::pin::pin!(wait_for_restored_seed(&cx, &observed));
+            let mut first = Some(first_tx);
+            let result = std::future::poll_fn(|poll| {
+                let result = waiting.as_mut().poll(poll);
+                if let Some(first) = first.take() {
+                    first
+                        .send(if result.is_pending() {
+                            "pending"
+                        } else {
+                            "ready"
+                        })
+                        .unwrap();
+                }
+                result
+            })
+            .await;
+            let _ = finished_tx.send(result);
+        });
+        let first_poll = first_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        engine_test_diagnostic(
+            "hold seed readiness at a verified paused torrent",
+            "Readiness polls Pending until real queue policy admits seeding.",
+            serde_json::json!({"first_poll": first_poll, "finished": handle.stats().finished,
+                "paused": handle.is_paused(), "state": format!("{:?}", handle.stats().state)}),
+            first_poll == "pending",
+        );
+        assert_eq!(
+            first_poll, "pending",
+            "a verified paused seed is not ready to serve payload"
+        );
+        assert!(matches!(
+            finished_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        dispatcher.set_network_blocked(false).unwrap();
+        finished_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        dispatcher.runtime.block_on(waiter).unwrap();
+        assert!(handle.stats().finished && !handle.is_paused());
+        assert!(matches!(handle.stats().state, TorrentStatsState::Live));
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn loopback_transfer_obeys_cap_stops_with_app_and_resumes_exact_bytes() {
         use librqbit::{create_torrent, spawn_utils::BlockingSpawner, CreateTorrentOptions};
@@ -196,18 +374,84 @@
             !saved.records[0].paused,
             "app shutdown must preserve the intent to resume"
         );
+        // Stop the client run before reopening the peer's listening port. Then
+        // await actual seed readiness: restore returns before verification and
+        // the first post-check queue reconciliation have necessarily finished.
+        // Readiness and reconnection share the existing 20 s completion budget.
+        let former_order = std::env::var_os("FBT_P102B_FORMER_ORDER").is_some();
+        let resume_began = Instant::now();
+        if !former_order {
+            client_runtime
+                .block_on(client.pause(client_runtime.cx(), &handle))
+                .unwrap();
+        }
         let seed = test_app(&seed_store, &seed_files, saved, Some(addr.port()));
+        let restored = seed.dispatcher.inner.handle(&hash).unwrap();
+        if !former_order {
+            seed.dispatcher.runtime.block_on(async {
+                time::timeout(
+                    &test_cx(),
+                    Duration::from_secs(20).saturating_sub(resume_began.elapsed()),
+                    wait_for_restored_seed(&test_cx(), &restored),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            });
+            assert!(restored.stats().finished && !restored.is_paused());
+            assert!(matches!(restored.stats().state, TorrentStatsState::Live));
+        }
         client_runtime.block_on(async {
-            client.pause(&test_cx(), &handle).await.unwrap();
-            client.unpause(&test_cx(), &handle).await.unwrap();
-            time::timeout(
+            resumed_transfer_observation(
+                &seed,
+                &handle,
+                &hash,
+                if former_order {
+                    "seed_restarted_before_client_resume"
+                } else {
+                    "seed_ready_before_client_resume"
+                },
+                began.elapsed(),
+                true,
+            );
+            if former_order {
+                // Exact former fixture sequence, retained only for the sampled
+                // hypothesis control. It still has every original assertion.
+                client.pause(&test_cx(), &handle).await.unwrap();
+                client.unpause(&test_cx(), &handle).await.unwrap();
+            }
+            let completed = time::timeout(
                 &test_cx(),
-                Duration::from_secs(20),
-                handle.wait_until_completed(&test_cx()),
+                if former_order {
+                    Duration::from_secs(20)
+                } else {
+                    Duration::from_secs(20).saturating_sub(resume_began.elapsed())
+                },
+                async {
+                    if !former_order {
+                        client.unpause(&test_cx(), &handle).await.unwrap();
+                    }
+                    resumed_transfer_observation(
+                        &seed,
+                        &handle,
+                        &hash,
+                        "client_resumed",
+                        began.elapsed(),
+                        true,
+                    );
+                    observe_resumed_completion(&test_cx(), &seed, &handle, &hash, began).await
+                },
             )
-            .await
-            .unwrap()
-            .unwrap();
+            .await;
+            resumed_transfer_observation(
+                &seed,
+                &handle,
+                &hash,
+                "completion_wait_returned",
+                began.elapsed(),
+                matches!(completed, Ok(Ok(()))),
+            );
+            completed.unwrap().unwrap();
             assert_eq!(
                 rqbit_runtime::fs::read(client_files.join("fixture.bin"))
                     .await
