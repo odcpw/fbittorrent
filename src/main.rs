@@ -2,6 +2,7 @@ mod agent;
 mod backend;
 mod browse;
 mod config;
+mod daemon;
 mod engine;
 mod native_runtime;
 mod network_app;
@@ -21,6 +22,7 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
+use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -466,7 +468,7 @@ fn run(cli: Cli) -> Result<Code> {
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
             if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
-            else { connect(&cfg, &c)?; tui::run(cfg, screen)?; }
+            else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
             Ok(Code::Ok)
         }
         Cmd::List { active } => {
@@ -824,15 +826,16 @@ impl Drop for SearchCleanup {
 
 fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
     if ipc::is_running(&cfg) { return backend::open_app(); }
+    let lifecycle = Lifecycle::default();
     loop {
     let snapshot = network_app::state(&cfg);
-    network_app::initialize(snapshot.clone());
+    lifecycle.set_expected_network(Some(snapshot.clone()));
     if !snapshot.ready {
-        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot)?);
-        let result = tui::run(cfg.clone(), screen);
+        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot, lifecycle.clone())?);
+        let result = tui::run(cfg.clone(), screen, lifecycle.clone());
         drop(parked);
         result?;
-        if network_app::restart_requested() && !network_app::close_requested() {
+        if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
             cfg = Config::load()?;
             continue;
         }
@@ -840,7 +843,7 @@ fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
     }
     let mut engine_cfg = cfg.clone();
     if cfg.network_interface.is_some() { engine_cfg.network_interface = snapshot.interface.clone(); }
-    let mut app = match engine::start(&engine_cfg) {
+    let mut app = match engine::start(&engine_cfg, lifecycle.clone()) {
         Ok(app) => app,
         Err(error) if error.to_string().contains("already open") => return backend::open_app(),
         Err(_) if cfg.network_interface.is_some() && network_app::state(&cfg) != snapshot => continue,
@@ -848,17 +851,18 @@ fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
     };
     let dispatcher = app.dispatcher();
     migrate_legacy(&cfg, &dispatcher)?;
+    let controls_lifecycle = lifecycle.clone();
     app.serve(&cfg, move |request| {
-        network_app::controls(request, &snapshot).or_else(|| dispatcher.dispatch(request))
+        network_app::controls(request, &snapshot, &controls_lifecycle).or_else(|| dispatcher.dispatch(request))
             .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
     })?;
     let app = tui::signals::AppGuard::new(app);
     // The guard drops before run() returns, including a TUI initialization error.
     // main() only calls process::exit after network activity and searches stop.
-    let result = tui::run(cfg.clone(), screen);
+    let result = tui::run(cfg.clone(), screen, lifecycle.clone());
     drop(app);
     result?;
-    if network_app::restart_requested() && !network_app::close_requested() {
+    if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
         cfg = Config::load()?;
         continue;
     }

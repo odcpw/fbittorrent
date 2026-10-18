@@ -29,6 +29,7 @@ use ftui::widgets::{StatefulWidget, StatusLine, Tab, Tabs, TabsState, Widget};
 use ftui::{Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
 
 use crate::config::Config;
+use crate::daemon::lifecycle::{Lifecycle, RestartReason, StopReason};
 use crate::imdb::{self, Title};
 use crate::browse;
 use crate::shows::{self, Episode, Show, Shows};
@@ -145,6 +146,7 @@ impl From<Event> for Msg {
 
 pub struct TuiApp {
     cfg: Config,
+    lifecycle: Lifecycle,
     theme: Theme,
     screen: Screen,
     tabs: RefCell<TabsState>,
@@ -221,8 +223,8 @@ pub struct TuiApp {
 
 const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];
 
-pub fn run(cfg: Config, screen: Screen) -> Result<()> {
-    let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+pub fn run(cfg: Config, screen: Screen, lifecycle: Lifecycle) -> Result<()> {
+    let mut model = TuiApp::with_lifecycle(cfg, screen, Shows::load()?, lifecycle);
     model.pointer_motion_on_start = true;
     // AppBuilder::run exits the process on a signal, skipping the outer engine
     // guard. Program returns instead, so our application owner drains first.
@@ -256,7 +258,12 @@ impl TuiApp {
         } else { false }
     }
 
+    #[cfg(test)]
     fn new(cfg: Config, screen: Screen, shows: Shows) -> Self {
+        Self::with_lifecycle(cfg, screen, shows, Lifecycle::default())
+    }
+
+    fn with_lifecycle(cfg: Config, screen: Screen, shows: Shows, lifecycle: Lifecycle) -> Self {
         let theme = Theme::load();
         let mut search_input = TextInput::new()
             .with_placeholder("search torrents, Enter to run")
@@ -265,6 +272,7 @@ impl TuiApp {
         search_input.set_focused(screen == Screen::Search);
         let mut app = TuiApp {
             cfg,
+            lifecycle,
             theme,
             screen,
             tabs: RefCell::new(TabsState { active: screen.index(), offset: 0 }),
@@ -1115,7 +1123,7 @@ impl TuiApp {
 
     fn on_settings_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
         if key.code == KeyCode::Escape { self.settings = None; return Cmd::none(); }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(Modifiers::CTRL) { crate::network_app::request_close(); return Cmd::quit(); }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(Modifiers::CTRL) { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
         if key.code == KeyCode::Enter {
             let values = self.settings.as_ref().unwrap().cfg.clone();
             let result = (|| -> Result<Config> {
@@ -1127,7 +1135,7 @@ impl TuiApp {
                 latest.validate()?;
                 if reopen {
                     latest.save()?;
-                    crate::network_app::request_restart();
+                    self.lifecycle.request_restart(RestartReason::Settings);
                 } else {
                     Client::from_config(&self.cfg).set_queue_limit(latest.max_active_downloads)?;
                 }
@@ -1137,7 +1145,7 @@ impl TuiApp {
                 Ok(cfg) => {
                     self.cfg = cfg;
                     self.settings = None;
-                    if crate::network_app::restart_requested() { Cmd::quit() }
+                    if self.lifecycle.pending_request().is_some() { Cmd::quit() }
                     else { self.set_status("download settings saved", false); self.poll() }
                 }
                 Err(error) => { self.settings.as_mut().unwrap().error = format!("{error:#}"); Cmd::none() }
@@ -1209,7 +1217,7 @@ impl TuiApp {
             return Cmd::none();
         }
         if self.prompt.is_some() { return self.on_prompt_key(k); }
-        if k.code == KeyCode::Char('c') && k.modifiers.contains(Modifiers::CTRL) { crate::network_app::request_close(); return Cmd::quit(); }
+        if k.code == KeyCode::Char('c') && k.modifiers.contains(Modifiers::CTRL) { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
         if self.files.is_some() { return self.on_files_key(k); }
         if self.providers.is_some() { return self.on_providers_key(k); }
         if k.code == KeyCode::F(6) && self.cfg.native() { self.open_settings(); return Cmd::none(); }
@@ -1238,9 +1246,9 @@ impl TuiApp {
         }
 
         match k.code {
-            KeyCode::Char('q') => { crate::network_app::request_close(); return Cmd::quit(); }
+            KeyCode::Char('q') => { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
             KeyCode::Char('Q') => {
-                crate::network_app::request_close();
+                self.lifecycle.request_stop(StopReason::Quit);
                 if !self.cfg.native() { let _ = crate::backend::stop(&self.cfg); }
                 return Cmd::quit();
             }
@@ -1737,8 +1745,7 @@ impl Model for TuiApp {
             }
             Msg::Raw(_) => Cmd::none(),
             Msg::Poll => {
-                if self.cfg.native() && crate::engine::quit_requested() { return Cmd::quit(); }
-                if self.cfg.native() && (crate::network_app::close_requested() || crate::network_app::check_transition(&self.cfg)) { return Cmd::quit(); }
+                if self.cfg.native() && crate::network_app::check_transition(&self.cfg, &self.lifecycle) { return Cmd::quit(); }
                 self.tick += 1; self.maybe_reload_theme(); self.poll()
             }
             Msg::Hover => {
@@ -3159,6 +3166,21 @@ mod interaction_tests {
         app.kitty = None;
         app.rss_initial_refresh_pending = false;
         app
+    }
+
+    #[test]
+    fn lifecycle_poll_and_quit_leave_the_request_for_the_owner() {
+        use crate::daemon::lifecycle::Request as LifecycleRequest;
+        let lifecycle = Lifecycle::default();
+        let mut app = app();
+        app.lifecycle = lifecycle.clone();
+        lifecycle.request_restart(RestartReason::Settings);
+        assert!(matches!(app.update(Msg::Poll), Cmd::Quit));
+        assert_eq!(lifecycle.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Settings)));
+        // An explicit quit while the restart is pending must prevent reopening.
+        assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char('q'))), Cmd::Quit));
+        assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
+        assert_eq!(app.lifecycle.pending_request(), None);
     }
 
     #[test]
