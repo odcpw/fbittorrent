@@ -1,0 +1,27 @@
+{"dir":"volatile","paths":["result.instance","result.server.pid","result.server.build","result.uptime_s","ts","result.torrent.added_at","result.torrent.completed_at"]}
+{"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","log"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"c2s","frame":{"args":{"source":{"url":"https://example.invalid/legal.torrent"}},"id":2,"instance":"0123456789abcdef0123456789abcdef","op":"torrents.add","ref":"test-add"}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"ref":"test-add","state":"pending"}}}
+{"dir":"c2s","frame":{"args":{"source":{"url":"https://example.invalid/legal.torrent"}},"id":3,"instance":"0123456789abcdef0123456789abcdef","op":"torrents.add","ref":"test-add"}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"ref":"test-add","state":"pending"}}}
+{"dir":"s2c","frame":{"epoch":2,"ev":"engine.changed","reason":"restart","seq":1,"state":"running","ts":1792310401}}
+{"dir":"s2c","frame":{"ev":"torrent.added","hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","origin":"manual","seq":2,"ts":1792310402}}
+{"dir":"s2c","frame":{"ev":"torrent.completed","hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","open_target":"/tmp/fbt-fixture/downloads/Example e2.mkv","seq":3,"ts":1792310403}}
+{"dir":"s2c","frame":{"buffered_s":30,"ev":"torrent.playable","file":0,"hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","open_target":"/tmp/fbt-fixture/downloads/Example e2.mkv","seq":4,"ts":1792310404}}
+{"dir":"s2c","frame":{"ev":"torrent.error","hash":"0123456789abcdef0123456789abcdef01234567","message":"missing files","name":"Example e2.mkv","seq":5,"ts":1792310405}}
+{"dir":"s2c","frame":{"ev":"mutation.result","op":"torrents.add","outcome":"done","ref":"test-add","result":{"hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","state":"done"},"seq":6,"ts":1792310406}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_state","message":"instance changed; confirm remove again","retryable":false},"ev":"mutation.result","op":"torrents.remove","outcome":"failed","ref":"test-remove","seq":7,"ts":1792310407}}
+{"dir":"s2c","frame":{"error":{"code":"timeout","details":{"after_s":95},"message":"outcome is unknown","retryable":true},"ev":"mutation.result","op":"torrents.add","outcome":"timeout","ref":"test-timeout","seq":8,"ts":1792310408}}
+{"dir":"s2c","frame":{"ev":"search.done","search_id":1,"seq":9,"total":0,"ts":1792310409,"warnings":[{"message":"no results","provider":"fixture"}]}}
+{"dir":"s2c","frame":{"ev":"shows.checked","imdb":"tt1234567","new":0,"seq":10,"ts":1792310410,"warnings":[]}}
+{"dir":"s2c","frame":{"already_added":true,"ev":"clipboard.magnet","hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","seq":11,"ts":1792310411}}
+{"dir":"c2s","frame":{"args":{"source":{"path":"/tmp/fbt-fixture/fixture.torrent"}},"id":4,"op":"torrents.add","ref":"test-path"}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"hash":"0123456789abcdef0123456789abcdef01234567","state":"done"}}}
+{"dir":"c2s","frame":{"args":{"source":{"restore":"0123456789abcdef0123456789abcdef01234567"}},"id":5,"op":"torrents.add","ref":"test-restore"}}
+{"dir":"s2c","frame":{"id":5,"ok":true,"result":{"hash":"0123456789abcdef0123456789abcdef01234567","state":"done"}}}
+{"dir":"c2s","frame":{"args":{"since_seq":1,"topics":["events"]},"id":6,"op":"subscribe"}}
+{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"sub":3,"topics":["events"]}}}
+{"dir":"s2c","frame":{"count":1,"ev":"snapshot.begin","oldest_seq":6,"reason":"resync","rev":1,"sub":3,"topic":"events"}}
+{"dir":"s2c","frame":{"ev":"snapshot.chunk","items":[{"ev":"mutation.result","op":"torrents.add","outcome":"done","ref":"test-add","result":{"hash":"0123456789abcdef0123456789abcdef01234567","name":"Example e2.mkv","state":"done"},"seq":6,"ts":1792310406}],"rev":2,"sub":3,"topic":"events"}}
+{"dir":"s2c","frame":{"ev":"snapshot.end","rev":3,"sub":3,"topic":"events"}}
