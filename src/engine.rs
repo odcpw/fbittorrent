@@ -164,6 +164,9 @@ pub enum RestoreOutcome {
 struct RestoreTask {
     generation: usize,
     outcome: RestoreOutcome,
+    // Retain the last diagnostic while another attempt is in flight. A
+    // pending retry is not evidence that the previous fault has been fixed.
+    last_error: Option<String>,
     task: Option<task::JoinHandle<()>>,
     cancel: CancellationToken,
 }
@@ -295,6 +298,7 @@ impl Inner {
             return Ok(());
         }
         let generation = RESTORE_GENERATION.fetch_add(1, Ordering::Relaxed);
+        let last_error = restores.get(&record.hash).and_then(|restore| restore.last_error.clone());
         let outcome = if self.torrent_path(&record.hash)?.exists() {
             RestoreOutcome::Checking
         } else { RestoreOutcome::Metadata };
@@ -327,15 +331,20 @@ impl Inner {
             if let Some(restore) = restores.get_mut(&record.hash) {
                 if restore.generation == generation {
                     restore.outcome = match result {
-                        Ok(()) => RestoreOutcome::Restored,
-                        Err(error) => RestoreOutcome::Failed {
-                            reason: "restore_failed", message: format!("could not restore {}: {error:#}", record.name),
-                        },
+                        Ok(()) => {
+                            restore.last_error = None;
+                            RestoreOutcome::Restored
+                        }
+                        Err(error) => {
+                            let message = format!("could not restore {}: {error:#}", record.name);
+                            restore.last_error = Some(message.clone());
+                            RestoreOutcome::Failed { reason: "restore_failed", message }
+                        }
                     };
                 }
             }
         })?;
-        restores.insert(hash, RestoreTask { generation, outcome, task: Some(task), cancel });
+        restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel });
         Ok(())
     }
 
@@ -347,11 +356,13 @@ impl Inner {
 
     fn unrestored_snapshot(&self, record: &Record) -> Torrent {
         let restores = self.restores.lock().unwrap();
-        let (state, error_message) = match restores.get(&record.hash).map(|entry| &entry.outcome) {
-            Some(RestoreOutcome::Failed { message, .. }) => ("error", Some(message.clone())),
-            Some(RestoreOutcome::Checking) => ("checkingDL", None),
-            Some(RestoreOutcome::Stopped) => (if record.completion_on > 0 { "stoppedUP" } else { "stoppedDL" }, None),
-            _ => ("metaDL", None),
+        let restore = restores.get(&record.hash);
+        let error_message = restore.and_then(|entry| entry.last_error.clone());
+        let state = match restore.map(|entry| &entry.outcome) {
+            Some(RestoreOutcome::Failed { .. }) => "error",
+            Some(RestoreOutcome::Checking) => "checkingDL",
+            Some(RestoreOutcome::Stopped) => if record.completion_on > 0 { "stoppedUP" } else { "stoppedDL" },
+            _ => "metaDL",
         };
         Torrent {
             hash: record.hash.clone(), name: record.name.clone(), state: state.into(), error_message,
@@ -747,7 +758,14 @@ impl EngineDispatcher {
                 let mut torrents = Vec::new();
                 for record in &ledger.records {
                     torrents.push(match self.inner.handle(&record.hash) {
-                        Ok(handle) => snapshot(record, &handle),
+                        Ok(handle) => {
+                            let mut torrent = snapshot(record, &handle);
+                            if torrent.error_message.is_none() {
+                                torrent.error_message = self.inner.restores.lock().unwrap()
+                                    .get(&record.hash).and_then(|restore| restore.last_error.clone());
+                            }
+                            torrent
+                        },
                         Err(_) => self.inner.unrestored_snapshot(record),
                     });
                 }
@@ -1574,7 +1592,8 @@ fn snapshot(record: &Record, handle: &Arc<ManagedTorrent>) -> Torrent {
         "queuedDL"
     } else {
         match stats.state {
-            TorrentStatsState::Initializing { .. } => "checkingDL",
+            TorrentStatsState::Initializing { paused: false } => "checkingDL",
+            TorrentStatsState::Initializing { paused: true } => "stoppedDL",
             TorrentStatsState::Paused => {
                 if stats.finished {
                     "stoppedUP"
@@ -1876,6 +1895,74 @@ mod tests {
     }
 
     #[test]
+    fn stop_during_hashing_is_paused_and_can_resume() {
+        use std::time::Instant;
+        let directory = review_directory("stop-during-hashing");
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let name = "P0-09.hashing.bin";
+        let length = 1024u64 * 1024 * 1024;
+        let piece_length = 4 * 1024 * 1024;
+        std::fs::File::create(downloads.join(name)).unwrap().set_len(length).unwrap();
+        // SHA-1 of a real 4 MiB zero piece. The sparse payload is read and hashed
+        // by librqbit; the deliberately wrong last hash keeps it incomplete.
+        let piece_hash = [0x2b, 0xcc, 0xbd, 0x2f, 0x38, 0xf1, 0x5c, 0x13, 0xeb, 0x7d, 0x5a, 0x89, 0xfd, 0x9d, 0x85, 0xf5, 0x95, 0xe2, 0x3b, 0xc3];
+        let mut pieces = piece_hash.repeat((length / piece_length) as usize);
+        let last = pieces.len() - 20;
+        pieces[last..].fill(0);
+        let mut bytes = format!("d4:infod6:lengthi{length}e4:name{}:{}12:piece lengthi{piece_length}e6:pieces{}:", name.len(), name, pieces.len()).into_bytes();
+        bytes.extend_from_slice(&pieces);
+        bytes.extend_from_slice(b"7:privatei1eee");
+        let hash = librqbit::torrent_from_bytes(&bytes).unwrap().info_hash.as_string();
+        let record = review_record(&hash, &downloads);
+        std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
+        std::fs::write(directory.join("torrents.json"), serde_json::to_vec(&Ledger {
+            migrated_legacy: true, records: vec![record],
+        }).unwrap()).unwrap();
+        let cfg = Config { save_path: Some(downloads.to_string_lossy().into()), ..Default::default() };
+        let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+        let app = start_in(&cfg, directory.clone(), instance, SessionOptions {
+            dht: None, disable_trackers: true, disable_local_service_discovery: true,
+            concurrent_init_limit: Some(1), ..Default::default()
+        }).unwrap();
+        let dispatcher = app.dispatcher();
+        let row = || -> Torrent {
+            let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
+            rows.into_iter().find(|row| row.hash == hash).unwrap()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let checking = row();
+            if checking.state == "checkingDL" && checking.completed > 0 && checking.completed < length as i64 {
+                println!("active hashing: state={} checked_bytes={}", checking.state, checking.completed);
+                break;
+            }
+            assert!(Instant::now() < deadline, "must stop during real hashing: {checking:?}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        dispatcher.dispatch(&request("torrents/stop", &[("hashes", &hash)])).unwrap().unwrap();
+        let stopped = row();
+        println!("stopped hashing: state={} checked_bytes={}", stopped.state, stopped.completed);
+        assert_eq!(stopped.state, "stoppedDL");
+        assert!(stopped.is_stopped(), "the shared client must offer Resume");
+        let saved = read_ledger(&directory.join("torrents.json")).unwrap();
+        assert!(saved.records[0].paused);
+        dispatcher.dispatch(&request("torrents/start", &[("hashes", &hash)])).unwrap().unwrap();
+        let handle = dispatcher.inner.handle(&hash).unwrap();
+        dispatcher.runtime.block_on(async {
+            time::timeout(dispatcher.runtime.cx(), Duration::from_secs(15),
+                handle.wait_until_initialized(dispatcher.runtime.cx())).await.unwrap().unwrap();
+        });
+        let resumed = row();
+        println!("resumed hashing: state={} verified_bytes={}", resumed.state, resumed.completed);
+        assert_eq!(resumed.state, "stalledDL");
+        assert!(resumed.completed > 0 && resumed.completed < length as i64);
+        assert!(!read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn bad_record_does_not_block() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
@@ -1913,8 +2000,9 @@ mod tests {
             (record, bytes)
         };
         let (valid, valid_bytes) = make_cached("valid.txt");
-        let (bad, repaired_bytes) = make_cached("corrupt.txt");
-        std::fs::write(directory.join(format!("{}.torrent", valid.hash)), valid_bytes).unwrap();
+        let (mut bad, repaired_bytes) = make_cached("corrupt.txt");
+        bad.source = format!("magnet:?xt=urn:btih:{}&tr=http%3A%2F%2F127.0.0.1%3A{}%2Fannounce", bad.hash, tracker.port());
+        std::fs::write(directory.join(format!("{}.torrent", valid.hash)), &valid_bytes).unwrap();
         let bad_path = directory.join(format!("{}.torrent", bad.hash));
         std::fs::write(&bad_path, b"corrupt cache").unwrap();
         let mut magnet = review_record("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &downloads);
@@ -1961,9 +2049,33 @@ mod tests {
         let failed_outcome = std::mem::replace(&mut entry.outcome, RestoreOutcome::Checking);
         drop(pending);
         assert_eq!(dispatcher.inner.unrestored_snapshot(&bad).state, "checkingDL");
-        assert!(dispatcher.inner.unrestored_snapshot(&bad).error_message.is_none());
+        assert_eq!(dispatcher.inner.unrestored_snapshot(&bad).error_message, failed.error_message);
         dispatcher.inner.restores.lock().unwrap().get_mut(&bad.hash).unwrap().outcome = failed_outcome;
 
+        // A retry may spend another 90 seconds resolving metadata. Keep the
+        // corruption diagnostic while it waits, and replace it only on a new
+        // failure or clear it after successful restoration.
+        std::fs::remove_file(&bad_path).unwrap();
+        dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        let retry = list().into_iter().find(|row| row.hash == bad.hash).unwrap();
+        assert_eq!(retry.state, "metaDL");
+        assert_eq!(retry.error_message, failed.error_message);
+        println!("pending retry state={} error_message={:?}", retry.state, retry.error_message);
+        dispatcher.dispatch(&request("torrents/stop", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        std::fs::write(&bad_path, &valid_bytes).unwrap(); // Real but mismatched metainfo.
+        dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let row = list().into_iter().find(|row| row.hash == bad.hash).unwrap();
+            assert!(row.error_message.is_some(), "a retry must retain a diagnostic: {row:?}");
+            if row.state == "error" {
+                assert!(row.error_message.as_ref().unwrap().contains("does not match saved record"));
+                println!("failed retry state={} error_message={:?}", row.state, row.error_message);
+                break;
+            }
+            assert!(Instant::now() < deadline, "{row:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         std::fs::write(&bad_path, repaired_bytes).unwrap();
         dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
