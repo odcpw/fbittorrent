@@ -997,12 +997,481 @@ def shutdown_inflight_add(binary, systemd):
                                f"Reply={response!r}.")
                     harness.lock_free()
 
+class ApiConn:
+    """Real bounded NDJSON connection; retains unsolicited frames separately."""
+    def __init__(self, harness, timeout=8):
+        self.harness, self.case = harness, harness.case
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.socket.settimeout(timeout)
+        self.socket.connect(str(DaemonContract.socket_path(harness.sandbox)))
+        self.buffer, self.pushed, self.next_id = b"", [], 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self):
+        self.socket.close()
+
+    def send(self, op, args=None, ref=None, request_id=None):
+        identifier = self.next_id if request_id is None else request_id
+        self.next_id = max(self.next_id, identifier + 1)
+        frame = dict(id=identifier, op=op)
+        if args is not None:
+            frame["args"] = args
+        if ref is not None:
+            frame["ref"] = ref
+        self.socket.sendall(json.dumps(frame, separators=(",", ":")).encode() + b"\n")
+        return identifier
+
+    def receive(self):
+        while b"\n" not in self.buffer:
+            chunk = self.socket.recv(8192)
+            if not chunk:
+                if self.buffer:
+                    raise EOFError("API closed during a JSON line")
+                return None
+            self.buffer += chunk
+            if len(self.buffer.split(b"\n", 1)[0]) + 1 > 1048576:
+                raise ValueError("server frame exceeds 1 MiB")
+        line, self.buffer = self.buffer.split(b"\n", 1)
+        if len(line) + 1 > 1048576:
+            raise ValueError("server frame exceeds 1 MiB")
+        return json.loads(line)
+
+    def call(self, op, args=None, ref=None, error=None):
+        step = self.case.step("API " + op + " " + json.dumps(args, sort_keys=True),
+                              "matching success reply" if error is None else "matching " + error + " failure")
+        identifier = self.send(op, args, ref)
+        while True:
+            frame = self.receive()
+            if frame is None:
+                step.fail("EOF before reply")
+                raise EOFError(op)
+            if "ev" in frame:
+                self.pushed.append(frame)
+                continue
+            if frame.get("id") != identifier:
+                step.fail(f"Unexpected response ID: {frame!r}")
+                raise ValueError("response ID mismatch")
+            ok = frame.get("ok") is True if error is None else frame.get("error", {}).get("code") == error
+            step.close(ok, json.dumps(frame, sort_keys=True))
+            return frame
+
+    def hello(self, kind="test"):
+        return self.call("hello", dict(proto=1, client=dict(name="daemon-api-test", version="0.2.0", kind=kind)))
+
+    def events(self):
+        while self.pushed:
+            yield self.pushed.pop(0)
+        while (frame := self.receive()) is not None:
+            yield frame
+
+
+@contextmanager
+def api_owned(name, binary, systemd):
+    with Case("daemon", name) as case, fixtures.Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        process = harness.start_serve()
+        if not (harness.receive_ready() and harness.wait_engine()):
+            raise RuntimeError("owned API fixture did not start")
+        try:
+            yield case, sandbox, harness, process
+        finally:
+            if process.child.poll() is None:
+                harness.stop_serve(process)
+            harness.lock_free()
+
+
+@contextmanager
+def stalled_api_source(case):
+    """A real loopback HTTP source held until cleanup; no synthetic daemon delay."""
+    import http.server
+    release, entered = threading.Event(), threading.Event()
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def do_GET(self):
+            entered.set()
+            release.wait()
+            try:
+                self.send_error(404)
+            except OSError:
+                pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = False
+    thread = threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=.05))
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/held.torrent", entered
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+        case.check(not thread.is_alive(), "owned stalled HTTP source joins", f"HTTP thread alive={thread.is_alive()}.")
+
+
+def connection_limit(binary, systemd):
+    with api_owned("connection_limit", binary, systemd) as (case, sandbox, harness, process), ExitStack() as stack:
+        clients = [stack.enter_context(ApiConn(harness)) for _ in range(32)]
+        for client in clients:
+            client.hello()
+        with ApiConn(harness) as rejected:
+            failure, final, eof = rejected.receive(), rejected.receive(), rejected.receive()
+            case.check(failure.get("ev") == "error" and failure["error"]["code"] == "busy"
+                       and failure["error"]["details"]["limit"] == "connections" and final["ev"] == "bye" and eof is None,
+                       "33rd connection receives request-less busy, bye, then EOF", f"{failure!r}; {final!r}; EOF={eof!r}.")
+        clients[0].close()
+        def replaced():
+            with ApiConn(harness) as replacement:
+                replacement.send("hello", dict(proto=1, client=dict(name="replacement", version="0", kind="test")))
+                value = replacement.receive()
+                return value.get("ok") is True, str(value)
+        harness.wait_for(replaced, "disconnected client releases admission", timeout=2)
+        path = DaemonContract.socket_path(sandbox)
+        case.check(path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700,
+                   "API socket and runtime directory are private", str(path))
+
+
+def api_protocol_failure(name, binary, systemd, payload):
+    with api_owned(name, binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        client.socket.sendall(payload)
+        failure, final, eof = client.receive(), client.receive(), client.receive()
+        case.check(failure.get("ev") == "error" and failure["error"]["code"] == "invalid_message"
+                   and final == dict(ev="bye", reason="invalid_message") and eof is None,
+                   "invalid_message always sends error, bye and closes", f"{failure!r}; {final!r}; EOF={eof!r}.")
+
+
+def line_cap(binary, systemd):
+    api_protocol_failure("line_cap", binary, systemd, b"x" * (70 * 1024) + b"\n")
+
+
+def non_object_line(binary, systemd):
+    api_protocol_failure("non_object_line", binary, systemd, b"[]\n")
+
+
+def hello_twice(binary, systemd):
+    with api_owned("hello_twice", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        first = client.hello()
+        second = client.call("hello", dict(proto=1, client=dict(name="test", version="0", kind="test")), error="invalid_state")
+        client.call("app.info")
+        case.check(len(first["result"]["instance"]) == 32 and second["error"]["retryable"] is False,
+                   "second hello is non-retryable and leaves connection usable")
+        client.socket.sendall(b'{"id":0,"op":"app.info"}\n')
+        invalid = client.receive()
+        case.check(invalid.get("id", "missing") is None and invalid["error"]["code"] == "invalid_args",
+                   "bad ID receives id:null and leaves connection open", str(invalid))
+        client.call("app.info")
+
+
+def hello_deadline_case(name, binary, systemd, trickle):
+    with api_owned(name, binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        began = time.monotonic()
+        if trickle:
+            for _ in range(8):
+                client.socket.sendall(b" ")
+                time.sleep(.5)
+        failure, final, eof = client.receive(), client.receive(), client.receive()
+        elapsed = time.monotonic() - began
+        case.check(4.7 <= elapsed <= 7 and failure["error"]["code"] == "hello_required"
+                   and final == dict(ev="bye", reason="hello_required") and eof is None,
+                   "five-second hello deadline is anchored to accept and not reset by bytes",
+                   f"elapsed={elapsed:.3f}s; {failure!r}; {final!r}; EOF={eof!r}.")
+
+
+def hello_deadline(binary, systemd):
+    hello_deadline_case("hello_deadline", binary, systemd, False)
+
+
+def slow_hello_bytes(binary, systemd):
+    hello_deadline_case("slow_hello_bytes", binary, systemd, True)
+
+
+def ninth_inflight_busy(binary, systemd):
+    with api_owned("ninth_inflight_busy", binary, systemd) as (case, sandbox, harness, process), \
+            stalled_api_source(case) as (source, entered), ApiConn(harness) as client:
+        client.hello()
+        batch = [dict(id=identifier, op="torrents.add", args=dict(source=dict(url=source), stopped=True))
+                 for identifier in range(2, 11)]
+        batch.append(dict(id=2, op="app.info"))
+        client.next_id = 11
+        client.socket.sendall(b"".join(json.dumps(frame).encode() + b"\n" for frame in batch))
+        frame = client.receive()
+        case.check(frame.get("id") == 10 and frame.get("error", {}).get("code") == "busy"
+                   and frame["error"]["details"]["limit"] == "inflight",
+                   "ninth pipelined in-flight operation is retryable busy before dispatch", str(frame))
+        duplicate = client.receive()
+        case.check(duplicate.get("id", "missing") is None and duplicate["error"]["code"] == "invalid_args",
+                   "reused in-flight ID is id:null invalid_args", str(duplicate))
+        case.check(entered.wait(2), "dispatch entered the owned HTTP source", f"entered={entered.is_set()}.")
+        # Signal cancellation before the source is released: pending requests
+        # must receive stopping errors, and bye is the final frame.
+        harness.stop_serve(process)
+        frames = list(client.events())
+        replies = [frame for frame in frames if "id" in frame]
+        outcomes = [frame for frame in frames if frame.get("ev") == "mutation.result"]
+        pending = [frame for frame in replies if frame.get("ok") is True and frame["result"]["state"] == "pending"]
+        case.check(len(replies) == 8 and all(frame in pending or frame.get("error", {}).get("code") == "engine_unavailable" for frame in replies)
+                   and len(outcomes) == len(pending) and all(frame["outcome"] == "failed" for frame in outcomes)
+                   and frames[-1] == dict(ev="bye", reason="shutdown"),
+                   "all eight accepted requests get pending plus failed outcome, or stopping rejection, before final bye", json.dumps(frames))
+
+
+def api_quiesce_bye(binary, systemd):
+    with api_owned("api_quiesce_bye", binary, systemd) as (case, sandbox, harness, process), \
+            ApiConn(harness) as first, ApiConn(harness) as second:
+        first.hello("bar")
+        second.hello("agent")
+        second.call("app.client", dict(interactive=True, glance=True))
+        before = second.call("app.info")["result"]
+        epoch, inode, instance = before["engine_epoch"], DaemonContract.socket_path(sandbox).stat().st_ino, before["instance"]
+        first.call("app.restart", dict(scope="engine"))
+        def restarted():
+            info = second.call("app.info")["result"]
+            return info["state"] == "running" and info["engine_epoch"] > epoch, json.dumps(info)
+        harness.wait_for(restarted, "same API connections observe replacement engine")
+        case.check(DaemonContract.socket_path(sandbox).stat().st_ino == inode and second.call("app.info")["result"]["instance"] == instance,
+                   "API listener and process instance survive engine restart")
+        result = first.call("app.shutdown", dict(reason="test"))["result"]
+        case.check(result["state"] == "pending" and isinstance(result["ref"], str), "shutdown acknowledges pending with correlation ref", str(result))
+        for connection in (first, second):
+            frames = list(connection.events())
+            case.check(frames and frames[-1] == dict(ev="bye", reason="shutdown") and
+                       sum(frame.get("ev") == "bye" for frame in frames) == 1,
+                       "each connection receives bye last and then EOF", str(frames))
+        process.wait()
+        case.check(not DaemonContract.socket_path(sandbox).exists(), "API socket unlinked after drain")
+
+def api_torrent_operations(binary, systemd):
+    with api_owned("api_torrent_operations", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        client.hello()
+        fixture = fixtures.two_file_fixture()
+        fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info, comment="API fixture", **{"created by": "P1-06"})))
+        fixtures.corrupt_byte(fixture.files[0], 0)
+        args = dict(source=dict(path=str(fixture.torrent)), save_path=str(sandbox.root), stopped=True, origin="agent")
+        added = client.call("torrents.add", args)["result"]
+        duplicate = client.call("torrents.add", dict(args, seed=True))["result"]
+        case.check(added["hash"] == fixture.info_hash and added["duplicate"] is False and duplicate["duplicate"] is True,
+                   "typed add returns the exact hash and serial duplicate outcome", f"added={added!r}; duplicate={duplicate!r}.")
+        with fixtures.HttpFixture(sandbox.root, {"/metadata.torrent": dict(file=fixture.torrent.name)}) as http:
+            pending = client.call("torrents.add", dict(source=dict(url=http.base + "/metadata.torrent"), stopped=True), ref="url-fixture")["result"]
+            case.check(pending == dict(state="pending", ref="url-fixture"), "URL add acknowledges pending with its ref", str(pending))
+            outcome = client.receive()
+            case.check(outcome.get("ev") == "mutation.result" and outcome["ref"] == "url-fixture" and outcome["outcome"] == "done"
+                       and outcome["result"]["hash"] == fixture.info_hash and outcome["result"]["duplicate"] is True
+                       and outcome["seq"] > 0 and outcome["ts"] > 0,
+                       "URL completion event carries the atomic real engine add result", str(outcome))
+
+        def checked():
+            detail = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+            return detail["checked"], json.dumps(detail)
+        harness.wait_for(checked, "API fixture completes real hash check")
+        detail = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(detail["private"] is True and detail["file_count"] == 2 and detail["piece_size"] == 16384
+                   and detail["piece_count"] > 1 and detail["comment"] == "API fixture" and detail["created_by"] == "P1-06"
+                   and detail["seed"] is False and detail["origin"] == "agent" and detail["uploaded_bytes"] == 0,
+                   "detail contains real cached metadata and duplicate add preserves existing policy", str(detail))
+        rows = client.call("torrents.list", dict(states=["paused"], origin=["agent"]))["result"]["torrents"]
+        case.check([row["hash"] for row in rows] == [fixture.info_hash], "list filters states and accepted origin", str(rows))
+        entries = client.call("torrents.files", dict(hash=fixture.info_hash))["result"]["files"]
+        case.check([entry["size"] for entry in entries] == [16384 + 123, 256 * 1024]
+                   and all(isinstance(entry["sort_key"], str) for entry in entries), "files carry exact sizes, selection and sort keys", str(entries))
+        client.call("torrents.start", dict(hashes=[fixture.info_hash]))
+        client.call("torrents.stop", dict(hashes=[fixture.info_hash]))
+        client.call("torrents.set_seed", dict(hashes=[fixture.info_hash], on=True))
+        client.call("torrents.set_upload_limit", dict(hashes=[fixture.info_hash], bps=32768))
+        client.call("torrents.set_files", dict(hash=fixture.info_hash, include=[0], skip=[1]))
+        selected = client.call("torrents.files", dict(hash=fixture.info_hash))["result"]["files"]
+        case.check([file["included"] for file in selected] == [True, False], "include/skip changes are applied before done", str(selected))
+        target = client.call("torrents.open_target", dict(hash=fixture.info_hash, file=0))["result"]
+        case.check(target == dict(path=str(fixture.files[0]), kind="file"), "explicit open-target file index resolves the real path", str(target))
+        client.call("transfer.info")
+        client.call("app.network")
+        client.call("torrents.get", dict(hash="f" * 40), error="not_found")
+        client.call("torrents.start", dict(hashes=[fixture.info_hash], force=False), error="invalid_args")
+        client.call("torrents.add", dict(source=dict(restore=fixture.info_hash)), error="invalid_args")
+        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
+        link = sandbox.root / "symlink.torrent"
+        link.symlink_to(fixture.torrent)
+        client.call("torrents.add", dict(source=dict(path=str(link))), error="invalid_args")
+        fifo = sandbox.root / "fifo.torrent"
+        os.mkfifo(fifo)
+        client.call("torrents.add", dict(source=dict(path=str(fifo))), error="invalid_args")
+        large = sandbox.root / "large.torrent"
+        with large.open("wb") as output:
+            output.truncate(16 * fixtures.MIB + 1)
+        client.call("torrents.add", dict(source=dict(path=str(large))), error="invalid_args")
+        client.call("torrents.remove", dict(hashes=[fixture.info_hash], delete_files=False))
+        case.check(all(path.exists() for path in fixture.files), "remove keeping files retains owned payloads")
+        case.check(client.call("torrents.list", {})["result"]["torrents"] == [], "durable remove is visible before response")
+        client.call("torrents.add", dict(args, files=[1]))
+        selected = client.call("torrents.files", dict(hash=fixture.info_hash))["result"]["files"]
+        case.check([file["included"] for file in selected] == [False, True], "initial file selection is admitted and saved atomically", str(selected))
+        client.call("torrents.remove", dict(hashes=[fixture.info_hash], delete_files=False))
+
+        magnet = "magnet:?xt=urn:btih:" + "a1" * 20 + "&dn=unresolved"
+        began = time.monotonic()
+        unresolved = client.call("torrents.add", dict(source=dict(magnet=magnet), stopped=True))["result"]
+        elapsed = time.monotonic() - began
+        case.check(unresolved["hash"] == "a1" * 20 and elapsed < 2,
+                   "magnet returns its durable hash without waiting for metadata", f"elapsed={elapsed:.3f}s; {unresolved!r}.")
+        client.call("torrents.stop", dict(hashes=["a1" * 20]))
+        client.call("torrents.remove", dict(hashes=["a1" * 20], delete_files=False))
+
+def dispatch_queue_busy(binary, systemd):
+    with api_owned("dispatch_queue_busy", binary, systemd) as (case, sandbox, harness, process), \
+            stalled_api_source(case) as (source, entered), ExitStack() as stack:
+        clients = [stack.enter_context(ApiConn(harness)) for _ in range(10)]
+        for client in clients:
+            client.hello()
+        for client in clients:
+            for _ in range(8):
+                client.send("torrents.add", dict(source=dict(url=source), stopped=True))
+        case.check(entered.wait(2), "eight-worker pool enters the held real source", str(entered.is_set()))
+        for client in clients:
+            client.socket.settimeout(.15)
+        refusals, acknowledgements = [], []
+        for client in clients:
+            while True:
+                try:
+                    value = client.receive()
+                except socket.timeout:
+                    break
+                if value is None:
+                    break
+                if value.get("ok") is True and value.get("result", {}).get("state") == "pending":
+                    acknowledgements.append(value)
+                else:
+                    refusals.append(value)
+        case.check(len(acknowledgements) == 8, "exactly eight dispatch workers start pending URL tasks", str(acknowledgements))
+        case.check(refusals and all(frame.get("error", {}).get("code") == "busy"
+                   and frame["error"]["details"]["limit"] == "dispatch" for frame in refusals),
+                   "eight active workers plus queue 64 refuse additional admitted work with dispatch busy", str(refusals))
+        # Owner control is independent of the saturated dispatch pool.
+        with ApiConn(harness) as control:
+            control.hello()
+            control.call("app.shutdown", {})
+            case.check(list(control.events())[-1] == dict(ev="bye", reason="shutdown"),
+                       "shutdown remains responsive when all dispatch workers and queue are occupied")
+        process.wait()
+
+
+def api_concurrent_adds(binary, systemd):
+    import concurrent.futures
+    with api_owned("api_concurrent_adds", binary, systemd) as (case, sandbox, harness, process):
+        inputs = []
+        for name in ("one", "two"):
+            directory = sandbox.root / name
+            directory.mkdir()
+            fixture = fixtures.two_file_fixture(directory)
+            inputs.append((dict(source=dict(path=str(fixture.torrent)), save_path=str(directory), stopped=True), fixture.info_hash))
+        def add(value):
+            with ApiConn(harness) as client:
+                client.send("hello", dict(proto=1, client=dict(name="concurrent", version="0", kind="test")))
+                assert client.receive()["ok"] is True
+                client.send("torrents.add", value)
+                return client.receive()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            requests = [(args, digest) for args, digest in inputs for _ in range(2)]
+            futures = [pool.submit(add, args) for args, _ in requests]
+            responses = [future.result(timeout=10) for future in futures]
+        for (_, digest), response in zip(requests, responses):
+            case.check(response.get("ok") is True and response["result"]["hash"] == digest,
+                       "concurrent add reply carries its own exact hash", json.dumps(response))
+        for _, digest in inputs:
+            outcomes = [response["result"]["duplicate"] for response in responses if response["result"]["hash"] == digest]
+            case.check(sorted(outcomes) == [False, True], "same-hash concurrent additions have exactly one durable first add", str(outcomes))
+        with ApiConn(harness) as client:
+            client.hello()
+            rows = client.call("torrents.list", {})["result"]["torrents"]
+            case.check(sorted(row["hash"] for row in rows) == sorted(digest for _, digest in inputs),
+                       "concurrent add ledger has exactly two records", str(rows))
+
+def contract_difference(expected, observed, volatile, path=""):
+    """First exact field mismatch, ignoring only the transcript's volatile paths."""
+    if path in volatile:
+        return None
+    if type(expected) is not type(observed):
+        return "/" + path.replace(".", "/"), expected, observed
+    if isinstance(expected, dict):
+        for key in sorted(expected.keys() | observed.keys()):
+            here = path + "." + key if path else key
+            if here in volatile:
+                continue
+            if key not in expected or key not in observed:
+                return "/" + here.replace(".", "/"), expected.get(key, "<missing>"), observed.get(key, "<missing>")
+            if difference := contract_difference(expected[key], observed[key], volatile, here):
+                return difference
+    elif isinstance(expected, list):
+        for index in range(max(len(expected), len(observed))):
+            here = path + "." + str(index)
+            if index >= len(expected) or index >= len(observed):
+                return "/" + here.replace(".", "/"), expected[index] if index < len(expected) else "<missing>", observed[index] if index < len(observed) else "<missing>"
+            if difference := contract_difference(expected[index], observed[index], volatile, here):
+                return difference
+    elif expected != observed:
+        return "/" + path.replace(".", "/"), expected, observed
+    return None
+
+
+def contract_group(group, binary, systemd):
+    path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    volatile = set(lines[0]["paths"]) if lines[0]["dir"] == "volatile" else set()
+    with api_owned("contract_" + group.replace("-", "_"), binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        for number, line in enumerate(lines, 1):
+            if line["dir"] == "c2s":
+                frame = line["frame"]
+                # The file is the oracle: do not substitute hashes, source paths,
+                # operations or expected capabilities to make a replay pass.
+                client.socket.sendall(json.dumps(frame).encode() + b"\n")
+            elif line["dir"] == "s2c":
+                expected, actual = line["frame"], client.receive()
+                difference = contract_difference(expected, actual, volatile)
+                step = case.step(f"replay {path.relative_to(REPO)}:{number}", "response equals fixture after declared volatile paths are ignored")
+                if difference:
+                    pointer, wanted, got = difference
+                    step.fail(f"JSON pointer {pointer}: expected {wanted!r}; observed {got!r}; actual={actual!r}.")
+                    # Fail at the first real mismatch; later future-phase URLs
+                    # and absolute paths must never reach an external service.
+                    return
+                step.ok(f"Frame matched at line {number}.")
+
+
+def contract_hello(binary, systemd):
+    contract_group("hello", binary, systemd)
+
+
+def contract_errors(binary, systemd):
+    contract_group("errors", binary, systemd)
+
+
+def contract_torrents(binary, systemd):
+    contract_group("torrents", binary, systemd)
+
+
+def contract_subscribe(binary, systemd):
+    contract_group("subscribe", binary, systemd)
+
+
+def contract_subscribe_gap(binary, systemd):
+    contract_group("subscribe-gap", binary, systemd)
+
+
+def contract_mutations(binary, systemd):
+    contract_group("mutations", binary, systemd)
+
 
 CASES = {function.__name__: function for function in
          (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
-          cap_change_no_check, seed_toggle_no_check)}
+          cap_change_no_check, seed_toggle_no_check, connection_limit, line_cap, non_object_line,
+          hello_twice, hello_deadline, slow_hello_bytes, ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy, api_concurrent_adds, contract_hello, contract_errors,
+          contract_torrents, contract_subscribe, contract_subscribe_gap, contract_mutations)}
 SYSTEMD_CASES = {"systemd_without_bus_address"}
 
 

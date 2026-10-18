@@ -9,6 +9,7 @@ pub mod ops;
 pub mod request;
 pub mod response;
 pub mod scalar;
+pub mod server;
 pub mod validation;
 
 pub use events::*;

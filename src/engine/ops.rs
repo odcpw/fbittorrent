@@ -2,7 +2,7 @@
 use super::*;
 mod parser;
 mod types;
-pub use parser::{LEGACY_ROUTES, Route};
+pub use parser::{Route, LEGACY_ROUTES};
 pub use types::*;
 
 impl EngineDispatcher {
@@ -37,7 +37,9 @@ impl EngineDispatcher {
         })
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
-        if let Some(result) = self.execute_dormant(cx, &op).await { return result; }
+        if let Some(result) = self.execute_dormant(cx, &op).await {
+            return result;
+        }
         if matches!(
             op,
             EngineOp::Network | EngineOp::Settings | EngineOp::Restart | EngineOp::Shutdown
@@ -97,6 +99,24 @@ impl EngineDispatcher {
                 }));
             }
             EngineOp::Info => return Ok(EngineResult::Torrents(self.info(cx).await?)),
+            EngineOp::Get { hash } => {
+                let mut torrent = self.info(cx).await?.into_iter()
+                    .find(|view| &view.hash == hash).context("torrent record not found")?;
+                let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+                let record = ledger.records.iter().find(|record| &record.hash == hash)
+                    .context("torrent record not found")?;
+                torrent.name = record.name.clone();
+                let bytes = if let Some(metadata) = self.inner.handle(hash).ok().and_then(|handle|handle.metadata.load_full()) {
+                    Some(metadata.torrent_bytes.to_vec())
+                } else {
+                    match parked::parked_metadata(record, &self.inner.directory) {
+                        Ok(bytes) => bytes,
+                        Err(_) if torrent.error.is_some() => None,
+                        Err(error) => return Err(error),
+                    }
+                };
+                return Ok(EngineResult::Detail(TorrentDetails::from_bytes(torrent, bytes.as_deref())?));
+            }
             EngineOp::Files { hash } => {
                 let handle = match self.inner.handle(hash) {
                     Ok(handle) => handle,
@@ -145,8 +165,39 @@ impl EngineDispatcher {
                 ));
             }
             EngineOp::Add(options) => {
-                self.add_typed(cx, options).await?;
-                return Ok(EngineResult::Acknowledged);
+                return Ok(EngineResult::Added(self.add_typed(cx, options, None).await?));
+            }
+            EngineOp::AddSelected { options, files } => {
+                return Ok(EngineResult::Added(self.add_typed(cx,options,Some(files.clone())).await?));
+            }
+            EngineOp::AddMagnet(options) => {
+                let _addition = OwnedMutexGuard::lock(self.inner.additions.clone(), cx).await?;
+                if self.inner.network_blocked.load(Ordering::Acquire) {
+                    bail!("connect ProtonVPN before adding a download");
+                }
+                let source = options.sources.first().context("no magnet supplied")?;
+                let magnet = librqbit::Magnet::parse(source)?;
+                let hash = magnet.as_id20().context("a v1 magnet hash is required")?.as_string();
+                let mut ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+                if let Some(record) = ledger.records.iter().find(|record| record.hash == hash) {
+                    return Ok(EngineResult::Added(vec![AddedTorrent {
+                        hash, name: record.name.clone(), duplicate: true,
+                    }]));
+                }
+                let only_files = magnet.get_select_only();
+                let record = Record {
+                    hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
+                    source: source.clone(), output_folder: options.save_path.clone()
+                        .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
+                    only_files, upload_limit: options.upload_limit,
+                    ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
+                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false,
+                };
+                ledger.records.push(record.clone());
+                self.inner.save(cx, &ledger).await?;
+                self.inner.spawn_restore(cx, record.clone())?;
+                self.inner.reconcile_queue(cx, &mut ledger, &HashSet::new()).await?;
+                return Ok(EngineResult::Added(vec![AddedTorrent { hash, name: record.name, duplicate: false }]));
             }
             EngineOp::ToggleSequentialDownload => bail!(
                 "the native engine always downloads each file sequentially; this setting cannot be disabled"
@@ -163,16 +214,35 @@ impl EngineDispatcher {
             priority,
         } = &op
         {
-            if self.inner.handle(hash).is_err() && self.inner.dormant(hash) && *priority != 0 && !ids.is_empty() {
-                let index = ledger.records.iter().position(|r| &r.hash == hash).context("torrent record not found")?;
+            if self.inner.handle(hash).is_err()
+                && self.inner.dormant(hash)
+                && *priority != 0
+                && !ids.is_empty()
+            {
+                let index = ledger
+                    .records
+                    .iter()
+                    .position(|r| &r.hash == hash)
+                    .context("torrent record not found")?;
                 let mut changed = ledger.records[index].clone();
                 let files = self.inner.saved_files(&changed)?;
-                if ids.iter().any(|index| *index >= files.len()) { bail!("file index is out of range"); }
-                let mut selected = changed.only_files.clone().unwrap_or_else(|| (0..files.len()).collect());
-                selected.extend(ids); selected.sort_unstable(); selected.dedup();
+                if ids.iter().any(|index| *index >= files.len()) {
+                    bail!("file index is out of range");
+                }
+                let mut selected = changed
+                    .only_files
+                    .clone()
+                    .unwrap_or_else(|| (0..files.len()).collect());
+                selected.extend(ids);
+                selected.sort_unstable();
+                selected.dedup();
                 changed.only_files = Some(selected);
-                self.inner.activate_record(cx, &mut ledger, index, changed).await?;
-                self.inner.reconcile_queue(cx, &mut ledger, &HashSet::new()).await?;
+                self.inner
+                    .activate_record(cx, &mut ledger, index, changed)
+                    .await?;
+                self.inner
+                    .reconcile_queue(cx, &mut ledger, &HashSet::new())
+                    .await?;
                 return Ok(EngineResult::Acknowledged);
             }
             let handle = self.inner.handle(hash)?;
@@ -325,7 +395,9 @@ impl EngineDispatcher {
                 // Validate before saving, then apply synchronously under the
                 // ledger lock. A failed save leaves the live limiter unchanged.
                 let limit = ledger.records[index].upload_limit;
-                handle.as_ref().expect("validated upload-cap handle")
+                handle
+                    .as_ref()
+                    .expect("validated upload-cap handle")
                     .set_upload_bps((limit != 0).then_some(limit as u64))?;
             }
             if matches!(op, EngineOp::Stop { .. }) {
@@ -354,13 +426,19 @@ impl EngineDispatcher {
         let Some(EngineOp::Add(options)) = EngineOp::parse(Route::Add.name(), request)? else {
             unreachable!()
         };
-        self.add_typed(cx, &options).await?;
+        self.add_typed(cx, &options, None).await?;
         EngineResult::Acknowledged.to_legacy_json()
     }
-    async fn add_typed(&self, cx: &Cx, options: &AddRequest) -> Result<()> {
+    async fn add_typed(
+        &self,
+        cx: &Cx,
+        options: &AddRequest,
+        files: Option<Vec<usize>>,
+    ) -> Result<Vec<AddedTorrent>> {
         // Serialize additions without holding the ledger while resolving magnets.
         // A duplicate add must observe the first add's durable record.
         let _addition = OwnedMutexGuard::lock(self.inner.additions.clone(), cx).await?;
+        let mut added = Vec::new();
         if self.inner.network_blocked.load(Ordering::Acquire) {
             bail!("connect ProtonVPN before adding a download");
         }
@@ -377,7 +455,7 @@ impl EngineDispatcher {
                 .save_path
                 .clone()
                 .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
-            only_files: None,
+            only_files: files,
             upload_limit: options.upload_limit,
             ratio_limit: options.ratio_limit,
             category: options.category.clone(),
@@ -429,6 +507,11 @@ impl EngineDispatcher {
                 }
                 // Also completes a prior paused add whose record fsync failed.
                 self.inner.save(cx, &ledger).await?;
+                added.push(AddedTorrent {
+                    hash: handle.info_hash().as_string(),
+                    name: handle.name().unwrap_or_default(),
+                    duplicate: true,
+                });
                 continue;
             }
             record.hash = handle.info_hash().as_string();
@@ -474,8 +557,13 @@ impl EngineDispatcher {
             self.inner
                 .reconcile_queue(cx, &mut ledger, &HashSet::new())
                 .await?;
+            added.push(AddedTorrent {
+                hash: record.hash.clone(),
+                name: record.name.clone(),
+                duplicate: false,
+            });
         }
-        Ok(())
+        Ok(added)
     }
 }
 pub(super) fn required<'a>(request: &'a Request, key: &str) -> Result<&'a str> {
@@ -536,3 +624,38 @@ pub(super) fn now() -> i64 {
 #[cfg(test)]
 #[path = "tests/ops.rs"]
 mod tests;
+
+/// Parked reads use the same typed view and metadata conversion. No second
+/// session or mutable ledger facade is introduced by the API adapter.
+pub(crate) fn parked_get(
+    ledger: &ParkedLedger,
+    hash: &str,
+    directory: &Path,
+) -> Result<EngineResult> {
+    let EngineResult::Torrents(rows) = ledger.execute(EngineOp::Info)? else {
+        unreachable!("typed parked info")
+    };
+    let mut torrent = rows
+        .into_iter()
+        .find(|row| row.hash == hash)
+        .context("torrent record not found")?;
+    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_legacy_json()?)?;
+    torrent.name = legacy["name"]
+        .as_str()
+        .context("saved name is unavailable")?
+        .to_owned();
+    let bytes = match std::fs::read(directory.join(format!("{hash}.torrent"))) {
+        Ok(bytes) => {
+            if librqbit::torrent_from_bytes(&bytes)?.info_hash.as_string() != hash {
+                bail!("saved metadata hash mismatch");
+            }
+            Some(bytes)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    Ok(EngineResult::Detail(TorrentDetails::from_bytes(
+        torrent,
+        bytes.as_deref(),
+    )?))
+}

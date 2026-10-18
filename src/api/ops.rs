@@ -128,3 +128,68 @@ pub const TABLE: &[Operation] = &[
         since: "P1-08",
     },
 ];
+
+pub mod app;
+pub mod torrents;
+pub mod transfer;
+
+pub type ApiResult<T> = Result<T, crate::api::Error>;
+pub fn error(code: crate::api::ErrorCode, message: &str, key: Option<&str>) -> crate::api::Error {
+    use crate::api::ErrorCode::*;
+    crate::api::Error {
+        code,
+        message: message.chars().take(200).collect(),
+        retryable: matches!(code, EngineUnavailable | Busy | Upstream | Timeout),
+        hint: match code {
+            EngineUnavailable => Some("fbittorrent status --json".into()),
+            Busy => Some("retry in a moment".into()),
+            _ => None,
+        },
+        details: key.map(|key| serde_json::Map::from_iter([("key".into(), key.into())])),
+    }
+}
+
+pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
+    use crate::api::ErrorCode::*;
+    if let Some(state) = value.downcast_ref::<crate::engine::InvalidTorrentState>() {
+        let mut failure = error(InvalidState, &state.to_string(), None);
+        failure.details = Some(serde_json::Map::from_iter([
+            ("hash".into(), state.hash.clone().into()),
+            ("reason".into(), state.reason.into()),
+        ]));
+        return failure;
+    }
+    let text = format!("{value:#}");
+    let code = if text.contains("not found") {
+        NotFound
+    } else if text.contains("already complete") {
+        InvalidState
+    } else if text.contains("engine_unavailable")
+        || text.contains("engine is closing")
+        || text.contains("connect ProtonVPN")
+    {
+        EngineUnavailable
+    } else if text.contains("timed out") {
+        Timeout
+    } else if text.contains("metadata") || text.contains("no live") || text.contains("out of range")
+    {
+        InvalidState
+    } else {
+        Internal
+    };
+    let mut failure = error(code, &text.chars().take(80).collect::<String>(), None);
+    if code == EngineUnavailable {
+        let state = if text.contains("state=starting") {
+            "starting"
+        } else if text.contains("ProtonVPN") {
+            "parked"
+        } else {
+            "stopping"
+        };
+        failure.details = Some(serde_json::Map::from_iter([("state".into(), state.into())]));
+    }
+    if text.contains("already complete") {
+        failure.hint = Some("enable seeding for this torrent, then retry".into());
+    }
+    failure
+}
