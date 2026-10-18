@@ -16,6 +16,11 @@ impl std::fmt::Display for InvalidTorrentState {
 }
 impl std::error::Error for InvalidTorrentState {}
 
+pub(super) struct SavedTorrent {
+    pub(super) files: Vec<TorrentFile>,
+    pub(super) selected_bytes: u64,
+}
+
 impl Inner {
     pub(super) fn set_restore_outcome(&self, hash: &str, outcome: RestoreOutcome) {
         let last_error = match &outcome {
@@ -35,31 +40,52 @@ impl Inner {
     }
 
     pub(super) fn saved_files(&self, record: &Record) -> Result<Vec<TorrentFile>> {
+        Ok(self.saved_torrent(record)?.files)
+    }
+
+    pub(super) fn saved_torrent(&self, record: &Record) -> Result<SavedTorrent> {
         let bytes = parked::parked_metadata(record, &self.directory)?
             .context("saved torrent metadata is unavailable")?;
         let torrent = librqbit::torrent_from_bytes(&bytes)?;
         let info = torrent.info.data.validate()?;
-        Ok(info
-            .iter_file_details()
+        let lengths = info.lengths();
+        let mut selected_end = 0;
+        let mut selected_bytes = 0;
+        let files = info
+            .iter_file_details_ext()
             .enumerate()
-            .map(|(index, file)| TorrentFile {
-                index: index as i64,
-                name: file.filename.to_pathbuf().to_string_lossy().into(),
-                size: file.len as i64,
-                progress: if record.completion_on > 0 { 1.0 } else { 0.0 },
-                // This is the saved completion claim, not a measurement of data.
-                progress_known: false,
-                priority: if record
+            .map(|(index, file)| {
+                let selected = record
                     .only_files
                     .as_ref()
-                    .is_none_or(|ids| ids.contains(&index))
-                {
-                    1
-                } else {
-                    0
-                },
+                    .is_none_or(|ids| ids.contains(&index));
+                // Match librqbit's compute_selected_pieces / hns.total(): the
+                // union of non-padding selected files' pieces, not file sizes.
+                // Metainfo order gives increasing ranges; count shared boundary
+                // pieces once and clip the final piece to its actual length.
+                let start = file.pieces.start.max(selected_end);
+                if selected && !file.details.attrs().padding && start < file.pieces.end {
+                    let piece_length = u64::from(lengths.default_piece_length());
+                    let end_bytes = (u64::from(file.pieces.end) * piece_length)
+                        .min(lengths.total_length());
+                    selected_bytes += end_bytes - u64::from(start) * piece_length;
+                    selected_end = file.pieces.end;
+                }
+                TorrentFile {
+                    index: index as i64,
+                    name: file.details.filename.to_pathbuf().to_string_lossy().into(),
+                    size: file.details.len as i64,
+                    progress: if record.completion_on > 0 { 1.0 } else { 0.0 },
+                    // This is the saved completion claim, not a measurement of data.
+                    progress_known: false,
+                    priority: if selected { 1 } else { 0 },
+                }
             })
-            .collect())
+            .collect();
+        Ok(SavedTorrent {
+            files,
+            selected_bytes,
+        })
     }
 
     pub(super) fn dormant(&self, hash: &str) -> bool {

@@ -457,12 +457,13 @@ impl Inner {
     pub(super) fn unrestored_view(&self, record: &Record) -> TorrentView {
         let mut view = TorrentView::unrestored(record, self.restores.lock().unwrap().get(&record.hash));
         if matches!(view.legacy.source, Source::Dormant) {
-            if let Ok(files) = self.saved_files(record) {
-                let size = files.iter().map(|file| file.size as u64).sum();
-                view.size = Some(size);
-                view.completed_bytes = Some(size);
+            if let Ok(saved) = self.saved_torrent(record) {
+                view.size = Some(saved.selected_bytes);
+                view.completed_bytes = Some(saved.selected_bytes);
                 let mut path = PathBuf::from(&record.output_folder);
-                if files.len() == 1 { path.push(&files[0].name); }
+                if saved.files.len() == 1 {
+                    path.push(&saved.files[0].name);
+                }
                 view.content_path = Some(path.to_string_lossy().into());
                 view.legacy.content_path = view.content_path.clone().unwrap();
             }

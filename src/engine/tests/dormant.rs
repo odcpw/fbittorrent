@@ -449,3 +449,171 @@ fn unknown_completion_and_seeding_restore_normally() {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+#[test]
+fn dormant_restart_preserves_selected_piece_totals() {
+    let directory = review_directory("lazy-selected-pieces");
+    let downloads = directory.join("downloads");
+    std::fs::create_dir_all(&downloads).unwrap();
+    // The first two selected files share a piece with first-skip.bin. The
+    // selected last.bin also shares the short final piece with last-skip.bin.
+    // Neither of middle-skip.bin's two complete pieces is selected.
+    let files = [
+        ("first-a.bin", 8192, b'a'),
+        ("first-b.bin", 4096, b'a'),
+        ("first-skip.bin", 4096, b'a'),
+        ("middle-skip.bin", 32768, b'b'),
+        ("last.bin", 8192, b'c'),
+        ("last-skip.bin", 3, b'c'),
+        ("empty.bin", 0, b'c'),
+    ];
+    let mut bytes = b"d4:infod5:filesl".to_vec();
+    for (name, length, value) in files {
+        bytes.extend_from_slice(
+            format!("d6:lengthi{length}e4:pathl{}:{name}ee", name.len()).as_bytes(),
+        );
+        std::fs::write(downloads.join(name), vec![value; length]).unwrap();
+    }
+    bytes.extend_from_slice(b"e4:name8:selected12:piece lengthi16384e6:pieces80:");
+    // Actual SHA-1 hashes of 16384 'a' bytes, twice 16384 'b' bytes,
+    // and the shorter final piece of 8195 'c' bytes.
+    bytes.extend_from_slice(&[
+        0x12, 0xff, 0x34, 0x7b, 0x4f, 0x27, 0xd6, 0x9e, 0x1f, 0x32, 0x8e, 0x6f, 0x4b, 0x55, 0x73,
+        0xe3, 0x66, 0x6e, 0x12, 0x2f,
+    ]);
+    bytes.extend_from_slice(
+        &[
+            0x76, 0x02, 0x42, 0x43, 0x18, 0x7a, 0x14, 0xd9, 0xcf, 0xa7, 0xed, 0x6f, 0x21, 0x2c,
+            0x81, 0x51, 0xb7, 0x2f, 0x7b, 0x92,
+        ]
+        .repeat(2),
+    );
+    bytes.extend_from_slice(&[
+        0x1c, 0x64, 0xf9, 0xc6, 0x59, 0x9a, 0x4f, 0x32, 0xc3, 0x50, 0x17, 0xde, 0xcf, 0x8a, 0x45,
+        0xaa, 0xbf, 0xd7, 0xd2, 0x52,
+    ]);
+    bytes.extend_from_slice(b"7:privatei1eee");
+    let hash = librqbit::torrent_from_bytes(&bytes)
+        .unwrap()
+        .info_hash
+        .as_string();
+    std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
+    let mut record = review_record(&hash, &downloads);
+    record.name = "selected".into();
+    record.only_files = Some(vec![0, 1, 4]);
+    let app = test_app(
+        &directory,
+        &downloads,
+        Ledger {
+            generation: Default::default(),
+            migrated_legacy: true,
+            records: vec![record],
+        },
+        None,
+    );
+    let dispatcher = app.dispatcher();
+    wait_for_check(&dispatcher, &hash);
+    let stats = dispatcher.inner.handle(&hash).unwrap().stats();
+    assert!(stats.finished);
+    assert_eq!(stats.total_bytes, 16384 + 8195);
+    assert_eq!(stats.progress_bytes, stats.total_bytes);
+    let live = dormant_rows(&dispatcher).pop().unwrap();
+    assert!(live.checked);
+    assert_eq!(live.size, Some(stats.total_bytes));
+    assert_eq!(live.completed_bytes, Some(stats.progress_bytes));
+    let saved = read_ledger(&directory.join("torrents.json")).unwrap();
+    assert!(saved.records[0].completion_on > 0);
+    assert_eq!(saved.records[0].only_files, Some(vec![0, 1, 4]));
+    drop(app);
+
+    // A real production restart with the unselected middle data now missing.
+    // It must keep the selected completion claim without admitting any storage.
+    let skipped = downloads.join("middle-skip.bin");
+    std::fs::remove_file(&skipped).unwrap();
+    let cfg = Config {
+        save_path: Some(downloads.to_string_lossy().into()),
+        ..Default::default()
+    };
+    let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
+    let app = start_in(
+        &cfg,
+        Lifecycle::default(),
+        directory.clone(),
+        instance,
+        SessionOptions {
+            dht: None,
+            disable_trackers: true,
+            disable_local_service_discovery: true,
+            fastresume: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let dispatcher = app.dispatcher();
+    let dormant = dormant_rows(&dispatcher).pop().unwrap();
+    assert_eq!(dormant.state, TorrentState::Done);
+    assert_eq!(dormant.progress, Some(1.0));
+    assert!(!dormant.checked);
+    assert_eq!(dormant.size, Some(stats.total_bytes));
+    assert_eq!(dormant.completed_bytes, Some(stats.progress_bytes));
+    assert_eq!(dormant.completed_at, live.completed_at);
+    assert_eq!(
+        dispatcher.restore_outcomes()[&hash],
+        RestoreOutcome::Dormant
+    );
+    assert_eq!(dispatcher.inner.session.with_torrents(|t| t.count()), 0);
+    assert!(!skipped.exists(), "restart must not recreate skipped data");
+    let EngineResult::Files(saved_files) = dispatcher
+        .execute(EngineOp::Files { hash: hash.clone() })
+        .unwrap()
+    else {
+        panic!("expected saved files")
+    };
+    assert_eq!(saved_files.iter().map(|file| file.size).sum::<i64>(), 57347);
+    assert!(saved_files.iter().all(|file| !file.progress_known));
+    for file in &saved_files {
+        assert_eq!(
+            file.priority,
+            if [0, 1, 4].contains(&file.index) {
+                1
+            } else {
+                0
+            }
+        );
+    }
+    assert_eq!(saved_files[3].size, 32768);
+    // The compatibility view uses the corrected counts with its existing wire
+    // shape; all ten existing wire fixtures remain unchanged.
+    let legacy = dispatcher.inner.unrestored_snapshot(&saved.records[0]);
+    assert_eq!(legacy.size, stats.total_bytes as i64);
+    assert_eq!(legacy.completed, stats.progress_bytes as i64);
+
+    // Metadata-only edges: absent/empty selection, an overlapping selection,
+    // just the short last piece, and an empty file (which selects no pieces).
+    for (selection, expected) in [
+        (None, 57347),
+        (Some(vec![]), 0),
+        (Some(vec![0, 1]), 16384),
+        (Some(vec![4]), 8195),
+        (Some(vec![6]), 0),
+    ] {
+        let mut record = saved.records[0].clone();
+        record.only_files = selection;
+        assert_eq!(
+            dispatcher
+                .inner
+                .saved_torrent(&record)
+                .unwrap()
+                .selected_bytes,
+            expected
+        );
+    }
+    dormant_diagnostic(
+        "restart retains the checked selected-piece totals and skips missing unselected data",
+        serde_json::json!({"live": live, "dormant": dormant, "files": saved_files,
+            "selected_file_bytes": 20480, "selected_piece_bytes": stats.total_bytes,
+            "unselected_whole_piece_bytes": 32768, "session_handles": 0}),
+    );
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}
