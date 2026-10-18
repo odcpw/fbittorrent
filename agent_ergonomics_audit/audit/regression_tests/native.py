@@ -25,7 +25,7 @@ from fbtlog import Case, REPO, suite_status
 CASES = (
     "dec_mouse_mode", "closed_status_stays_closed", "one_enter_adds_once",
     "refresh_preserves_read_history", "rss_mouse_and_scoped_shortcuts",
-    "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety",
+    "mouse_selection_at_scroll_offset", "native_cli_fields_and_deletion_safety", "no_fake_seed_counts",
     "shows_inbox_and_targets", "file_modal_shows_help_80x24",
     "settings_queue_vpn_restart", "quit_restart_down",
 )
@@ -176,11 +176,8 @@ class NativeHarness:
         return child.returncode, value
 
 
-def no_fake_seed_counts(root, env, cli, tmux, keys, capture):
-    """P0-11: real TUI captures; local provider fixtures, never public swarms."""
-    from fbtlog import Case
-
-    artifacts = Path(__file__).resolve().parents[3] / "target/test-logs/native"
+def prepare_peer_label_fixture(env, torrent_name):
+    """Install an offline provider before the TUI enumerates its plugins."""
     provider = Path(env["XDG_DATA_HOME"]) / "fbittorrent/nova3/engines/peer_labels.py"
     provider.parent.mkdir(parents=True, exist_ok=True)
     provider.write_text('''from novaprinter import prettyPrinter
@@ -200,58 +197,68 @@ class peer_labels:
     cache = Path(env["XDG_CACHE_HOME"]) / "fbittorrent"
     names = cache / "imdb/by-name-v2"
     names.mkdir(parents=True, exist_ok=True)
-    for name in ["Local YTS unknown counts", "Local seeded fixture"]:
+    for name in [torrent_name, "Local YTS unknown counts", "Local seeded fixture"] + [f"Fixture episode {i}" for i in range(1, 46)]:
         safe = re.sub(r"[^a-z0-9]", "_", name.lower())[:120]
         (names / (safe + ".json")).write_text('{"missing":true}')
     if not (cache / "title.ratings.tsv").exists():
         (cache / "title.ratings.tsv").write_text("tconst\taverageRating\tnumVotes\n")
 
-    with Case("native", "no_fake_seed_counts") as case:
-        def check_capture(filename, ready, extra=lambda pane: True):
-            step = case.step("Capture " + filename,
-                             "The populated pane has no fabricated seed count.")
-            try:
-                def poll():
-                    pane = capture()
-                    return pane if ready(pane) else None
-                pane = wait_for(poll, filename)
-                path = artifacts / ("no_fake_seed_counts." + filename)
-                path.write_text(pane)
-                valid = not re.search(r"\b0 seeds\b|\b0s\b", pane) and extra(pane)
-                (step.ok if valid else step.fail)(f"Captured {path}:\n{pane}")
-            except Exception as error:
-                step.fail(f"Capture failed: {error}; last pane:\n{capture()}")
+def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session):
+    """P0-11: real TUI captures; local provider fixtures, never public swarms."""
+    artifacts = REPO / "target/test-logs/native"
+    def check_capture(filename, ready, extra=lambda pane: True):
+        step = case.step("Capture " + filename,
+                         "The populated pane has no fabricated seed count.")
+        try:
+            last = [""]
+            def poll():
+                last[0] = capture()
+                return ready(last[0])
+            available = wait_for(poll, filename)
+            pane = last[0]
+            path = artifacts / ("no_fake_seed_counts." + filename)
+            path.write_text(pane)
+            valid = available and not re.search(r"\b0 seeds\b|\b0s\b", pane) and extra(pane)
+            (step.ok if valid else step.fail)(f"Captured {path}:\n{pane}", artifacts=[path])
+        except Exception as error:
+            step.fail(f"Capture failed: {error}; last pane:\n{capture()}")
 
-        if not cli("list")["torrents"]:
-            cli("add", str(root / "fixture.torrent"), "--quiet")
-        tmux("resize-window", "-x", "160", "-y", "45")
-        keys("1", "Home")
-        check_capture("01-torrents-160x45.txt", lambda pane: "peers connected" in pane)
-        keys("2", "/", "C-a")
-        tmux("send-keys", "-l", "known peers")
-        keys("Enter", "Down")
-        check_capture("08-search-results-selected.txt",
-                      lambda pane: "12 seeds, 3 leechers" in pane)
-        keys("/", "C-a")
-        tmux("send-keys", "-l", "unknown peers")
-        keys("Enter", "Down")
+    if not cli("list")["torrents"]:
+        cli("add", str(root / "fixture.torrent"), "--quiet")
+    tmux("resize-window", "-t", session, "-x", "160", "-y", "45")
+    keys("1", "Home")
+    check_capture("01-torrents-160x45.txt", lambda pane: "peers connected" in pane)
+    keys("2", "/", "C-a")
+    tmux("send-keys", "-t", session, "-l", "known peers")
+    keys("Enter")
+    wait_for(lambda: "Local seeded fixture" in capture(), "local seeded search result")
+    keys("Down")
+    check_capture("08-search-results-selected.txt",
+                  lambda pane: "12 seeds, 3 leechers" in pane)
+    keys("/", "C-a")
+    tmux("send-keys", "-t", session, "-l", "unknown peers")
+    keys("Enter")
+    wait_for(lambda: "Local YTS unknown counts" in capture(), "local unknown-count search result")
+    keys("Down")
 
-        def blank_seed_column(pane):
-            header = next(line for line in pane.splitlines() if "NAME" in line and "SEEDS" in line)
-            row = next(line for line in pane.splitlines() if "Local YTS unknown counts" in line)
-            end = header.index("SEEDS") + len("SEEDS")
-            return not row[end - 6:end].strip() and "seeds" not in pane and "leechers" not in pane
+    def blank_seed_column(pane):
+        header = next(line for line in pane.splitlines() if "NAME" in line and "SEEDS" in line)
+        end = header.index("SEEDS") + len("SEEDS")
+        row = next(line for line in pane.splitlines()
+                   if "Local YTS unknown counts" in line[:end - 6])
+        return not row[end - 6:end].strip() and "seeds" not in pane and "leechers" not in pane
 
-        check_capture("10-browse-yts-latest.txt",
-                      lambda pane: "Local YTS unknown counts" in pane, blank_seed_column)
-        keys("Escape", "4")
-        check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
-        step = case.step("Read capabilities --json", "The native zero seed sentinel is documented as unknown.")
-        capabilities = cli("capabilities")
-        note = capabilities.get("field_notes", {}).get("list[].num_seeds")
-        (step.ok if note == "always 0 in native mode: unknown" else step.fail)(f"Field note: {note}.")
-        keys("1")
-        tmux("resize-window", "-x", "120", "-y", "30")
+    check_capture("10-browse-yts-latest.txt",
+                  lambda pane: pane.count("Local YTS unknown counts") == 2 and "source" in pane,
+                  blank_seed_column)
+    keys("Escape", "4")
+    check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
+    step = case.step("Read capabilities --json", "The native zero seed sentinel is documented as unknown.")
+    capabilities = cli("capabilities")
+    note = capabilities.get("field_notes", {}).get("list[].num_seeds")
+    (step.ok if note == "always 0 in native mode: unknown" else step.fail)(f"Field note: {note}.")
+    keys("1")
+    tmux("resize-window", "-t", session, "-x", "120", "-y", "30")
 
 
 def main():
@@ -288,6 +295,8 @@ def main():
         cli, record, wait_for = harness.cli, harness.record, harness.wait_for
 
         name = "Fixture.with.a.long.filename." + "readable." * 14 + "END.txt"
+        if options.case in (None, "no_fake_seed_counts"):
+            prepare_peer_label_fixture(env, name)
         content = b"Local torrent lifecycle fixture.\n"
         info = {"length": len(content), "name": name, "piece length": 16384,
                 "pieces": hashlib.sha1(content).digest()}
@@ -349,8 +358,8 @@ def main():
         def show_episodes(imdb):
             return {episode["key"]: episode for episode in cli("shows", "episodes", imdb)["episodes"]}
 
-        tmux_socket = f"fbt-fbt-p0-15-3hq-{os.getpid()}"
-        session = "fbt-fbt-p0-15-3hq"
+        tmux_socket = f"fbt-fbt-p0-11-tjs-{os.getpid()}"
+        session = "fbt-fbt-p0-11-tjs"
 
         def tmux(*args, check=True, timeout=None):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
@@ -490,6 +499,11 @@ def main():
                 cli("delete", expected_hash, "--files", code=3)
             if options.case == "native_cli_fields_and_deletion_safety":
                 return suite_status("native")
+            if options.case in (None, "no_fake_seed_counts"):
+                with Case("native", "no_fake_seed_counts") as case:
+                    no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
+                if options.case == "no_fake_seed_counts":
+                    return suite_status("native")
             with Case("native", "shows_inbox_and_targets", enabled=options.case in (None, "shows_inbox_and_targets")) as case:
                 keys("1", "Enter")
                 wait_for(lambda: "Files" in capture(), "file modal")
@@ -623,6 +637,10 @@ def main():
                 print(error_file.read_text(), file=sys.stderr)
             raise
         finally:
+            if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
+                terminal_artifact = REPO / "target/test-logs/native/no_fake_seed_counts.terminal.typescript"
+                terminal_artifact.write_bytes(terminal_bytes.read_bytes())
+                print(f"Terminal stream retained: {terminal_artifact}")
             tmux("kill-server", check=False)
             server.shutdown()
     return suite_status("native")
