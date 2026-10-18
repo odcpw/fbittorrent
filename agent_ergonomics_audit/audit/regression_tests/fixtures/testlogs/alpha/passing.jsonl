@@ -1,0 +1,2 @@
+{"ts": "2026-10-18T00:00:00.000Z", "suite": "alpha", "case": "passing", "step": 1, "action": "fixture assertion", "expect": "fixture passes", "observed": "pass", "ok": true, "ms": 20, "artifacts": []}
+{"ts": "2026-10-18T00:00:00.000Z", "suite": "alpha", "case": "passing", "final": true, "ok": true, "steps": 1, "failed": [], "ms": 20}

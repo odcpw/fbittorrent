@@ -2,12 +2,48 @@
 # Run native unit and isolated app integration checks. Legacy/Desktop checks
 # require explicit opt-in because they control the configured live service/UI.
 set -euo pipefail
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+  cat <<'HELP'
+Usage: all.sh [--help]
+Default: logger/marker tests, hygiene, Rust tests, release build, isolated native
+CLI/TUI tests, CI/resource/summary regression tests, then the JSONL summary table.
+Local release/all.sh runs must use the AGENTS.md release-lock/memory-scope wrapper.
+
+Environment flags (opt-ins default to 0; set exactly 1 to enable):
+  FBT_TEST_QS=1         Quickshell store/smoke fixtures (P2-02/P2-04); requires
+                       Quickshell, Qt 6.12 and Omarchy shell modules.
+  FBT_TEST_VISUAL=1     plugin/tests/qs-visual.sh captures (P2-08); requires the
+                       live shell, grim and its visual-fixture dependencies.
+  FBT_TEST_WIDGET=1     widget_keys.sh; requires the live shell, plugin and wtype.
+  FBT_TEST_VPN=1        vpn.py in its isolated user/network namespace; requires
+                       unshare, iproute2 and permission to create namespaces.
+  FBT_TEST_RESOURCES=1  Build release-perf, measure idle/active CPU and RSS, and
+                       compare baselines/resources.json on its reference host.
+  FBT_TEST_VERBOSE=1    Mirror every JSONL line to stderr, including pane polls.
+  FBT_TEST_FORCE_FAIL=<suite>/<case>
+                       Force that case's first step to fail; retain its logs.
+  FBT_TEST_LEGACY=1     Legacy CLI/TUI checks; controls the configured live service.
+
+Unavailable opted-in fixture scripts fail explicitly. QS/visual scripts arrive
+in their named P2 beads. No live-service or live-widget suite runs by default.
+HELP
+  exit 0
+fi
+if [[ $# != 0 ]]; then
+  echo "Unknown argument: $1 (use --help)" >&2
+  exit 2
+fi
 cd "$(dirname "$0")/../../.." || exit 1
 export PATH="$HOME/.rch/shims:$HOME/.cargo/bin:$PATH"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Reset all scheduled JSONL suites before any gate can fail. Archived bead
 # evidence and unrelated suites are neither removed nor included in this run.
-summary_args=(--suite fbtlog_test --suite qs_log_test --suite hygiene --suite native)
+summary_args=(--suite fbtlog_test --suite qs_log_test --suite hygiene --suite native --suite ci_gates)
+if [[ "${FBT_TEST_QS:-0}" == 1 ]]; then summary_args+=(--suite gate_qs_store --suite gate_qs_smoke); fi
+if [[ "${FBT_TEST_VISUAL:-0}" == 1 ]]; then summary_args+=(--suite gate_visual); fi
+if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then summary_args+=(--suite gate_widget); fi
+if [[ "${FBT_TEST_VPN:-0}" == 1 ]]; then summary_args+=(--suite gate_vpn); fi
+if [[ "${FBT_TEST_RESOURCES:-0}" == 1 ]]; then summary_args+=(--suite resources); fi
 python3 scripts/testlog-summary.py --reset "${summary_args[@]}"
 test_log=$(mktemp)
 finish() {
@@ -44,6 +80,32 @@ echo "## Release build"
 RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-1200}" cargo build --release --locked
 echo "## Isolated native CLI/TUI and RSS checks"
 python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
+echo "## CI, summary and resource-gate regression checks"
+python3 agent_ergonomics_audit/audit/regression_tests/ci_test.py
+gate() {
+  local suite=$1
+  shift
+  python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite "$suite" -- "$@"
+}
+if [[ "${FBT_TEST_QS:-0}" == 1 ]]; then
+  gate gate_qs_store bash plugin/tests/qs-store.sh
+  gate gate_qs_smoke bash plugin/tests/qs-smoke.sh
+fi
+if [[ "${FBT_TEST_VISUAL:-0}" == 1 ]]; then
+  gate gate_visual bash plugin/tests/qs-visual.sh
+fi
+if [[ "${FBT_TEST_VPN:-0}" == 1 ]]; then
+  # vpn.py owns its config/data/cache/runtime directories; supply isolated state
+  # here as well, without changing that older fixture's implementation.
+  python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite gate_vpn --isolate-state -- \
+    python3 agent_ergonomics_audit/audit/regression_tests/vpn.py target/release/fbittorrent
+fi
+if [[ "${FBT_TEST_RESOURCES:-0}" == 1 ]]; then
+  RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-1200}" cargo build --profile release-perf --locked
+  python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
+    --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
+    --output target/test-logs/resources/measurement.json
+fi
 if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
   echo "## Configured legacy CLI and TUI"
   agent_ergonomics_audit/audit/regression_tests/run.sh
@@ -51,5 +113,5 @@ if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
 fi
 if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then
   echo "## Live widget keyboard controls"
-  agent_ergonomics_audit/audit/regression_tests/widget_keys.sh
+  gate gate_widget bash agent_ergonomics_audit/audit/regression_tests/widget_keys.sh
 fi
