@@ -128,3 +128,7 @@ Receipt: [P0-16.md](P0-16.md) (branch ntm/fbittorrent/cod_2, commit fe18858; mer
 ## P0-13
 
 Receipt: [P0-13.md](P0-13.md) (branch ntm/fbittorrent/cod_2, commit ea13ef3; merged by the orchestrator after an independent test run).
+
+## P0-05
+
+Receipt: [P0-05.md](P0-05.md) (branch ntm/fbittorrent/cod_4, commit d4eb8fa; merged by the orchestrator after an independent test run).
