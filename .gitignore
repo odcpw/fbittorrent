@@ -9,4 +9,4 @@ temp/
 # `git add -f`; nothing over 256 KB.
 docs/validation/**
 !docs/validation/**/
-!docs/validation/**/README.md
+!docs/validation/**/*.md
