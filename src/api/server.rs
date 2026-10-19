@@ -225,6 +225,7 @@ struct Job {
     connection: Arc<Connection>,
     request: Request,
     generation: u64,
+    _activity: Option<crate::daemon::policy::Mutation>,
 }
 #[derive(Default)]
 struct Work {
@@ -268,6 +269,15 @@ struct Shared {
     stopping: AtomicBool,
 }
 impl Shared {
+    fn presence(&self, connection: &Connection) {
+        let client = connection.client.lock().unwrap();
+        let interactive = client.interactive && client.client.as_ref()
+            .is_some_and(|c| c.kind != ClientKind::Bar);
+        let glance = client.glance;
+        drop(client);
+        self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
+        self.bus.refresh();
+    }
     fn url_outcome(
         &self,
         connection: &Connection,

@@ -1,5 +1,13 @@
 use super::*;
 pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stream: UnixStream) {
+    struct Presence<'a>(&'a Shared, u64);
+    impl Drop for Presence<'_> {
+        fn drop(&mut self) {
+            self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
+            self.0.bus.refresh();
+        }
+    }
+    let _presence = Presence(&shared, connection.number);
     let mut reader = BufReader::new(stream);
     let mut bytes = Vec::new();
     let mut staged: Vec<Job> = Vec::new();
@@ -148,6 +156,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 glance: false,
                 caps: validation::NegotiatedCaps::from_hello(&hello),
             };
+            shared.presence(&connection);
             connection.send(json!({"id":request.id,"ok":true,"result":hello}));
             // The hello fuse is the only read deadline. A subscribed listener
             // may send nothing for hours; shutdown wakes this blocking read.
@@ -181,6 +190,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 client.glance = value;
             }
             drop(client);
+            shared.presence(&connection);
             connection.complete(
                 request.id.get(),
                 generation,
@@ -196,10 +206,14 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             request.call,
             Call::AppShutdown { .. } | Call::AppRestart { .. }
         );
+        let activity = ops::TABLE.iter().any(|op| op.name == request.call.op()
+            && op.mutating && op.name.starts_with("torrents."))
+            .then(|| crate::daemon::policy::Mutation::start(shared.daemon.policy.clone()));
         let job = Job {
             connection: connection.clone(),
             request,
             generation,
+            _activity: activity,
         };
         // Owner control remains responsive even when all dispatch workers are
         // waiting for upstream work. The owner still performs the drain.

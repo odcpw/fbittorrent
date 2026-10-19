@@ -37,6 +37,8 @@ pub struct Config {
     pub timeout_secs: u64,
     /// Open the app on demand when a command needs its torrent engine.
     pub autostart: bool,
+    /// Stop an otherwise idle daemon after this delay; 0 disables the idle net.
+    pub idle_exit_secs: u64,
     /// systemd user unit that runs qbittorrent-nox.
     pub backend_unit: String,
     /// Preferred release quality for followed shows ("2160p", "1080p", "720p", "480p").
@@ -62,6 +64,7 @@ impl Default for Config {
             notify: true,
             timeout_secs: 10,
             autostart: true,
+            idle_exit_secs: 300,
             backend_unit: "qbittorrent-nox.service".into(),
             show_quality: "1080p".into(),
         }
@@ -93,6 +96,8 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(self.idle_exit_secs == 0 || self.idle_exit_secs >= 30,
+                        "idle_exit_secs must be 0 or at least 30 seconds");
         anyhow::ensure!(matches!(self.engine.as_str(), "native" | "qbittorrent"), "engine must be native or qbittorrent");
         anyhow::ensure!(self.max_active_downloads > 0, "simultaneous downloads must be at least 1");
         anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer encryption must be off, prefer, or require");
@@ -138,6 +143,18 @@ impl Config {
             Self::default().save_to(path)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    #[test]
+    fn idle_delay_bounds_and_default() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.idle_exit_secs, 300);
+        for seconds in [0, 30, 300] { cfg.idle_exit_secs = seconds; cfg.validate().unwrap(); }
+        for seconds in [1, 2, 29] { cfg.idle_exit_secs = seconds; assert!(cfg.validate().is_err()); }
     }
 }
 

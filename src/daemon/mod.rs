@@ -1,4 +1,5 @@
 pub mod lifecycle;
+pub(crate) mod policy;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
@@ -15,7 +16,7 @@ use slot::{EngineSlot, Slot, State};
 use std::io::Read;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, RwLock,
+    Arc, Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 
@@ -26,13 +27,17 @@ pub struct Daemon {
     pub slot: RwLock<EngineSlot>,
     pub instance: String,
     pub launcher: &'static str,
-    pub idle_exit_secs: u64,
+    pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub no_notify: bool,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
 
 impl Daemon {
+    pub(crate) fn idle_exit_secs(&self) -> u64 {
+        self.policy.lock().unwrap().seconds()
+    }
+
     pub(crate) fn network(&self) -> network_app::NetworkState {
         self.network.read().unwrap().clone()
     }
@@ -97,7 +102,7 @@ impl Daemon {
                     else { "the terminal running fbittorrent serve" }},
             "engine": format!("librqbit {}", librqbit::version()),
             "instance": self.instance, "engine_epoch": slot.engine_epoch,
-            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs},
+            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs()},
         })
     }
 
@@ -119,6 +124,8 @@ impl Daemon {
         if let Some(result) = crate::api::legacy::control(&op, &network, &self.lifecycle) {
             return result;
         }
+        let _activity = (request.method != "GET")
+            .then(|| policy::Mutation::start(self.policy.clone()));
         let began = Instant::now();
         loop {
             let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
@@ -235,7 +242,18 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
-        let request = daemon.lifecycle.wait(Duration::from_secs(1));
+        let timeout = {
+            let mut policy = daemon.policy.lock().unwrap();
+            let now = Instant::now();
+            if policy.expired(now) { return Ok(StopReason::Idle); }
+            policy.wait(now)
+        };
+        // Network safety still checks once a second when bound. Otherwise the
+        // idle supervisor sleeps five seconds, or until its earlier deadline.
+        let timeout = if cfg.network_interface.is_some() {
+            timeout.min(Duration::from_secs(1))
+        } else { timeout };
+        let request = daemon.lifecycle.wait(timeout);
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -267,7 +285,7 @@ fn supervise(
 
 /// Blocks until the daemon owner has drained. Signal setup precedes all daemon
 /// threads; main routes here before search::begin_session or any TUI guard.
-pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Result<i32> {
+pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) -> Result<i32> {
     if no_notify {
         cfg.notify = false;
     }
@@ -293,7 +311,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         } else {
             "foreground"
         },
-        idle_exit_secs,
+        policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         no_notify,
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
@@ -305,8 +323,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         "INFO daemon listening {} no_notify={no_notify}",
         daemon.info()
     );
-    // P1-12 owns the idle busy table; P1-13 owns desktop notifications and
-    // consumes no_notify. sd_notify is always active when NOTIFY_SOCKET is set.
+    // P1-13 owns desktop notifications. sd_notify remains active when
+    // NOTIFY_SOCKET is set, independently of the notification preference.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         notify.send("READY=1")?;
         eprintln!("INFO daemon ready state=starting");

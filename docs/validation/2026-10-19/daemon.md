@@ -1,47 +1,69 @@
 # Daemon track
 
+Commands below use the private-XDG runner `target/test-logs/<bead-id>/run.py`;
+all application launches prove HOME/TMPDIR/five XDG paths and download isolation.
+No all.sh between beads, per the owner track policy.
+
 ## P1-08 — event bus (`fbt-p1-08-xyp`)
 
-Implementation: `d44d4cd`, live replay regression `ae508cd`; final evidence commit
-follows this section. Added bounded subscriptions, consistent chunked snapshots,
-field deltas/null deletion, an instance event ring, structural engine observers,
-restart/detail cleanup and resource tooling. Split the inherited API server into
-modules; all changed application Rust files are below 900 lines. Small neighbouring
-changes expose engine sampling/admission notifications, use live subscription
-counts, advertise subscribe and wire the opt-in resource gate.
+Commits `d44d4cd` (implementation), `ae508cd` (live replay test), `e47c2a5`
+(budget/evidence). Added consistent snapshots/deltas, revision tracking, event
+replay, bounded slow-reader shutdown, engine observers and restart/detail cleanup.
+Split the inherited server below 900 lines; engine/fork hooks, app subscription
+counts, harness/resource gate and README changes are additive. Evidence paths in
+this section are relative to `target/test-logs/fbt-p1-08-xyp/`.
 
-All paths below are relative to `target/test-logs/fbt-p1-08-xyp/`.
-
-| Criterion | Command / artifact | Observed result |
+| Criterion | Command / evidence | Result |
 |---|---|---|
-| Subscribe fixtures / gap recovery | `run.py api`; `run.py cases bus_subscriptions subscribe_gap_recovery`; `api-final/`, `event-driven-live/daemon/`, `event-driven-systemd-final/daemon/` | **PARTIAL**: frozen fixture decoder/reducer tests and complete six-topic live typed transcript pass; losing a real frame triggers unsubscribe/resubscribe and a fresh consistent snapshot in both modes. Full canonical live example replay is not claimed (see below). |
-| Slow reader closes; others live | `run.py cases slow_client_closed_others_live`; `escaped-client-live/daemon/`, `event-driven-systemd-final/daemon/` | PASS: actual queue reaches 512, bye/EOF, healthy pause delta continues; newline client name stays on one log line. |
-| Ten-minute consecutive rev | `FBT_TEST_SOAK=1 FBT_BUS_BINARY=target/release-perf/fbittorrent run.py cases rev_soak_10min`; `soak-final/daemon/rev_soak_10min.{jsonl,frames.ndjson}` | PASS: 608.266 s case, 600 s soak, final rev 652, zero gaps or interleaved snapshots. |
-| Resource matrix / bar criterion | `run.py budget`, `run.py budget_reference`; `daemon-budget-qualified.json`, `budget-final/`, `budget-proc-reference/`; `daemon-budget.md` | PASS: complete three-run 10/100 × 0/1/8 matrix; 100×8 CPU 0.26/0.25/0.27 s/min, RSS 20876/20612/20492 KiB. Median bar increments 0.00/0.02 s ≤ references 0.02/0.02 s. |
+| Subscribe fixtures / recovery | `run.py api`; `run.py cases bus_subscriptions subscribe_gap_recovery`; `api-final/`, `event-driven-{live,systemd-final}/daemon/` | **PARTIAL**: frozen decoder/reducer and whole live typed transcript pass; losing a real frame causes unsubscribe/resubscribe and a fresh snapshot in both modes. Exact canonical live replay remains unmet. |
+| Slow reader / healthy peers | `cases slow_client_closed_others_live`; `escaped-client-live/`, `event-driven-systemd-final/` | PASS: real queue reaches 512, bye/EOF, healthy pause delta continues; newline name remains on one log line. |
+| Ten-minute revisions | `FBT_TEST_SOAK=1 FBT_BUS_BINARY=target/release-perf/fbittorrent run.py cases rev_soak_10min`; `soak-final/daemon/` | PASS: 600 s soak, final rev 652, no gaps/interleaved snapshots; case 608.266 s. |
+| Matrix / bar budget | `run.py budget`, `run.py budget_reference`; `daemon-budget-qualified.json`, `budget-final/`, `budget-proc-reference/` | PASS: three runs each at 10/100 × 0/1/8; bar increments 0.00/0.02 s/min ≤ references 0.02/0.02. Full method/table: `daemon-budget.md`. |
 
-Supporting tests: `run.py full` passed 281 tests (two intentional subprocess/bridge
-ignores) in `final-unit-suite/` before three late observer regressions were added.
-The final touched modules passed API 62/one bridge ignored (`api-final/`), engine
-observer 3 (`observer-module-final/`), real fork transition test 1 (`fork-tests/`),
-and eight live cases per foreground/systemd mode (seven in `event-driven-live/`
-and `event-driven-systemd-final/`, plus `event-replay-{live,systemd}/`). The restart
-case also passed after the startup-deadline fix (`transitional-live/`). Python
-logging, CI dispatch and budget-boundary regressions passed (`verified-gates/`,
-`daemon-gate-tests/`, `budget-exact-arithmetic/`). Earlier failed observer and
-measurement runs are retained separately. No all.sh rerun under the track policy.
+Supporting tests: full Rust 281 passed/two intentional ignores (`final-unit-suite/`)
+preceded the late observer fixes; final API 62/one bridge ignored (`api-final/`),
+observer 3 (`observer-module-final/`), real fork 1 (`fork-tests/`), eight live cases
+per mode (`event-driven-*`, `event-replay-{live,systemd}`), final startup fix
+(`transitional-live/`), Python logger/CI/budget math (`verified-gates/`,
+`daemon-gate-tests/`, `budget-exact-arithmetic/`) all pass. P1-12's full run below
+also rechecks the final engine/API code. Earlier failed runs remain archived.
 
-Unmet: full canonical live replay of `subscribe.ndjson` (the actual frozen filename,
-rather than the bead's `subscribe-torrents.ndjson`) and `subscribe-gap.ndjson` under
-P1-06's unchanged normalization table. It has no identity rules for hash-bearing
-`topic` strings, `changed` map keys or `removed` values, and the subscription
-examples also require future policy/watch/limits fields and specific transfer
-counters. The current live six-topic transcript is retained as
-`event-driven-systemd-final/daemon/bus_subscriptions.live.ndjson`; it validates
-against the frozen types, but is not represented as an exact canonical replay.
-No fixture, validator, normalization mask or IPC document was changed to hide
-this distinction. A scope/normalization ruling remains outstanding.
+Unmet: canonical live `subscribe.ndjson`/`subscribe-gap.ndjson` replay under the
+unchanged P1-06 normalization table: no identity rules cover hash-bearing topic
+strings, changed-map keys or removed values; examples also require future
+policy/watch/limits fields and exact counters. The retained
+`event-driven-systemd-final/daemon/bus_subscriptions.live.ndjson` validates frozen
+types but is not claimed as exact replay. No fixture, validator, mask or IPC doc
+was weakened. Follow-ups: settle those replay preconditions/rules; rerun the
+integrated resource gate after policy/CLI migration. Inherited P1-06 active-check
+and dynamic-history disagreements remain outside this change.
 
-Follow-ups: resolve canonical subscription replay normalization/future-feature
-preconditions; run the integrated resource gate again after policy/CLI migration.
-The inherited P1-06 live active-check/history disagreements remain outside this
-change. Continue with P1-12; P1-11 awaits P1-09 and P1-12/P1-14/P1-17.
+## P1-12 — stop rule and idle net (`fbt-p1-12-pmn`)
+
+Added default 300/minimum 30/zero-off config and CLI override, transfer/restore/
+mutation/search/presence busy inputs, bar exclusion, glance pause/resume/drop,
+summary countdown and bye-idle drain. Owner shutdown preserves durable run intent.
+CLI declarations and RSS/Shows handlers moved out of main (886 lines); original
+bodies/tests unchanged. Minimal API/engine hooks and agent/README updates included.
+Paths below are relative to `target/test-logs/fbt-p1-12-pmn/`. The `run.py cases`
+commands name all ten `idle_exit_*` cases in `daemon_policy.py`, once with
+`FBT_BUS_RUNNAME=policy-live`, once with `FBT_BUS_SYSTEMD=1 FBT_BUS_RUNNAME=policy-systemd`.
+
+| Criterion | Case / JSONL under both `policy-{live,systemd}/daemon/` | Result |
+|---|---|---|
+| Empty exits | `idle_exit_no_torrents.jsonl` | PASS: bye idle, exit 0, both sockets removed. |
+| Local download stays | `idle_exit_download_keeps_alive.jsonl` | PASS: real 8 MiB seed/leecher, 32768 B/s cap, verified bytes and positive rate; survives 4 s with 2 s idle delay. |
+| Interactive stays | `idle_exit_interactive_keeps_alive.jsonl` | PASS: named reason, no countdown, owner shutdown drains. |
+| Bar alone exits | `idle_exit_bar_does_not.jsonl` | PASS: bar interactive=true is ignored; bye idle, exit 0. |
+| Parked download stays | `idle_exit_parked_keeps_alive.jsonl` | PASS: missing private payload + run intent, missing interface; named parked_waiting reason, alive after 4 s. |
+| Zero off / shutdown drains | `idle_exit_disabled_{never_exits,shutdown_drains}.jsonl` | PASS: no fake busy/countdown; shutdown drains, durable paused=false survives. |
+| Busy reasons name work | Above + `idle_exit_mutation_keeps_alive.jsonl` | PASS: downloading, seeding, interactive, parked_waiting, real held loopback URL mutation; search count unit-tested for P3-01. |
+
+Glance cases also pass: fresh reads freeze at 20 s across a 5 s pause, resume at
+20 s, exit after 20.728/20.742 s including drain; socket drop resumes the short
+countdown. All 20 cases have conforming JSONL and clean owned process/unit cleanup.
+`run.py check`: exit 0 (`initial-check/`); `run.py policy`: 6 passed (`policy-units/`);
+`run.py full`: **292 passed, 0 failed, 2 intentional bridge/probe ignores**, 7.94 s
+(`final-full/development_full/full.{jsonl,stdout.log}`). Unmet for P1-12: none;
+UI attachment/quit verbs remain P1-15. Handoffs: P1-09 asynchronous mutation workers
+must retain the lifetime guard; P3-01 must update the live/grace-period search count.

@@ -147,8 +147,14 @@ interface starts it parked, with saved history and start/stop/remove-keeping-fil
 available; the engine reopens when that exact interface returns.
 
 `serve --no-notify` disables desktop notifications while retaining systemd
-readiness datagrams. `--idle-exit-secs N` defaults to 300 (0 means disabled) and
-is exposed in daemon policy metadata; the automatic idle policy follows in P1-12. The current core runs until stopped.
+readiness datagrams. `idle_exit_secs` defaults to 300 in the config (minimum 30,
+or 0 to disable); `serve --idle-exit-secs N` overrides it. The daemon stops when
+its idle countdown reaches zero. Downloads, explicit seeding, waiting downloads
+behind an unavailable interface, interactive clients, search sessions and pending
+mutations cancel that countdown. The bar alone never keeps it running; opening
+the popup pauses the remaining time and closing it resumes that time. The
+`summary` subscription reports the countdown and busy reasons. Owner shutdown
+always drains, even while busy, and preserves download intent for the next start.
 `setup --magnet` writes the on-demand static `fbittorrent.service` using the
 current executable path, reloads the user manager and registers desktop handlers.
 It never enables or starts the unit. `setup --uninstall` removes the unit while

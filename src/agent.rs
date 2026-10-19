@@ -7,7 +7,7 @@ use std::fmt;
 pub const CONTRACT_VERSION: &str = "1.1.1";
 
 const NATIVE_LIFETIME: &str = "The TUI owns its engine until quit; fbittorrent serve owns a headless engine until shutdown, independently of windows.";
-const SERVE_LIMITATIONS: &str = "serve currently has no idle exit yet; systemd starts it on demand for writes. It uses the framed legacy socket (engine.sock), not API v1.";
+const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes. API v1 uses api.sock; today's CLI still uses the framed legacy socket (engine.sock).";
 const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
 const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
 
@@ -394,7 +394,7 @@ mod tests {
             assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
         }
         assert!(guide.contains("fbittorrent serve"));
-        for limitation in ["no idle exit yet", "on demand", "framed legacy socket"] {
+        for limitation in ["idle_exit_secs", "on demand", "framed legacy socket", "api.sock", "glance pauses"] {
             assert!(guide.contains(limitation));
         }
         for (code, name) in [(70, "panic"), (75, "upgrade")] {

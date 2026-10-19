@@ -117,6 +117,7 @@ struct Sample {
     files: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
+    daemon: Value,
 }
 impl Sample {
     fn value(&self, topic: &Topic) -> Value {
@@ -156,7 +157,7 @@ impl Sample {
                 v
             })
             .collect();
-        let mut result = json!({"counts":counts,"alt":false,"limits":{},"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":{"state":self.state,"busy_reasons":if self.state=="parked" {vec!["parked_waiting"]}else{vec![]},"upgrade_pending":false},"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
+        let mut result = json!({"counts":counts,"alt":false,"limits":{},"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -176,6 +177,7 @@ pub(crate) struct Bus {
     initial_hashes: BTreeSet<String>,
 }
 impl Bus {
+    pub(crate) fn refresh(&self) { self.wake.signal(); }
     pub fn new(daemon: Arc<Daemon>) -> Arc<Self> {
         Arc::new(Self {
             daemon,
@@ -332,6 +334,10 @@ impl Bus {
         let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
         let epoch = slot.engine_epoch;
         let state = slot.slot.state().name().to_owned();
+        let restoring = match &slot.slot {
+            Slot::Running(app) => app.dispatcher().has_pending_restore(),
+            _ => false,
+        };
         let (rows, details) = match &slot.slot {
             Slot::Running(app) => app
                 .dispatcher()
@@ -363,7 +369,7 @@ impl Bus {
             }
             Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new()),
         };
-        let rows = rows
+        let rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)
             .collect::<ApiResult<Vec<_>>>()?;
@@ -388,8 +394,18 @@ impl Bus {
             })
             .collect();
         let cfg = crate::config::Config::load().map_err(ops::engine_error)?;
+        let activity = crate::daemon::policy::Transfers::from_torrents(&rows, &state, restoring);
+        let mut daemon = {
+            let mut policy = self.daemon.policy.lock().unwrap();
+            let now = Instant::now();
+            policy.configure(cfg.idle_exit_secs, now);
+            policy.transfers(activity, now);
+            serde_json::to_value(policy.snapshot(now)).unwrap()
+        };
+        daemon["state"] = json!(state);
+        daemon["upgrade_pending"] = json!(false);
         let network = serde_json::to_value(self.daemon.network()).unwrap();
-        let mut settings = json!({"max_active_downloads":cfg.max_active_downloads,"peer_encryption":cfg.peer_encryption,"save_path":cfg.save_path.unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads")).to_string_lossy().into_owned()),"seed_by_default":cfg.seed_by_default,"autostart":cfg.autostart,"idle_exit_secs":self.daemon.idle_exit_secs,"notify":cfg.notify,"timeout_secs":cfg.timeout_secs,"handler":"confirm","open_command":"xdg-open","clipboard_watch":false,"peer_port":cfg.peer_port,"show_quality":cfg.show_quality,"alt_limits_on":false,"restart_class":["network_interface","peer_encryption","peer_port"]});
+        let mut settings = json!({"max_active_downloads":cfg.max_active_downloads,"peer_encryption":cfg.peer_encryption,"save_path":cfg.save_path.unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads")).to_string_lossy().into_owned()),"seed_by_default":cfg.seed_by_default,"autostart":cfg.autostart,"idle_exit_secs":self.daemon.idle_exit_secs(),"notify":cfg.notify,"timeout_secs":cfg.timeout_secs,"handler":"confirm","open_command":"xdg-open","clipboard_watch":false,"peer_port":cfg.peer_port,"show_quality":cfg.show_quality,"alt_limits_on":false,"restart_class":["network_interface","peer_encryption","peer_port"]});
         if let Some(v) = cfg.network_interface {
             settings["network_interface"] = json!(v);
         }
@@ -400,6 +416,7 @@ impl Bus {
             files,
             network,
             settings,
+            daemon,
         })
     }
     fn run(&self) {

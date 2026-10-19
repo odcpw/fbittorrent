@@ -2961,8 +2961,16 @@ from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
                         engine_restart_keeps_connection, slow_client_closed_others_live,
                         rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay)
 
+from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
+    idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
+    idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
+    idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
+
 CASES = {function.__name__: function for function in
-         (bus_subscriptions, events_since_seq_replay, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
+         (idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
+          idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
+          idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
           engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
           fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
