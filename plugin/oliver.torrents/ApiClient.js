@@ -34,7 +34,10 @@ function create(io, options) {
   function fail(entry, failure, status) {
     if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
     if (entry.callback) entry.callback(null, failure)
-    if(!entry.quiet)c.lastError = failure
+    // Automatic connection bookkeeping is rebuilt after reconnect. A lost
+    // presence/subscription reply is not an uncertain user mutation.
+    var transportFailure=entry.internal && (failure.code==="timeout" || failure.code==="engine_unavailable")
+    if(!entry.quiet && !transportFailure)c.lastError = failure
   }
   function write(entry, resend) {
     var frame = { id: c.nextId++, op: entry.op }
@@ -65,7 +68,7 @@ function create(io, options) {
       if (settings.callback) settings.callback(null, unsupported)
       changed(); return false
     }
-    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance, quiet:settings.quiet===true && !settings.mutating,
+    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance, quiet:settings.quiet===true && !settings.mutating, internal:settings.internal===true && !settings.mutating,
       ref: settings.mutating ? "qs-" + c.started + "-" + c.nextRef++ : undefined }
     if (entry.ref) {
       var refs = Object.keys(c.actions)
@@ -92,7 +95,7 @@ function create(io, options) {
   c.connected = function() {
     if (c.helloSent) return
     c.helloSent = true; c.connecting = true; c.graceful = false; c.lastFrame = now()
-    write({ op: "hello", args: { proto: 1, client: { name: "oliver.torrents",
+    write({ op: "hello", internal:true, args: { proto: 1, client: { name: "oliver.torrents",
       version: o.version || "0.2.0", kind: "bar" }, interactive: c.dashboardVisible || c.quickVisible } }, false)
     changed()
   }
@@ -139,7 +142,7 @@ function create(io, options) {
   c.visibility = function(popup, dashboard, details, quick) {
     c.popupOpen = !!popup; c.dashboardVisible = !!dashboard; c.quickVisible=!!quick; c.details = details || []
     if (c.online) {
-      c.request("app.client", presence())
+      c.request("app.client", presence(), {internal:true})
       c.subscribeAll()
     }
   }
@@ -165,7 +168,7 @@ function create(io, options) {
     function advance(){
       if(subscriptionRun!==run || !c.online)return
       if(run.remove.length){
-        c.request("unsubscribe",{sub:run.remove.shift()},{callback:function(result,failure){
+        c.request("unsubscribe",{sub:run.remove.shift()},{internal:true,callback:function(result,failure){
           if(subscriptionRun!==run)return
           if(failure){c.reset("could not release old subscriptions");return}
           advance()
@@ -174,7 +177,7 @@ function create(io, options) {
         if(run.generation===subscriptionGeneration && c.lastError===subscriptionFailure){c.lastError=null;subscriptionFailure=null}
         subscriptionRun=null;renewSubscriptions()
       }else{
-        c.request("subscribe",{topics:run.groups[run.index++],interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000},{callback:function(result,failure){
+        c.request("subscribe",{topics:run.groups[run.index++],interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000},{internal:true,callback:function(result,failure){
           if(subscriptionRun!==run)return
           if(failure){
             if(failure.code==="unknown_op"){subscriptionRun=null;c.mode="poll";subscriptionWanted=false;c.pollAt=0;c.poll()}
@@ -290,7 +293,7 @@ function create(io, options) {
         else fail(e, { code: "timeout", message: "no answer", retryable: true }, "no answer")
       })
       if (o.instance && previous !== c.instance) o.instance(c.instance)
-      c.request("app.client", presence())
+      c.request("app.client", presence(), {internal:true})
       c.subscribeAll()
     } else if (!frame.ok) fail(entry, frame.error)
     else if (entry.ref && c.actions[entry.ref]) {

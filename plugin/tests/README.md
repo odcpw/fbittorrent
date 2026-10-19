@@ -147,3 +147,24 @@ in the manager's network namespace, so both ends can actually communicate. Focus
 `--group p2|dashboard|daemon` or repeated `--case NAME`. Each invocation retains
 commands, exit status, output and generated case evidence under `target/m2-*/`.
 See [the one-page owner demo](../../docs/M2-demo.md) for real-desktop checks.
+
+## M1 / M6 milestone checks
+
+`FBT_BIN=<current-binary> plugin/tests/qs-smoke.sh` exercises only an owned
+private daemon, including mutations and restored Summary/torrent subscriptions
+after restart. It never probes the owner's socket.
+
+`plugin/tests/qs-smoke.sh --palette <current-binary>` and
+`plugin/tests/qs-dashboard.sh --palette <current-binary>` run the same
+`palette_summon_routing` journey: the installed separate summon route, native
+query/magnet/path input, staged review cancellation, unchanged bar toggle and
+continued transfer. Both require the private network namespace and compositor.
+`FBT_TEST_QS=1 scripts/gate-full.sh` includes it once alongside store and smoke.
+
+`FBT_TEST_VISUAL=1 plugin/tests/qs-visual.sh --milestone --binary <current-binary>`
+captures empty, downloading, paused, 200-row, ready and may-stall popups in
+`owner` and `catppuccin-latte`, with private copies of each theme. Each capture
+also pairs the real installed Wi-Fi panel (its backend is an unavailable private
+shim). PNGs are under `target/test-logs/visual/<date>/`, with per-state logs under
+`target/test-logs/qs_visual_runs/`. No owner-theme switch or shell IPC is used.
+The opt-in full gate runs this matrix using the executable it just built.

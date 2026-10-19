@@ -13,18 +13,24 @@ use anyhow::Result;
 use std::time::Duration;
 
 pub fn locked() -> Result<(InstanceLock, ParkedLedger)> {
+    locked_for(Duration::from_secs(2))
+}
+fn locked_for(timeout:Duration)->Result<(InstanceLock,ParkedLedger)> {
     let directory = config::runtime_dir();
     std::fs::create_dir_all(&directory)?;
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
-    let lock = InstanceLock::acquire_wait(config::runtime_dir(), Duration::from_secs(2))?;
+    let lock = InstanceLock::acquire_wait(config::runtime_dir(), timeout)?;
     Ok((
         lock,
         ParkedLedger::new(config::data_dir().join("engine"), Lifecycle::default()),
     ))
 }
 pub fn list() -> Result<Vec<api::Torrent>> {
-    let (_lock, ledger) = locked()?;
+    list_after(Duration::from_secs(2))
+}
+pub(super) fn list_after(timeout:Duration)->Result<Vec<api::Torrent>> {
+    let (_lock, ledger) = locked_for(timeout)?;
     let EngineResult::Torrents(rows) = ledger.execute(EngineOp::Info)? else {
         unreachable!()
     };

@@ -52,9 +52,10 @@ def ordered_shutdown(stderr, complete=True):
     """Require each owner drain to release the engine before unlinking sockets.
 
     Engine-only restarts may drain before the owner starts shutting down.
+    A parked slot has no session to drain and must explicitly report its absence.
     Unrelated success diagnostics may appear between any two phases.
     """
-    phases = [r"daemon draining\b", r"engine drained\b", r"daemon slot released\b",
+    phases = [r"daemon draining\b", r"engine (?:drained\b|slot empty state=parked session=absent\b)", r"daemon slot released\b",
               r"daemon sockets unlinked\b", r"daemon stopped\b"]
     next_phase = 0
     stopped = False

@@ -363,6 +363,17 @@ class Harness:
     def stop_serve(self, process, number=signal.SIGTERM, code=0):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
+        if code == 0:
+            # Retain a typed pre-stop observation for the receipt. The slot may
+            # change before signal handling; shutdown still must prove a drain
+            # or explicit parked session absence in its ordered diagnostics.
+            try:
+                with ApiConn(self) as client:
+                    client.hello()
+                    state = client.call("app.info").get("result", {}).get("state")
+                    self.case.check(True, "record engine slot before signalling owned daemon", str(state))
+            except (OSError, EOFError, ValueError):
+                pass
         stderr_offset = len(self.stderr())
         began = time.monotonic()
         os.kill(pid, number)

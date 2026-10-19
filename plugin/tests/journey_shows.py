@@ -65,8 +65,8 @@ def run(binary):
             q.keys(['='],lambda:(view().get('controls') or {}).get('preferenceOpen'))
             q.keys(['j','-k','Return'],lambda:not (view().get('controls') or {}).get('preferenceOpen') and followed()[0].get('quality')=='2160p')
             case.check(not records(),'the visible per-show quality dropdown durably selects 2160p without downloading',json.dumps(followed()))
-            q.keys(['r'],lambda:shows().get('rows') and all(row['quality']=='2160p' for row in shows()['rows']))
-            case.check(not records(),'the next visible Check selects the preferred release quality without downloading',json.dumps(shows()))
+            q.keys(['R'],lambda:not shows().get('busy') and len(shows().get('rows',[]))==3 and all(r.get('quality')=='2160p' for r in shows()['rows']))
+            case.check(not records(),'the next dashboard check prefers 2160p for every episode and still downloads nothing',json.dumps(shows()['rows']))
             q.keys(['g','-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)
             selected=shows()['rows'][shows()['cursor']]['key'];hash_=add()['hash']
             stage=c.call('torrents.get',dict(hash=hash_))['result']['torrent']

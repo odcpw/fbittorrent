@@ -12,6 +12,7 @@ pub(super) mod stream;
 pub(super) mod raw;
 pub(super) mod restart;
 mod native;
+mod status;
 mod handler;
 mod download_limit;
 pub(super) mod offline;
