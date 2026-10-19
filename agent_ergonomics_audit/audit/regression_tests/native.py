@@ -1685,7 +1685,7 @@ def main():
                          "live queue limit changes admission")
                 import tomllib
                 case.check(tomllib.loads((config_dir / "config.toml").read_text())["max_active_downloads"] == 1, 'The one-download limit is durable in the isolated config file.')
-                cli("settings", "--max-downloads", "0", code=1)
+                cli("settings", "--max-downloads", "0", code=2)  # usage: value out of range (CLI exit-code dictionary)
                 case.check(cli("settings").get("max_active_downloads") == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
                 for hash_ in extra_hashes:
                     cli("delete", hash_)
