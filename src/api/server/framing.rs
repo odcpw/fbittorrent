@@ -128,7 +128,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
             | "on" | "unread_only" | "read" | "inbox" => value.is_boolean(),
             "feed" | "item" | "url" | "name" | "imdb" | "query" | "key" | "quality" => value.is_string(),
             "proto" | "file" | "sub" | "interval_ms" | "since_seq" => value.is_u64(),
-            "bps" => value.is_u64() || (op == "torrents.set_upload_limit" && value.is_null()),
+            "bps" => value.is_u64() || (matches!(op,"torrents.set_upload_limit"|"torrents.set_download_limit") && value.is_null()),
             "hash" => serde_json::from_value::<Hash>(value.clone()).is_ok(),
             "hashes" => serde_json::from_value::<Vec<Hash>>(value.clone()).is_ok(),
             "topics" => serde_json::from_value::<Vec<Topic>>(value.clone()).is_ok(),

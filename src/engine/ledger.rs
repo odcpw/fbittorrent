@@ -11,6 +11,8 @@ pub(super) struct Record {
     pub(super) output_folder: String,
     pub(super) only_files: Option<Vec<usize>>,
     pub(super) upload_limit: i64,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub(super) download_limit: Option<u64>,
     pub(super) ratio_limit: f64,
     pub(super) category: String,
     pub(super) tags: String,
@@ -56,7 +58,7 @@ impl Record {
         let record = Self {
             hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
-            upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
+            download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
             category: options.category.clone(), tags: options.tags.clone(),
             added_on: now(), completion_on: 0, paused: options.stopped,
             resume_after_migration: false, deferred: true,
@@ -85,6 +87,10 @@ impl Record {
         } else {
             None
         };
+        let download_bps=self.download_limit.map(|bps|{
+            anyhow::ensure!(bps>=16384,"download cap must be at least 16 KiB/s");
+            Ok::<_,anyhow::Error>(NonZeroU32::new(u32::try_from(bps).context("download cap exceeds the native engine maximum")?).unwrap())
+        }).transpose()?;
         Ok(AddTorrentOptions {
             paused,
             overwrite: true,
@@ -92,7 +98,7 @@ impl Record {
             only_files: self.only_files.clone(),
             ratelimits: LimitsConfig {
                 upload_bps,
-                download_bps: None,
+                download_bps,
             },
             peer_limit: Some(96),
             ..Default::default()
@@ -283,3 +289,16 @@ impl EngineDispatcher {
 #[cfg(test)]
 #[path = "tests/ledger.rs"]
 mod tests;
+
+#[cfg(test)]mod download_cap_tests {
+    use super::*;
+    #[test]fn current_record_load_and_cap_persistence(){
+        let mut record=super::super::tests::review_record(&"56".repeat(20),std::path::Path::new("/tmp/private-fixture"));
+        let today=serde_json::to_value(&record).unwrap();assert!(today.get("download_limit").is_none());
+        let restored:Record=serde_json::from_value(today).unwrap();assert!(restored.options(true).unwrap().ratelimits.download_bps.is_none());
+        record.download_limit=Some(65536);
+        let restored:Record=serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
+        assert_eq!(restored.options(true).unwrap().ratelimits.download_bps.unwrap().get(),65536);
+        for value in [0,1,u32::MAX as u64+1]{record.download_limit=Some(value);assert!(record.options(true).is_err());}
+    }
+}

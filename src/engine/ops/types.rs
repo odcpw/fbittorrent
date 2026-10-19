@@ -97,6 +97,7 @@ pub enum EngineOp {
         ids: Vec<usize>,
         priority: u8,
     },
+    SetDownloadLimit { hashes: HashSelection, bps: Option<u64> },
     SetUploadLimit {
         hashes: HashSelection,
         limit: i64,
@@ -123,6 +124,7 @@ impl EngineOp {
             Self::FilePriority { priority, .. } if !matches!(priority, 0 | 1) => bail!(
                 "the native engine supports skip (0) and normal (1) file priorities; high and maximum are unavailable"
             ),
+            Self::SetDownloadLimit{bps:Some(bps),..} if !(16384..=u32::MAX as u64).contains(bps)=>bail!("download cap must be between 16 KiB/s and the engine maximum"),
             Self::SetUploadLimit { limit, .. } if *limit < 0 => {
                 bail!("upload limit must be zero (unlimited) or a positive byte rate")
             }
@@ -152,6 +154,7 @@ impl EngineOp {
             | Self::Stop { hashes }
             | Self::Delete { hashes, .. }
             | Self::SetUploadLimit { hashes, .. }
+            | Self::SetDownloadLimit { hashes, .. }
             | Self::SetShareLimits { hashes, .. }
             | Self::AddTags { hashes, .. }
             | Self::RemoveTags { hashes, .. } => Some(hashes),

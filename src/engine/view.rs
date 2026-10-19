@@ -140,6 +140,10 @@ pub struct TorrentView {
     pub upload_policy: UploadPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub download_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub effective_download_limit_bps: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
     pub save_path: String,
@@ -207,6 +211,8 @@ impl TorrentView {
                 UploadPolicy::Custom
             },
             upload_limit_bps: u64::try_from(record.upload_limit).ok(),
+            download_limit_bps: record.download_limit,
+            effective_download_limit_bps: None,
             ratio: None,
             save_path: record.output_folder.clone(),
             content_path: None,
@@ -252,6 +258,7 @@ impl TorrentView {
         let mut view = Self::record(record, facts, Source::Handle);
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
+        view.effective_download_limit_bps=handle.effective_download_bps();
         view.seeds = handle.live().map(|live| live.connected_seed_count() as u64);
         if let Some(metadata) = metadata {
             view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));

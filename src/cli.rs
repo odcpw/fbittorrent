@@ -6,6 +6,7 @@ pub(super) mod stream;
 pub(super) mod raw;
 pub(super) mod restart;
 mod native;
+mod download_limit;
 mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
@@ -100,6 +101,8 @@ pub(super) enum Cmd {
         #[arg(long)] alt_down: Option<String>,
         #[arg(long)] alt_up: Option<String>,
     },
+    /// Set a torrent download cap in bytes/s (K/M suffix); none clears
+    Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)

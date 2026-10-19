@@ -382,6 +382,8 @@ pub enum Call {
     TorrentsSetSeed { args: SetSeedArgs },
     #[serde(rename = "torrents.set_upload_limit")]
     TorrentsSetUploadLimit { args: UploadLimitArgs },
+    #[serde(rename="torrents.set_download_limit")]
+    TorrentsSetDownloadLimit { args: UploadLimitArgs },
     #[serde(rename = "torrents.open_target")]
     TorrentsOpenTarget { args: OpenTargetArgs },
     #[serde(rename = "subscribe")]
@@ -421,6 +423,7 @@ impl Call {
             Self::TorrentsPeers { .. } => "torrents.peers",
             Self::TorrentsSetFiles { .. } => "torrents.set_files",
             Self::TorrentsSetSeed { .. } => "torrents.set_seed",
+            Self::TorrentsSetDownloadLimit { .. } => "torrents.set_download_limit",
             Self::TorrentsSetUploadLimit { .. } => "torrents.set_upload_limit",
             Self::TorrentsOpenTarget { .. } => "torrents.open_target",
             Self::Subscribe { .. } => "subscribe",

@@ -538,6 +538,16 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 state: DoneState::Done,
             })
         }
+        Call::TorrentsSetDownloadLimit{args}=>{
+            let rows=list(daemon)?;
+            if let Some(hash)=args.hashes.as_slice().iter().find(|h|!rows.iter().any(|row|&row.hash==*h)){
+                let mut failure=error(NotFound,"torrent record not found",None);
+                failure.details=Some(serde_json::Map::from_iter([("hash".into(),json!(hash))]));
+                return Err(failure);
+            }
+            if !matches!(args.bps,Update::Unset){execute(daemon,EngineOp::SetDownloadLimit{hashes:hashes(&args.hashes),bps:match args.bps{Update::Set(bps)=>Some(bps),_=>None}})?;}
+            Reply::TorrentsSetDownloadLimit(DoneResult{state:DoneState::Done})
+        },
         Call::TorrentsSetUploadLimit { args } => {
             match args.bps {
                 Update::Unset => {}

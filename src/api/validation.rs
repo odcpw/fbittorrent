@@ -138,6 +138,11 @@ impl Validate for Request {
                 Ok(())
             },
             Call::Subscribe { args } => args.validate(),
+            Call::TorrentsSetDownloadLimit{args}=>{
+                args.validate()?;
+                if let Update::Set(bps)=args.bps {require(bps<=u32::MAX as u64,"bps","at most 4294967295 bytes/s")?;}
+                Ok(())
+            },
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
             _ => Ok(()),

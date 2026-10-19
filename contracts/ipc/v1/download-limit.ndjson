@@ -1,0 +1,6 @@
+{"dir":"c2s","frame":{"id":1,"op":"torrents.set_download_limit","args":{"hashes":["5656565656565656565656565656565656565656"],"bps":65536}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":2,"op":"torrents.set_download_limit","args":{"hashes":["5656565656565656565656565656565656565656"],"bps":131072}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":3,"op":"torrents.set_download_limit","args":{"hashes":["5656565656565656565656565656565656565656"],"bps":null}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}

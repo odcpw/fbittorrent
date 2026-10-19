@@ -241,6 +241,7 @@ pub enum Reply {
     TorrentsSetFiles(DoneResult),
     TorrentsSetSeed(DoneResult),
     TorrentsSetUploadLimit(MutationResult),
+    TorrentsSetDownloadLimit(DoneResult),
     TorrentsOpenTarget(OpenTargetResult),
     Subscribe(SubscribeResult),
     Unsubscribe(EmptyResult),
@@ -283,6 +284,7 @@ impl Reply {
             "torrents.set_upload_limit" => {
                 serde_json::from_value(result).map(Self::TorrentsSetUploadLimit)
             }
+            "torrents.set_download_limit" => serde_json::from_value(result).map(Self::TorrentsSetDownloadLimit),
             "torrents.open_target" => serde_json::from_value(result).map(Self::TorrentsOpenTarget),
             "subscribe" => serde_json::from_value(result).map(Self::Subscribe),
             "unsubscribe" => serde_json::from_value(result).map(Self::Unsubscribe),

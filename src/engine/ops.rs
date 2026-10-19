@@ -215,7 +215,7 @@ impl EngineDispatcher {
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
-                    only_files, upload_limit: options.upload_limit,
+                    only_files, download_limit: None, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false,
                 };
@@ -316,7 +316,7 @@ impl EngineDispatcher {
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
         if matches!(
             op,
-            EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
+            EngineOp::SetDownloadLimit { .. } | EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
         ) {
             for hash in &hashes {
                 if !matches!(op, EngineOp::Delete { .. }) || !self.inner.dormant(hash) {
@@ -390,6 +390,7 @@ impl EngineDispatcher {
                     record.paused = true;
                     record.resume_after_migration = false;
                 }
+                EngineOp::SetDownloadLimit{bps,..}=>{record.download_limit=*bps;record.options(record.paused)?;},
                 EngineOp::SetUploadLimit { limit, .. } => {
                     record.upload_limit = *limit;
                     record.options(record.paused)?;
@@ -428,6 +429,9 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
+            }
+            if matches!(op,EngineOp::SetDownloadLimit{..}){
+                handle.as_ref().expect("validated download-cap handle").set_download_bps(ledger.records[index].download_limit)?;
             }
             if matches!(op, EngineOp::SetUploadLimit { .. }) {
                 // Validate before saving, then apply synchronously under the
@@ -494,6 +498,7 @@ impl EngineDispatcher {
                 .clone()
                 .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
             only_files: files,
+            download_limit: None,
             upload_limit: options.upload_limit,
             ratio_limit: options.ratio_limit,
             category: options.category.clone(),

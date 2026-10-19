@@ -132,6 +132,10 @@ pub struct Torrent {
     pub seeds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub download_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub effective_download_limit_bps: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]

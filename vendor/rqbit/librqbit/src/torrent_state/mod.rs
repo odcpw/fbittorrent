@@ -275,6 +275,25 @@ impl ManagedTorrent {
         Ok(())
     }
 
+    /// Replace the download bucket in place; no handle/storage/state transition.
+    pub fn set_download_bps(&self, bps: Option<u64>) -> anyhow::Result<()> {
+        let limit=bps.map(|bps|{
+            anyhow::ensure!(bps>=16384,"download cap must be at least 16 KiB/s");
+            Ok::<_,anyhow::Error>(std::num::NonZeroU32::new(u32::try_from(bps).context("download cap exceeds the native engine maximum")?).unwrap())
+        }).transpose()?;
+        let limits=&self.shared.options.ratelimits;
+        if limits.get_download_bps()!=limit {limits.set_download_bps(limit);}
+        Ok(())
+    }
+
+    /// The session bucket already reflects the selected global/turtle policy.
+    pub fn effective_download_bps(&self) -> Option<u64> {
+        crate::limits::effective_rate([
+            self.shared.options.ratelimits.get_download_bps(),
+            self.shared.session.upgrade().and_then(|s|s.ratelimits.get_download_bps()),
+        ]).map(|v|u64::from(v.get()))
+    }
+
     pub fn with_metadata<R>(
         &self,
         mut f: impl FnMut(&Arc<TorrentMetadata>) -> R,

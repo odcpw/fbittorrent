@@ -9,6 +9,7 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation{name:"torrents.set_download_limit",mutating:true,idempotent:true,since:"P7-06",args:"`hashes: [hash]`, `bps?: bps|null` (16384..4294967295; omission retains)",result:"`{state: \"done\"}`"},
     Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
     Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },

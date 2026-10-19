@@ -25,6 +25,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Noseed { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
+            | Cmd::Limit { .. }
             | Cmd::Restart
     )
 }
@@ -363,6 +364,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 json!({"ok":true,"action":if stop{"stop"}else{"delete"},"count":hashes.len(),"hashes":hashes,"running":running}),
             );
         }
+        Cmd::Limit{selector,down}=>{
+            let bps=super::download_limit::parse(down)?;
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            bulk(&c,"torrents.set_download_limit",&hashes,json!({"bps":bps}))?;
+            emit(json_mode,json!({"ok":true,"action":"limit","hashes":hashes,"download_limit_bps":bps}));
+        },
         Cmd::Start { .. }
         | Cmd::Seed { .. }
         | Cmd::Noseed { .. }

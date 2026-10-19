@@ -444,6 +444,8 @@ fn strict_type_errors_name_the_argument() {
         assert_eq!(failure.error.code, ErrorCode::InvalidArgs);
         assert_eq!(failure.error.details.unwrap()["key"], key);
     }
+    let download_clear=json!({"id":1,"op":"torrents.set_download_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
+    assert!(decode(&serde_json::to_vec(&download_clear).unwrap()).is_ok());
     let clear = json!({"id":1,"op":"torrents.set_upload_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
     assert!(decode(&serde_json::to_vec(&clear).unwrap()).is_ok());
 }

@@ -642,3 +642,37 @@ injection diagnostics without suppressing unexpected worker panics. All three
 P5-01 acceptance criteria are met; a globally green wrapper scan is not claimed.
 Evidence is under `target/test-logs/fbt-p5-01-c1a/`, mirrored in
 `/tmp/fbt-track-a-evidence/fbt-p5-01-c1a/`. UI rendering remains P5-02/C/D.
+
+## P7-06 — per-torrent download cap (fbt-p7-06-6mh)
+
+Durable optional download_limit is installed before restore admission and
+changed through the same live shared limiter without rebuilding. Added typed
+idempotent API operation, configured/effective torrent fields, `limit <sel>
+--down N[K|M]|none`, 256-hash client batches, explicit null clear and identity
+validation even for an omitted/no-op bps. Contract 1.2.14 bookkeeping and exact
+hello/error caps are complete. Today's records without the optional field keep
+loading. Mechanical Record literal initializers include the new None field;
+no new legacy implementation. Dashboard input is deferred to C/D.
+
+`FBT_BEAD=fbt-p7-06-6mh python3 /tmp/fbt-track-a-run.py check`, `fork
+ effective_rate_is_min`, final `build`, and single `full` pass (**386/0/3
+ignored**). `cli_cases download_cap_holds contract_hello contract_errors`
+passes 3/3 foreground/systemd (`foreground-final/`, `systemd-final/`); `agent
+ limit_verb` passes in both modes (`agent-{foreground,systemd}-final/`). Every
+one-second dl_bps sample satisfies the unchanged ±25% bound, after exactly 5 s
+warmup over the 20 s window; independent byte rates are **65,527.09/65,531.31
+B/s**. Live cap change remains downloading, no pushed checking state, same
+engine epoch. CLI 0/2 exits, exact JSON, all/none, restart persistence and
+omission/identity checks pass. Initial failed runs are retained: the new
+operation needed null permission in the server argument filter, and the first
+fixture measured payload requested before its cap existed. Final setup pauses,
+installs the baseline cap, resumes, then keeps the same warmup/window/bounds;
+the later change is still during active transfer. Minimal neighbours are wire
+catalogue/validation/framing, CLI dispatch and typed shapes, and Record literal
+initializers. Evidence: `target/test-logs/fbt-p7-06-6mh/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p7-06-6mh/`. Both acceptance criteria met. One
+Do-step ruling remains pending: the literal min of both configured primary and
+alt conflicts with accepted P5-04's test requiring unlimited alt to override a
+finite primary. Current code preserves that selection and reports min of the
+per-torrent cap and the selected global/turtle bucket; no frozen P5-04 test was
+changed. Owner clarification requested; independent suite-budget work continues.
