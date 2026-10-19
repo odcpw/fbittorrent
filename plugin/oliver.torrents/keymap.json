@@ -761,6 +761,19 @@
       "scope": "screen:torrents"
     },
     {
+      "id": "search.browse_grid",
+      "keys": {
+        "dashboard": [
+          "v"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Browse grid/rows",
+      "note": "Browse lists only.",
+      "scope": "screen:search"
+    },
+    {
       "id": "search.sort",
       "keys": {
         "dashboard": [

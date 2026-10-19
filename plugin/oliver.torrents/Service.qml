@@ -15,6 +15,7 @@ import "SettingsFlow.js" as SettingsFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
 import "SearchFlow.js" as SearchFlow
+import "BrowsePosters.js" as BrowsePosters
 
 Item {
   id: root
@@ -56,6 +57,8 @@ Item {
 
   property var searchTopics:[]
   property var searchFlow:null
+  property var browsePosters:null
+  property int browsePosterRevision:0
   property int searchRevision:0
   function scheduleSearchPoster(){searchPoster.restart()}
   Timer {id:searchPoster;interval:300;onTriggered:if(root.searchFlow)root.searchFlow.lookup()}
@@ -397,6 +400,7 @@ Item {
     helpActions=JSON.parse(helpDocument.text()).actions.filter(function(row){return Array.isArray(row.keys.dashboard)})
     settingsFlow=SettingsFlow.create(root,function(){root.settingsRevision++})
     clipboardFlow=ClipboardFlow.create(root)
+    browsePosters=BrowsePosters.create(root,function(){root.browsePosterRevision++})
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")

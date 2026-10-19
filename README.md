@@ -188,6 +188,13 @@ the shared review sheet: staged add is used when the daemon advertises it; older
 daemons send `search.grab` only after Download. `y` copies a magnet, `O` opens the
 source page, and `f` follows an IMDb-linked show. The table renders at most 500 rows.
 
+Empty Search opens YTS's latest movies as a poster grid. Use `b` to select a
+browse list, including TPB; its provider and list name stay in the query box.
+`v` switches between the grid and rows. The grid shows at most 60 local posters
+in three to six columns, with title, year, known rating and seed count. Poster
+reads are asynchronous and bounded; QML never fetches image URLs from the network.
+Enter opens the same add review as a search result.
+
 The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
 logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
 closes it. Drag the divider to resize it; width and sort order survive reopening
@@ -543,6 +550,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Browse grid/rows | — | `v` | — | Browse lists only. |
 | `screen:search` | Sort results | — | `s` | — |  |
 | `screen:search` | Reverse results sort | — | `S` | — |  |
 | `pane:search.results` | Copy magnet | — | `y` | — |  |

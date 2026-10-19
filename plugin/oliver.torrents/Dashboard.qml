@@ -57,7 +57,7 @@ Item {
     if(helpLoader.item){svc.focusWindow(window,helpLoader.item);return}
     if(settingsSheet){svc.focusWindow(window,settingsSheet);return}
     if(logView){svc.focusWindow(window,logView);return}
-    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" && search ? search.queryTarget : currentView==="torrents" && torrents ? torrents : scope
+    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" && search ? (search.viewModel.mode==="browse" ? search : search.queryTarget) : currentView==="torrents" && torrents ? torrents : scope
     svc.focusWindow(window,target)
   }
   function open(payloadJson) {

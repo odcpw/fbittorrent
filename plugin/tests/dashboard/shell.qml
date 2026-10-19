@@ -84,6 +84,10 @@ ShellRoot {
       var button=root.find(dashboard.item.logView,"log-"+kind+"-"+(value || "all"));if(!button)return false
       preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
     }
+    function gridState():string {
+      var view=dashboard.item ? dashboard.item.search : null
+      return JSON.stringify(view ? {grid:view.gridShowing ? view.viewState.grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
+    }
     function eventTrace():string{return JSON.stringify(service.store.events)}
     function searchFocus():string {
       var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null

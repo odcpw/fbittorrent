@@ -15,30 +15,34 @@ FocusScope {
   readonly property int revision:service.searchRevision
   readonly property var viewModel:revision>=0 && flow ? flow.snapshot() : ({rows:[],phase:"idle",sort:{key:"seeds",reverse:false}})
   readonly property bool editing:queryInput.activeFocus || (sheet.item && sheet.item.editing===true)
+  readonly property bool gridShowing:viewModel.mode==="browse" && viewModel.grid===true
   readonly property bool dialogOpen:!!viewModel.panel
-  readonly property var viewState:({query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : 0,added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"})
+  readonly property var viewState:({grid:gridShowing ? grid.state() : null,query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : 0,added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"})
   signal changed()
   signal queryEdited(string query)
   signal dismissRequested()
   function focusQuery(){queryInput.forceActiveFocus()}
   function focusResults(){service.cancelFocusTarget(queryInput);queryInput.focus=false;root.forceActiveFocus()}
-  function open(query,run){queryInput.text=String(query || "");if(run && queryInput.text)flow.start(queryInput.text);Qt.callLater(focusQuery)}
+  function open(query,run){queryInput.text=String(query || "");if(run && queryInput.text)flow.start(queryInput.text);Qt.callLater(queryInput.text ? focusQuery : focusResults)}
   function key(event){
     if(sheet.item){if(sheet.item.key(event))return true;return sheet.item.editing===true ? false : true}
     if(editing){
-      if(event.key===Qt.Key_Return){flow.start(queryInput.text);focusResults();return true}
+      if(event.key===Qt.Key_Return){if(queryInput.text.trim())flow.start(queryInput.text);else flow.browseDefault();focusResults();return true}
       if(event.key===Qt.Key_Escape && queryInput.text){flow.cancel();queryInput.text="";queryEdited("");return true}
       if(event.key===Qt.Key_Escape || event.key===Qt.Key_Down){focusResults();return true}
       return false
     }
     if(event.key===Qt.Key_Escape){if(viewModel.phase==="searching"){flow.cancel();return true}focusQuery();return true}
     if(event.text==="/" || event.text==="e"){focusQuery();return true}
-    if(event.text==="j" || event.key===Qt.Key_Down){flow.move(1);return true}
-    if(event.text==="k" || event.key===Qt.Key_Up){flow.move(-1);return true}
+    if(gridShowing && (event.text==="h" || event.key===Qt.Key_Left)){flow.move(-1);return true}
+    if(gridShowing && (event.text==="l" || event.key===Qt.Key_Right)){flow.move(1);return true}
+    if(event.text==="v" && viewModel.mode==="browse"){flow.toggleGrid();return true}
+    if(event.text==="j" || event.key===Qt.Key_Down){flow.move(gridShowing ? grid.columns : 1);return true}
+    if(event.text==="k" || event.key===Qt.Key_Up){flow.move(gridShowing ? -grid.columns : -1);return true}
     if(event.key===Qt.Key_Home || event.text==="g"){flow.move(0,0);return true}
     if(event.key===Qt.Key_End || event.text==="G"){flow.move(0,viewModel.rows.length-1);return true}
-    if(event.key===Qt.Key_PageDown){flow.move(Math.max(1,Math.floor(list.height/Commons.Style.space(50))));return true}
-    if(event.key===Qt.Key_PageUp){flow.move(-Math.max(1,Math.floor(list.height/Commons.Style.space(50))));return true}
+    if(event.key===Qt.Key_PageDown){flow.move(pageRows());return true}
+    if(event.key===Qt.Key_PageUp){flow.move(-pageRows());return true}
     if(event.text==="s"){flow.cycleSort();return true}
     if(event.text==="S"){flow.reverseSort();return true}
     if(event.text==="P"){flow.providersOpen();return true}
@@ -51,6 +55,7 @@ FocusScope {
     if(event.text==="q"){dismissRequested();return true}
     return false
   }
+  function pageRows(){return gridShowing ? grid.columns*Math.max(1,Math.floor(grid.height/grid.rowPitch)) : Math.max(1,Math.floor(list.height/Commons.Style.space(50)))}
   function handleKey(event){return key(event)}
   Keys.priority:Keys.BeforeItem
   Keys.onPressed:function(event){if(root.key(event))event.accepted=true}
@@ -59,7 +64,7 @@ FocusScope {
     else if(viewModel.mode==="query")lastBrowseLabel=""
   }
   onViewStateChanged:changed()
-  Component.onCompleted:{flow.mount();open(initialQuery,!!initialQuery)}
+  Component.onCompleted:{flow.mount();open(initialQuery,!!initialQuery);if(!initialQuery)flow.browseDefault()}
   Component.onDestruction:flow.hide()
   ColumnLayout {
     anchors.fill:parent;anchors.margins:Commons.Style.spacing.panelPadding;spacing:Commons.Style.spacing.panelGap
@@ -84,7 +89,15 @@ FocusScope {
     }
     RowLayout {
       Layout.fillWidth:true;Layout.fillHeight:true;spacing:Commons.Style.spacing.panelGap
+      Components.BrowseGrid {
+        id:grid;Layout.fillWidth:true;Layout.fillHeight:true;visible:root.gridShowing
+        service:root.service;rows:visible ? root.viewModel.gridRows : [];cursor:root.viewModel.cursor
+        loading:root.viewModel.phase==="searching";message:root.viewModel.message
+        onChosen:function(key){root.focusResults();root.flow.choose(key)}
+        onActivated:root.flow.activate()
+      }
       Components.PaneFrame {
+        visible:!root.gridShowing
         Layout.fillWidth:true;Layout.fillHeight:true
         ColumnLayout {
           anchors.fill:parent;spacing:Commons.Style.spacing.xxs
@@ -105,13 +118,13 @@ FocusScope {
         }
       }
       Components.PaneFrame {
-        visible:root.width>=Commons.Style.space(1100) && !!root.viewModel.poster
+        visible:!root.gridShowing && root.width>=Commons.Style.space(1100) && !!root.viewModel.poster
         Layout.preferredWidth:Commons.Style.space(280);Layout.fillHeight:true
         Components.PosterCard {id:posterCard;anchors.top:parent.top;width:parent.width;card:root.revision>=0 ? root.flow.card : null}
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.total>500 ? "Showing 500 of "+root.viewModel.total+" · " : "")+(root.viewModel.phase==="searching" ? "Providers still searching · " : "")+"Sort: "+root.viewModel.sort.key+(root.viewModel.sort.reverse ? " reversed" : "")+" · "+(root.viewModel.message || "")}
-    Components.KeyHint {Layout.fillWidth:true;text:"Enter review add · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
+    Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.total>500 ? "Showing 500 of "+root.viewModel.total+" · " : "")+(root.viewModel.phase==="searching" ? (root.viewModel.mode==="browse" ? "Loading browse list… · " : "Providers still searching · ") : "")+"Sort: "+root.viewModel.sort.key+(root.viewModel.sort.reverse ? " reversed" : "")+" · "+(root.viewModel.message || "")}
+    Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.mode==="browse" ? (root.gridShowing ? "v rows · " : "v grid · ") : "")+"Enter review add · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
   }
   Rectangle {anchors.fill:parent;visible:!!root.viewModel.panel;color:Commons.Util.alpha(Commons.Color.background,0.7);MouseArea {anchors.fill:parent;onClicked:root.flow.closePanel()}}
   Components.PaneFrame {
