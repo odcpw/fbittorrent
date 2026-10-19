@@ -14,9 +14,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = p => fs.readFileSync(p, 'utf8').replace(/^\.(?:pragma|import).*$/gm, '');
-const glyphs = {};
-vm.runInNewContext(source(require('node:path').join(require('node:path').dirname(process.argv[2]), 'Glyphs.js')), glyphs);
-const model = {Glyphs:glyphs};
+const model = {};
+for (const name of ['Glyphs', 'Formats', 'Palette']) {
+  const file = require('node:path').join(require('node:path').dirname(process.argv[2]), name+'.js');
+  if (fs.existsSync(file)) {model[name]={}; vm.runInNewContext(source(file),model[name]);}
+}
 vm.runInNewContext(source(process.argv[2]), model);
 const torrent = {state: 'downloading', progress: 0.42, size: 1024 * 1024,
   dlspeed: 2048, upspeed: 0, eta: 65, num_seeds: 0, num_leechs: 7,

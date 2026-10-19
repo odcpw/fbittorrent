@@ -11,6 +11,7 @@ import qs.Ui
 import qs.Ui as Ui
 import "Model.js" as Model
 import "Glyphs.js" as Glyphs
+import "Geometry.js" as Geometry
 
 Ui.Panel {
   id: root
@@ -22,7 +23,7 @@ Ui.Panel {
   readonly property var svc: shell ? shell.serviceFor("oliver.torrents") : null
   readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
-  readonly property color dim: Qt.darker(foreground, 1.55)
+  readonly property color dim: Model.dim(foreground,Commons.Color.popups.background)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color barIconColor: svc && svc.online && (svc.activeTorrents.length > 0 || svc.transferring) ? barForeground : Qt.darker(barForeground, 1.55)
   readonly property string tuiCommand: String(setting("tuiCommand", "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"))
@@ -38,6 +39,9 @@ Ui.Panel {
   visible: !!svc && (svc.online || setting("showWhenStopped",false) || root.opened || svc.stoppedRecently || svc.reconnecting)
   readonly property var rows: svc ? svc.torrents : []
   property var pendingRemoval: null
+
+  function popupItem() { return keyCatcher }
+  function geometry() { return root.opened ? Geometry.describe(keyCatcher,Style.font.title) : null }
 
   function requestRemoval(t) {
     if (!t || svc.busy || pendingRemoval) return
@@ -163,7 +167,7 @@ Ui.Panel {
     function tui(): string { root.openTui(); return "ok" }
     // Test hook: where the keyboard cursor is. Lets a script verify key handling
     // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
-    function state(): string { return svc.stateJson() }
+    function state(): string { var state=JSON.parse(svc.stateJson());state.geometry=root.geometry();return JSON.stringify(state) }
     function useRuntimeDir(path: string): string { return svc.useRuntimeDir(path) }
     function cursor(): string {
       return JSON.stringify({ section: root.focusSection, row: root.rowIndex, header: root.headerIndex, active: root.cursorActive, rows: root.rows.length, opened: root.opened,
