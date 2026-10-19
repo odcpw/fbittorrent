@@ -107,27 +107,39 @@ P1-11 must reconcile the additive key-doc command with its contract-version
 and command-discovery changes. Future feature beads add their own action rows;
 this table does not advertise handlers that have not landed.
 
-## P4-06 — fbt-p4-06-vp8 — coherent intermediate, NOT complete
+## P4-06 — fbt-p4-06-vp8
 
-Selected names are static on every list, including when hovered. An unselected
-hovered name moves once at 8 cells/s on the existing 300 ms clock, reaches its
-final window, resets to the elided start and stays there. Pointer/identity changes
-rearm the clock; target comparisons borrow and hash metadata without per-frame
-formatted strings. `reduce_motion=false` defaults in config; true disables hover
-motion. The fourth TUI Settings row stages/persists that preference without an
-engine restart, and mouse hit-testing matches the new row. Evidence under
-`target/test-logs/fbt-p4-06-vp8/`: `cargo check --locked` passes (`check.*`),
-`cargo test --locked tui:: -- --nocapture` passes **82** tests (`tui_compare.*`),
-including fake-clock `marquee_once_then_stops`, `reduce_motion_no_scroll`, static
-selected rows and identity rearming; `cargo test --locked config:: -- --nocapture`
-passes **4** tests (`config.*`), including persistent roundtrip/default behavior.
-The size gate passes (`sizes.*`); 31 render goldens remain byte-identical, with
-only three Settings goldens adding the fourth row (`golden-review.json`). Both
-motion acceptance criteria pass, but **Do step 3 is incomplete**: the additive
-API `Settings.reduce_motion` schema/docs/fixture extension awaits the owner's
-frozen-contract ruling. `docs/IPC.md` and every wire fixture are untouched.
-The bead's one full suite is reserved for completion after that ruling. This
-intermediate compiles and passes its touched-module tests; do not close P4-06.
-P4-03/04/07–11 and P5-02 await API/layout dependencies; P4-05 lacks P2-08's
-`contracts/ui/themes/expected.json`; P6-10 lacks daemon notifications/Shows.
-M3 is not reached. No branch switch, merge, release build or all.sh performed.
+Completed the motion change from `e45791b` and the owner-authorized additive
+Settings extension. Selected names stay static on every list; unselected hover
+moves once at 8 cells/s on the existing 300 ms clock, reaches its last window,
+resets and stops. `reduce_motion=true` disables it through config and the fourth
+TUI Settings row without an engine restart. API Settings retains optional wire
+presence and defaults absence to false; null and non-booleans are rejected.
+`settings-motion.ndjson` adds a 12-record conversation covering absent/true/false/
+absent with expected models. Documentation lists the field and an exact example;
+all **187** old fixture records and all **3** old IPC example lines remain
+byte-identical (`contract-proof.json`, `extension-proof.json`).
+
+Both acceptance criteria pass: `selected_long_name_is_static_even_under_pointer`
+keeps each rendered frame unchanged across fake times; `marquee_once_then_stops`
+prints each cell/offset and finishes at zero permanently, while
+`reduce_motion_no_scroll` prints unchanged cells. Evidence under
+`target/test-logs/fbt-p4-06-vp8/`: `cargo check --locked` passes (`check.*`);
+`cargo test --locked tui:: -- --nocapture` passes **82** tests (`tui_compare.*`);
+`cargo test --locked config:: -- --nocapture` passes **4** (`config.*`);
+`cargo test --locked api:: -- --nocapture` passes **64**, 1 ignored (`api_extension.*`),
+including strict type, roundtrip, default and poisoned-transcript controls.
+The bead's ONE full `cargo test --locked -- --nocapture` passes **299**, 2 ignored
+(`full.*`), with no background failure matches (`extension_checks.*`).
+`scripts/lint-sizes.sh --self-test src/api src/tui` passes **105** files
+(`final_sizes.*`); the largest changed source is 687 lines. The 31 non-Settings
+render goldens remain unchanged; three Settings goldens add the fourth row.
+Nothing remains unmet for this bead. API service emission/attachment belongs
+to P3-05/P4-03; this extension is contract proof, and the current TUI consumes
+its persisted local preference. No release build or all.sh between track beads.
+
+Next items checked in the requested order: P4-04 awaits P4-03; P4-07 awaits
+P4-04/P3-01/P3-18; P4-10 and P4-11 await P4-04; P4-08 awaits P1-14/P4-03;
+P4-03 awaits the authorized P1-15 integration and P3-07; P4-05 lacks P2-08's
+`contracts/ui/themes/expected.json`; P4-09 awaits P4-03. No next item is
+unblocked on this branch. M3 is not reached. No branch switch or merge performed.

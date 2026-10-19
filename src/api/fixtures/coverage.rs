@@ -154,6 +154,7 @@ fn every_optional_field_has_present_and_absent_examples() {
         &objects,
         "Settings",
         &[
+            "reduce_motion",
             "network_interface",
             "download_limit_bps",
             "upload_limit_bps",
