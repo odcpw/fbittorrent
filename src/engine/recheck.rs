@@ -126,6 +126,7 @@ impl Inner {
             }
             records.push(record.hash.clone());
         }
+        for hash in &records {self.invalidate_resume(hash)?;}
         if self.stopping.load(Ordering::Acquire) {
             bail!("native engine is closing");
         }

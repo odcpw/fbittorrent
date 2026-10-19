@@ -229,6 +229,17 @@ impl TorrentView {
         }
     }
 
+    fn trusted_pending(record:&Record, value:resume::Measurement)->Self {
+        let facts=StateFacts {activity:Activity::Paused,paused:true,finished:value.have==value.size,
+            stop_on_complete:record.stop_on_complete(),record_paused:record.paused,
+            check_cancelled:false,receiving:false,parked:false};
+        let mut view=Self::record(record,facts,Source::Handle);
+        view.checked=true;view.size=Some(value.size);view.completed_bytes=Some(value.have);
+        view.progress=Some(if value.size==0 {1.0} else {value.have as f64/value.size as f64});
+        view.legacy.progress_known=true;
+        view
+    }
+
     fn handle(record: &Record, handle: &Arc<ManagedTorrent>, check_cancelled: bool) -> Self {
         let stats = handle.stats();
         let activity = match stats.state {
@@ -515,6 +526,11 @@ impl EngineDispatcher {
                 ),
                 Err(_) => self.inner.unrestored_view(record),
             };
+            if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
+                if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
+                    view=TorrentView::trusted_pending(record,value);
+                } else {self.inner.resume_prepared.finish(&record.hash);}
+            }
             if view.error.is_none() {
                 view.error = self
                     .inner
