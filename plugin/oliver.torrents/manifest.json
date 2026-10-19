@@ -2,12 +2,18 @@
   "schemaVersion": 1,
   "id": "oliver.torrents",
   "name": "Torrents",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Oliver",
   "license": "MIT",
   "description": "Torrent status, transfer rates and quick actions in the open fbittorrent app.",
-  "kinds": ["bar-widget"],
-  "entryPoints": { "barWidget": "Panel.qml" },
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
   "barWidget": {
     "displayName": "Torrents",
     "description": "Active downloads, rates, add from clipboard, open the fbittorrent TUI.",
@@ -15,16 +21,43 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "refreshIntervalSec": 2,
-      "idleRefreshIntervalSec": 10,
       "binary": "fbittorrent",
+      "showWhenStopped": false,
+      "showRates": false,
+      "middleClick": "dashboard",
       "tuiCommand": "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"
     },
     "schema": [
-      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh while open (seconds)", "min": 1, "max": 60, "step": 1, "defaultValue": 2 },
-      { "key": "idleRefreshIntervalSec", "type": "integer", "label": "Refresh while closed (seconds)", "min": 2, "max": 600, "step": 1, "defaultValue": 10 },
-      { "key": "binary", "type": "string", "label": "fbittorrent binary", "defaultValue": "fbittorrent" },
-      { "key": "tuiCommand", "type": "string", "label": "TUI launch command", "defaultValue": "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui" }
+      {
+        "key": "binary",
+        "type": "string",
+        "label": "binary",
+        "defaultValue": "fbittorrent"
+      },
+      {
+        "key": "showWhenStopped",
+        "type": "boolean",
+        "label": "showWhenStopped",
+        "defaultValue": false
+      },
+      {
+        "key": "showRates",
+        "type": "boolean",
+        "label": "showRates",
+        "defaultValue": false
+      },
+      {
+        "key": "middleClick",
+        "type": "string",
+        "label": "middleClick",
+        "defaultValue": "dashboard"
+      },
+      {
+        "key": "tuiCommand",
+        "type": "string",
+        "label": "tuiCommand",
+        "defaultValue": "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"
+      }
     ]
   }
 }

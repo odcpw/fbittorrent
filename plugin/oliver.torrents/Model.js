@@ -30,26 +30,26 @@ function eta(secs) {
 }
 
 function isActive(t) {
-  return ["downloading", "metaDL", "forcedDL", "stalledDL", "checkingDL", "allocating", "forcedMetaDL"].indexOf(t.state) >= 0
+  return ["metadata", "checking", "stalled", "downloading", "metaDL", "forcedDL", "stalledDL", "checkingDL", "allocating", "forcedMetaDL"].indexOf(t.state) >= 0
 }
 function isStopped(t) {
-  return ["stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].indexOf(t.state) >= 0
+  return ["paused", "done", "stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].indexOf(t.state) >= 0
 }
-function isDone(t) { return t.progress_known !== false && Number(t.progress) >= 1 }
+function isDone(t) { return t.state === "done" || t.state === "seeding" || (t.progress_known !== false && Number(t.progress) >= 1) }
 
 function stateLabel(t) {
   switch (t.state) {
     case "downloading": case "forcedDL": return "Downloading"
-    case "metaDL": case "forcedMetaDL": return "Fetching metadata"
-    case "stalledDL": return "Stalled"
-    case "queuedDL": return "Queued"
-    case "waitingVPN": return "Waiting for VPN"
-    case "checkingDL": case "checkingUP": case "checkingResumeData": return "Checking"
-    case "uploading": case "forcedUP": return "Seeding"
+    case "metadata": case "metaDL": case "forcedMetaDL": return "Fetching metadata"
+    case "stalled": case "stalledDL": return "Stalled"
+    case "queued": case "queuedDL": return "Queued"
+    case "waiting_vpn": case "waitingVPN": return "Waiting for VPN"
+    case "checking": case "checkingDL": case "checkingUP": case "checkingResumeData": return "Checking"
+    case "seeding": case "uploading": case "forcedUP": return "Seeding"
     case "stalledUP": return "Seeding · idle"
     case "queuedUP": return "Queued · seed"
-    case "stoppedDL": case "pausedDL": return "Stopped"
-    case "stoppedUP": case "pausedUP": return "Done"
+    case "paused": case "stoppedDL": case "pausedDL": return "Stopped"
+    case "done": case "stoppedUP": case "pausedUP": return "Done"
     case "error": return "Error"
     case "missingFiles": return "Missing files"
     default: return t.state || "?"
@@ -65,6 +65,15 @@ function glyph(t) {
 
 // One-line meta under the torrent name.
 function meta(t) {
+  if (t.intent !== undefined) {
+    var values = []
+    if (t.progress !== undefined) values.push((t.progress * 100).toFixed(1) + "%")
+    if (t.dl_bps !== undefined) values.push(rate(t.dl_bps))
+    if (t.eta_s !== undefined) values.push(eta(t.eta_s))
+    if (!values.length && t.size !== undefined) values.push(bytes(t.size))
+    values.push(t.seed ? "seeding allowed" : "seed off")
+    return values.join(" · ")
+  }
   var pct = (Number(t.progress) * 100).toFixed(pctDigits(t))
   var parts = []
   if (t.progress_known === false) return stateLabel(t) + " · progress checked after connection"
@@ -91,6 +100,7 @@ function meta(t) {
 }
 
 function seedAllowed(t) {
+  if (typeof t.seed === "boolean") return t.seed
   var tags = String(t.tags || "").split(",").map(function(s) { return s.trim() })
   return tags.indexOf("seed") >= 0 || Number(t.up_limit) !== 32768
 }
@@ -111,4 +121,19 @@ function detailPill(s) {
   if (s.seeding > 0) return s.seeding + " SEEDING"
   if (s.queued > 0) return s.queued + " QUEUED"
   return ""
+}
+
+function apiStatus(store, online) {
+  var rows = store.rows(), summary = store.summary, counts = summary.counts || {}
+  var result = {ok:online, torrents:rows, total:rows.length, active:0, seeding:0, stopped:0, queued:0,
+    dl:summary.dl_bps === undefined ? store.transfer.dl_bps : summary.dl_bps,
+    up:summary.ul_bps === undefined ? store.transfer.ul_bps : summary.ul_bps}
+  rows.forEach(function(t) {
+    if (isActive(t)) result.active++
+    else if (t.state === "seeding") result.seeding++
+    else if (t.state === "queued") result.queued++
+    else result.stopped++
+  })
+  if (store.info.state === "parked" || (summary.network && summary.network.state !== "ready")) result.connection = "vpn_waiting"
+  return result
 }
