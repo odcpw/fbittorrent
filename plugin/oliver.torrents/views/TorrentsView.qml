@@ -35,7 +35,7 @@ FocusScope {
   Component.onCompleted:scheduleDetail()
   Component.onDestruction:service.hideDetail()
   readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
-  readonly property var viewState:({columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
+  readonly property var viewState:({errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
     toast:service.toast,cursor:cursorHash,selection:Object.keys(selection),filter:filter,query:query,
     focus:focusPane,details:detailState,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
     panes:{sidebar:sideFrame.visible,detailsDocked:detailsFrame.visible,detailsSheet:sheet.visible},
@@ -126,7 +126,6 @@ FocusScope {
         }
       }
       Text {text:"↓ "+Model.rate(root.service.status.dl,true)+"  ↑ "+Model.rate(root.service.status.up,true);textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-      Text {visible:root.service.store.summary.alt===true || root.service.store.settings.alt_limits_on===true;text:Glyphs.turtle+" turtle";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       Text {visible:sidebar.vpn;text:Glyphs.vpn+" "+(root.service.store.network.selection || root.service.store.settings.network_interface || "");textFormat:Text.PlainText;color:root.service.store.network.ready===false ? Commons.Color.urgent : Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       Item {Layout.fillWidth:true}
     }

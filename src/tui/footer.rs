@@ -34,6 +34,7 @@ impl TuiApp {
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",
                 ModalKind::Stopped => "Stopped",
+                ModalKind::Clipboard => "Clipboard",
             },
             Scope::Prompt => {
                 if self.prompt.as_ref().is_some_and(|p| p.yes_no) {

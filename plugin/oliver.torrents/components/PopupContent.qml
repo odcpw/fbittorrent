@@ -15,6 +15,7 @@ PanelKeyCatcher {
   readonly property color dim:owner.dim
   readonly property string fontFamily:owner.fontFamily
   readonly property var presentation:{var revision=svc.actionRevision,now=svc.now,status=svc.status;return PopupState.describe(svc)}
+  readonly property bool turtleOn:svc.turtleOn
   property bool cursorActive:false
   property bool hints:false
   property int keySerial:0
@@ -63,7 +64,7 @@ PanelKeyCatcher {
   function stop(){stopping=false;svc.quit();forceActiveFocus()}
   function dashboard(view){svc.openDashboard(view || "torrents");owner.close()}
   function toggleGroup(group){var next=Object.assign({},expanded);next[group.key]=!group.open;expanded=next;rebuild()}
-  function header(){if(headerIndex===0)svc.addFromClipboard();else if(headerIndex===1)dashboard();else if(headerIndex===2)svc.setTurtle(!svc.store.summary.alt);else power()}
+  function header(){if(headerIndex===0)svc.addFromClipboard();else if(headerIndex===1)dashboard();else if(headerIndex===2)svc.toggleTurtle();else power()}
   function move(dx,dy) {
     keySerial++;hints=true
     var strip=currentStrip();if(strip){strip.move(dx || dy);return}
@@ -99,7 +100,7 @@ PanelKeyCatcher {
     else if(t==="w"){if(focusSection==="groups" && sections[groupIndex])svc.openDashboardFilter(PopupState.dashboardFilter(sections[groupIndex].key));else svc.openDashboard();owner.close()}
     else if(t==="/")dashboard("search")
     else if(t==="t")owner.openTui()
-    else if(t==="z")svc.setTurtle(!svc.store.summary.alt)
+    else if(t==="z")svc.toggleTurtle()
     else if(t==="p")svc.toggleTorrent(selected())
     else if(t==="o")svc.openTorrent(selected())
     else if(t==="u")svc.toggleSeeding(selected())
@@ -115,13 +116,13 @@ PanelKeyCatcher {
     Column {
       id:column;width:flick.width;spacing:Style.spacing.xxl
       PanelHero {
-        width:parent.width;title:"Torrents";meta:Model.heroMeta(svc.status);detail:svc.status.active ? svc.status.active+" DOWNLOADING" : "";foreground:root.foreground;fontFamily:root.fontFamily
+        width:parent.width;title:"Torrents";meta:Model.heroMeta(svc.status);detail:(svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs
           HeaderAction {host:root;index:0;iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
           HeaderAction {host:root;index:1;iconText:"▢";tooltipText:"Open window (w)";onClicked:root.dashboard()}
-          HeaderAction {host:root;index:2;iconText:Glyphs.turtle;tooltipText:"Turtle limits (z)";enabled:svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.setTurtle(!svc.store.summary.alt)}
+          HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
           HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:"Stop fbittorrent (Q)";onClicked:root.power()}
         }}
       }

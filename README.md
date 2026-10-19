@@ -480,6 +480,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
 | --- | --- | --- | --- | --- | --- |
+| `modal:clipboard` | Add offered magnet | — | `y` | `y` |  |
+| `modal:clipboard` | Dismiss offered magnet | — | `Esc` | `Esc` |  |
 | `global` | Turtle limits | `z` | `z` | `z` |  |
 | `global` | Torrents | `1` | `1` | — |  |
 | `global` | Search | `2` | `2` | — |  |
