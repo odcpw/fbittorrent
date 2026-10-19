@@ -34,6 +34,8 @@ Item {
   property var detailFlow:null
   property int detailRevision:0
   property int logRevision:0
+  property int statsRevision:0
+  readonly property var statistics:{var revision=statsRevision;return online ? (store.topics.stats || null) : null}
   property real detailsWidth:360
   property var savedPreferences:({})
   onDetailsWidthChanged:if(preferencesLoaded)savePreferences.restart()
@@ -194,6 +196,7 @@ Item {
     if(detailFlow)detailFlow.frame(frame,request)
     if(searchFlow)searchFlow.frame(frame)
     if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
+    if(frame.topic==="stats" || (request && request.op==="hello"))statsRevision++
     if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)

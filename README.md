@@ -46,6 +46,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   The bottom rows show contextual commands such as `(o) Open`; uppercase keys
   use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.
+  Live speed history appears in the TUI tab bar and dashboard/popup status row.
+  Dashboard Settings shows session and all-time transfer totals; press `L` in
+  the TUI for the same totals below the Log. All-time totals survive daemon restarts.
 - **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
   a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
   season packs, with no account or external watchlist. Checks run on app opening

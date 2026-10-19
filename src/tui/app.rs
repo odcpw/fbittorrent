@@ -109,6 +109,7 @@ pub struct TuiApp {
     pub(super) status_success: bool,
     pub(super) feedback:super::feedback::Feedback,
     pub(super) log_open:bool,
+    pub(super) statistics_footer:RefCell<super::statistics::Footer>,
     pub(super) alt_busy:bool,
     pub(super) service_busy:bool,
     pub(super) settings_loading:bool,
@@ -263,7 +264,7 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
-            status_success:false,feedback:Default::default(),log_open:false,alt_busy:false,service_busy:false,settings_loading:false,follow_target:None,topic_selection:Default::default(),
+            status_success:false,feedback:Default::default(),statistics_footer:Default::default(),log_open:false,alt_busy:false,service_busy:false,settings_loading:false,follow_target:None,topic_selection:Default::default(),
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();

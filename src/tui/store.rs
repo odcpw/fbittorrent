@@ -61,6 +61,7 @@ pub(super) struct Store {
 impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
         self.stale = true;
+        self.stats = None;
         self.lose_pending();
         self.subscriptions.clear();
         self.snapshots.clear();

@@ -61,6 +61,10 @@ mod format;
 mod palette;
 mod feedback;
 mod limits;
+mod statistics;
+#[cfg(test)]
+#[path="tests/statistics.rs"]
+mod statistics_tests;
 #[cfg(test)]
 #[path="tests/history.rs"]
 mod history_tests;

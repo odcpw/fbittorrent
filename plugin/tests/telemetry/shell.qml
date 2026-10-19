@@ -10,9 +10,10 @@ ShellRoot {
   Service {id:svc;settings:({binary:Quickshell.env("FBT_TEST_BINARY")})}
   Dashboard {id:dashboard;service:svc}
   Window {id:probe;visible:true;width:640;height:80;RateStatus {id:rates;anchors.fill:parent;service:svc}}
+  Statistics {id:statistics;visible:false;statistics:svc.statistics;online:svc.online}
   IpcHandler {
     target:"telemetry"
-    function state():string{return JSON.stringify({online:svc.online,history:rates.history,rates:rates.rateText,visible:dashboard.svc.dashboardVisible,topics:svc.client ? svc.client.state().subs : {}})}
+    function state():string{return JSON.stringify({online:svc.online,history:rates.history,rates:rates.rateText,statistics:svc.statistics,sessionText:statistics.sessionText,allTimeText:statistics.allTimeText,visible:dashboard.svc.dashboardVisible,topics:svc.client ? svc.client.state().subs : {}})}
     function open(view:string):bool{return dashboard.open(JSON.stringify({view:view}))}
     function hide():bool{dashboard.close();return true}
     function grab(path:string):bool{return dashboard.grab(path)}

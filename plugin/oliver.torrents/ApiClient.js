@@ -147,6 +147,7 @@ function create(io, options) {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
     if(c.dashboardVisible || c.caps.indexOf("clipboard")>=0)wanted.push("events")
+    if(c.dashboardVisible && c.caps.indexOf("history")>=0)wanted.push("stats")
     if(c.dashboardVisible && c.caps.indexOf("settings")>=0)wanted.push("settings")
     if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
     if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")

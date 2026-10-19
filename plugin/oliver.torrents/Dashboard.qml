@@ -267,7 +267,7 @@ Item {
         }
       }
       DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
-      Loader {id:settingsLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
+      Loader {id:settingsLoader;asynchronous:true;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
       Loader {id:helpLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.helpOpen;onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.HelpOverlay {service:root.svc;onDismissed:root.helpOpen=false}}
       Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusView)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }
