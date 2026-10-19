@@ -182,47 +182,40 @@ impl Drop for AnnounceGuard {
     }
 }
 pub fn redact_url(url: &Url) -> String {
-    let text = url.as_str();
-    match text.find('?') {
-        Some(end) => format!("{}?…", &text[..end]),
-        None => text.to_owned(),
-    }
+    let mut public=url.clone();
+    let _=public.set_username("");let _=public.set_password(None);
+    public.set_query(None);public.set_fragment(None);
+    if url.query().is_some() {format!("{public}?…")}else{public.to_string()}
 }
-/// Strip query strings from every URL in diagnostics, not only this tracker.
-/// Known parameter values are also removed if a remote failure echoes them.
+/// Strip URL userinfo, fragments and queries in all diagnostics. Remove known
+/// credential values too, because an untrusted tracker can echo them as prose.
 pub fn sanitize(url: &Url, text: &str) -> String {
-    let mut text = text
-        .chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect::<String>();
-    for (_, value) in url.query_pairs() {
-        if !value.is_empty() {
-            text = text.replace(value.as_ref(), "…");
-        }
+    let text=text.chars().map(|ch|if ch.is_control(){' '}else{ch}).collect::<String>();
+    let mut secrets=url.query_pairs().map(|(_,v)|v.into_owned()).collect::<Vec<_>>();
+    for value in [Some(url.username()),url.password(),url.fragment()].into_iter().flatten().filter(|v|!v.is_empty()) {
+        secrets.push(value.to_owned());
+        let encoded=format!("value={value}");
+        secrets.extend(url::form_urlencoded::parse(encoded.as_bytes()).map(|(_,v)|v.into_owned()));
     }
-    let mut output = String::with_capacity(text.len());
+    let mut output=String::with_capacity(text.len());
     for word in text.split_inclusive(char::is_whitespace) {
-        if let Some(scheme) = word.find("://") {
-            if let Some(query) = word[scheme + 3..].find('?') {
-                let end = scheme + 3 + query;
-                output.push_str(&word[..end]);
-                output.push_str("?…");
-                // Keep only separating whitespace; the entire query is private.
-                output.extend(
-                    word.chars()
-                        .rev()
-                        .take_while(|ch| ch.is_whitespace())
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev(),
-                );
-                continue;
+        if let Some(separator)=word.find("://") {
+            let start=word[..separator].char_indices().rev().take_while(|(_,c)|c.is_ascii_alphanumeric()||matches!(*c,'+'|'-'|'.')).last().map_or(separator,|(i,_)|i);
+            let token=word[start..].trim_end();
+            if let Ok(parsed)=Url::parse(token) {
+                output.push_str(&word[..start]);output.push_str(&redact_url(&parsed));
+                output.push_str(&word[start+token.len()..]);continue;
             }
         }
         output.push_str(word);
     }
+    // Redact URL structure before prose substitutions: a credential such as
+    // "https" must not invalidate another URL's scheme before it is inspected.
+    secrets.sort_by_key(|value|std::cmp::Reverse(value.len()));
+    for secret in secrets.into_iter().filter(|v|!v.is_empty()) {output=output.replace(&secret,"…");}
     output.chars().take(200).collect()
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,4 +275,17 @@ fn removed_announce_cannot_resurrect_or_overwrite_readded_observation() {
     assert!(set.remove(&url));assert!(set.add(url).unwrap());
     assert!(!state.announce_now(),"set mutation preserves the same throttle owner");
     println!("removed/readded tracker: stale results cannot resurrect rows; throttle owner survives edits");
+}
+
+#[cfg(test)]
+#[test]
+fn userinfo_and_fragments_never_reach_tracker_diagnostics() {
+    let url=Url::parse("https://credential-user:credential-pass@tracker.invalid/announce?passkey=private-key#private-fragment").unwrap();
+    assert_eq!(redact_url(&url),"https://tracker.invalid/announce?…");
+    let value=sanitize(&url,"credential-user credential-pass private-key private-fragment https://other-user:other-pass@other.invalid/error?secret=value#fragment");
+    for secret in ["credential-user","credential-pass","private-key","private-fragment","other-user","other-pass","secret=","#fragment"] {assert!(!value.contains(secret),"{value}");}
+    assert!(value.contains("https://other.invalid/error?…"));
+    let scheme_secret=Url::parse("https://tracker.invalid/?key=https").unwrap();
+    let value=sanitize(&scheme_secret,"https://other-user:other-pass@other.invalid/error?secret=value");
+    for secret in ["other-user","other-pass","secret=","value"] {assert!(!value.contains(secret),"{value}");}
 }

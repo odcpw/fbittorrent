@@ -14,7 +14,7 @@ pub(super) mod restart;
 mod native;
 mod handler;
 mod download_limit;
-mod offline;
+pub(super) mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
@@ -108,11 +108,13 @@ pub(super) enum Cmd {
         #[arg(long)] alt_down: Option<String>,
         #[arg(long)] alt_up: Option<String>,
     },
+    /// Set the displayed name only; an empty name restores the original
+    Rename {selector:String,name:String},
     /// Set a torrent download cap in bytes/s (K/M suffix); none clears
     Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
-    /// Close the app and stop its engine (legacy mode stops the service)
+    /// Stop the daemon and its engine
     Down,
     /// List torrents
     #[command(alias = "ls")]
@@ -132,12 +134,6 @@ pub(super) enum Cmd {
         /// Attribution retained by the daemon.
         #[arg(long, default_value="manual", value_parser=["manual","handler","agent"])]
         origin: String,
-        /// Do not enable sequential download
-        #[arg(long)]
-        no_seq: bool,
-        /// Do not prioritise first and last pieces
-        #[arg(long)]
-        no_first_last: bool,
         /// Add in stopped state
         #[arg(long)]
         stopped: bool,
@@ -200,20 +196,10 @@ pub(super) enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Toggle sequential download (legacy mode; native scheduling is intrinsic)
-    Seq { selectors: Vec<String> },
-    /// Toggle first/last piece priority (legacy mode; native scheduling is intrinsic)
-    FirstLast { selectors: Vec<String> },
     /// Allow uploading/seeding
     Seed { selectors: Vec<String> },
     /// Limit uploading and stop when complete (default for new torrents)
     Noseed { selectors: Vec<String> },
-    /// Native scheduling stub; legacy mode applies defaults to outside additions
-    Reconcile {
-        /// Only touch torrents added within the last N seconds (0 = all)
-        #[arg(long, default_value_t = 0)]
-        recent: i64,
-    },
     /// Add whatever magnet/URL is on the Wayland clipboard
     AddClipboard,
     /// Open the file (single-file torrent) or folder in the desktop
@@ -251,7 +237,7 @@ pub(super) enum Cmd {
         #[arg(long, default_value_t = 30)]
         limit: usize,
     },
-    /// Configure the app download folder (explicit legacy mode also sets up its service)
+    /// Configure the app download folder and desktop integration
     Setup {
         #[arg(long, default_value_t = 8080)]
         port: u16,
@@ -263,14 +249,17 @@ pub(super) enum Cmd {
         /// Link the checkout's plugin or copy it for a stable installation
         #[arg(long, value_parser=["link", "copy"])]
         plugin: Option<String>,
+        /// Opt into the quick palette and its Hyprland shortcut (choose an unused chord)
+        #[arg(long, num_args=0..=1, default_missing_value="SUPER + CTRL + ALT + T")]
+        quick: Option<String>,
         /// List exact planned actions without writing files or running commands
         #[arg(long)]
         dry_run: bool,
         /// Remove desktop integration while keeping saved data
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         uninstall: bool,
         /// Remove integration and application data (never downloaded payloads)
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         purge: bool,
         /// Confirm application-data removal with --purge
         #[arg(long)]
@@ -343,6 +332,12 @@ pub(super) enum RssCmd {
 
 #[derive(Subcommand)]
 pub(super) enum ShowsCmd {
+    /// Set a show's preferred quality without checking or starting the daemon
+    Quality {
+        show: String,
+        #[arg(value_parser=["2160p","1080p","720p","480p","default"])]
+        quality: String,
+    },
     /// Followed shows with new / seen / grabbed counts
     #[command(alias = "ls")]
     List,
@@ -378,6 +373,15 @@ pub(super) enum ShowsCmd {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_current_native_commands_and_add_options_are_exposed() {
+        for command in ["seq","first-last","reconcile"] {
+            assert!(Cli::try_parse_from(["fbittorrent",command]).is_err());
+        }
+        for option in ["--no-seq","--no-first-last"] {
+            assert!(Cli::try_parse_from(["fbittorrent","add","magnet:?xt=urn:btih:0000000000000000000000000000000000000000",option]).is_err());
+        }
+    }
     #[test]
     fn serve_idle_override_preserves_config_default_and_short_test_delays() {
         let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();

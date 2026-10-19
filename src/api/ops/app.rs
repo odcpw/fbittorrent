@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit","pieces","history","rename"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -30,15 +30,18 @@ pub fn dispatch(
     uptime: u64,
     subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
+    let totals=matches!(call,Call::AppStats {..}).then(||daemon.statistics());
     Ok(match call {
         Call::AppClipboardDismiss { args } => {
             daemon.clipboard.dismiss(args.hash.as_str());
             Reply::AppClipboardDismiss(EmptyResult {})
         }
         Call::AppLog { args } => Reply::AppLog(daemon.logs.query(&args.clone().unwrap_or_default())),
-        Call::AppStats { .. } => Reply::AppStats(StatsResult {
+        Call::AppStats { args } => Reply::AppStats(StatsResult {
+            session:Some(totals.as_ref().unwrap().0.clone()),all_time:Some(totals.unwrap().1),
             connections: serde_json::from_value(counts).unwrap(),
             active_clients: serde_json::from_value(active_counts).unwrap(),
+            history:args.as_ref().filter(|a|a.history==Some(true)).map(|_|daemon.history.lock().unwrap().snapshot()),
         }),
         Call::AppFreeSpace { args } => Reply::AppFreeSpace(crate::free_space::inspect(std::path::Path::new(&args.path))),
         Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),

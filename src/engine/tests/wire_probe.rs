@@ -73,12 +73,12 @@ fn legacy_wire_fixture_probe() {
     capture("live-queue", dispatcher.dispatch(&request("app/queue", &[])).unwrap().unwrap());
     capture("live-files", dispatcher.dispatch(&request("torrents/files", &[("hash", &hashes[0])])).unwrap().unwrap());
     let lifecycle = Lifecycle::default();
-    capture("settings-unbound", crate::network_app::controls(&request("app/settings", &[]), &crate::network_app::state(&cfg), &lifecycle).unwrap().unwrap());
+    capture("settings-unbound", fixture::controls(&request("app/settings", &[]), &crate::network_app::state(&cfg), &lifecycle).unwrap().unwrap());
     cfg.max_active_downloads = 7;
     cfg.peer_encryption = "require".into();
     cfg.network_interface = Some("fbmissing0".into());
     cfg.save().unwrap();
-    capture("settings-bound", crate::network_app::controls(&request("app/settings", &[]), &crate::network_app::state(&cfg), &lifecycle).unwrap().unwrap());
+    capture("settings-bound", fixture::controls(&request("app/settings", &[]), &crate::network_app::state(&cfg), &lifecycle).unwrap().unwrap());
     drop(dispatcher);
     drop(app);
 }

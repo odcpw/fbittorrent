@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import "Plugin/DetailFlow.js" as DetailFlow
 import "Plugin/Store.js" as Store
+import "Plugin/DetailText.js" as DetailText
 ShellRoot {
   function check(name,condition,expect,observed){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise details controller and reducers",expect:expect,observed:JSON.stringify(observed),ok:!!condition,ms:0}))}
   function service(){
@@ -14,6 +15,10 @@ ShellRoot {
     return s
   }
   Component.onCompleted:{
+    var explanation=DetailText.networking({private:true,size:1024})
+    check("private_networking",explanation.indexOf("Private torrent")>=0 && explanation.indexOf("no DHT")>=0 && explanation.indexOf("no PeX")>=0,"private metainfo explains disabled discovery",explanation)
+    check("private_networking",DetailText.networking({private:false,size:1024})==="Public torrent" && !DetailText.networking({private:true}) && !DetailText.networking({size:1024}),"public and metadata-unknown rows do not claim disabled discovery",{})
+    console.log("FBTQS-PASS private_networking")
     var s=service(),h="a".repeat(40),other="b".repeat(40),d=DetailFlow.create(s,function(){})
     s.store.torrents[h]={hash:h,name:"Local Fixture",state:"paused"};s.store.torrents[other]={hash:other,name:"Other",state:"paused"}
     d.begin(h);d.lookup();s.calls[0].callback({torrent:{hash:h,private:true,file_count:10}},null);s.calls[1].callback({card:null},null)

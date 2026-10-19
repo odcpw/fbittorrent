@@ -164,6 +164,8 @@ pub struct TorrentView {
 }
 
 impl TorrentView {
+    pub(crate) fn original_name(&self)->&str {&self.legacy.name}
+
     fn rechecking(&mut self) {
         self.state = TorrentState::Checking;
         self.checked = false;
@@ -193,7 +195,7 @@ impl TorrentView {
         let (state, reason) = derive_state(facts);
         Self {
             hash: record.hash.clone(),
-            name: record.name.chars().take(1024).collect(),
+            name: record.display_name.as_deref().unwrap_or(&record.name).chars().take(1024).collect(),
             state,
             reason: reason.map(str::to_owned),
             error: None,
@@ -434,7 +436,7 @@ impl TorrentView {
 
     /// This is the only qBittorrent state-string mapping. Preserve legacy unknown
     /// sentinels here; normalized serialization above always omits unknown data.
-    pub fn to_legacy_json(&self) -> Result<String> {
+    pub fn to_cli_json(&self) -> Result<String> {
         let f = self.legacy.facts;
         let state = match self.legacy.source {
             Source::Dormant => "stoppedUP",
@@ -543,7 +545,7 @@ impl Inner {
     }
     #[cfg(test)]
     pub(super) fn unrestored_snapshot(&self, record: &Record) -> Torrent {
-        serde_json::from_str(&self.unrestored_view(record).to_legacy_json().unwrap()).unwrap()
+        serde_json::from_str(&self.unrestored_view(record).to_cli_json().unwrap()).unwrap()
     }
 }
 impl EngineDispatcher {

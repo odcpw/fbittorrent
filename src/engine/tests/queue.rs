@@ -30,7 +30,7 @@
                 } else {
                     vec![]
                 },
-                file: Some(crate::ipc::Upload {
+                file: Some(crate::engine::tests::fixture::Upload {
                     name: format!("queue-{index}.torrent"),
                     bytes,
                 }),

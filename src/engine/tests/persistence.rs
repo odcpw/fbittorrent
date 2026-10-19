@@ -201,6 +201,7 @@
     #[test]
     fn restoring_downloads_preserves_upload_policy() {
         let record = Record {
+            display_name:None,
             hash: "abc".into(),
             name: "fixture".into(),
             source: String::new(),
@@ -257,7 +258,7 @@
                 method: "POST".into(),
                 path: "torrents/add".into(),
                 args: vec![],
-                file: Some(crate::ipc::Upload {
+                file: Some(crate::engine::tests::fixture::Upload {
                     name: "fixture.torrent".into(),
                     bytes: torrent,
                 }),
@@ -407,155 +408,5 @@
         assert!(!downloads.join("fixture.txt").exists());
         drop(reopened);
         drop(old_session);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn legacy_import_preserves_files_and_refuses_renamed_layout_before_writes() {
-        let directory = std::env::temp_dir().join(format!(
-            "fbittorrent-migrate-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let store = directory.join("store");
-        let downloads = directory.join("downloads");
-        let backup = directory.join("backup");
-        std::fs::create_dir_all(&downloads).unwrap();
-        std::fs::create_dir_all(&backup).unwrap();
-        std::fs::write(downloads.join("original.txt"), b"hello").unwrap();
-        let app = test_app(&store, &downloads, Ledger::default(), None);
-        let bytes = app.dispatcher.runtime.block_on(async {
-            librqbit::create_torrent(
-                &test_cx(),
-                &downloads.join("original.txt"),
-                librqbit::CreateTorrentOptions::default(),
-                &librqbit::spawn_utils::BlockingSpawner::new(1),
-            )
-            .await
-            .unwrap()
-            .as_bytes()
-            .unwrap()
-        });
-        let hash = librqbit::torrent_from_bytes(&bytes)
-            .unwrap()
-            .info_hash
-            .as_string();
-        std::fs::write(backup.join(format!("{hash}.torrent")), &bytes).unwrap();
-        std::fs::rename(
-            downloads.join("original.txt"),
-            downloads.join("renamed.txt"),
-        )
-        .unwrap();
-        let mut torrent = Torrent {
-            hash: hash.clone(),
-            name: "renamed.txt".into(),
-            state: "stoppedUP".into(),
-            progress: 1.0,
-            size: 5,
-            completed: 5,
-            save_path: downloads.to_string_lossy().into_owned(),
-            content_path: downloads.join("renamed.txt").to_string_lossy().into_owned(),
-            category: "fixture".into(),
-            tags: "read".into(),
-            up_limit: NO_UPLOAD_LIMIT,
-            ratio_limit: 0.0,
-            ..Default::default()
-        };
-        let mut file = TorrentFile {
-            name: "renamed.txt".into(),
-            size: 5,
-            progress: 1.0,
-            priority: 1,
-            ..Default::default()
-        };
-        let rejected = app
-            .dispatcher
-            .import_legacy(
-                vec![torrent.clone()],
-                HashMap::from([(hash.clone(), vec![file.clone()])]),
-                backup.clone(),
-            )
-            .unwrap_err();
-        assert!(rejected
-            .to_string()
-            .contains("renamed or unsupported layout"));
-        assert!(!store.join("torrents.json").exists());
-        assert!(!store.join(format!("{hash}.torrent")).exists());
-        assert!(!downloads.join("original.txt").exists());
-        assert_eq!(
-            std::fs::read(downloads.join("renamed.txt")).unwrap(),
-            b"hello"
-        );
-        std::fs::rename(
-            downloads.join("renamed.txt"),
-            downloads.join("original.txt"),
-        )
-        .unwrap();
-        torrent.content_path = downloads
-            .join("original.txt")
-            .to_string_lossy()
-            .into_owned();
-        file.name = "original.txt".into();
-        assert_eq!(
-            app.dispatcher
-                .import_legacy(
-                    vec![torrent],
-                    HashMap::from([(hash.clone(), vec![file])]),
-                    backup
-                )
-                .unwrap(),
-            1
-        );
-        assert!(app.dispatcher.legacy_migration_completed().unwrap());
-        let record = app.dispatcher.runtime.block_on(async {
-            let handle = app.dispatcher.inner.handle(&hash).unwrap();
-            time::timeout(
-                &test_cx(),
-                Duration::from_secs(5),
-                handle.wait_until_initialized(&test_cx()),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            assert!(handle.stats().finished);
-            assert!(handle.is_paused());
-            OwnedMutexGuard::lock(app.dispatcher.inner.ledger.clone(), &test_cx())
-                .await
-                .unwrap()
-                .records[0]
-                .clone()
-        });
-        assert_eq!(record.upload_limit, NO_UPLOAD_LIMIT);
-        assert_eq!(record.only_files, Some(vec![0]));
-        assert_eq!(record.category, "fixture");
-        assert_eq!(record.tags, "read");
-        let error = app
-            .dispatcher
-            .dispatch(&request(
-                "torrents/setUploadLimit",
-                &[("hashes", &hash), ("limit", "1024")],
-            ))
-            .unwrap()
-            .unwrap_err();
-        assert!(error.to_string().contains("at least 16 KiB/s"));
-        let error = app
-            .dispatcher
-            .dispatch(&request(
-                "torrents/filePrio",
-                &[("hash", &hash), ("id", "0"), ("priority", "7")],
-            ))
-            .unwrap()
-            .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("high and maximum are unavailable"));
-        assert_eq!(
-            std::fs::read(downloads.join("original.txt")).unwrap(),
-            b"hello"
-        );
-        drop(app);
         std::fs::remove_dir_all(directory).unwrap();
     }

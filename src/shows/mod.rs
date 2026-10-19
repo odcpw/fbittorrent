@@ -358,6 +358,11 @@ impl Shows {
     pub fn get_mut(&mut self, imdb: &str) -> Option<&mut Show> {
         self.shows.iter_mut().find(|s| s.imdb == imdb)
     }
+    pub fn set_quality(&mut self, imdb: &str, quality: Option<&str>) -> Result<()> {
+        anyhow::ensure!(quality.is_none_or(|q|QUALITIES.contains(&q)),"quality must be 2160p, 1080p, 720p, 480p or default");
+        self.get_mut(imdb).context("show not followed")?.quality=quality.map(str::to_owned);
+        Ok(())
+    }
 
     /// Add a show; false when it is already followed.
     pub fn follow(&mut self, t: &Title) -> bool {

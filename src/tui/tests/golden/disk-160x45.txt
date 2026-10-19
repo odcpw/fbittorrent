@@ -1,4 +1,4 @@
-[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS   ▄█                                                                        ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
 ╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
 │  STATE     NAME                                             SIZE     %      ↓    ETA PEERS││                                                                 │
 │▌ ! Disk    The Diplomat S04E01 1080p WEB-DL H264-GROUP   4.0 KiB   25%                    ││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
 ! Not enough space for the running downloads: 3.1 GiB needed, 1.2 GiB free
-[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (g) First …   (?) Help
+[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (D) Delete with files  (a) Add  (s) Sort  (j) Next …    (?) Help
 The Diplomat S04E01 1080p WEB-DL H264-GROUP

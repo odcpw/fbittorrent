@@ -157,6 +157,7 @@ PanelKeyCatcher {
           Component {id:torrentRow;PopupRow {host:root;torrent:entry.itemData.torrent;rowIdx:entry.itemData.index}}
         }
       }
+      RateStatus {width:parent.width;service:svc}
       PanelSeparator {visible:root.hints;foreground:root.foreground}
       PopupKeyHints {visible:root.hints}
     }

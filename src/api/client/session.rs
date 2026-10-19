@@ -175,13 +175,13 @@ impl Client {
         Self::connect_at(
             cfg,
             agent,
-            &crate::ipc::socket_path(cfg).with_file_name("api.sock"),
+            &crate::config::runtime_dir().join("api.sock"),
         )
     }
     pub fn connect_named(cfg: &Config, name: &str) -> Result<Self> {
-        Self::connect_at_named(cfg,true,&crate::ipc::socket_path(cfg).with_file_name("api.sock"),Some(name))
+        Self::connect_at_named(cfg,true,&crate::config::runtime_dir().join("api.sock"),Some(name))
     }
-    fn connect_at(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
+    pub(super) fn connect_at(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
         Self::connect_at_named(cfg,agent,path,None)
     }
     fn connect_at_named(cfg: &Config, agent: bool, path: &std::path::Path, name: Option<&str>) -> Result<Self> {
@@ -213,7 +213,7 @@ impl Client {
     }
     pub fn hello_envelope(cfg: &Config, args: Value) -> Result<Value> {
         let deadline=Instant::now()+Duration::from_millis(200);
-        let path=crate::ipc::socket_path(cfg).with_file_name("api.sock");
+        let path=crate::config::runtime_dir().join("api.sock");
         let mut socket=connect_probe(&path,deadline)?;
         socket.set_write_timeout(Some(Duration::from_millis(200)))?;
         send(&mut socket,&json!({"id":1,"op":"hello","args":args}))?;

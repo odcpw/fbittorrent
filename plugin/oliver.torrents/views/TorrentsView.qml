@@ -19,7 +19,7 @@ FocusScope {
   property bool detailsOpen:false
   readonly property int tier:TableLayout.tier(windowLogicalWidth)
   readonly property bool overviewOpen:service.overviewRevision>=0 && service.overviewFlow && !!service.overviewFlow.modal
-  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || overviewOpen
+  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || overviewOpen || (pane && pane.trackerEditing)
   readonly property var pane:docked.item || floating.item
   readonly property bool editing:overviewOpen || filterInput.activeFocus || (pane ? pane.editing : false)
   readonly property real scale:Commons.Style.effectiveSpacingScale
@@ -30,7 +30,7 @@ FocusScope {
     hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
     overview:pane ? pane.overviewState : null,
     action:overviewSheet.item ? overviewSheet.item.state : null,actionStatus:service.overviewRevision>=0 && service.overviewFlow ? service.overviewFlow.status(cursorHash) : "",
-    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],poster:pane && pane.posterLoaded ? "loaded" : "none"})
+    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,networking:pane ? pane.networkingText : "",poster:pane && pane.posterLoaded ? "loaded" : "none"})
   function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
   function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
   onCursorHashChanged:scheduleDetail()
@@ -108,6 +108,7 @@ FocusScope {
     if(text==="s"){service.cycleSort();return true}
     if(text==="S"){service.sortReverse=!service.sortReverse;return true}
     if(event.key===Qt.Key_Return || event.key===Qt.Key_Enter){if(current)activate(cursorHash);return true}
+    if(text==="N"){if(current){activate(cursorHash);service.detailFlow.begin(cursorHash);Qt.callLater(function(){if(pane)pane.renameTitle()})}return true}
     if(text==="o"){if(current)service.openTarget(cursorHash);return true}
     if(text==="p" || event.key===Qt.Key_Space){if(current)service.toggleTorrent(current);return true}
     if(text==="u"){if(current)service.toggleSeed(cursorHash);return true}
@@ -208,7 +209,7 @@ FocusScope {
         }
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   p pause   u seed   d remove   D delete files   U undo   Ctrl+A select visible   o open   s sort   / filter   q close"}
+    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u seed   d remove   D delete files   U undo   Ctrl+A select visible   o open   s sort   / filter   q close"}
     RowLayout {
       Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding
       Text {

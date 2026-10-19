@@ -33,6 +33,20 @@ pub enum ReleaseTransfer {None,Downloading,Queued,Paused,Done,AddedBefore}
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShowArgs {pub imdb:String}
+#[derive(Debug,Clone,Copy,PartialEq,Serialize,Deserialize)]
+pub enum ShowQuality {
+    #[serde(rename="2160p")] Uhd,
+    #[serde(rename="1080p")] FullHd,
+    #[serde(rename="720p")] Hd,
+    #[serde(rename="480p")] Sd,
+}
+impl ShowQuality {pub fn as_str(self)->&'static str {match self {Self::Uhd=>"2160p",Self::FullHd=>"1080p",Self::Hd=>"720p",Self::Sd=>"480p"}}}
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ShowQualityArgs {
+    pub imdb:String,
+    #[serde(default,skip_serializing_if="Update::is_unset")] pub quality:Update<ShowQuality>,
+}
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShowFollowArgs {
@@ -58,6 +72,7 @@ pub struct ShowReadArgs {pub imdb:String,pub key:String,pub read:bool}
 #[serde(deny_unknown_fields)]
 pub struct ShowGrabArgs {
     pub imdb:String,pub key:String,
+    #[serde(skip_serializing_if="Option::is_none")] pub stage:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub seed:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub stopped:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub save_path:Option<String>,

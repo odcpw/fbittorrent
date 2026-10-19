@@ -243,7 +243,7 @@ fn typed_seed_live_retains_handle_and_never_checks() {
                 TorrentStatsState::Initializing { .. }
             ));
             assert_eq!(current.is_paused(), !on);
-            let legacy: Torrent = serde_json::from_str(&r.to_legacy_json().unwrap()).unwrap();
+            let legacy: Torrent = serde_json::from_str(&r.to_cli_json().unwrap()).unwrap();
             assert_eq!(legacy.state, if on { "uploading" } else { "stoppedUP" });
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
             assert_eq!(saved.records[0].upload_limit, if on { 0 } else { 32768 });

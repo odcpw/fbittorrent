@@ -31,6 +31,7 @@ Item {
   property string routeError:""
   readonly property var torrents:torrentsLoader.item
   readonly property var search:searchLoader.item
+  readonly property var shows:showsLoader.item
   readonly property var views:["torrents","search","shows","rss","settings","log"]
   readonly property var labels:["Torrents","Search","Shows","RSS","Settings","Log"]
   function selectTorrent(hash){currentView="torrents";selectedHash=hash;if(torrents)torrents.cursorHash=hash}
@@ -48,6 +49,7 @@ Item {
       clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
+    if(window.visible && currentView==="shows" && shows)svc.dashboardState=Object.assign({},svc.dashboardState,shows.viewState)
     if(window.visible && settingsSheet)svc.dashboardState.settings=settingsSheet.state
     if(window.visible && logView)svc.dashboardState.log={level:logView.level,source:logView.source,hash:logView.hashFilter,count:logView.count,follow:logView.follow}
     if(window.visible)svc.dashboardState.help=helpOpen
@@ -60,7 +62,7 @@ Item {
     if(helpLoader.item){svc.focusWindow(window,helpLoader.item);return}
     if(settingsSheet){svc.focusWindow(window,settingsSheet);return}
     if(logView){svc.focusWindow(window,logView);return}
-    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" && search ? (search.viewModel.mode==="browse" ? search : search.queryTarget) : currentView==="torrents" && torrents ? torrents : scope
+    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" && search ? (search.viewModel.mode==="browse" ? search : search.queryTarget) : currentView==="torrents" && torrents ? torrents : currentView==="shows" && shows ? shows : scope
     svc.focusWindow(window,target)
   }
   function open(payloadJson) {
@@ -116,7 +118,7 @@ Item {
   onFilterChanged:publish()
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
-  Connections {target:root.svc;function onSettingsRevisionChanged(){root.publish()} function onClipboardOfferChanged(){root.publish()} function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
+  Connections {target:root.svc;function onShowsRevisionChanged(){root.publish()} function onSettingsRevisionChanged(){root.publish()} function onClipboardOfferChanged(){root.publish()} function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
   Component.onDestruction:{disposing=true;if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window);svc.hideDetail()}}
 
   FloatingWindow {
@@ -150,6 +152,8 @@ Item {
         }
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
         if(root.currentView==="search" && root.search && root.search.handleKey(event)){event.accepted=true;return}
+        if(root.currentView==="shows" && root.shows && root.shows.handleKey(event)){event.accepted=true;return}
+        if(root.currentView==="shows" && root.shows && root.shows.editing)return
         if((root.currentView==="torrents" && torrents && torrents.editing) || (root.currentView==="search" && root.search && root.search.editing))return
         if(event.text==="r"){root.svc.refresh();event.accepted=true;return}
         if(event.text===","){root.openSettings();event.accepted=true;return}
@@ -172,8 +176,8 @@ Item {
       Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active;onActivated:root.svc.addClipboardSheet()}
       Shortcut {sequence:"Ctrl+C";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && (!torrents || !torrents.editing) && (!root.search || !root.search.editing);onActivated:root.dismiss()}
       Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online;onActivated:root.svc.quit()}
-      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen);onActivated:root.cycleView(1)}
-      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen);onActivated:root.cycleView(-1)}
+      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen);onActivated:root.cycleView(1)}
+      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen);onActivated:root.cycleView(-1)}
       ColumnLayout {
         anchors.fill:parent
         anchors.margins:Commons.Style.space(0)
@@ -243,9 +247,15 @@ Item {
             onLoaded:{root.publish();Qt.callLater(root.focusView)}
             sourceComponent:Views.LogView {service:root.svc;consumer:"global-log";onChanged:root.publish()}
           }
+          Loader {
+            id:showsLoader;anchors.fill:parent
+            active:window.visible && !!root.svc && root.svc.online && root.currentView==="shows"
+            onLoaded:{root.publish();Qt.callLater(root.focusView)}
+            sourceComponent:Views.ShowsView {service:root.svc;onChanged:root.publish();onFocusRequested:Qt.callLater(root.focusView)}
+          }
           ColumnLayout {
             anchors.fill:parent
-            visible:!!root.svc && root.svc.online && root.currentView!=="torrents" && root.currentView!=="search" && root.currentView!=="settings" && root.currentView!=="log"
+            visible:!!root.svc && root.svc.online && root.currentView!=="torrents" && root.currentView!=="search" && root.currentView!=="settings" && root.currentView!=="log" && root.currentView!=="shows"
             spacing:Commons.Style.spacing.panelGap
             Text {text:root.labels[root.views.indexOf(root.currentView)];textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title;font.bold:true}
             Ui.TextField {
@@ -261,6 +271,7 @@ Item {
             Item {Layout.fillWidth:true;Layout.fillHeight:true}
           }
         }
+        Components.RateStatus {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Text {
           visible:root.routeError!=="" || (!!root.svc && root.svc.lastError!=="")
           text:root.routeError || (root.svc ? root.svc.lastError : "")
@@ -269,7 +280,7 @@ Item {
         }
       }
       DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
-      Loader {id:settingsLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
+      Loader {id:settingsLoader;asynchronous:true;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
       Loader {id:helpLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.helpOpen;onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.HelpOverlay {service:root.svc;onDismissed:root.helpOpen=false}}
       Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusAfterAdd)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }

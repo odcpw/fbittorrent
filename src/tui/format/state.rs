@@ -65,6 +65,13 @@ pub(in crate::tui) fn reason(code: &str) -> &str {
         .and_then(|s|s.definition.phrases.get(code).copied()).unwrap_or(code)
 }
 
+pub(in crate::tui) fn tracker_label(status: &api::TrackerStatus) -> String {
+    let key=match status {api::TrackerStatus::Ok=>"tracker.ok",api::TrackerStatus::Error=>"tracker.error",api::TrackerStatus::Updating=>"tracker.updating",api::TrackerStatus::NotContacted=>"tracker.not_contacted"};
+    let state=&definitions().iter().find(|s|s.definition.state==key).expect("tracker state contract").definition;
+    let gap=if dw(state.text_glyph)+dw(state.word)+1>14 {""}else{" "};
+    format!("{}{gap}{}",state.text_glyph,state.word)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

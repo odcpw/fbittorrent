@@ -1,8 +1,8 @@
 //! Local render state only: never init/update the model or start subscriptions.
 use super::*;
 
-pub(super) const SURFACES: [&str; 11] = [
-    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done",
+pub(super) const SURFACES: [&str; 12] = [
+    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done", "clipboard",
 ];
 
 pub(super) fn app(surface: &str) -> TuiApp {
@@ -74,7 +74,18 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "details-trackers"=>crate::tui::tracker_tests::prepare(&mut app),
+        "peers"=>crate::tui::peer_tests::prepare(&mut app),
         "disk"=>crate::tui::disk_tests::prepare(&mut app),
+        "pieces" => {
+            let lines=include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().collect::<Vec<_>>();
+            let hello:serde_json::Value=serde_json::from_str(lines[1]).unwrap();
+            app.store.hello(serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
+            let data:crate::api::Pieces=serde_json::from_str(include_str!("../../../agent_ergonomics_audit/audit/regression_tests/fixtures/states/pieces-1000.json")).unwrap();
+            let hash=crate::api::Hash::new(app.torrents[0].hash.clone()).unwrap();
+            let t=app.torrents[0].clone();let _=app.open_details(&t);app.details.as_mut().unwrap().tab=DetailsTab::Pieces;
+            app.store.pieces.insert(hash,(data.clone(),data.decode().unwrap()));
+        },
         "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
         "poster" => {let key=app.torrents[0].name.clone();crate::tui::poster_tests::ready(&mut app,&key);let _=app.on_key(KeyEvent::new(KeyCode::Char('v')));},
         "done" => app.tor_list.borrow_mut().select(Some(1)),
@@ -104,6 +115,9 @@ pub(super) fn app(surface: &str) -> TuiApp {
             app.open_prompt(PromptKind::AddMagnet, " Add magnet link or URL ", false);
             app.prompt.as_mut().unwrap().input.set_value("magnet:?xt=urn:btih:0000000000000000000000000000000000000001");
         },
+        "clipboard" => app.clipboard_event(&serde_json::from_value(serde_json::json!({
+            "ev":"clipboard.magnet","seq":1,"ts":1,"hash":"c7".repeat(20),"name":"Sintel.2010.1080p","already_added":false
+        })).unwrap()),
         "help" => app.show_help = true,
         "confirm" => { let _ = app.on_torrents_key(KeyEvent::new(KeyCode::Char('D'))); },
         _ => panic!("unknown render fixture: {surface}"),

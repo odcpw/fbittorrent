@@ -40,9 +40,9 @@ regular file at most 16 MiB whose first byte is d (bencoded).
   `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
-  `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
+  `torrents.reannounce`, `torrents.set_download_limit`, `torrents.rename`, `torrents.add_tracker`,
   `torrents.remove_tracker`. Every other
-  mutating operation (`torrents.remove`, `torrents.recheck`, `torrents.move`, `torrents.rename`,
+  mutating operation (`torrents.remove`, `torrents.recheck`, `torrents.move`,
   `torrents.queue_move`, `rss.add`, `rss.remove`, `shows.follow`, `shows.unfollow`,
   `shows.undo_read`, `search.install`, the `*.grab` family, `app.shutdown`, `app.restart`) is not,
   and a client never resends it on its own. `api::ops::TABLE` carries this flag and `api --list`
@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `rename` | `torrents.rename`; display only, original_name in torrent details | P7-03 |
 | `tracker_edit` | `torrents.add_tracker/remove_tracker` | P7-04 |
 | `download_limit` | `torrents.set_download_limit`, configured/effective torrent fields | P7-06 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
@@ -93,7 +94,7 @@ when a required cap is missing.
 | `watch` | `playable` fields, `torrent.playable` event, `wait --until playable` | P5-05 |
 | `trackers` | `torrents.trackers/reannounce`, topic `torrent:<h>.trackers` | P6-01 |
 | `pieces` | `torrents.pieces`, topic `torrent:<h>.pieces` | P6-02 |
-| `history` | `summary.history`; statistics reserved for later beads | P6-03, P6-04 |
+| `history` | `app.stats {history:true}`, summary/status history and `stats` | P6-03 |
 | `queue` | `torrents.force_start/queue_move`, `queue_pos`, `force` | P6-05 |
 | `origin` | `origin` field, `{restore: hash}` undo source | P6-08 |
 | `clipboard` | `clipboard.magnet` event, `app.clipboard.dismiss` | P6-13 |
@@ -156,26 +157,28 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.commit` | `hash`, `files?`, `seed?`, `save_path?` | `{state: "done"}` | yes | P3-06 |
 | `torrents.discard` | `hash` | `{state: "done"}`; payload files never deleted | yes | P3-06 |
 | `torrents.move` | `hashes: [hash]` (1..256), `save_path` | `{state: "pending", ref}`, then mutation.result | yes | P7-02 |
+| `torrents.pieces` | `hash: hash` | `Pieces` (MSB-first base64 verified bitfield) | no | P6-02 |
 | `torrents.trackers` | `hash: hash` | `{trackers: [Tracker]}` | no | P6-01 |
 | `torrents.reannounce` | `hashes: [hash]` (1..256) | `{state: "done"}` | yes | P6-01 |
 | `hello` | See handshake | HelloResult | no | P1-06 |
 | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
 | `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
-| `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
+| `app.stats` | `history?: bool` | `{active_clients: ClientCounts, connections: ClientCounts, session: SessionTotals, all_time: AllTimeTotals, history?: RateHistory}`; current clients, cumulative connections, session/all-time totals, optional 600 samples | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
-| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
+| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?`, `overlay_visible: bool?` (drop resets presence; bar interactive needs a visible dashboard or palette) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
 | `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
 | `shows.follow` | `query?: str`, `imdb?: str`, `quality?: str` | `{show: Show}` | yes | P3-03 |
+| `shows.set_quality` | `imdb: str`, `quality?: enum(2160p\|1080p\|720p\|480p)\|null` (default) | `{show: Show}` | yes | P3-18 |
 | `shows.unfollow` | `imdb: str` | `{}` | yes | P3-03 |
 | `shows.check` | `imdb?: str` | `{state: "pending", ref: str}`, then `shows.checked` and `mutation.result {new}` | yes | P3-03 |
 | `shows.releases` | `imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str` | `{releases: [Release]}` | no | P3-03 |
 | `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
 | `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
 | `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
-| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, `stage?: bool`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
 | `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
 | `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
 | `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
@@ -202,6 +205,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
+| `torrents.rename` | `hash: hash`, `name: str` (0..512, empty clears) | `{state: "done"}` | yes | P7-03 |
 | `torrents.add_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.remove_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
@@ -457,7 +461,7 @@ The hello/error replay normalization table remains:
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit","pieces","history","rename"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -841,10 +845,16 @@ observations return saved URLs as `not_contacted`. `tracker_count` counts every
 metainfo URL, including private secondary and unsupported URLs. Forced announces
 wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
 Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
-a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription awaits P1-08 integration: keyed by
-URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
-topic/item registration and pushed-delivery qualification remain pending that
-integration, alongside the TUI/dashboard rendering owned by their tracks.
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription is keyed by the complete URL, with
+one typed `Tracker` per snapshot item and ordinary keyed deltas. Its default
+cadence is 1,000 ms; status changes are structural. The daemon reads observations
+only for subscribed tracker details, releases them when the last subscriber
+leaves, and resets the snapshot across engine epochs. Paused torrents retain
+their last available observations. Clients render URLs without userinfo,
+queries or fragments. Tracker failure messages and ordinary CLI diagnostics
+also strip URL credentials and known echoed credential values; the private URL
+identity is retained for explicit socket tracker operations.
+
 
 ### Payload moves (P7-02, contract 1.2.21)
 
@@ -899,11 +909,9 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.31**. Each additive change after the 1.2.0
-baseline has its own patch, assigned in first-parent integration merge order.
-Changes arriving together retain their feature order; the P1-18 event and raw
-API entries receive successive patches. Future merges allocate after the latest
-integrated patch and update this table, capabilities, and contract assertions.
+The current CLI contract is **1.2.32**. Additive changes from parallel tracks
+may share a patch version. Integration preserves their version numbers and
+change descriptions; patches are not renumbered at merge time.
 API hello still negotiates wire version 1; these CLI patches do not change
 NDJSON framing or the capability arrays in the wire fixtures.
 
@@ -938,8 +946,13 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.27` | `download_limit_bps` |
 | `1.2.28` | `search.install_torznab` |
 | `1.2.29` | `search.torznab` |
+| `1.2.30` | `shows.quality` |
 | `1.2.30` | `trackers.edit` |
+| `1.2.31` | `status.history` |
+| `1.2.31` | `pieces` |
 | `1.2.31` | `cli.catalogue` |
+| `1.2.32` | `status.all_time` |
+| `1.2.32` | `torrents.rename` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1050,6 +1063,11 @@ inbox identity; existing hello/error arrays exactly include the shows cap.
 
 ### P5-01: connected seeds and peers (contract 1.2.26)
 
+`Summary.top[]` also carries optional `peers` and `seeds` from the same current
+connected-peer observations as the torrent list. This bounded glance projection
+lets the bar show named torrent counts while detail sampling is off. Missing
+counts stay absent; they are never swarm totals or substituted zeroes.
+
 Capability `peers` adds `torrents.peers {hash}` and `torrent:<hash>.peers`.
 The latter is keyed by `addr`, defaults to 1000 ms and releases sampling when
 its final subscriber disconnects or unsubscribes. `Peer` contains `addr`,
@@ -1129,6 +1147,46 @@ credentials remain in a private file. Provider listings distinguish `kind`
 `nova` and `torznab`; the existing search capability and normalized result
 shapes are shared by both provider kinds. Invalid configuration exits 2.
 
+### P3-18: per-show quality (contract 1.2.30)
+
+`shows.set_quality {imdb, quality}` is idempotent and uses the existing `shows`
+capability. Values are 2160p, 1080p, 720p or 480p; null or omission clears the
+override, so the next check uses `Settings.show_quality`. Saving never checks
+or downloads. CLI `shows quality <show> <q|default>` returns
+`{ok, action: "shows-quality", imdb, quality}` and never starts a stopped daemon;
+exit codes are 0, 2 (quality), 6 (not followed) and 7 (ambiguous selector).
+`shows.releases {inbox:true, unread_only:true, quality:"2160p"}` applies both
+filters; `unread_only:false` explicitly includes read releases.
+
+### P6-03: global speed history (contract 1.2.31)
+
+Capability `history` adds one daemon-owned ring of 600 one-second global
+download/upload byte rates, oldest first. It starts empty and is neither padded
+nor interpolated. `Summary.history` and CLI `status --json` contain the latest
+60 download points. `app.stats {history:true}` additionally returns
+`history: {download:[u64], upload:[u64], interval_s:1}`, at most 600 matching
+points per direction; omission/false excludes this optional field. The `stats`
+topic sends `state {data:{history:...}}` initially and at most every 5,000 ms,
+independent of subscriber count. No per-torrent rings or on-disk history exist.
+Hello capability lists in existing fixtures are updated exactly per the owner
+cap-bookkeeping ruling; all other existing fixture values remain unchanged.
+
+### P6-04: session and all-time statistics (contract 1.2.32)
+
+`app.stats` and the `stats` topic add `session: {downloaded, uploaded, started_at}`
+and `all_time: {downloaded, uploaded, completed}` under the existing `history`
+capability. Bytes and completion counts are unsigned integers; `started_at` is
+the daemon's Unix start time in seconds. Session bytes accumulate actual engine
+network counters across engine restarts, independent of verified on-disk bytes.
+Restoring completed data does not recount it. A daemon restart resets session
+bytes, preserving all-time totals. History remains opt-in on the operation.
+
+`status --json` includes `all_time`, including while stopped without autostart.
+Only the three all-time totals are stored in `$XDG_STATE_HOME/fbittorrent/stats.json`
+(default `~/.local/state/fbittorrent/stats.json`), mode 0600. Updates use a unique
+same-directory temporary, file fsync, atomic rename and directory fsync; saves
+occur only on change, at most every 30 seconds, and at drain after the engine's
+final counters. Session values, history and per-client counters are not persisted.
 
 ## Native Torznab providers (P7-01, CLI contract 1.2.29)
 
@@ -1210,3 +1268,29 @@ interactive edge refreshes only stale catalogues. The existing UI connection
 subscribes to rss.feeds/shows and reloads today's atomic files on pushed updates;
 shows.checked also refreshes the cached Shows view. A fresh reconnect does not
 fetch again. Explicit user refresh/check remains available.
+### P6-02: verified Pieces (contract 1.2.31)
+
+The `pieces` capability adds read-only `torrents.pieces {hash}` → `Pieces` and
+`torrent:<hash>.pieces`, a singleton `state {data: Pieces}` detail topic.
+`Pieces {count: u64, piece_size: u64, have: str, priority: [u64], playable_end?: u64}`
+uses the BEP 3 MSB-first verified have bitfield in standard padded base64, exactly
+`ceil(count/8)` bytes before encoding, unused low bits zero. `priority` contains
+sorted unique first/last indices of included nonempty non-padding files.
+`playable_end`, when known from the playable prefix, is an exclusive piece end
+index. Unknown prefix is omitted. The 1,048,576-byte frame cap still applies; an
+unrepresentable read returns `unsupported`. An unknown hash is `not_found`; a
+known torrent without a live verified snapshot returns `invalid_state`.
+Sampling exists only for subscribed details, at most once every2,000ms (requested
+intervals can lengthen this). No snapshot is fabricated during checking, parking
+or dormant restore. Clients clear unavailable observations at engine changes and
+release the topic when hiding/switching the pane.
+### Display names (P7-03)
+
+`torrents.rename {hash,name}` stores a trimmed display override. Empty input clears it.
+Names contain at most 512 Unicode characters and no control characters. `name` in
+torrent rows, selectors, filters and sorting uses this override; `original_name` in
+`torrents.get` remains metadata-derived. Payload paths and hashes never change.
+
+An optional quick palette on the shared bar socket declares `app.client` with
+`interactive:true, overlay_visible:true` while visible, then clears `overlay_visible`
+on close. A bar with neither dashboard nor palette visible never prevents idle exit.

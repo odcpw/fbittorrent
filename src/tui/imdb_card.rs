@@ -8,35 +8,10 @@ impl TuiApp {
         if self.imdb_aliases.len()>=1024&&!self.imdb_aliases.contains_key(&name) {if let Some(old)=self.imdb_aliases.keys().next().cloned(){self.imdb_aliases.remove(&old);}}
         self.imdb_aliases.insert(name.clone(),key.clone());
         if matches!(self.imdb.get(&key),Some(ImdbState::Loading|ImdbState::Ready(..)|ImdbState::Missing)){return Cmd::none();}
-        let connection=self.presence.clone().filter(|c|self.cfg.native()&&c.alive());
-        if self.cfg.native()&&connection.is_none(){return Cmd::none();}
+        let connection=self.presence.clone().filter(|c|c.alive());
         self.cache_imdb(key.clone(),ImdbState::Loading);
         let id=id.or_else(||key.starts_with("tt").then(||key.clone()));
-        Cmd::task(move || {
-            if let Some(connection)=connection {return Msg::Imdb(key,remote::imdb::lookup(&connection,&name,id.as_deref()).map_err(|e|e.to_string()));}
-            if imdb::ratings_stale() { let _ = imdb::refresh_ratings(); }
-            let found = match id.as_deref().filter(|i| i.starts_with("tt")) {
-                Some(i) => imdb::lookup_id(i),
-                None => imdb::lookup(&name),
-            };
-            let r = found.map_err(|e| e.to_string()).map(|t| t.map(|t| {
-                let poster = if t.poster_url.is_empty() { None } else {
-                    imdb::fetch_poster(&t.poster_url, 360).ok()
-                        .and_then(|p| std::fs::read(p).ok())
-                        .and_then(|b| Poster::from_bytes(&b))
-                };
-                (t, poster)
-            }));
-            Msg::Imdb(key, r)
-        })
-    }
-
-    pub(super) fn load_ratings(&self) -> Cmd<Msg> {
-        if self.cfg.native(){return Cmd::none();}
-        Cmd::task(|| {
-            if imdb::ratings_stale() { let _ = imdb::refresh_ratings(); }
-            Msg::Ratings(imdb::RatingsIndex::load().map(Arc::new).map_err(|e| e.to_string()))
-        })
+        Cmd::task(move || Msg::Imdb(key,connection.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::imdb::lookup(&connection,&name,id.as_deref())).map_err(|e|e.to_string())))
     }
 
     /// Rating for a result: from the in-memory index when the source gave an IMDb id,
@@ -48,25 +23,6 @@ impl TuiApp {
             if let Some((v, _)) = idx.get(id) { return Some(v); }
         }
         match self.imdb_state(&r.file_name) { Some(ImdbState::Ready(t, _)) => t.rating, _ => None }
-    }
-
-    /// Resolve IMDb ids for the best results that came without one (top of the list only:
-    /// one network call each, cached on disk by release name).
-    pub(super) fn resolve_ids(&mut self) -> Cmd<Msg> {
-        if self.cfg.native(){return Cmd::none();}
-        if self.ids_inflight { return Cmd::none(); }
-        let names: Vec<String> = self.search_results.iter()
-            .filter(|r| r.imdb.is_empty() && !self.name_ids.contains_key(&r.file_name))
-            .take(24)
-            .map(|r| r.file_name.clone())
-            .collect();
-        if names.is_empty() { return Cmd::none(); }
-        self.ids_inflight = true;
-        Cmd::task(move || {
-            // Names that resolve to nothing are remembered as empty so we stop retrying them.
-            let pairs = names.into_iter().map(|n| { let id = imdb::resolve_id(&n).unwrap_or_default(); (n, id) }).collect();
-            Msg::Ids(pairs)
-        })
     }
 
     /// Open the IMDb page (or start the lookup) for a release name.

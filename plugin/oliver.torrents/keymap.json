@@ -271,6 +271,30 @@
       "scope": "global"
     },
     {
+      "id": "clipboard.offer_add",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Add",
+      "scope": "modal:clipboard"
+    },
+    {
+      "id": "clipboard.offer_dismiss",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Dismiss",
+      "scope": "modal:clipboard"
+    },
+    {
       "id": "daemon.start",
       "keys": {
         "dashboard": null,
@@ -281,6 +305,124 @@
       },
       "label": "Start fbittorrent",
       "scope": "modal:stopped"
+    },
+    {
+      "id": "details.rename",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.add",
+      "keys": {
+        "dashboard": [
+          "+"
+        ],
+        "popup": null,
+        "tui": [
+          "+"
+        ]
+      },
+      "label": "Add",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.remove",
+      "keys": {
+        "dashboard": [
+          "x"
+        ],
+        "popup": null,
+        "tui": [
+          "x"
+        ]
+      },
+      "label": "Remove",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.reannounce",
+      "keys": {
+        "dashboard": [
+          "e"
+        ],
+        "popup": null,
+        "tui": [
+          "e"
+        ]
+      },
+      "label": "Reannounce",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.refresh",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Refresh",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓",
+          "j"
+        ]
+      },
+      "label": "Next tracker",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑",
+          "k"
+        ]
+      },
+      "label": "Previous tracker",
+      "scope": "modal:details"
+    },
+    {
+      "id": "peers.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓",
+          "j"
+        ]
+      },
+      "label": "Next peer",
+      "scope": "modal:details"
+    },
+    {
+      "id": "peers.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑",
+          "k"
+        ]
+      },
+      "label": "Previous peer",
+      "scope": "modal:details"
     },
     {
       "id": "details.close",
@@ -590,6 +732,60 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.rename",
+      "keys": {
+        "dashboard": [
+          "N"
+        ],
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.undo_remove",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "U"
+        ]
+      },
+      "label": "Undo removal",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.sort",
+      "keys": {
+        "dashboard": [
+          "s"
+        ],
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.reverse_sort",
+      "keys": {
+        "dashboard": [
+          "S"
+        ],
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse sort",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.details_previous",
       "keys": {
         "dashboard": [
@@ -871,45 +1067,6 @@
         ]
       },
       "label": "Follow show",
-      "note": "Native TUI; legacy uses F while f is first/last priority.",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.follow",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F"
-        ]
-      },
-      "label": "Follow show (legacy)",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.sequential",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "s"
-        ]
-      },
-      "label": "Sequential (legacy)",
-      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.first_last",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "f"
-        ]
-      },
-      "label": "First/last priority (legacy)",
-      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
       "scope": "screen:torrents"
     },
     {
@@ -932,7 +1089,9 @@
           "s"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "s"
+        ]
       },
       "label": "Sort results",
       "scope": "screen:search"
@@ -944,7 +1103,9 @@
           "S"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "S"
+        ]
       },
       "label": "Reverse results sort",
       "scope": "screen:search"
@@ -956,7 +1117,9 @@
           "y"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "y"
+        ]
       },
       "label": "Copy magnet",
       "scope": "pane:search.results"
@@ -1468,6 +1631,42 @@
       "scope": "pane:rss.items"
     },
     {
+      "id": "shows.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort releases",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse releases sort",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.copy_magnet",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Copy magnet",
+      "scope": "pane:shows.releases"
+    },
+    {
       "id": "shows.next",
       "keys": {
         "dashboard": [
@@ -1887,30 +2086,6 @@
       "scope": "modal:files"
     },
     {
-      "id": "files.high",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "2"
-        ]
-      },
-      "label": "High (legacy)",
-      "scope": "modal:files"
-    },
-    {
-      "id": "files.max",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "3"
-        ]
-      },
-      "label": "Max (legacy)",
-      "scope": "modal:files"
-    },
-    {
       "id": "providers.close",
       "keys": {
         "dashboard": null,
@@ -2231,30 +2406,6 @@
         ]
       },
       "label": "Submit",
-      "scope": "prompt"
-    },
-    {
-      "id": "prompt.sequential",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F2"
-        ]
-      },
-      "label": "Sequential (legacy)",
-      "scope": "prompt"
-    },
-    {
-      "id": "prompt.first_last",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F3"
-        ]
-      },
-      "label": "First/last (legacy)",
       "scope": "prompt"
     },
     {

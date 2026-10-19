@@ -65,6 +65,13 @@ with open(input_path) as f:
                         if frame.get('ev')=='clipboard.magnet':out.append(frame)
                         out.extend(ev for ev in frame.get('added',frame.get('items',[])) if ev.get('ev')=='clipboard.magnet')
                     return out
+                ui=None
+                if name=='clipboard_tui_offer':
+                    import native
+                    ui=native.AttachedTui(case,str(binary),box,h,session='fbt-fbt-p6-13-dxe')
+                    h.resources.callback(ui.close)
+                    target,_=ui.start()
+                    ui.assert_pane(target,'[Torrents]')
                 send(MAGNET.replace(HASH,'d8'*20).replace(NAME,'DroppedOversized')+'&padding='+'x'*65536);send(SECRET);send(MAGNET)
                 h.wait_for(lambda:(len(found:=events())==1,json.dumps(found)),'one bounded clipboard.magnet after producer delay',timeout=5)
                 ev=events()[0]
@@ -73,7 +80,18 @@ with open(input_path) as f:
                 h.wait_for(lambda:(notifications.exists() and 'Magnet on clipboard: '+NAME in notifications.read_text(),notifications.read_text() if notifications.exists() else 'none'),'one magnet notification')
                 argv=[json.loads(l) for l in notifications.read_text().splitlines()]
                 case.check(len(argv)==1 and 'add=Add' in argv[0] and 'dismiss=Dismiss' in argv[0],'one notification exposes API actions',json.dumps(argv))
-                if name=='clipboard_watch_add':
+                if name=='clipboard_tui_offer':
+                    for width,height in [(80,24),(120,30),(160,45)]:
+                        result=ui.tmux('resize-window','-t',target,'-x',str(width),'-y',str(height))
+                        case.check(result.returncode==0,'private TUI resized',str((width,height)))
+                        ui.assert_pane(target,"Add '"+NAME+"'? (y/Esc)")
+                        pane=ui.capture(target)
+                        case.check('[Clipboard]' in pane and '(y) Add' in pane and '(Esc) Dismiss' in pane,
+                                   'live clipboard offer and its exact keys appear at each width',pane)
+                    ui.keys(target,'Escape',literal=False)
+                    h.wait_for(lambda:('[Clipboard]' not in ui.capture(target),ui.capture(target)),'Esc dismisses the strip')
+                    case.check(c.call('torrents.list',{})['result']['torrents']==[],'Esc never adds a torrent')
+                elif name=='clipboard_watch_add':
                     def added():
                         result=c.call('torrents.list',{})['result']['torrents']
                         return any(row['hash']==HASH and row.get('origin')=='clipboard' for row in result),json.dumps(result)
@@ -94,8 +112,19 @@ with open(input_path) as f:
                     h.wait_for(lambda:(len([r for r in rows() if r['ev']=='selection'])>=6,json.dumps(rows())),'producer copies an existing ledger hash')
                     time.sleep(.35)
                     case.check(len(events())==1,'ledger deduplication works independently of last hash',json.dumps(events()))
+                if name=='clipboard_tui_offer':
+                    other='e9'*20
+                    send('magnet:?xt=urn:btih:'+other+'&dn=SecondOffer')
+                    ui.assert_pane(target,"Add 'SecondOffer'? (y/Esc)")
+                    ui.keys(target,'y')
+                    h.wait_for(lambda:((rs:=c.call('torrents.list',{})['result']['torrents']) is not None and any(row['hash']==other and row.get('origin')=='clipboard' for row in rs),json.dumps(rs)),
+                               'y adds the actual clipboard hash with clipboard origin')
+                    h.wait_for(lambda:('[Clipboard]' not in ui.capture(target),ui.capture(target)),'accepted offer is removed')
+                    case.check(all(row['hash']!=HASH for row in c.call('torrents.list',{})['result']['torrents']),
+                               'dismissed first hash was never added')
+                    ui.close()
                 combined=h.stderr()+json.dumps(c.call('app.log',dict(limit=1000))['result'])
-                needles=[SECRET,NAME,MAGNET,'AlreadyAdded','DroppedOversized'];matches=[s for s in needles if s in combined]
+                needles=[SECRET,NAME,MAGNET,'AlreadyAdded','DroppedOversized','SecondOffer'];matches=[s for s in needles if s in combined]
                 case.check(not matches,'fixed-string grep of daemon stderr and app.log is empty',json.dumps(dict(command='scan stderr and app.log',needles=needles,matches=matches)))
                 off=h.cli('settings','--clipboard-watch','off');began=time.monotonic()
                 h.wait_for(lambda:(not d.process_alive(started['pid']) and not d.process_alive(started['descendant']),json.dumps(dict(pid=started['pid'],descendant=started['descendant'],at=time.monotonic(),trace=rows()))),'off kills reader and descendant',timeout=5)
@@ -117,3 +146,5 @@ def clipboard_watch_add(binary,systemd):run('clipboard_watch_add',binary,systemd
 def clipboard_watch_dedupe(binary,systemd):run('clipboard_watch_dedupe',binary,systemd)
 def clipboard_watch_off_kills_child(binary,systemd):run('clipboard_watch_off_kills_child',binary,systemd)
 def clipboard_never_logged(binary,systemd):run('clipboard_never_logged',binary,systemd)
+
+def clipboard_tui_offer(binary,systemd):run("clipboard_tui_offer",binary,systemd)

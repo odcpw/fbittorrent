@@ -1,5 +1,11 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("shows.sort",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('s'))],"Sort releases",90,
+        |_|true,Some(|a|a.cycle_release_sort(false)),T,None,None,None),
+    action!("shows.reverse_sort",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse releases sort",90,
+        |_|true,Some(|a|a.cycle_release_sort(true)),T,None,None,None),
+    action!("shows.copy_magnet",Scope::Pane(Screen::Shows,Pane::Releases),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
+        |a|a.selected_episode().is_some(),Some(|a|a.copy_episode_magnet()),T,None,None,None),
     action!(
         "shows.next",
         Scope::Screen(Screen::Shows),

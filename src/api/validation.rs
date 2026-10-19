@@ -126,6 +126,8 @@ impl Validate for UploadLimitArgs {
 impl Validate for Request {
     fn validate(&self) -> Checked {
         match &self.call {
+            Call::TorrentsRename {args}=>require(crate::engine::rename::valid_name(&args.name),"name","at most 512 characters, no control characters; empty restores original"),
+            Call::ShowsSetQuality {args} => require(crate::imdb::service::valid_id(&args.imdb),"imdb","an IMDb id (tt followed by digits)"),
             Call::AppLog { args: Some(args) } => {
                 require(args.limit.is_none_or(|v| v <= 1000), "limit", "at most 1000")?;
                 if let Some(source) = &args.source { text(source, 64, "source")?; }
@@ -205,6 +207,7 @@ impl Validate for File {
 }
 impl Validate for Summary {
     fn validate(&self) -> Checked {
+        require(self.history.as_ref().is_none_or(|h|h.len()<=60),"summary.history","at most 60 samples")?;
         require(self.top.len() <= 5, "summary.top", "at most 5 entries")?;
         for top in &self.top {
             text(&top.name, 1024, "summary.top.name")?;
@@ -215,9 +218,18 @@ impl Validate for Summary {
         Ok(())
     }
 }
+impl Validate for Tracker {
+    fn validate(&self)->Checked {
+        text(&self.url,65536,"tracker.url")?;
+        if let Some(message)=&self.message {text(message,200,"tracker.message")?;}
+        Ok(())
+    }
+}
 impl Validate for Reply {
     fn validate(&self) -> Checked {
         match self {
+            Self::TorrentsPieces(result) => result.validate(),
+            Self::AppStats(result)=>{if let Some(history)=&result.history {history.validate()?;} Ok(())},
             Self::AppLog(result) => {
                 require(result.entries.len() <= 1000, "entries", "at most 1000")?;
                 for entry in &result.entries { entry.validate()?; }
@@ -351,14 +363,18 @@ impl TorrentFileSizes {
 /// require watch in a successful hello.
 #[derive(Debug, Default)]
 pub struct NegotiatedCaps {
+    history:bool,
     watch: bool,
     log: bool,
+    pieces: bool,
 }
 impl NegotiatedCaps {
     pub fn from_hello(hello: &HelloResult) -> Self {
         Self {
+            history:hello.caps.iter().any(|cap|cap=="history"),
             watch: hello.caps.iter().any(|cap| cap == "watch"),
             log: hello.caps.iter().any(|cap| cap == "log"),
+            pieces: hello.caps.iter().any(|cap|cap=="pieces"),
         }
     }
     fn playable(&self, present: bool, path: &str) -> Checked {
@@ -372,6 +388,7 @@ impl NegotiatedCaps {
         self.playable(value.playable.is_some(), "torrent.playable")
     }
     pub fn summary(&self, value: &Summary) -> Checked {
+        require(value.history.is_none()||self.history,"summary.history","requires the history capability")?;
         for (index, top) in value.top.iter().enumerate() {
             self.playable(
                 top.playable.is_some(),
@@ -382,7 +399,9 @@ impl NegotiatedCaps {
     }
     pub fn reply(&self, value: &Reply) -> Checked {
         match value {
-            Reply::AppLog(_) | Reply::AppStats(_) => require(self.log, "result", "requires the log capability"),
+            Reply::TorrentsPieces(_) => require(self.pieces,"result","requires the pieces capability"),
+            Reply::AppLog(_) => require(self.log, "result", "requires the log capability"),
+            Reply::AppStats(result) => {require(self.log,"result","requires the log capability")?;require((result.history.is_none()&&result.session.is_none()&&result.all_time.is_none())||self.history,"history/session/all_time","requires the history capability")},
             Reply::TorrentsList(result) => {
                 for torrent in &result.torrents {
                     self.torrent(torrent)?;
@@ -398,7 +417,7 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::Peer(_) | Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
+                Item::Tracker(_) | Item::Peer(_) | Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
@@ -406,6 +425,8 @@ impl NegotiatedCaps {
     }
     pub fn event(&self, value: &Event) -> Checked {
         match value {
+            Event::State {topic:Topic::Pieces(_),..} => {require(self.pieces,"topic","requires the pieces capability")?;},
+            Event::State {topic:Topic::Stats,..}=>require(self.history,"topic","requires the history capability")?,
             Event::SnapshotBegin { topic: Topic::Log, .. } | Event::SnapshotChunk { topic: Topic::Log, .. }
             | Event::SnapshotEnd { topic: Topic::Log, .. } | Event::Delta { topic: Topic::Log, .. } => {
                 require(self.log, "topic", "requires the log capability")?;
@@ -459,6 +480,7 @@ fn items(topic: &Topic, values: &[Item]) -> Checked {
             (Topic::Log, Item::Log(entry)) => entry.validate()?,
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
             (Topic::Peers(_), Item::Peer(p)) => p.validate()?,
+            (Topic::Trackers(_),Item::Tracker(row))=>row.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
             (Topic::Search(_), Item::Search(s)) => s.validate()?,
             (Topic::Events, Item::Event(e))
@@ -544,7 +566,7 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
-                                Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
+                                Topic::Trackers(_) | Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
                                 Topic::Shows | Topic::ShowReleases(_) => key.is_string(),
                                 Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
                                 Topic::Search(_) => key.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 8192),
@@ -565,7 +587,7 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => lower_hex(key, 40),
-                                Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
+                                Topic::Trackers(_) | Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
                                 Topic::Shows | Topic::ShowReleases(_) => !key.is_empty(),
                                 Topic::Files(_) => key.parse::<u64>().is_ok(),
                                 Topic::Search(_) => !key.is_empty() && key.len() <= 8192,
@@ -582,6 +604,8 @@ impl Validate for Event {
                 Ok(())
             }
             Self::State { topic, data, .. } => match (topic, data) {
+                (Topic::Pieces(_), StateData::Pieces(value)) => value.validate(),
+                (Topic::Stats,StateData::Stats(value))=>value.history.validate(),
                 (Topic::Summary, StateData::Summary(value)) => value.validate(),
                 (Topic::Network, StateData::Network(_))
                 | (Topic::Settings, StateData::Settings(_)) => Ok(()),

@@ -14,9 +14,8 @@ pub(crate) fn releases(daemon:&Daemon,args:&ShowReleasesArgs)->ApiResult<Vec<Rel
     daemon.shows.releases(args.imdb.as_deref(),args.unread_only.unwrap_or(args.inbox.unwrap_or(false)),args.quality.as_deref(),&rows).map_err(failure)
 }
 pub fn dispatch(daemon:&Daemon,call:&Call)->ApiResult<Reply>{
-    dispatch_in(&daemon.shows,&daemon.imdb,call,|args|releases(daemon,args),|args|{
-        let Reply::TorrentsAdd(added)=super::torrents::dispatch(daemon,&Call::TorrentsAdd {args})? else{unreachable!()};
-        Ok(added)
+    dispatch_in(&daemon.shows,&daemon.imdb,call,|args|releases(daemon,args),|args,source|{
+        crate::daemon::staged_sources::add(daemon,args,source)
     })
 }
 pub(crate) fn catalogue(service:&crate::daemon::shows::Service,imdb:&crate::imdb::service::Service,rows:&[Torrent],call:&Call)->ApiResult<Reply>{
@@ -24,13 +23,20 @@ pub(crate) fn catalogue(service:&crate::daemon::shows::Service,imdb:&crate::imdb
         if args.imdb.is_some()==args.inbox.unwrap_or(false){return Err(error(ErrorCode::InvalidArgs,"choose imdb or inbox:true",Some("imdb")));}
         if let Some(id)=&args.imdb{require_in(service,id)?;}
         service.releases(args.imdb.as_deref(),args.unread_only.unwrap_or(args.inbox.unwrap_or(false)),args.quality.as_deref(),rows).map_err(failure)
-    },|_|Err(error(ErrorCode::EngineUnavailable,"grab requires the daemon",None)))
+    },|_,_|Err(error(ErrorCode::EngineUnavailable,"grab requires the daemon",None)))
 }
 fn dispatch_in(service:&crate::daemon::shows::Service,imdb:&crate::imdb::service::Service,call:&Call,
     release_list:impl FnOnce(&ShowReleasesArgs)->ApiResult<Vec<Release>>,
-    add_torrent:impl FnOnce(AddArgs)->ApiResult<AddResult>)->ApiResult<Reply>{
+    add_torrent:impl FnOnce(AddArgs,crate::daemon::staged_sources::Source)->ApiResult<AddResult>)->ApiResult<Reply>{
     Ok(match call{
         Call::ShowsList {..}=>Reply::ShowsList(ShowsResult {shows:service.list().map_err(failure)?}),
+        Call::ShowsSetQuality {args}=>{
+            let _edit=service.edit.lock().unwrap();require_in(service,&args.imdb)?;
+            let mut all=Shows::load().map_err(failure)?;
+            all.set_quality(&args.imdb,if let Update::Set(q)=args.quality {Some(q.as_str())} else {None}).map_err(failure)?;
+            all.save().map_err(failure)?;
+            Reply::ShowsSetQuality(ShowResult {show:require_in(service,&args.imdb)?})
+        },
         Call::ShowsFollow {args}=>{
             if args.imdb.is_some()==args.query.is_some(){return Err(error(ErrorCode::InvalidArgs,"choose exactly one of query or imdb",Some("query")));}
             if args.imdb.as_ref().is_some_and(|id|!crate::imdb::service::valid_id(id)){return Err(error(ErrorCode::InvalidArgs,"invalid IMDb id",Some("imdb")));}
@@ -70,12 +76,74 @@ fn dispatch_in(service:&crate::daemon::shows::Service,imdb:&crate::imdb::service
             Reply::ShowsUndoRead(UndoReadResult {restored})
         },
         Call::ShowsGrab {args}=>{
-            let _edit=service.edit.lock().unwrap();let mut all=Shows::load().map_err(failure)?;let e=episode(&all,&args.imdb,&args.key)?;
+            let e={let _edit=service.edit.lock().unwrap();episode(&Shows::load().map_err(failure)?,&args.imdb,&args.key)?};
             let source=if e.magnet.starts_with("http://")||e.magnet.starts_with("https://"){AddSource::Url(e.magnet.clone())}else{AddSource::Magnet(e.magnet.clone())};
-            let add=serde_json::from_value(json!({"source":source,"seed":args.seed,"stopped":args.stopped,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"shows"})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
-            let added=add_torrent(add)?;
-            all.get_mut(&args.imdb).unwrap().mark_grabbed(&e.key,&e.magnet);all.save().map_err(failure)?;Reply::ShowsGrab(added)
+            let add=serde_json::from_value(json!({"source":source,"seed":args.seed,"stopped":args.stopped,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"shows","stage":args.stage})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
+            let source=crate::daemon::staged_sources::Source::Show {imdb:args.imdb.clone(),key:e.key,magnet:e.magnet};
+            Reply::ShowsGrab(add_torrent(add,source)?)
         },
         _=>return Err(error(ErrorCode::Unsupported,"not a Shows operation",None)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_grab_preserves_stage_and_releases_edit_lock() {
+        const CHILD: &str = "FBT_SHARED_SHOW_GRAB_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let root = std::env::temp_dir().join(format!("fbt-show-grab-{}-{}",
+                std::process::id(), std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::create_dir(&root).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "api::ops::shows::tests::shared_grab_preserves_stage_and_releases_edit_lock", "--nocapture"])
+                .env(CHILD, "1").env("XDG_DATA_HOME", &root).output().unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            assert!(output.status.success(), "{}\n{}",
+                String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        let mut saved = Shows::default();
+        saved.follow(&crate::imdb::Title { id:"tt1234001".into(), name:"Merge fixture".into(), ..Default::default() });
+        saved.get_mut("tt1234001").unwrap().episodes.push(serde_json::from_value(json!({
+            "key":"S01E01", "season":1, "episode":1, "title":"Merge fixture S01E01",
+            "magnet":format!("magnet:?xt=urn:btih:{}", "ab".repeat(20)), "seeds":1,
+            "size":1024, "released":0, "quality":"1080p", "candidates":1
+        })).unwrap());
+        saved.save().unwrap();
+        let service = crate::daemon::shows::Service::new().unwrap();
+        let imdb = crate::imdb::service::Service::default();
+        for staged in [false, true] {
+            let args: ShowGrabArgs = serde_json::from_value(json!({
+                "imdb":"tt1234001", "key":"S01E01", "stage":staged
+            })).unwrap();
+            let call = Call::ShowsGrab { args };
+            let reply = dispatch_in(&service, &imdb, &call, |_| panic!("not a read"), |args, source| {
+                assert_eq!(args.stage, Some(staged));
+                assert!(service.edit.try_lock().is_ok(), "source admission must not hold the edit lock");
+                assert!(matches!(source, crate::daemon::staged_sources::Source::Show {imdb,key,..}
+                    if imdb == "tt1234001" && key == "S01E01"));
+                assert!(Shows::load().unwrap().get("tt1234001").unwrap().grabbed.is_empty());
+                Ok(serde_json::from_value(json!({"state":"done", "hash":"ab".repeat(20), "duplicate":false})).unwrap())
+            }).unwrap();
+            assert!(matches!(reply, Reply::ShowsGrab(_)));
+            assert!(Shows::load().unwrap().get("tt1234001").unwrap().grabbed.is_empty(),
+                "source marks belong to successful admission/commit, not the shared handler");
+            let rejected = catalogue(&service, &imdb, &[], &call).unwrap_err();
+            assert_eq!(rejected.code, ErrorCode::EngineUnavailable);
+        }
+        let original = Shows::load().unwrap().get("tt1234001").unwrap().episodes.clone();
+        for quality in [Some("720p"), None] {
+            let args=serde_json::from_value(json!({"imdb":"tt1234001","quality":quality})).unwrap();
+            assert!(matches!(catalogue(&service,&imdb,&[],&Call::ShowsSetQuality {args}).unwrap(),Reply::ShowsSetQuality(_)));
+            let saved=Shows::load().unwrap();let show=saved.get("tt1234001").unwrap();
+            assert_eq!(show.quality.as_deref(),quality);
+            assert_eq!(show.episodes,original);
+            assert!(show.grabbed.is_empty());
+        }
+        println!("shared Shows grab/quality: stage forwarded, edit lock released, marks delegated, local grab refused, quality saved without changing releases");
+    }
 }

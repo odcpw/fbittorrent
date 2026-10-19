@@ -9,6 +9,8 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {name:"torrents.pieces",mutating:false,idempotent:false,since:"P6-02",args:"`hash: hash`",result:"`Pieces` (MSB-first base64 verified bitfield)"},
+    Operation{name:"torrents.rename",mutating:true,idempotent:true,since:"P7-03",args:"`hash: hash`, `name: str` (0..512, empty clears)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
 
@@ -56,13 +58,14 @@ pub const TABLE: &[Operation] = &[
     Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
     Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
+    Operation { name:"shows.set_quality",mutating:true,idempotent:true,since:"P3-18",args:"`imdb: str`, `quality?: enum(2160p|1080p|720p|480p)|null` (default)",result:"`{show: Show}`" },
     Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },
     Operation { name:"shows.check",mutating:true,idempotent:false,since:"P3-03",args:"`imdb?: str`",result:"`{state: \"pending\", ref: str}`, then `shows.checked` and `mutation.result {new}`" },
     Operation { name:"shows.releases",mutating:false,idempotent:false,since:"P3-03",args:"`imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str`",result:"`{releases: [Release]}`" },
     Operation { name:"shows.set_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`, `key: str`, `read: bool`",result:"`{}`" },
     Operation { name:"shows.mark_show_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`",result:"`{count: u64}`" },
     Operation { name:"shows.undo_read",mutating:true,idempotent:false,since:"P3-03",args:"none",result:"`{restored?: {imdb: str, key: str}}`" },
-    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
+    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, `stage?: bool`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
     Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
     Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
     Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
@@ -76,7 +79,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
         args: "`since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error|warn|info|debug)`, `source?: str`, `hash?: hash`", result: "`{entries: [LogEntry], next_seq: u64}`" },
     Operation { name: "app.stats", mutating: false, idempotent: false, since: "P1-14",
-        args: "none", result: "`{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start" },
+        args: "`history?: bool`", result: "`{active_clients: ClientCounts, connections: ClientCounts, session: SessionTotals, all_time: AllTimeTotals, history?: RateHistory}`; current clients, cumulative connections, session/all-time totals, optional 600 samples" },
     Operation { name: "app.settings.get", mutating: false, idempotent: false, since: "P3-05",
         args: "none", result: "`Settings`" },
     Operation { name: "app.settings.set", mutating: true, idempotent: true, since: "P3-05",
@@ -88,7 +91,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "app.info", mutating: false, idempotent: false, since: "P1-06",
         args: "none", result: "hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08)" },
     Operation { name: "app.client", mutating: false, idempotent: false, since: "P1-06",
-        args: "`interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible)", result: "`{}`" },
+        args: "`interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?`, `overlay_visible: bool?` (drop resets presence; bar interactive needs a visible dashboard or palette)", result: "`{}`" },
     Operation { name: "app.shutdown", mutating: true, idempotent: false, since: "P1-06",
         args: "`reason: str?`", result: "`{state: \"pending\"}`, then `bye`" },
     Operation { name: "app.restart", mutating: true, idempotent: false, since: "P1-06",
@@ -137,6 +140,7 @@ pub mod trackers;
 pub mod rss;
 pub mod shows;
 pub mod moving;
+pub mod pieces;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

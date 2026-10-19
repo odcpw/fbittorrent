@@ -252,14 +252,14 @@ def headless_park_unpark(binary):
 
             def settle(label, ready, epoch, index=None):
                 def observed():
-                    network = json.loads(harness.engine_call("app/network").get("value") or "{}")
-                    rows = json.loads(harness.engine_call("torrents/info").get("value") or "[]")
+                    network = harness.api("app.network")["state"]
+                    rows = harness.api("torrents.list")["torrents"]
                     saved = {row["hash"]: row["paused"] for row in json.loads(ledger.read_text())["records"]}
                     all_rows = len(rows) == 3 and saved == expected
                     if not ready:
-                        all_rows = all_rows and all(row.get("progress_known") is False for row in rows)
+                        all_rows = all_rows and all("progress" not in row for row in rows)
                     final_state = f"state={'running' if ready else 'parked'} engine_epoch={epoch}"
-                    settled = network.get("ready") is ready and (index is None or network.get("index") == index) and all_rows and final_state in harness.stderr()
+                    settled = network.get("ready") is ready and (index is None or socket.if_nametoindex(network["interface"]) == index) and all_rows and final_state in harness.stderr()
                     return settled, f"network={network!r}; rows={rows!r}; saved={saved!r}; expect {final_state}."
                 harness.wait_for(observed, label)
                 case.check(harness.engine_path.stat().st_ino == inode and harness.daemon_pid() == pid,

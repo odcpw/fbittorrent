@@ -24,6 +24,8 @@
 │                                     │   (v) Card                                                                       │                                     │
 │                                     │                                                                                  │                                     │
 │                                     │ SCREEN:TORRENTS                                                                  │                                     │
+│                                     │   (s) Sort                                                                       │                                     │
+│                                     │   (S) Reverse sort                                                               │                                     │
 │                                     │   (j/↓) Next                                                                     │                                     │
 │                                     │   (k/↑) Previous                                                                 │                                     │
 │                                     │   (g/Home) First                                                                 │                                     │
@@ -32,8 +34,6 @@
 │                                     │   (PgUp) Page up                                                                 │                                     │
 │                                     │   (Enter) Details                                                                │                                     │
 │                                     │   (o) Open                                                                       │                                     │
-│                                     │   (p/Space) Pause/resume                                                         │                                     │
-│                                     │   (u) Seed on/off                                                                │                                     │
 │                                     │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │                                     │
 │                                     │                                                                                  │                                     │
 │                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │

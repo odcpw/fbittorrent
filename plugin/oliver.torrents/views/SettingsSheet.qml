@@ -12,7 +12,7 @@ FocusScope {
  readonly property var state:service.settingsRevision>=0 ? flow.snapshot() : ({})
  readonly property bool editing:rowsHaveFocus()
  signal dismissed()
- function rowsHaveFocus(){for(var i=0;i<rows.count;i++)if(rows.itemAt(i).editing)return true;return false}
+ function rowsHaveFocus(){for(var i=0;i<rows.count;i++){var item=rows.itemAt(i);if(item && item.editing)return true}return false}
  function row(key){var index=Schema.fields.findIndex(function(field){return field.key===key});return index>=0 ? rows.itemAt(index) : null}
  function focusSetting(key){var item=row(key);if(!item)return false;scroll.contentY=Math.max(0,item.y-Commons.Style.spacing.lg);if(item.textField.visible)item.textField.forceActiveFocus();else if(item.toggle.visible)item.toggle.forceActiveFocus();return true}
  function focusSheet(){forceActiveFocus()}
@@ -34,6 +34,7 @@ FocusScope {
     id:scroll;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;contentWidth:width;contentHeight:fields.implicitHeight;boundsBehavior:Flickable.StopAtBounds
     ScrollBar.vertical:ScrollBar {}
     ColumnLayout {id:fields;width:scroll.width;spacing:Commons.Style.spacing.xxl
+     Components.Statistics {Layout.fillWidth:true;statistics:root.service.statistics;online:root.service.online}
      Repeater {id:rows;model:Schema.fields;Components.SettingRow {required property var modelData;spec:modelData;service:root.service;Layout.fillWidth:true}}
     }
    }

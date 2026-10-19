@@ -124,9 +124,8 @@
         let native = render(&app, 160, 45);
         assert!(native.contains("7 peers connected"));
         assert!(!native.contains("0 seeds") && !native.contains("leechers"));
-        app.cfg.engine = "qbittorrent".into();
         app.torrents[0].num_seeds = 3;
-        assert!(render(&app, 160, 45).contains("10 peers connected"));
+        assert!(render(&app, 160, 45).contains("7 peers connected"));
     }
 
     #[test]
@@ -263,7 +262,7 @@
         assert!(app.show_grabbing.contains("tt111:S01E01"));
         assert!(!app.show_grabbing.contains("tt222:S01E01"));
         assert!(matches!(app.on_shows_key(KeyEvent::new(KeyCode::Enter)), Cmd::None));
-        app.update(Msg::ShowGrab { imdb: "tt111".into(), episode: episode("S01E01", 10), result: Err("fixture add failed".into()) });
+        app.update(Msg::ServiceDone { connection:None, op:"shows.grab", args:serde_json::json!({"imdb":"tt111","key":"S01E01"}), label:String::new(), result:Err("fixture add failed".into()) });
         assert_eq!(app.selected_release_target(), Some(selected));
         assert!(!app.shows.shows[0].seen.contains("S01E01"));
         assert_eq!(app.shows.new_total(), 4);
@@ -619,6 +618,13 @@
 
     #[test]
     fn rss_no_initial_refresh() {
+        let mut app=app();
+        assert!(matches!(app.update(Msg::Rss {revision:0,result:Ok(vec![feed(vec![article("item","FeedItemAlpha")])])}),Cmd::None));
+        assert!(!app.rss_busy,"loading cached rows cannot start a network refresh");
+    }
+
+    #[test]
+    fn rss_refresh_and_download_dispatch_only_once() {
         let mut app = app();
         let feed:crate::api::Feed=serde_json::from_value(serde_json::json!({"id":"fixture-feed","name":"Example feed","url":"http://127.0.0.1/feed","unread":1,"loading":false})).unwrap();
         let item:crate::api::FeedItem=serde_json::from_value(serde_json::json!({"id":"item","title":"FeedItemAlpha","read":false,"grabbed":false})).unwrap();
