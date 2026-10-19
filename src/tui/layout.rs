@@ -1,5 +1,17 @@
 //! Existing layout behavior.
 use super::*;
+mod table;
+mod sort;
+pub(super) use table::{Column,Rects,TorrentTable,visible_range};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Tier { Narrow, Medium, Wide }
+impl Tier {
+    pub fn at(width: u16) -> Self {
+        if width < 100 { Self::Narrow } else if width < 140 { Self::Medium } else { Self::Wide }
+    }
+    pub fn extended(self) -> bool { self != Self::Narrow }
+}
 
 impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
@@ -17,6 +29,7 @@ impl TuiApp {
             region
         });
         self.tab_rects.set(regions);
+        self.rects.borrow_mut().tabs=regions;
         let tabs = Tabs::new([Tab::new(" 1 Torrents "), Tab::new(" 2 Search "), Tab::new(shows_tab.as_str()), Tab::new(" 4 RSS ")])
             .style(th.dimmed())
             .active_style(th.selected())

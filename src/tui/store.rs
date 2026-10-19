@@ -8,7 +8,7 @@ mod pending;
 mod snapshot;
 mod sort;
 use snapshot::Snapshot;
-pub(super) use sort::TorrentSort;
+pub(super) use sort::{TorrentSort,legacy_order};
 #[cfg(test)]
 mod tests;
 

@@ -2,13 +2,16 @@
 use super::*;
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(in crate::tui) enum TorrentSort {
     Name,
     Size,
     Progress,
     DownloadRate,
     Added,
+    State,
+    Eta,
+    Peers,
 }
 impl Store {
     /// Build only when data or sort selection changes, never from the frame renderer.
@@ -25,6 +28,9 @@ impl Store {
                     optional(left.dl_bps, right.dl_bps, descending, u64::cmp)
                 }
                 TorrentSort::Added => direction(left.added_at.cmp(&right.added_at), descending),
+                TorrentSort::State => direction(state_rank(left.state).cmp(&state_rank(right.state)),descending),
+                TorrentSort::Eta => optional(left.eta_s,right.eta_s,descending,u64::cmp),
+                TorrentSort::Peers => optional(left.peers,right.peers,descending,u64::cmp),
             };
             order.then_with(|| left.hash.cmp(&right.hash))
         });
@@ -42,6 +48,26 @@ impl Store {
         });
         rows
     }
+}
+fn state_rank(state:api::TorrentState)->u8 {
+    match state {api::TorrentState::Metadata=>0,api::TorrentState::Checking=>1,api::TorrentState::Downloading=>2,
+        api::TorrentState::Stalled=>3,api::TorrentState::Queued=>4,api::TorrentState::Paused=>5,api::TorrentState::Done=>6,
+        api::TorrentState::Seeding=>7,api::TorrentState::WaitingVpn=>8,api::TorrentState::Error=>9}
+}
+pub(in crate::tui) fn legacy_order(left:&crate::qbt::Torrent,right:&crate::qbt::Torrent,field:TorrentSort,descending:bool)->Ordering {
+    let state=|t:&crate::qbt::Torrent|match t.state.as_str(){"metaDL"|"forcedMetaDL"=>0,"checkingDL"|"checkingUP"|"checkingResumeData"=>1,
+        "downloading"|"forcedDL"=>2,"stalledDL"=>3,"queuedDL"|"queuedUP"=>4,"stoppedDL"|"pausedDL"=>5,
+        "stoppedUP"|"pausedUP"=>6,"uploading"|"stalledUP"|"forcedUP"=>7,"waitingVPN"=>8,_=>9};
+    let order=match field {
+        TorrentSort::Name=>direction(left.name.cmp(&right.name),descending),
+        TorrentSort::Size=>optional((left.progress_known||left.size>0).then_some(left.size),(right.progress_known||right.size>0).then_some(right.size),descending,i64::cmp),
+        TorrentSort::Progress=>optional(left.progress_known.then_some(left.progress),right.progress_known.then_some(right.progress),descending,f64::total_cmp),
+        TorrentSort::DownloadRate=>optional(left.is_active().then_some(left.dlspeed),right.is_active().then_some(right.dlspeed),descending,i64::cmp),
+        TorrentSort::Added=>direction(left.added_on.cmp(&right.added_on),descending),
+        TorrentSort::State=>direction(state(left).cmp(&state(right)),descending),
+        TorrentSort::Eta=>optional((left.is_active()&&left.eta<8_640_000).then_some(left.eta),(right.is_active()&&right.eta<8_640_000).then_some(right.eta),descending,i64::cmp),
+        TorrentSort::Peers=>optional(left.is_active().then_some(left.num_leechs.saturating_add(left.num_seeds)),right.is_active().then_some(right.num_leechs.saturating_add(right.num_seeds)),descending,i64::cmp),
+    };order.then_with(||left.hash.cmp(&right.hash))
 }
 fn direction(value: Ordering, descending: bool) -> Ordering {
     if descending {

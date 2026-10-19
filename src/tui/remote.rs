@@ -75,7 +75,7 @@ impl TuiApp {
                     self.store.transfer = Some(snapshot.transfer.clone());
                     let rows = self
                         .store
-                        .sorted_torrents(store::TorrentSort::Added, true)
+                        .sorted_torrents(self.torrent_sort,self.torrent_descending)
                         .into_iter()
                         .map(format::torrent)
                         .collect();

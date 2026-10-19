@@ -23,6 +23,7 @@ impl TuiApp {
         let root = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(0), Constraint::Fixed(2)]).split(b);
         match self.screen {
             Screen::Torrents => {
+                if let Some(area)=self.rects.borrow().table {return area.contains(x,y).then_some((MouseList::Torrents,area));}
                 let cols = torrent_columns(root[1]);
                 let inner = Block::bordered().inner(cols[0]);
                 let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill]).split(inner);
@@ -177,6 +178,11 @@ impl TuiApp {
             self.search_input.set_focused(true);
             return Cmd::none();
         }
+        if self.screen==Screen::Torrents&&self.files.is_none()&&self.providers.is_none()&&self.prompt.is_none()
+            &&matches!(m.kind,MouseEventKind::Down(MouseButton::Left)) {
+            let column=self.rects.borrow().headers.iter().find(|(_,area)|area.contains(m.x,m.y)).map(|(column,_)|*column);
+            if let Some(column)=column {self.last_click=None;return self.sort_torrent_column(column);}
+        }
         let Some((list, area)) = self.mouse_list_at(m.x, m.y) else { return Cmd::none() };
         if matches!(m.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
             self.focus_mouse_list(list);
@@ -184,7 +190,11 @@ impl TuiApp {
         }
         if !matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Down(MouseButton::Left)) { return Cmd::none(); }
         let state = self.mouse_list_state(list);
-        let Some(index) = mouse_row_index(area, m.x, m.y, state.borrow().offset, self.mouse_list_len(list)) else { return Cmd::none() };
+        let index=if list==MouseList::Torrents&&self.rects.borrow().table.is_some(){
+            self.rects.borrow().rows.iter().find(|(_,rect)|rect.contains(m.x,m.y))
+                .and_then(|(hash,_)|self.torrents.iter().position(|t|&t.hash==hash))
+        }else{mouse_row_index(area,m.x,m.y,state.borrow().offset,self.mouse_list_len(list))};
+        let Some(index)=index else{return Cmd::none()};
         if m.kind == MouseEventKind::Moved {
             state.borrow_mut().hovered = Some(index);
             return Cmd::none();

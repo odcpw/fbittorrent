@@ -580,8 +580,8 @@
         let mut app = app();
         app.torrents = vec![Torrent { name: "Next episode".into(), state: "queuedDL".into(), progress_known: true, ..Default::default() }, Torrent { name: "Saved episode".into(), state: "waitingVPN".into(), progress_known: false, ..Default::default() }];
         let text = render(&app, 120, 30);
-        assert!(text.contains("Queued"));
-        assert!(text.contains("Wait VPN"));
+        assert!(text.contains("… Queue  "), "queued state must occupy its contract state cell: {text}");
+        assert!(text.contains("⏚ VPN    "), "VPN state must occupy its contract state cell: {text}");
         assert!(!app.torrents[0].is_active());
         assert!(!app.torrents[1].is_active());
     }
