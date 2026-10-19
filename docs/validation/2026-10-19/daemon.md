@@ -283,3 +283,37 @@ the marked DaemonContract.throttle adapter temporarily uses the existing typed
 single-seed upload cap; that Do-step remains deferred. No all.sh between track
 beads. Follow-ups: wire that adapter when P5-04 lands; restore the expanded CI
 runtime budget without deleting or shortening coverage.
+
+## P1-16b — dormant daemon integration (`fbt-awy`)
+
+The four frozen acceptance criteria pass in both launch modes. A bounded test-only
+runtime gate installs the torrents subscription before READY=1; five previously
+verified completed records list done/unchecked in 30.5–95.7 ms, with no checking
+state or matching initialization diagnostic. Explicit CLI seed has exactly one
+real validation-admission diagnostic and seeds only its record. Missing files
+stay saved done until acted on, then give invalid_state/missing_files and an
+unchecked error row. Open_target takes 1.45/1.41 ms and stays dormant; CLI open,
+nonempty file inclusion and typed CLI delete-files are also exercised. The delete
+check exposed the live-handle precondition: dormant deletion now uses saved
+metainfo, persists record removal before side effects, and unlinks exact relative
+files through directory descriptors; parent symlinks cannot redirect deletion.
+Three new units cover no admission, failed-save/no-deletion and symlink boundaries.
+
+Evidence root `target/test-logs/fbt-awy/`: private `run.py check` passes;
+`policy` dormant filter (`dormant-units-final/`) passes 11; `engine_ops` passes
+existing typed operations; `restore_unit` passes the named restore test. Grouped
+`cli_cases lazy_restore_no_checks dormant_seed_checks dormant_missing_files
+dormant_open_no_check` passes four real cases in foreground-final/daemon/ and
+FBT_BUS_SYSTEMD=1 systemd-final/daemon/. The initial delete refusal remains in
+foreground/ and systemd/. CI dispatcher regressions (`ci-dispatch/`, python-ci/)
+pass four cases; these run stub commands, not a live full gate. all.sh schedules
+the four real cases in one process and summarizes their daemon suite. Python,
+shell syntax, whitespace and <=900 source-line checks pass. Single full locked
+Rust (`full-final/`): 371 passed, zero failed, three process bridges ignored.
+
+Do-step remainder: torrents.recheck belongs to Track B's canonical asynchronous
+P5-03 contract (hashes, pending, mutation.result), now on main but absent from this
+branch; it was not replaced with a conflicting synchronous route. Merge that
+track before claiming all of Do 2. No fixture byte changes, all.sh run between
+track beads, or owner installation. Follow-up: reconcile/replay the P5-03 hook
+when main is merged.

@@ -39,6 +39,7 @@ mod settings;
 pub mod ops;
 mod restore;
 mod dormant;
+mod dormant_delete;
 pub mod view;
 mod parked;
 mod legacy_import;
