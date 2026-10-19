@@ -9,6 +9,7 @@ mod app;
 pub use app::{TuiApp, Screen, Msg, ImdbState};
 use app::*;
 mod connection;
+mod remote;
 mod attach;
 #[path = "screens/torrents.rs"]
 mod screens_torrents;
@@ -132,6 +133,7 @@ impl Model for TuiApp {
                 match r { Ok(idx) => self.ratings = Some(idx), Err(e) => self.set_status(format!("ratings index: {e}"), true) }
                 Cmd::none()
             }
+            Msg::ApiRead(result) => self.apply_api_read(result),
             Msg::Torrents(r) => {
                 self.poll_inflight = false;
                 match r {
@@ -152,6 +154,7 @@ impl Model for TuiApp {
                     }
                     Err(e) => {
                         self.online = false; self.backend_error = e;
+                        if self.cfg.native() {self.store.disconnected();}
                         self.failed_polls = self.failed_polls.saturating_add(1);
                         self.daemon_stopped = self.cfg.native() && self.failed_polls >= 2;
                     }
@@ -159,7 +162,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
+                Ok(presence) => { self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
                 Err(error) => { self.set_status(error,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {

@@ -1125,10 +1125,10 @@ ATTACH_CASES = ("tui_starts_daemon", "q_detaches", "q_confirms", "first_q_notice
 
 
 class AttachedTui:
-    def __init__(self, case, binary, sandbox, harness):
+    def __init__(self, case, binary, sandbox, harness, session="fbt-fbt-p1-15-h0l"):
         self.case, self.binary, self.sandbox, self.h = case, binary, sandbox, harness
-        self.socket = "fbt-fbt-p1-15-h0l-" + str(os.getpid())
-        self.session, self.counter = "fbt-fbt-p1-15-h0l", 0
+        self.socket = session + "-" + str(os.getpid())
+        self.session, self.counter = session, 0
         self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
 
     def tmux(self, *args):

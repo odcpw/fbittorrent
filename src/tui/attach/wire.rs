@@ -5,12 +5,26 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::{fd::AsRawFd, unix::net::UnixStream};
 use std::time::{Duration, Instant};
 
+#[derive(Debug)]
+pub(super) struct RemoteError(pub crate::api::Error);
+impl std::fmt::Display for RemoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.message)?;
+        if let Some(hint) = &self.0.hint {
+            write!(f, "; {hint}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for RemoteError {}
+
 pub(super) struct Wire {
     reader: BufReader<UnixStream>,
     partial: Vec<u8>,
     began: Option<Instant>,
     id: u64,
     instance: Option<String>,
+    hello: Option<crate::api::HelloResult>,
 }
 impl Wire {
     pub(super) fn connect() -> Result<Self> {
@@ -41,6 +55,7 @@ impl Wire {
             began: None,
             id: 0,
             instance: None,
+            hello: None,
         };
         let result = wire.call(
             "hello",
@@ -55,7 +70,13 @@ impl Wire {
             hello.proto
         );
         wire.instance = Some(hello.instance.as_str().to_owned());
+        wire.hello = Some(hello);
         Ok(wire)
+    }
+    pub(super) fn hello(&self) -> &crate::api::HelloResult {
+        self.hello
+            .as_ref()
+            .expect("Wire is exposed only after hello succeeds")
     }
     pub(super) fn interrupt(&self) -> Result<UnixStream> {
         Ok(self.reader.get_ref().try_clone()?)
@@ -87,14 +108,7 @@ impl Wire {
             }
             if frame["ok"] != true {
                 let error: crate::api::Error = serde_json::from_value(frame["error"].clone())?;
-                bail!(
-                    "{}{}",
-                    error.message,
-                    error
-                        .hint
-                        .map(|hint| format!("; {hint}"))
-                        .unwrap_or_default()
-                );
+                return Err(RemoteError(error).into());
             }
             crate::api::Reply::decode(op, frame["result"].clone())?;
             return Ok(frame["result"].clone());

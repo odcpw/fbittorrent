@@ -38,6 +38,7 @@ pub(super) struct Store {
     pub torrents: BTreeMap<String, api::Torrent>,
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
+    pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
     pub network: Option<api::NetworkState>,
     pub settings: Option<api::Settings>,

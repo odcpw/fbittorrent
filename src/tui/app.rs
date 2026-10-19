@@ -12,6 +12,7 @@ impl Screen {
 
 pub struct TuiApp {
     pub(super) cfg: Config,
+    pub(super) store: super::store::Store,
     pub(super) presence: Option<Arc<super::attach::Presence>>,
     pub(super) failed_polls: u8,
     pub(super) daemon_stopped: bool,
@@ -98,6 +99,7 @@ pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: S
 pub enum Msg {
     Raw(Event),
     Poll,
+    ApiRead(Result<super::remote::ReadSnapshot,String>),
     Attached(Result<Arc<super::attach::Presence>,String>),
     OwnerShutdown(Result<(),String>),
     SettingsSaved(Result<Config,String>),
@@ -143,6 +145,7 @@ impl TuiApp {
         search_input.set_focused(screen == Screen::Search);
         let mut app = TuiApp {
             cfg,
+            store:super::store::Store::default(),
             presence:None,failed_polls:0,daemon_stopped:false,quit_notice:false,
             theme,
             footer_cache: RefCell::new(None),

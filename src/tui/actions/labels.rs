@@ -6,7 +6,7 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
         match id {
             "torrents.pause" => {
                 let torrent = app.selected_torrent()?;
-                if torrent.complete_no_seed() {
+                if app.complete_no_seed(torrent) {
                     return None;
                 }
                 if torrent.is_stopped() {
@@ -17,9 +17,9 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
             }
             "torrents.seed" => {
                 let torrent = app.selected_torrent()?;
-                if torrent.complete_no_seed() {
+                if app.complete_no_seed(torrent) {
                     "Seed"
-                } else if torrent.seed_allowed() {
+                } else if app.seed_allowed(torrent) {
                     "Seed off"
                 } else {
                     "Seed on"

@@ -29,8 +29,8 @@ impl TuiApp {
         if let Some(torrent) = self.selected_torrent() {
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
-            torrent.complete_no_seed().hash(&mut hash);
-            torrent.seed_allowed().hash(&mut hash);
+            self.complete_no_seed(torrent).hash(&mut hash);
+            self.seed_allowed(torrent).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);

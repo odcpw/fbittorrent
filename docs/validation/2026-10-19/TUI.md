@@ -214,3 +214,18 @@ branch lacks the bus and settings request operations, and Track B feature
 namespaces; those integrations remain pending. No full suite or all.sh run for
 this intermediate checkpoint; the bead's one full suite is reserved for its
 completed integration.
+
+P4-03 read-path checkpoint: native torrent rows, rates, network state, file reads
+and file selection now use the existing presence connection. The typed store
+keeps unknown values; screen adapters render them as unknown and use explicit
+seed intent, including custom caps and completed records without a date.
+`cargo test --locked -p fbittorrent tui:: -- --nocapture` passes **99** tests,
+including all **34 unchanged goldens** (`rpc_units.*`). The real
+`daemon.py --case tui_single_connection` passes with `engine.sock` renamed out
+of reach: torrent/file views stay online, Space changes real file selection,
+and client counts go **0→1→0** (`rpc_live/daemon/tui_single_connection.jsonl`,
+3.826 s). Debug build and size self-tests pass (`rpc_binary.*`, `rpc_sizes.*`).
+The native helper now accepts the bead's unique tmux session name. Remaining:
+push/ApiSub transport, native mutations, reconnect UI, settings service and
+Track B namespaces. The existing timer remains until the push server arrives;
+no full-suite/all.sh run for this coherent intermediate integration.

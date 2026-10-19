@@ -16,6 +16,7 @@ struct Request {
 }
 /// One connection per UI, with bounded commands and prompt cancellation on drop.
 pub(crate) struct Presence {
+    pub(in crate::tui) hello: crate::api::HelloResult,
     commands: mpsc::SyncSender<Request>,
     closed: Arc<AtomicBool>,
     interrupt: UnixStream,
@@ -25,6 +26,7 @@ impl Presence {
     pub(in crate::tui) fn connect() -> Result<Arc<Self>> {
         let mut wire = Wire::connect()?;
         let interrupt = wire.interrupt()?;
+        let hello = wire.hello().clone();
         let (commands, requests) = mpsc::sync_channel::<Request>(4);
         let closed = Arc::new(AtomicBool::new(false));
         let stopping = closed.clone();
@@ -35,10 +37,11 @@ impl Presence {
                 while !stopping.load(Ordering::Acquire) {
                     match requests.try_recv() {
                         Ok(request) => {
-                            let result = wire
-                                .call(request.op, request.args)
-                                .map_err(|error| error.to_string());
-                            let failed = result.is_err();
+                            let result = wire.call(request.op, request.args);
+                            let failed = result.as_ref().is_err_and(|error| {
+                                error.downcast_ref::<super::wire::RemoteError>().is_none()
+                            });
+                            let result = result.map_err(|error| error.to_string());
                             let _ = request.reply.send(result);
                             if failed {
                                 break;
@@ -65,6 +68,7 @@ impl Presence {
                 stopping.store(true, Ordering::Release);
             })?;
         Ok(Arc::new(Self {
+            hello,
             commands,
             closed,
             interrupt,

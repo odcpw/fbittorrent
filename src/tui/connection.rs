@@ -7,6 +7,7 @@ pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     let _terminal=signals::AppGuard::new(());
     let native=cfg.native();
     let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+    if let Some(connection)=presence.as_ref() {model.store.hello(connection.hello.clone());}
     model.presence=presence;
     model.pointer_motion_on_start = true;
     // Program returns on signals, allowing the presence connection and terminal
@@ -45,6 +46,10 @@ impl TuiApp {
         Cmd::task(move || {
             if presence.as_ref().is_some_and(|connection| !connection.alive()) {
                 return Msg::Torrents(Err("fbittorrent stopped".into()));
+            }
+            if cfg.native() {
+                let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::read(&connection));
+                return Msg::ApiRead(result.map_err(|error|error.to_string()));
             }
             let c = Client::from_config(&cfg);
             let r = c.login().and_then(|_| Ok((c.torrents()?, c.transfer_info()?)));
