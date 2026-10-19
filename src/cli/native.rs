@@ -114,7 +114,11 @@ fn emit(json_mode: bool, value: Value) {
                 if let (Some(downloaded), Some(uploaded)) =
                     (value[key]["downloaded"].as_u64(), value[key]["uploaded"].as_u64())
                 {
-                    println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B");
+                    if let Some(completed) = value[key]["completed"].as_u64() {
+                        println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B; completed {completed}");
+                    } else {
+                        println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B");
+                    }
                 }
             }
         } else if let Some(rows) = value["torrents"].as_array() {

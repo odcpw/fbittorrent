@@ -21,7 +21,8 @@ def status_totals(case,box,binary,expected,session=True):
     child=case.popen([str(binary),'status'],env=box.env,cwd=box.root,stdout=subprocess.PIPE,text=True)
     output,_=child.communicate(timeout=10)
     pairs=[('all_time','All time')]+([('session','Session')] if session else [])
-    wanted=[f"{label}: downloaded {expected[key]['downloaded']} B; uploaded {expected[key]['uploaded']} B" for key,label in pairs]
+    wanted=[f"{label}: downloaded {expected[key]['downloaded']} B; uploaded {expected[key]['uploaded']} B"
+            +(f"; completed {expected[key]['completed']}" if 'completed' in expected[key] else '') for key,label in pairs]
     step.close(child.returncode==0 and all(line in output for line in wanted) and (session or 'Session:' not in output),output)
     return value
 
