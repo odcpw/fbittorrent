@@ -1,6 +1,7 @@
 use rqbit_runtime::Cx;
 use std::{net::SocketAddr, sync::Arc};
 
+use anyhow::Context;
 use bencode::from_bytes;
 use buffers::{ByteBuf, ByteBufOwned};
 use bytes::Bytes;
@@ -79,19 +80,65 @@ pub(crate) async fn read_metainfo_from_peer(
     }
 }
 
+/// One peer may announce up to this much metadata.
+const MAX_METADATA_SIZE: u32 = 32 * 1024 * 1024;
+/// Bytes allocated at once for peer-announced metadata across every magnet
+/// resolution. Each peer chooses its own `metadata_size`; without a shared
+/// budget, many concurrent peers can each make us allocate the maximum.
+const IN_FLIGHT_METADATA_CAP: usize = 64 * 1024 * 1024;
+static IN_FLIGHT_METADATA: MetadataBudget = MetadataBudget::new(IN_FLIGHT_METADATA_CAP);
+
+struct MetadataBudget {
+    used: std::sync::atomic::AtomicUsize,
+    cap: usize,
+}
+impl MetadataBudget {
+    const fn new(cap: usize) -> Self {
+        Self {
+            used: std::sync::atomic::AtomicUsize::new(0),
+            cap,
+        }
+    }
+    fn reserve(&'static self, bytes: usize) -> anyhow::Result<MetadataReservation> {
+        use std::sync::atomic::Ordering;
+        self.used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(bytes).filter(|total| *total <= self.cap)
+            })
+            .map_err(|_| anyhow::anyhow!("too much peer metadata is already being received"))?;
+        Ok(MetadataReservation(Some((self, bytes))))
+    }
+}
+
+/// A share of a metadata budget, returned on drop.
+#[derive(Default)]
+struct MetadataReservation(Option<(&'static MetadataBudget, usize)>);
+impl Drop for MetadataReservation {
+    fn drop(&mut self) {
+        if let Some((budget, bytes)) = self.0.take() {
+            budget
+                .used
+                .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
+        }
+    }
+}
+
 #[derive(Default)]
 struct HandlerLocked {
     metadata_size: u32,
     total_pieces: usize,
     buffer: Vec<u8>,
     received_pieces: Vec<bool>,
+    _reservation: MetadataReservation,
 }
 
 impl HandlerLocked {
     fn new(metadata_size: u32) -> anyhow::Result<Self> {
-        if metadata_size > 32 * 1024 * 1024 {
-            anyhow::bail!("metadata size {} is too big", metadata_size);
+        if metadata_size == 0 || metadata_size > MAX_METADATA_SIZE {
+            anyhow::bail!("metadata size {} is invalid or too big", metadata_size);
         }
+        // Reserve before allocating; the reservation lives with the buffer.
+        let reservation = IN_FLIGHT_METADATA.reserve(metadata_size as usize)?;
         let buffer = vec![0u8; metadata_size as usize];
         let total_pieces: usize = (metadata_size as u64)
             .div_ceil(CHUNK_SIZE as u64)
@@ -102,6 +149,7 @@ impl HandlerLocked {
             received_pieces,
             buffer,
             total_pieces,
+            _reservation: reservation,
         })
     }
     fn piece_size(&self, index: u32) -> usize {
@@ -192,14 +240,22 @@ impl PeerConnectionHandler for Handler {
         trace!("{}: received message: {:?}", self.addr, msg);
 
         if let Message::Extended(ExtendedMessage::UtMetadata(UtMetadata::Data(utdata))) = msg {
+            // A peer may send data before its extended handshake, or after
+            // the metadata completed: refuse it instead of panicking.
             let piece_ready = self
                 .locked
                 .write()
                 .as_mut()
-                .unwrap()
+                .context("metadata piece before an accepted extended handshake")?
                 .record_piece(&utdata, &self.info_hash)?;
             if piece_ready {
-                let buf = Bytes::from(self.locked.write().take().unwrap().buffer);
+                let mut locked = self
+                    .locked
+                    .write()
+                    .take()
+                    .context("metadata already completed")?;
+                let buf = Bytes::from(std::mem::take(&mut locked.buffer));
+                drop(locked);
                 let info = from_bytes::<TorrentMetaV1Info<ByteBuf>>(&buf)
                     .map(|i| {
                         use clone_to_owned::CloneToOwned;
@@ -256,6 +312,8 @@ impl PeerConnectionHandler for Handler {
         self.writer_tx
             .send(WriterRequest::Message(Message::Interested))?;
 
+        // A repeated handshake releases the previous buffer before reserving.
+        self.locked.write().take();
         let inner = HandlerLocked::new(metadata_size)?;
         let total_pieces = inner.total_pieces;
 
@@ -276,5 +334,32 @@ impl PeerConnectionHandler for Handler {
 
     fn client_name_and_version(&self) -> &str {
         &self.client_name_and_version
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::{HandlerLocked, MAX_METADATA_SIZE, MetadataBudget};
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn peer_metadata_allocations_share_one_bounded_budget() {
+        assert!(HandlerLocked::new(0).is_err());
+        assert!(HandlerLocked::new(MAX_METADATA_SIZE + 1).is_err());
+        let ok = HandlerLocked::new(1000).unwrap();
+        assert_eq!(ok.buffer.len(), 1000);
+        // A private budget: concurrent tests may hold shares of the global one.
+        static BUDGET: MetadataBudget = MetadataBudget::new(3 * MAX_METADATA_SIZE as usize);
+        let max = MAX_METADATA_SIZE as usize;
+        let held: Vec<_> = (0..3).map(|_| BUDGET.reserve(max).unwrap()).collect();
+        // Another peer announcing a large size is refused, a tiny one too.
+        assert!(BUDGET.reserve(max).is_err());
+        assert!(BUDGET.reserve(1).is_err());
+        assert_eq!(BUDGET.used.load(Ordering::Acquire), 3 * max);
+        drop(held);
+        // Dropping a handler (peer gone or metadata complete) returns its share.
+        assert_eq!(BUDGET.used.load(Ordering::Acquire), 0);
+        assert!(BUDGET.reserve(max).is_ok());
+        assert_eq!(BUDGET.used.load(Ordering::Acquire), 0);
     }
 }

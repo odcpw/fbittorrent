@@ -1088,6 +1088,24 @@ impl Session {
         .boxed()
     }
 
+    /// The torrent-named folder this session derives under its own folder.
+    /// Only that folder is rqbit's: it may be opened without following a
+    /// planted symlink and removed when a delete-with-files empties it.
+    fn is_derived_output_folder(
+        &self,
+        folder: &Path,
+        info: &ValidatedTorrentMetaV1Info<ByteBufOwned>,
+        magnet_name: Option<&str>,
+    ) -> bool {
+        derived_output_folder(
+            &self.output_folder,
+            folder,
+            self.get_default_subfolder_for_torrent(info, magnet_name)
+                .ok()
+                .flatten(),
+        )
+    }
+
     fn get_default_subfolder_for_torrent(
         &self,
         info: &ValidatedTorrentMetaV1Info<ByteBufOwned>,
@@ -1200,6 +1218,9 @@ impl Session {
             (None, Some(s)) => self.output_folder.join(s),
         };
 
+        let derived_output_folder =
+            self.is_derived_output_folder(&output_folder, &metadata.info, name.as_deref());
+
         if opts.list_only {
             return Ok(AddTorrentResponse::ListOnly(ListOnlyResponse {
                 info_hash,
@@ -1275,6 +1296,7 @@ impl Session {
                     peer_read_write_timeout: peer_opts.read_write_timeout,
                     allow_overwrite: opts.overwrite,
                     output_folder,
+                    derived_output_folder,
                     ratelimits: Limits::new(opts.ratelimits),
                     initial_peers: opts.initial_peers.clone().unwrap_or_default(),
                     peer_limit: opts.peer_limit.or(self.peer_limit),
@@ -1397,7 +1419,9 @@ impl Session {
             (Ok(storage), true) => {
                 debug!("will delete files");
                 remove_files_and_dirs(&metadata.file_infos, &storage);
-                if removed.shared().options.output_folder != self.output_folder
+                // A user-selected folder (including a single-file torrent's
+                // save path) is never removed; only rqbit's own subfolder is.
+                if removed.shared().options.derived_output_folder
                     && let Err(e) = storage.remove_directory_if_empty(Path::new(""))
                 {
                     warn!(
@@ -1657,6 +1681,34 @@ impl Session {
 pub(crate) struct ResolveMagnetResult {
     pub metadata: TorrentMetadata,
     pub seen_peers: Vec<SocketAddr>,
+}
+
+fn derived_output_folder(session_folder: &Path, folder: &Path, subfolder: Option<PathBuf>) -> bool {
+    subfolder.is_some_and(|name| {
+        !name.as_os_str().is_empty()
+            && folder != session_folder
+            && session_folder.join(name) == folder
+    })
+}
+
+#[cfg(test)]
+mod derived_folder_tests {
+    use super::derived_output_folder;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn only_the_session_derived_torrent_folder_counts_as_created() {
+        let session = Path::new("/data/downloads");
+        let name = || Some(PathBuf::from("Show.S01"));
+        // Multi-file torrent without a save path: rqbit's own subfolder.
+        assert!(derived_output_folder(session, &session.join("Show.S01"), name()));
+        // Single-file torrents have no subfolder; their folder is the user's.
+        assert!(!derived_output_folder(session, Path::new("/home/me/Videos"), None));
+        assert!(!derived_output_folder(session, session, None));
+        // A user save path, even for a multi-file torrent, is never ours.
+        assert!(!derived_output_folder(session, Path::new("/home/me/Videos"), name()));
+        assert!(!derived_output_folder(session, session, Some(PathBuf::new())));
+    }
 }
 
 fn remove_files_and_dirs(infos: &FileInfos, files: &dyn TorrentStorage) {

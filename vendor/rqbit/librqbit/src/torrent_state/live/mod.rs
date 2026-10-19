@@ -2287,25 +2287,8 @@ impl PeerHandler {
 
     fn send_metadata_piece(&self, piece_id: u32) -> anyhow::Result<()> {
         let data = &self.state.metadata.info_bytes;
-        let metadata_size = data.len();
-        if metadata_size == 0 {
-            anyhow::bail!("peer requested for info metadata but we don't have it")
-        }
-        let total_pieces: usize = (metadata_size as u64)
-            .div_ceil(CHUNK_SIZE as u64)
-            .try_into()?;
-
-        if piece_id as usize > total_pieces {
-            bail!("piece out of bounds")
-        }
-
-        let offset = piece_id * CHUNK_SIZE;
-        let end = (offset + CHUNK_SIZE).min(data.len().try_into()?);
-        let total_size: u32 = data
-            .len()
-            .try_into()
-            .context("can't send metadata: len doesn't fit into u32")?;
-        let data = data.slice(offset as usize..end as usize);
+        let (total_size, range) = metadata_piece_range(data.len(), piece_id)?;
+        let data = data.slice(range);
 
         self.tx
             .send(WriterRequest::UtMetadata(UtMetadata::Data(
@@ -2390,3 +2373,47 @@ fn format_peer_client_name(value: &ByteBuf<'_>) -> Option<String> {
 #[cfg(test)]
 #[path = "live_fatal_write_tests.rs"]
 mod live_fatal_write_tests;
+
+/// The byte range of one requested ut_metadata piece. Any peer may ask for any
+/// index, so piece_id == total_pieces (one past the end) must be refused here
+/// rather than reach `Bytes::slice`, which panics on an out-of-range start.
+fn metadata_piece_range(
+    metadata_size: usize,
+    piece_id: u32,
+) -> anyhow::Result<(u32, std::ops::Range<usize>)> {
+    if metadata_size == 0 {
+        anyhow::bail!("peer requested for info metadata but we don't have it")
+    }
+    let total_size: u32 = metadata_size
+        .try_into()
+        .context("can't send metadata: len doesn't fit into u32")?;
+    let total_pieces = total_size.div_ceil(CHUNK_SIZE);
+    if piece_id >= total_pieces {
+        bail!("piece out of bounds")
+    }
+    let offset = piece_id * CHUNK_SIZE;
+    let end = offset.saturating_add(CHUNK_SIZE).min(total_size);
+    Ok((total_size, offset as usize..end as usize))
+}
+
+#[cfg(test)]
+mod metadata_piece_tests {
+    use super::{CHUNK_SIZE, metadata_piece_range};
+
+    #[test]
+    fn metadata_piece_one_past_the_end_is_refused_not_sliced() {
+        let size = CHUNK_SIZE as usize * 2 + 10;
+        let info = bytes::Bytes::from(vec![7u8; size]);
+        assert_eq!(metadata_piece_range(size, 0).unwrap(), (size as u32, 0..CHUNK_SIZE as usize));
+        let (_, last) = metadata_piece_range(size, 2).unwrap();
+        assert_eq!(info.slice(last).len(), 10);
+        // total_pieces == 3: index 3 used to pass `>` and panic in slice().
+        for piece in [3, 4, u32::MAX] {
+            assert!(metadata_piece_range(size, piece).is_err(), "piece {piece}");
+        }
+        let exact = CHUNK_SIZE as usize;
+        assert_eq!(metadata_piece_range(exact, 0).unwrap().1, 0..exact);
+        assert!(metadata_piece_range(exact, 1).is_err());
+        assert!(metadata_piece_range(0, 0).is_err());
+    }
+}

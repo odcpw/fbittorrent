@@ -120,6 +120,8 @@ pub(crate) struct ManagedTorrentOptions {
     pub peer_read_write_timeout: Option<Duration>,
     pub allow_overwrite: bool,
     pub output_folder: PathBuf,
+    /// output_folder is the session folder joined with this torrent's name.
+    pub derived_output_folder: bool,
     // Shared by all run states; pause/resume must not recreate an old cap.
     pub ratelimits: Limits,
     pub initial_peers: Vec<SocketAddr>,
