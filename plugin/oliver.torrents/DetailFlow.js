@@ -3,6 +3,7 @@
 // One controller belongs to the shared service, not either layout Loader.
 function create(service, changed) {
   var settingsInstance="", engineEpoch=0, metadataKnown=false
+  var pieceCache=null, pieceState=""
   var extras=Object.create(null), looked=Object.create(null), cards=Object.create(null)
   var d={hash:"",tab:"overview",query:"",files:[],cursor:0,card:null,loading:false,trackerBusy:false,trackerRequest:0}
   function keep(cache,key,value){if(!Object.prototype.hasOwnProperty.call(cache,key) && Object.keys(cache).length>=128)delete cache[Object.keys(cache)[0]];cache[key]=value}
@@ -39,6 +40,7 @@ function create(service, changed) {
   }
   d.begin=function(hash){
     if(hash===d.hash)return
+    pieceCache=null;pieceState=""
     service.unsubscribeDetail();service.logConsumer("details",false)
     d.trackerRequest++;d.trackerBusy=false;d.hash=hash || "";d.card=null;d.files=[];d.query="";d.cursor=0;d.loading=false
     if(d.hash){
@@ -54,6 +56,8 @@ function create(service, changed) {
     service.logConsumer("details",!!d.hash && d.tab==="log")
     var topic=d.tab==="files" ? "files" : ["peers","trackers","pieces"].indexOf(d.tab)>=0 ? d.tab : ""
     if(d.hash && topic){
+      var row=d.row()
+      if(topic==="pieces" && pieceCache && row && row.checked===true && row.state===pieceState)service.store.topics["torrent:"+d.hash+".pieces"]=pieceCache
       service.subscribeDetail(d.hash,[topic]);d.loading=topic==="files" && !service.store.topics["torrent:"+d.hash+".files"]
       if(topic==="files" && (!cap("subscribe") || service.client.mode==="poll"))d.fetchFiles()
 
@@ -97,7 +101,13 @@ function create(service, changed) {
   d.openFile=function(){var f=d.files[d.cursor];if(f)service.openTarget(d.hash,f.index)}
   d.frame=function(frame,request){
     if(!d.hash)return
-    if(frame.topic==="torrent:"+d.hash+".pieces"){changed();return}
+    if(frame.topic==="torrent:"+d.hash+".pieces"){
+      var current=service.store.torrents[d.hash]
+      if(current && current.checked===true && current.state!=="checking" && current.state!=="error"){
+        pieceCache=service.store.topics[frame.topic] || null;pieceState=current.state
+      }
+      changed();return
+    }
     var topic="torrent:"+d.hash+".files"
     if(frame.topic===topic || (request && request.op==="torrents.files" && request.args.hash===d.hash)){
       if(frame.ev==="snapshot.end" || (request && frame.ok))d.loading=false
@@ -106,7 +116,10 @@ function create(service, changed) {
     var events=frame.topic==="events" ? frame.items || frame.added || [] : [frame]
     var engineChanged=events.some(function(e){if(e.ev!=="engine.changed" && e.ev!=="engine.restarted")return false;var epoch=Number(e.epoch || engineEpoch+1);if(epoch<=engineEpoch)return false;engineEpoch=epoch;return true})
     var row=service.store.torrents[d.hash],known=!!(row && row.size!==undefined)
-    if(d.tab==="pieces" && (engineChanged || !row || !row.checked)){service.store.releaseTopics(["torrent:"+d.hash+".pieces"]);changed()}
+    if(engineChanged || !row || row.checked!==true || row.state==="checking" || row.state==="error" || (pieceCache && row.state!==pieceState) || (request && request.ref && frame.ok)){
+      pieceCache=null;pieceState="";service.store.releaseTopics(["torrent:"+d.hash+".pieces"])
+      if(d.tab==="pieces")changed()
+    }
     if(engineChanged || (known && !metadataKnown))d.get(true)
     metadataKnown=known
   }

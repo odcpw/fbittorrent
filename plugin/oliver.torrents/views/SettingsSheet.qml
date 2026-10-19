@@ -14,7 +14,7 @@ FocusScope {
  signal dismissed()
  function rowsHaveFocus(){for(var i=0;i<rows.count;i++){var item=rows.itemAt(i);if(item && item.editing)return true}return false}
  function row(key){var index=Schema.fields.findIndex(function(field){return field.key===key});return index>=0 ? rows.itemAt(index) : null}
- function focusSetting(key){var item=row(key);if(!item)return false;scroll.contentY=Math.max(0,item.y-Commons.Style.spacing.lg);if(item.textField.visible)item.textField.forceActiveFocus();else if(item.toggle.visible)item.toggle.forceActiveFocus();return true}
+ function focusSetting(key){var item=row(key);if(!item)return false;scroll.contentY=Math.max(0,item.y-Commons.Style.spacing.lg);if(item.textField)item.textField.forceActiveFocus();else if(item.toggle)item.toggle.forceActiveFocus();return true}
  function focusSheet(){forceActiveFocus()}
  Component.onCompleted:flow.open()
  Component.onDestruction:flow.close()

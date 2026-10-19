@@ -23,7 +23,7 @@ function utf8Bytes(s) {
 
 function create(io, options) {
   var o = options || {}, now = o.now || Date.now
-  var subscriptionGeneration=0, subscriptionRun=null, subscriptionWanted=false, subscriptionRetryAt=0, subscriptionFailure=null
+  var subscriptionGeneration=0, subscriptionRun=null, subscriptionWanted=false, subscriptionRetryAt=0, subscriptionFailure=null, subscriptionForced=false
   var c = { online: false, instance: "", caps: [], hello: null, pending: Object.create(null), actions: Object.create(null),
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
@@ -101,7 +101,7 @@ function create(io, options) {
   }
   c.disconnected = function() {
     var wasOnline = c.online
-    subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
+    subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null;subscriptionForced=false; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (!c.graceful && wasOnline) c.reconnecting = true
     c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
     // Unsent actions have no unknown outcome and are never replayed.
@@ -140,9 +140,10 @@ function create(io, options) {
     return args
   }
   c.visibility = function(popup, dashboard, details, quick) {
+    var presenceChanged=c.popupOpen!==!!popup || c.dashboardVisible!==!!dashboard || c.quickVisible!==!!quick
     c.popupOpen = !!popup; c.dashboardVisible = !!dashboard; c.quickVisible=!!quick; c.details = details || []
     if (c.online) {
-      c.request("app.client", presence(), {internal:true})
+      if(presenceChanged)c.request("app.client", presence(), {internal:true})
       c.subscribeAll()
     }
   }
@@ -163,8 +164,19 @@ function create(io, options) {
     if(subscriptionRun || !subscriptionWanted || !c.online || now()<subscriptionRetryAt)return
     subscriptionWanted=false
     var base=topics(),details=c.details.filter(function(t,i,all){return base.indexOf(t)<0 && all.indexOf(t)===i}).slice(0,16-base.length)
-    var run={generation:subscriptionGeneration,remove:Object.keys(c.subs).map(Number),groups:[base].concat(details.map(function(t){return [t]})),index:0}
-    subscriptionRun=run;c.subs=Object.create(null);c.topicRevs=Object.create(null)
+    var interval=c.popupOpen || c.dashboardVisible ? 1000 : 5000
+    var groups=[base].concat(details.map(function(t){return [t]})),keep=Object.create(null),remove=[]
+    // A detail-tab change must not replay the entire torrents snapshot. Keep
+    // unchanged atomic groups, including their live revision counters.
+    Object.keys(c.subs).forEach(function(id){
+      var sub=c.subs[id],signature=JSON.stringify(sub.topics)
+      var index=groups.findIndex(function(group){return JSON.stringify(group)===signature})
+      if(!subscriptionForced && !sub.resync && sub.interval===interval && index>=0){keep[id]=sub;groups.splice(index,1)}
+      else {remove.push(Number(id));sub.topics.forEach(function(topic){delete c.topicRevs[topic]})}
+    })
+    subscriptionForced=false
+    var run={generation:subscriptionGeneration,remove:remove,groups:groups,index:0}
+    subscriptionRun=run;c.subs=keep
     function advance(){
       if(subscriptionRun!==run || !c.online)return
       if(run.remove.length){
@@ -177,7 +189,7 @@ function create(io, options) {
         if(run.generation===subscriptionGeneration && c.lastError===subscriptionFailure){c.lastError=null;subscriptionFailure=null}
         subscriptionRun=null;renewSubscriptions()
       }else{
-        c.request("subscribe",{topics:run.groups[run.index++],interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000},{internal:true,callback:function(result,failure){
+        c.request("subscribe",{topics:run.groups[run.index++],interval_ms:interval},{internal:true,callback:function(result,failure){
           if(subscriptionRun!==run)return
           if(failure){
             if(failure.code==="unknown_op"){subscriptionRun=null;c.mode="poll";subscriptionWanted=false;c.pollAt=0;c.poll()}
@@ -185,7 +197,7 @@ function create(io, options) {
             else advance()
           }else if(result){
             if(run.generation!==subscriptionGeneration)run.remove.push(result.sub)
-            else c.subs[result.sub]={topics:result.topics,rev:0,resync:false}
+            else c.subs[result.sub]={topics:result.topics,rev:0,resync:false,interval:interval}
             advance()
           }
           changed()
@@ -194,7 +206,8 @@ function create(io, options) {
     }
     advance()
   }
-  c.subscribeAll = function() {
+  c.subscribeAll = function(force) {
+    subscriptionForced=subscriptionForced || !!force
     subscriptionGeneration++
     if(c.caps.indexOf("subscribe")<0 || c.mode==="poll"){c.mode="poll";c.pollAt=0;c.poll();return}
     subscriptionWanted=true;renewSubscriptions()
@@ -203,7 +216,7 @@ function create(io, options) {
   c.resubscribe = function(topic) {
     // A subscription shares one revision counter across its topics.
     // Rebuild its entire atomic group, never retain a partially ordered group.
-    c.subscribeAll()
+    c.subscribeAll(true)
     if (o.resubscribe) o.resubscribe(topic)
   }
   c.poll = function() {
