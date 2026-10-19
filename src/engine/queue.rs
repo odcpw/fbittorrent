@@ -24,6 +24,11 @@ impl Inner {
             let Ok(handle) = self.handle(&record.hash) else {
                 continue;
             };
+            if self.rechecks.active(&record.hash) { continue; }
+            if self.recheck_failed(&record.hash) {
+                decisions.push((handle, false, false));
+                continue;
+            }
             let stats = handle.stats();
             // Initializing.paused is transfer intent, not check activity.
             // Unpause closes the current run, so leave active verification

@@ -202,6 +202,7 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsRecheck(RecheckReply),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -229,6 +230,7 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
@@ -279,3 +281,19 @@ pub struct SettingsSetResult {
     pub applied: Vec<String>,
     pub restart: bool,
 }
+
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RecheckReply {
+    Pending(PendingResult),
+    Complete(RecheckResult),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckResult {
+    pub rechecked: Vec<Hash>,
+    pub failed: Vec<RecheckFailure>,
+    pub have_bytes: std::collections::BTreeMap<Hash, u64>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckFailure { pub hash: Hash, pub message: String }

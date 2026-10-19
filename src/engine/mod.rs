@@ -34,6 +34,7 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
 mod queue;
+pub mod recheck;
 mod settings;
 pub mod ops;
 mod restore;
@@ -84,6 +85,7 @@ struct Inner {
     additions: Arc<Mutex<()>>,
     directory: PathBuf,
     default_folder: PathBuf,
+    rechecks: recheck::Rechecks,
     stopping: AtomicBool,
     max_active_downloads: AtomicUsize,
     network_blocked: AtomicBool,
@@ -182,6 +184,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         additions: Arc::new(Mutex::new(())),
         directory,
         default_folder,
+        rechecks: Default::default(),
         stopping: AtomicBool::new(false),
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
         network_blocked: AtomicBool::new(false),
@@ -236,6 +239,8 @@ impl AppEngine {
     pub(crate) fn quiesce(&self) {
         self.dispatcher.inner.stopping.store(true, Ordering::Release);
         self.dispatcher.inner.session.cancellation_token().cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }
@@ -273,6 +278,7 @@ impl AppEngine {
             .inner
             .stopping
             .store(true, Ordering::Release);
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }

@@ -81,6 +81,7 @@
             additions: Arc::new(Mutex::new(())),
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
+            rechecks: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
             network_blocked: AtomicBool::new(false),

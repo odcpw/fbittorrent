@@ -152,6 +152,13 @@ pub struct TorrentView {
 }
 
 impl TorrentView {
+    fn rechecking(&mut self) {
+        self.state = TorrentState::Checking;
+        self.checked = false;
+        self.reason = None;
+        self.completed_at = None;
+    }
+
     fn retain_restore_reason(&mut self) {
         if self
             .error
@@ -177,7 +184,7 @@ impl TorrentView {
             } else {
                 Intent::Run
             },
-            staged: false,
+            staged: record.staged,
             checked: false,
             progress: None,
             size: None,
@@ -509,6 +516,16 @@ impl EngineDispatcher {
                     .unwrap()
                     .get(&record.hash)
                     .and_then(|restore| restore.last_error.clone());
+            }
+            if self.inner.rechecks.active(&record.hash) {
+                view.rechecking();
+            } else if self.inner.recheck_failed(&record.hash) {
+                view.state = TorrentState::Error;
+                view.checked = false;
+                view.reason = Some("restore_failed".into());
+                view.completed_at = None;
+                view.completed_bytes = None;
+                view.progress = None;
             }
             view.retain_restore_reason();
             torrents.push(view);

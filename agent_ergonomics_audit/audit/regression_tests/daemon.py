@@ -3748,8 +3748,227 @@ def settings_offline_no_start(binary, systemd):
                    "settings reads and writes never invoke a manager or create a live engine", json.dumps(bad))
 
 
+
+def recheck_reply(client, hash_, ref, timeout=15):
+    reply = client.call("torrents.recheck", dict(hashes=[hash_]), ref=ref)
+    client.case.check(reply.get("result") == dict(state="pending",ref=ref),
+                      "recheck acknowledges its exact pending ref", json.dumps(reply))
+    states, started, result = [], time.monotonic(), None
+    while time.monotonic() - started < timeout:
+        row = client.call("torrents.get",dict(hash=hash_))["result"]["torrent"]
+        states.append(row)
+        for frame in list(client.pushed):
+            if frame.get("ev") == "mutation.result" and frame.get("ref") == ref:
+                result = frame
+                client.pushed.remove(frame)
+                break
+        if result is not None:
+            break
+        time.sleep(.005)
+    client.case.check(result is not None and result["outcome"] == "done" and result["result"]["rechecked"] == [hash_]
+                      and not result["result"]["failed"],
+                      "one terminal recheck receipt contains measured bytes and no failures", json.dumps(dict(event=result,states=states)))
+    if result is None:
+        raise RuntimeError("recheck result did not arrive")
+    return result,states
+
+
+def recheck_local_fixture(sandbox, name="recheck.bin", size=256 * 1024):
+    root = sandbox.root / "recheck-source"
+    root.mkdir(exist_ok=True)
+    payload = root / name
+    payload.write_bytes(os.urandom(size))
+    return fixtures.torrent_fixture(root,[payload],name=name)
+
+
+def recheck_paused_stays_paused(binary, systemd):
+    with api_owned("recheck_paused_stays_paused",binary,systemd) as (case,sandbox,h,process), ApiConn(h) as client:
+        client.hello()
+        fixture = recheck_local_fixture(sandbox)
+        # Point at complete existing data, preserving explicit paused intent.
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),stopped=True))
+        h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["checked"],json.dumps(row)), "initial paused check finishes")
+        event,states = recheck_reply(client,fixture.info_hash,"paused-check")
+        after = client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        saved = json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+        case.check(after["state"] == "paused" and after["intent"] == "pause" and saved["records"][0]["paused"] is True
+                   and event["result"]["have_bytes"][fixture.info_hash] == 262144,
+                   "paused recheck verifies bytes and never resumes transfer",json.dumps(dict(row=after,ledger=saved)))
+        # Unknown records and unresolved metadata are rejected before pending.
+        unknown=client.call("torrents.recheck",dict(hashes=["f"*40]),error="not_found")
+        case.check(unknown["error"]["retryable"] is False and unknown["error"].get("details",{}).get("hash")=="f"*40,"unknown recheck is a nonretryable not_found naming its hash",json.dumps(unknown))
+        magnet="magnet:?xt=urn:btih:"+"e"*40
+        client.call("torrents.add",dict(source=dict(magnet=magnet),stopped=True))
+        missing=client.call("torrents.recheck",dict(hashes=["e"*40]),error="invalid_state")
+        case.check(missing["error"].get("details",{}).get("reason")=="metadata_unavailable",
+                   "metadata-less torrent is refused before pending",json.dumps(missing))
+
+
+def recheck_restart_fixture(name,binary,systemd,staged=False):
+    with Case("daemon",name) as case, Sandbox() as sandbox, Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve(); h.receive_ready(); h.wait_engine()
+        fixture=recheck_local_fixture(sandbox)
+        try:
+            with ApiConn(h) as client:
+                client.hello()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
+                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
+            h.stop_serve(process); h.notify.close()
+            ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+            if staged:
+                record=json.loads(ledger.read_text());record["records"][0].update(staged=True,paused=True)
+                ledger.write_text(json.dumps(record))
+            process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello()
+                before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                if staged:
+                    refusal=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),error="invalid_state")
+                    case.check(refusal["error"].get("details",{}).get("reason")=="staged",
+                               "a real saved staged record is refused with invalid_state/exit-1 code",json.dumps(refusal))
+                else:
+                    case.check(before["state"]=="done" and before["checked"] is False,"completed fixture is dormant before explicit recheck",json.dumps(before))
+                    event,states=recheck_reply(client,fixture.info_hash,"dormant-check")
+                    count=h.stderr().count("INFO engine recheck started hash="+fixture.info_hash)
+                    case.check(count==1 and event["result"]["have_bytes"][fixture.info_hash]==262144,
+                               "dormant recheck has one admission; exact storage-read count is covered by engine test",f"started={count}; states={states}")
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+
+def recheck_dormant(binary,systemd):
+    recheck_restart_fixture("recheck_dormant",binary,systemd)
+
+
+def recheck_staged_invalid_state(binary,systemd):
+    recheck_restart_fixture("recheck_staged_invalid_state",binary,systemd,staged=True)
+
+
+def recheck_corrupt_byte(binary,systemd,fixture_size=64*fixtures.MIB,case_name="recheck_corrupt_byte"):
+    with api_owned(case_name,binary,systemd) as (case,sandbox,h,process), ApiConn(h) as client, \
+            Sandbox() as seedbox,Harness(case,binary,seedbox,systemd) as seedh:
+        seedprocess=seedh.start_serve();seedh.receive_ready();seedh.wait_engine()
+        fixture=recheck_local_fixture(seedbox,size=fixture_size)
+        port=tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml").read_text())["peer_port"]
+        tracker=fixtures.bencode(dict(interval=1,complete=1,incomplete=0,peers=socket.inet_aton("127.0.0.1")+struct.pack("!H",port)))
+        try:
+            with fixtures.HttpFixture(seedbox.root,{"/announce":dict(base64=base64.b64encode(tracker).decode())}) as http,ApiConn(seedh) as seed:
+                fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info,announce=http.base+"/announce")))
+                client.hello();seed.hello()
+                seed.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),seed=True))
+                seedh.wait_for(lambda: ((row:=seed.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="seeding",json.dumps(row)),"local seed fully checked")
+                seed.call("torrents.stop",dict(hashes=[fixture.info_hash]))
+                destination=sandbox.downloads/fixture.files[0].name
+                shutil.copyfile(fixture.files[0],destination)
+                original=hashlib.sha256(destination.read_bytes()).hexdigest()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(sandbox.downloads)))
+                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"leech initially complete and durably saved without downloading")
+                fixtures.corrupt_byte(destination,0)
+                event,states=recheck_reply(client,fixture.info_hash,"corrupt-check")
+                row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                ledger=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+                have=event["result"]["have_bytes"][fixture.info_hash]
+                if fixture_size > 256*1024:
+                    case.check(any(row["state"]=="checking" for row in states),
+                               "real 64 MiB corrupted fixture is observed checking over api.sock",json.dumps(states))
+                case.check(have==fixture_size-16384 and row["state"] in ("downloading","stalled")
+                           and "completed_at" not in row and ledger["records"][0]["completion_on"]==0,
+                           "offline seed: corrupted piece is unverified, durable completion cleared, never done",json.dumps(dict(have_bytes=have,row=row,ledger=ledger)))
+                case.check(hashlib.sha256(destination.read_bytes()).hexdigest()!=original,
+                           "seed remains paused until measured verification receipt arrives","corrupted file has not been repaired early")
+                seed.call("torrents.start",dict(hashes=[fixture.info_hash]))
+                repaired=[]
+                def done():
+                    row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                    repaired.append(row)
+                    return row["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)
+                h.wait_for(done,"unpaused loopback seed repairs the missing piece",timeout=60)
+                case.check(hashlib.sha256(destination.read_bytes()).hexdigest()==original and repaired[-1].get("completed_at",0)>0,
+                           "loopback repair restores byte-identical payload and completion history",json.dumps(dict(states=states+repaired,sha256=original)))
+                case.step("record completion-event integration", "P1-13 emits torrent.completed again after the measured completion reset").ok(
+                    "Measured completion reset and second completion are proven; pushed completion event awaits P1-08/P1-13 integration.")
+        finally:
+            seedh.stop_serve(seedprocess);seedh.lock_free()
+
+
+
+def recheck_corrupt_byte_256k(binary,systemd):
+    # Keep the prescribed 16-piece fixture as a separate exact-byte proof.
+    # Its sub-millisecond scan may end between API requests; the 64 MiB case
+    # above and the real gated unit case prove observable active checking.
+    recheck_corrupt_byte(binary,systemd,256*1024,"recheck_corrupt_byte_256k")
+
+
+def recheck_resets_completion(binary,systemd):
+    with Case("daemon","recheck_resets_completion") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve();h.receive_ready();h.wait_engine()
+        fixture=recheck_local_fixture(sandbox,size=64*fixtures.MIB)
+        try:
+            with ApiConn(h) as client:
+                client.hello()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
+                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"large local fixture completion durably saved")
+                fixtures.corrupt_byte(fixture.files[0],0)
+                reply=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),ref="restart-during-check")
+                observed=[]
+                def checking():
+                    row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                    observed.append(row)
+                    return row["state"]=="checking",json.dumps(row)
+                h.wait_for(checking,"active recheck is observable before restart",timeout=2)
+                # Crash at the observed active check; no shutdown save can hide
+                # an incorrect completion checkpoint. Restart must verify data.
+                os.kill(h.daemon_pid(),signal.SIGKILL)
+                process.wait(timeout=5,code=-signal.SIGKILL if not systemd else 255)
+            h.notify.close()
+            saved=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+            case.check(saved["records"][0]["completion_on"]==0,"recheck durably invalidates completion before hashing I/O",json.dumps(saved))
+            process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello()
+                states=[]
+                for _ in range(100):
+                    row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                    states.append(row)
+                    if row["checked"] and row["state"] in ("stalled","downloading"):break
+                    time.sleep(.02)
+                case.check(all(row["state"]!="done" for row in states) and states[-1]["state"] in ("stalled","downloading")
+                           and "completed_at" not in states[-1],"restart mid-repair never restores corrupt data as dormant done",json.dumps(dict(before=observed,after=states)))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+def recheck_failed_receipt(binary,systemd):
+    with api_owned("recheck_failed_receipt",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello()
+        fixture=recheck_local_fixture(sandbox)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
+        h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"saved complete record before deliberate cache-write failure")
+        cached=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine"/(fixture.info_hash+".torrent")
+        metadata=cached.read_bytes();cached.unlink();cached.mkdir()
+        try:
+            pending=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),ref="failed-recheck")["result"]
+            events=[]
+            began=time.monotonic()
+            while time.monotonic()-began<5:
+                rows=client.call("torrents.list",{})["result"]["torrents"]
+                events.extend(client.pushed);client.pushed.clear()
+                if any(e.get("ref")=="failed-recheck" for e in events):break
+                time.sleep(.01)
+            result=[e for e in events if e.get("ref")=="failed-recheck"]
+            saved=json.loads((cached.parent/"torrents.json").read_text())
+            case.check(pending==dict(state="pending",ref="failed-recheck") and len(result)==1
+                       and result[0]["outcome"]=="failed" and result[0]["error"]["code"]=="invalid_state"
+                       and result[0]["result"]["failed"][0]["hash"]==fixture.info_hash
+                       and rows[0]["state"]=="error" and "completed_at" not in rows[0]
+                       and saved["records"][0]["completion_on"]==0,
+                       "failed verification sends exactly one failed ref result and keeps completion invalidated",json.dumps(dict(events=result,rows=rows,ledger=saved)))
+        finally:
+            cached.rmdir();cached.write_bytes(metadata)
+
 CASES = {function.__name__: function for function in
-         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

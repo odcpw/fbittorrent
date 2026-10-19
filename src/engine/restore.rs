@@ -282,9 +282,9 @@ impl Inner {
             // Restore the previous record if changing the cap cannot be applied.
             let rollback = self.restore_record(cx, old, true).await;
             if let Err(rollback) = rollback {
-                bail!("changing upload cap failed: {error:#}; restoring previous torrent failed: {rollback:#}");
+                bail!("rebuilding torrent failed: {error:#}; restoring previous torrent failed: {rollback:#}");
             }
-            return Err(error).context("changing upload cap; previous torrent restored");
+            return Err(error).context("rebuilding torrent; previous torrent restored");
         }
         Ok(())
     }

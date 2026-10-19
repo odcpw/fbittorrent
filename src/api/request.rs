@@ -262,6 +262,8 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "torrents.recheck")]
+    TorrentsRecheck { args: HashesArgs },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -327,6 +329,7 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",
