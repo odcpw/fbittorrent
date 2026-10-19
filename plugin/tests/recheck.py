@@ -38,7 +38,6 @@ def run(binary):
                 q.wait(lambda:feedback()['button'] and feedback()['button']['enabled'])
                 assert q.ipc('scrollRecheck')=='true'
                 q.wait(lambda:(f:=feedback())['button']['y']>=0 and f['button']['y']+f['button']['height']<=f['viewport']['height'] and not f['viewport']['moving'])
-                case.check(True,'Overview exposes the enabled Recheck button',json.dumps(feedback()))
                 assert q.ipc('recheckButton')=='true'
                 q.wait(lambda:(view().get('dialog') or {}).get('kind')=='recheck')
                 q.keys(['-k','Return'],lambda:not view().get('dialog'))

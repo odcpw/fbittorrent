@@ -40,7 +40,6 @@ class Headless:
                 sockets=[p for p in runtime.glob('wayland-*') if p.is_socket()]
                 if sockets:
                     self.env['WAYLAND_DISPLAY']=str(sockets[0])
-                    case.check(True,'private compositor uses headless software backend',f'pid={self.child.pid}; display={sockets[0]}; log={self.log}')
                     return
                 if self.child.poll() is not None:raise RuntimeError(f'private compositor exited {self.child.returncode}; {self.log}')
                 time.sleep(.03)

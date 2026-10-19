@@ -82,7 +82,7 @@ sys.exit(code)
                                 harness.wait_for_reopen(root / "engine.sock", "fixture",
                                                         seconds=.2 if mode in ("timeout", "slow") else 10))
                     case.check(restored.get("state") == "stoppedDL", "engine reopening preserves the manual pause")
-                    case.check(True, "later case checks still execute")
+                    case.check(case.steps >= 2, "later case checks still execute")
             (root / "diagnostics.txt").write_text(diagnostics.getvalue())
             rows = [json.loads(line) for line in case.path.read_text().splitlines()]
             calls = [row for row in rows if row.get("action", "").startswith("CLI ")]

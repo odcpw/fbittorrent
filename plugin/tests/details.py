@@ -17,8 +17,6 @@ def view(q):return q.state().get('view') or {}
 def detail(q):return view(q).get('details') or {}
 def press(case,q,args,predicate,expect):
     q.keys(args,predicate)
-    case.check(True,expect,json.dumps(dict(keys=args,details=detail(q),focus=view(q).get('focus'))))
-def record(case,q,expect):case.check(True,expect,json.dumps(detail(q)))
 def ledger(sandbox,hash):
     path=Path(sandbox.env['XDG_DATA_HOME'])/'fbittorrent/engine/torrents.json'
     return next(r for r in json.loads(path.read_text())['records'] if r['hash']==hash)
@@ -95,7 +93,7 @@ def run(binary):
                     q.wait(lambda:detail(q).get('hash')==hash)
                     if detail(q).get('tab')!='files':press(case,q,[']'],lambda:detail(q).get('tab')=='files','select Files before sampling check')
                     q.wait(lambda:'torrent:'+hash+'.files' in client.call('app.info')['result']['subscriptions']['by_topic'])
-                    before=client.call('app.info')['result']['subscriptions']['by_topic'];case.check(True,'visible Files owns its actual daemon detail topic',json.dumps(before))
+                    before=client.call('app.info')['result']['subscriptions']['by_topic']
                     q.shell('hide');q.wait(lambda:q.state()['view'] is None)
                     q.wait(lambda:not any(k.startswith('torrent:') for k in client.call('app.info')['result']['subscriptions']['by_topic']))
                     after=client.call('app.info')['result']['subscriptions']['by_topic'];case.check(not any(k.startswith('torrent:') for k in after),'hide unsubscribes every torrent detail topic',json.dumps(dict(before=before,after=after)))
@@ -108,12 +106,12 @@ def run(binary):
                     q.wait(lambda:prefs.exists() and json.loads(prefs.read_text()).get('details_width')==420)
                     q.shell('hide');q.wait(lambda:q.state()['view'] is None);q.shell('summon',json.dumps(dict(view='torrents',hash=hash)))
                     q.wait(lambda:q.compositor.ipc('[title="^fbittorrent$"] floating enable, border none, resize set 1800 px 800 px'))
-                    q.wait(lambda:detail(q).get('width')==420);record(case,q,'window reopen restores the saved width')
+                    q.wait(lambda:detail(q).get('width')==420)
                     q.close();q.config.rename(sandbox.root/'first-shell');shutil.copy2(q.log,q.log.with_suffix('.before-shell-restart.log'))
                     q=Session(setup,sandbox);q.compositor.ipc('output * mode 1920x1080')
                     q.wait(lambda:q.ipc('ready')=='true');q.shell('summon',json.dumps(dict(view='torrents',hash=hash)))
                     q.wait(lambda:q.compositor.ipc('[title="^fbittorrent$"] floating enable, border none, resize set 1800 px 800 px'))
-                    q.wait(lambda:detail(q).get('width')==420);record(case,q,'a fully new private shell/service restores the saved width')
+                    q.wait(lambda:detail(q).get('width')==420)
                 with Case('qs_details','details_sheet_below_1400') as case:
                     q.wait(lambda:q.compositor.ipc('[title="^fbittorrent$"] resize set 1399 px 800 px'));q.wait(lambda:detail(q).get('mode')=='sheet')
                     press(case,q,['-k','Return'],lambda:view(q).get('panes',{}).get('detailsSheet'),'Enter at1399 opens the overlay sheet')
@@ -129,7 +127,6 @@ def run(binary):
                     case.check(all(e.get('hash')==hash for e in entries),'Log renders only the selected torrent hash',json.dumps(entries))
                     image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.exists() and image.stat().st_size>0)
                     q.shell('hide');q.wait(lambda:client.call('app.info')['result']['subscriptions']['by_topic'].get('log',0)==0)
-                    record(case,q,'last hidden consumer releases the shared log topic')
             finally:q.close()
     return suite_status('qs_details') or suite_status('daemon')
 

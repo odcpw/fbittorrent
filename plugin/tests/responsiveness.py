@@ -194,7 +194,6 @@ def run(args):
                           shell_memory=[line for line in Path(f'/proc/{q.child.pid}/status').read_text().splitlines() if line.startswith(('VmHWM:','VmRSS:'))])
             args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(result,indent=2)+'\n')
             print(json.dumps({k:v for k,v in result.items() if k not in ('samples','transfer_samples')},indent=2),flush=True)
-            case.check(True,'all measured interactions reach an actual presented frame',str(args.output))
         except BaseException:
             print('Last state:',q.state(),flush=True);traceback.print_exc();raise
         finally:

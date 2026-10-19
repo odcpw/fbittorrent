@@ -35,7 +35,6 @@ def readonly(sandbox):
 def picker(q):return state(q).get('picker')
 def press(case,q,keys,predicate,expect):
     q.keys(keys,predicate)
-    case.check(True,expect,json.dumps(dict(keys=keys,sheet=state(q))))
 def open_picker(case,q):
     press(case,q,['-k','Tab','-k','Tab','-k','Tab'],lambda:state(q).get('field')=='choose','Tab cycles only through the modal form to Choose')
     press(case,q,['-k','Return'],lambda:picker(q) is not None,'Enter on Choose opens the native folder browser')

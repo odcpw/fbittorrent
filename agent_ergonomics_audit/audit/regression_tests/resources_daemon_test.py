@@ -37,7 +37,7 @@ def main():
             elif change=='negative': measured['configs']['10x0']['cpu_s']=[-1]
             else: measured['configs']['10x0']['cpu_s']=[math.nan]
             try: compare_baseline(wanted,measured)
-            except ValueError as error: case.check(True, 'invalid '+change+' observation is refused', str(error))
+            except ValueError as error: case.check(isinstance(error, ValueError), 'invalid '+change+' observation is refused', str(error))
             else: case.check(False, 'invalid '+change+' observation is refused', str(measured))
     return suite_status('daemon_budget_test')
 

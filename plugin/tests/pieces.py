@@ -53,7 +53,6 @@ def run(binary):
                     q.shell('summon',json.dumps(dict(view='torrents',hash=torrent.info_hash)))
                     q.wait(lambda:detail(q).get('hash')==torrent.info_hash)
                     q.wait(lambda:'no DHT, no PeX' in detail(q).get('networking',''))
-                    setup.check(True,'real dashboard Overview identifies private networking',detail(q)['networking'])
                     with Case('qs_pieces_live','pieces_bar') as case:
                         # Click the actual Pieces control directly; unrelated
                         # diagnostic tabs are exercised by their own cases.
@@ -89,7 +88,6 @@ def run(binary):
                         tmux('send-keys','-t',session,'Enter')
                         wait(lambda:'[Overview]' in capture())
                         wait(lambda:'no DHT, no PeX' in capture())
-                        case.check(True,'real TUI Overview identifies private networking',capture())
                         # Each navigation key is a real key event. A pasted
                         # multi-character sequence is deliberately not navigation.
                         for label in ('Files','Peers','Trackers','Log','Pieces'):
@@ -107,7 +105,6 @@ def run(binary):
                         case.check(client.call('app.info')['result']['subscriptions']['by_topic'].get(topic)==1,'TUI owns one visible sampled detail topic','one subscription')
                         tmux('send-keys','-t',session,'Escape')
                         wait(lambda:topic not in client.call('app.info')['result']['subscriptions']['by_topic'])
-                        case.check(True,'closing TUI Details releases its Pieces subscription','absent in real app.info')
                         tmux('send-keys','-t',session,'-l','q')
                         wait(lambda:tmux('has-session','-t',session,check=False).returncode!=0)
                         case.check(client.call('app.info')['ok'],'TUI detach leaves the owned daemon running','app.info success')

@@ -1247,6 +1247,9 @@ def local_download(case, binary, leech):
     import struct
     import tomllib
     with private_sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
+        process = seedh.start_serve()
+        if not (seedh.receive_ready() and seedh.wait_engine()):
+            raise RuntimeError("loopback seed failed to start")
         config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
         peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
         body = fixtures.bencode(dict(interval=1, peers=peer))
@@ -1254,9 +1257,6 @@ def local_download(case, binary, leech):
             payload = seedbox.downloads / "daemon-fixture.bin"
             payload.write_bytes(os.urandom(8 * 1024 * 1024))
             torrent = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
-            process = seedh.start_serve()
-            if not (seedh.receive_ready() and seedh.wait_engine()):
-                raise RuntimeError("loopback seed failed to start")
             seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
             seedh.wait_for(lambda: ((row := seedh.api("torrents.list")["torrents"][0])["state"] == "seeding", str(row)), "verified local seed")
             reply = seedh.api("torrents.set_upload_limit",dict(hashes=[torrent.info_hash],bps=32768))

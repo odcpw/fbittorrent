@@ -152,7 +152,6 @@ def main():
                 executable=shutil.which(name)
                 reply=subprocess.run(argv,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=3) if executable else None
                 case.check(bool(executable),'capture tool available: '+name,f'{executable}; '+(reply.stdout.splitlines()[0] if reply and reply.stdout else 'no version output'))
-            case.check(True,'isolation policy','private Qs config, compositor and theme, Qt item capture; no owner-shell IPC, theme switch or whole-desktop screenshot')
         return finish('dry_run')
     if os.environ.get('FBT_TEST_VISUAL')!='1':parser.error('set FBT_TEST_VISUAL=1 for owned capture processes')
     if not (ROOT/'contracts/ui/themes'/f'{args.theme}.toml').is_file():parser.error('theme is not a checked-in fixture')
@@ -167,7 +166,6 @@ def main():
             before=q.ipc('useRuntimeDir',sandbox.env['XDG_RUNTIME_DIR'])
             case.check(before=='ok','isolated runtime hook accepts the owned fixture',before)
             q.wait(lambda:(state:=json.loads(q.ipc('state')))['online'] and not state['error'])
-            case.check(True,'healthy fixture reconnect has no stale action error',q.ipc('state'))
             q.ipc('open')
             q.wait(lambda:json.loads(q.ipc('state'))['opened'] and (args.state=='empty' or json.loads(q.ipc('state'))['rows']>0))
             directory=ROOT/'target/test-logs/visual'/date.today().isoformat();directory.mkdir(parents=True,exist_ok=True)

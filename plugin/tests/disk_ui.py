@@ -108,7 +108,6 @@ def run(binary):
                 q.wait(lambda: view(q).get('errors') == 0, timeout=15)
                 harness.wait_for(lambda: ((value := client.call('torrents.get', dict(hash=item.info_hash))['result']['torrent']).get('completed_bytes',0) > previous_bytes,
                                          json.dumps(value)), 'freeing the owned filler resumes bytes without any start request', timeout=10)
-                case.check(True, 'automatic recovery clears the rendered Errors count without a start action', json.dumps(view(q)))
             finally:
                 q.close()
                 seed.stop_serve(seedprocess)

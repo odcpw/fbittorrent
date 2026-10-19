@@ -45,7 +45,6 @@ def run(binary):
                         call('shows.check',dict(imdb=IMDB));q.wait(lambda:view().get('window',{}).get('view')=='shows',timeout=10)
                         q.wait(lambda:len(state().get('rows',[]))==3)
                         assert len(notify.calls(box))==1 and 'window=Open Shows' in notify.calls(box)[0]
-                        case.check(True,'new-release notification action opens the actual populated Shows inbox',json.dumps(state()))
                         keys(['='],lambda:view().get('controls',{}).get('preferenceOpen'))
                         keys(['j','-k','Return'],lambda:show().get('quality')=='2160p')
                         keys(['r'],lambda:any(row['key']=='S01E01' and row['quality']=='2160p' for row in state().get('rows',[])))
@@ -55,7 +54,6 @@ def run(binary):
                         dropdown('quality',['jjj','-k','Return'],lambda:state().get('qualityFilter')=='720p' and len(state().get('rows',[]))==1)
                         dropdown('quality',['kk','-k','Return'],lambda:state().get('qualityFilter')=='2160p' and not state().get('rows'))
                         dropdown('read',['k','-k','Return'],lambda:state().get('readFilter')=='all' and len(state().get('rows',[]))==1)
-                        case.check(True,'actual dropdowns filter read state and release quality independently',json.dumps(state()))
                         keys(['='],lambda:view().get('controls',{}).get('preferenceOpen'));keys(['k','-k','Return'],lambda:'quality' not in show())
                         assert c.call('torrents.list',{})['result']['torrents']==[], 'quality, filters and checks never download'
                         # An explicit visible check with a new key is silent.
@@ -87,14 +85,12 @@ def run(binary):
                             wait(lambda:'(y) Copy magnet' in capture());text('=');wait(lambda:'Show quality:' in capture())
                             tmux('send-keys','-t',session,'C-a');text('480p');tmux('send-keys','-t',session,'Enter');wait(lambda:show().get('quality')=='480p')
                             text('F');wait(lambda:'Inbox filter:' in capture());tmux('send-keys','-t',session,'C-a');text('read 720p');tmux('send-keys','-t',session,'Enter');wait(lambda:'read 720p' in capture() and 'S01E02' in capture())
-                            case.check(True,'TUI = saves quality and F filters the real read history',capture())
                             text('q');wait(lambda:tmux('has-session','-t',session,check=False).returncode!=0)
                         finally:tmux('kill-server',check=False)
                         c.close();h.stop_serve(process);h.notify.close();process=h.start_serve(idle_exit_secs=0);assert h.receive_ready() and h.wait_engine()
                         with daemon.ApiConn(h) as restored:
                             restored.hello();saved=restored.call('shows.list')['result']['shows'][0]
                             assert saved.get('quality')=='480p' and restored.call('torrents.list',{})['result']['torrents']==[]
-                            case.check(True,'dashboard, CLI and TUI preference survives daemon restart without downloading',json.dumps(saved))
                     h.stop_serve(process);h.lock_free()
             except Exception:
                 print(json.dumps(q.state()),flush=True);traceback.print_exc();raise

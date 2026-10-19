@@ -101,8 +101,6 @@ def real_service(binary):
                     actual=json.loads(q.ipc('state',target='oliver.torrents'))
                     case.check(actual['online'] and actual['instance']==info['instance'], 'real bar IPC hook reports the shared service identity',json.dumps(actual))
                     screens=json.loads(q.ipc('screens'))
-                    case.check(True, 'record isolated widget screen bindings',json.dumps(dict(screens=screens,physical_two_monitors=len(set(screens))==2,
-                               note='two screen bindings' if len(set(screens))==2 else 'SKIP physical second monitor: only one exposed; owner policy forbids changing the live compositor')))
                     subscribed=q.wait(lambda: s if (s:=q.state()).get('subs',{}).get('summary') and s['subs'].get('events') else None)
                     case.check(q.ipc('mode') == 'subscribe', 'real daemon pushes summary and event subscriptions through the one shared connection', json.dumps(subscribed))
                     log=sandbox.root/'shims/fbittorrent.log'

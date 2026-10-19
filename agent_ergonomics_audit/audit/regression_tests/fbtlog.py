@@ -41,9 +41,10 @@ class Suite:
         self.results = []
 
     def summarize(self):
-        failed = sum(not row["ok"] for row in self.results)
+        failed = sum(row["ok"] is False for row in self.results)
+        skipped = sum(row.get("status") == "skip" for row in self.results)
         summary = dict(suite=self.name, cases=len(self.results),
-                       passed=len(self.results) - failed, failed=failed,
+                       passed=len(self.results) - failed - skipped, failed=failed, skipped=skipped,
                        slowest=[dict(case=row["case"], ms=row["ms"]) for row in
                                 sorted(self.results, key=lambda row: row["ms"], reverse=True)[:5]])
         (self.directory / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -99,6 +100,7 @@ class Case:
         self.path = self.suite.directory / f"{name}.jsonl"
         self.daemon_path = self.path.with_suffix(".daemon.log")
         self.steps, self.failed, self.pending = 0, [], []
+        self.skipped = None
 
     def __enter__(self):
         self.started = time.monotonic()
@@ -123,6 +125,11 @@ class Case:
         return step.close(bool(condition), observed if observed is not None
                           else f"Condition evaluated to {condition!r}.")
 
+    def skip(self, reason):
+        """A missing opt-in is unexecuted coverage, never a passed assertion."""
+        self.skipped = str(reason)
+        self.write(dict(skip=True, reason=self.skipped))
+
     def popen(self, argv, **kwargs):
         if "stderr" in kwargs:
             raise ValueError("Case.popen owns stderr; capture stdout with stdout=PIPE")
@@ -139,12 +146,16 @@ class Case:
             with self.suite.stderr_path.open("rb") as source:
                 source.seek(self.stderr_offset)
                 self.daemon_path.write_bytes(source.read())
-            final = dict(final=True, ok=not self.failed, steps=self.steps, failed=self.failed,
+            skipped = self.skipped is not None and not self.failed
+            final = dict(final=True, ok=None if skipped else not self.failed,
+                         status="skip" if skipped else "fail" if self.failed else "pass",
+                         steps=self.steps, failed=self.failed,
                          ms=max(0, round((time.monotonic() - self.started) * 1000)))
+            if skipped: final["reason"] = self.skipped
             self.write(final)
             self.suite.results.append(dict(case=self.name, **final))
             self.suite.summarize()
-            print(f"{'FAIL' if self.failed else 'ok'}: {self.suite.name}/{self.name}")
+            print(f"{'FAIL' if self.failed else 'SKIP' if skipped else 'ok'}: {self.suite.name}/{self.name}")
             if self.failed:
                 for path in (self.path, self.daemon_path):
                     print(f"--- {path} (last 20 lines) ---", file=sys.stderr)

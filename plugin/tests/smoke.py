@@ -28,7 +28,6 @@ def readiness(case,harness):
         last=subprocess.run([harness.binary,'--no-start','status','--quiet'],env=harness.sandbox.env,cwd=harness.sandbox.root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=2)
         if last.returncode==0:
             now=time.time()*1000
-            case.check(True,'isolated read-only status is ready within 10 s',f'--quiet: exit=0 after {round((time.monotonic()-began)*1000)} ms')
             return now
         time.sleep(.03)
     raise RuntimeError(f'owned status readiness exit {last.returncode}')
@@ -38,7 +37,6 @@ def main():
     binary=Path(os.environ.get('FBT_BIN',ROOT/'target/release/fbittorrent')).resolve()
     with Case('qs_smoke','private_lifecycle') as guard:
         import private_net
-        guard.check(True,'private network and local-only DNS are active',private_net.describe())
         with fixtures.Sandbox() as sandbox:
             config,env=prepare(sandbox,Path(__file__).with_name('smoke'))
             env['QS_NO_RELOAD_POPUP']='1'

@@ -16,7 +16,6 @@ from fbtlog import Case,suite_status
 def view(q):return q.state().get('view') or {}
 def press(case,q,keys,predicate,expect):
     q.keys(keys,predicate)
-    case.check(True,expect,json.dumps(dict(keys=keys,view=view(q)),ensure_ascii=False))
 
 def run(binary):
     from datetime import datetime
@@ -88,7 +87,6 @@ def run(binary):
                 press(case,q,['S'],lambda:view(q).get('sort',{}).get('reverse') is True,'S reverses the selected typed sort')
                 case.check(view(q)['rows'][0]['seeds']==2,'reversed numeric seeds puts2 before9 and100',json.dumps(view(q)['rows']))
                 press(case,q,['S'],lambda:view(q).get('sort',{}).get('reverse') is False,'S restores descending seeds')
-                case.check(True,'retain actual search completion event trace',q.ipc('eventTrace'))
             with Case('qs_search','search_added_marker') as case:
                 press(case,q,['j'],lambda:view(q).get('cursor')==hash,'j selects the merged existing hash')
                 case.check(hash in view(q)['added'],'result shows the server-provided + In your list marker',json.dumps(view(q)))

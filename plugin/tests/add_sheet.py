@@ -27,7 +27,6 @@ def fixture(sandbox):
         file=source/name;file.write_bytes((name.encode()*32768)[:65536]);files.append(file)
     return fixtures.torrent_fixture(source,files),files
 
-def record(case,q,action):case.check(True,action,json.dumps(state(q)))
 
 def sheet(binary,commit):
     name='add_sheet_commit' if commit else 'add_sheet_discard'
@@ -41,7 +40,6 @@ def sheet(binary,commit):
             q.wait(lambda:(q.state().get('view') or {}).get('window',{}).get('visible'))
             keys=['a'] if commit else ['-M','ctrl','v','-m','ctrl']
             q.keys(keys,lambda:state(q).get('visible'));preview=wait_sheet(q,'ready')
-            record(case,q,'review existing-daemon add before any write')
             staged=client.call('torrents.list',{})['result']['torrents']
             case.check(len(staged)==1 and staged[0]['staged'] and not staged[0]['checked'] and len(preview['files'])==2 and not staged[0]['upload_enabled'],'a/Ctrl+V stages real metadata and file choices with no payload transfer or upload permission',json.dumps(preview))
             image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.exists() and image.stat().st_size>0)
@@ -56,7 +54,6 @@ def sheet(binary,commit):
                 requests=[t for t in state(q)['trace'] if t['kind']=='request']
                 case.check(client.call('torrents.list',{})['result']['torrents']==[] and [r['op'] for r in requests]==['torrents.add','torrents.discard'],'Discard removes only the reviewed stage without committing it',json.dumps(state(q)))
             case.check(all(p.read_bytes()==body for p,body in original.items()) and saved.read_bytes()==b'keep existing download','source payloads and existing downloads remain byte-identical',str(saved))
-            record(case,q,'final sheet state and actual request/reply trace')
         finally:q.close()
 
 def drop_routing(binary):
@@ -77,7 +74,6 @@ def drop_routing(binary):
             q.keys(['magnet:?xt=urn:btih:','-s','1200','a'*40,'-k','Return'],lambda:state(q).get('hash')=='a'*40 and state(q).get('owned'))
             case.check(state(q)['source']==dict(magnet=magnet),'typing across the one-second service tick preserves the complete source',json.dumps(state(q)))
             q.keys(['-k','Escape'],lambda:not state(q).get('visible'))
-            case.check(True,'record manual drag qualification boundary','NOT RUN: this is routing under private Sway, not the requested manual Hyprland check')
         finally:q.close()
 
 def handler(binary,suite='qs_dashboard_add',name='handler_confirm_mode'):
