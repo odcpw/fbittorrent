@@ -173,3 +173,6 @@ fn watch_ready_and_may_stall_goldens() {
         println!("{path}: truthful watch detail at 80x24; synthetic rendering only");
     }
 }
+
+#[test]
+fn details_trackers_medium() {assert_render("details-trackers",120,30);}

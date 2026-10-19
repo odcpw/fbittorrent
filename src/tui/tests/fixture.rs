@@ -75,6 +75,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "details-trackers"=>crate::tui::tracker_tests::prepare(&mut app),
         "peers"=>crate::tui::peer_tests::prepare(&mut app),
         "disk"=>crate::tui::disk_tests::prepare(&mut app),
         "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},

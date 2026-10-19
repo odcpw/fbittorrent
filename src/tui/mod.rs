@@ -31,6 +31,11 @@ mod modals_details;
 use modals_details::*;
 #[path = "modals/peers.rs"]
 mod modals_peers;
+#[path = "modals/trackers.rs"]
+mod modals_trackers;
+#[cfg(test)]
+#[path = "tests/trackers.rs"]
+mod tracker_tests;
 #[cfg(test)]
 #[path = "tests/peers.rs"]
 mod peer_tests;
@@ -332,6 +337,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::TopicsSelected {connection,active,result}=>self.topics_selected(connection,active,result),
+            Msg::Trackers {connection,hash,request,forced,result}=>self.trackers_loaded(connection,hash,request,forced,result),
             Msg::ServiceDone {connection,op,args,label,result}=>self.service_done(connection,op,args,label,result),
             Msg::RssAction { revision, label, result, error } => {
                 if revision != self.rss_revision { return Cmd::none(); }

@@ -6,6 +6,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
     let frame:serde_json::Value=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().map(|l|serde_json::from_str::<serde_json::Value>(l).unwrap()).find(|v|v["frame"]["result"]["caps"].is_array()).unwrap();
     let mut hello:api::HelloResult=serde_json::from_value(frame["frame"]["result"].clone()).unwrap();
     if !hello.caps.iter().any(|c|c=="peers") {hello.caps.push("peers".into());}
+    hello.caps.retain(|cap|cap!="trackers"); // Isolate the peers capability in these fixtures.
     app.store.hello(hello);
     app.store.stale=false;
     let t=app.torrents[0].clone();let _=app.open_details(&t);

@@ -307,6 +307,56 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "trackers.reannounce",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "e"
+        ]
+      },
+      "label": "Reannounce",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.refresh",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Refresh",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓",
+          "j"
+        ]
+      },
+      "label": "Next tracker",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑",
+          "k"
+        ]
+      },
+      "label": "Previous tracker",
+      "scope": "modal:details"
+    },
+    {
       "id": "peers.down",
       "keys": {
         "dashboard": null,

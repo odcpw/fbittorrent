@@ -6,12 +6,17 @@ pub(super) enum DetailsTab {
     Overview,
     Files,
     Peers,
+    Trackers,
     Log,
 }
+#[derive(Default)]
+struct TabLabel {key: Option<(DetailsTab,bool,bool)>,text: String}
 pub(super) struct DetailsModal {
     pub hash: String,
     pub name: String,
     pub tab: DetailsTab,
+    pub trackers: modals_trackers::TrackerPanel,
+    tab_label: RefCell<TabLabel>,
     pub peer_offset: usize,
     pub peer_cache: RefCell<modals_peers::PeerTable>,
 }
@@ -34,6 +39,8 @@ impl TuiApp {
             hash: torrent.hash.clone(),
             name: torrent.name.clone(),
             tab: DetailsTab::Overview,
+            trackers: Default::default(),
+            tab_label: RefCell::default(),
             peer_offset: 0,
             peer_cache: RefCell::default(),
         });
@@ -47,8 +54,10 @@ impl TuiApp {
         let tab = tabs[index];
         if tab == current {return Cmd::none();}
         self.details.as_mut().unwrap().tab = tab;
+        if tab!=DetailsTab::Trackers {let panel=&mut self.details.as_mut().unwrap().trackers;panel.busy=false;panel.request=0;}
         self.files = None;
         if tab != DetailsTab::Peers {self.store.peers.clear();}
+        if tab == DetailsTab::Trackers {return self.load_trackers(false);}
         if tab == DetailsTab::Files {
             if let Some(torrent)=self.selected_torrent().cloned() {return self.open_files(&torrent);}
         }
@@ -57,8 +66,23 @@ impl TuiApp {
     pub(super) fn details_tabs(&self) -> Vec<DetailsTab> {
         let mut tabs=vec![DetailsTab::Overview,DetailsTab::Files];
         if self.has_cap("peers") {tabs.push(DetailsTab::Peers);}
+        if self.has_cap("trackers") {tabs.push(DetailsTab::Trackers);}
         tabs.push(DetailsTab::Log);
         tabs
+    }
+    fn details_tab_label(&self) -> std::cell::Ref<'_,str> {
+        let details=self.details.as_ref().expect("visible details");
+        let key=(details.tab,self.has_cap("peers"),self.has_cap("trackers"));
+        let mut cache=details.tab_label.borrow_mut();
+        if cache.key!=Some(key) {
+            cache.text=self.details_tabs().iter().map(|tab| {
+                let name=match tab {DetailsTab::Overview=>"Overview",DetailsTab::Files=>"Files",DetailsTab::Peers=>"Peers",DetailsTab::Trackers=>"Trackers",DetailsTab::Log=>"Log"};
+                if *tab==details.tab {format!("[{name}]")} else {name.to_string()}
+            }).collect::<Vec<_>>().join("  ")+"    [ / ] tabs";
+            cache.key=Some(key);
+        }
+        drop(cache);
+        std::cell::Ref::map(details.tab_label.borrow(),|c|c.text.as_str())
     }
     pub(super) fn has_cap(&self, cap: &str) -> bool {
         self.store.hello.as_ref().is_some_and(|hello|hello.caps.iter().any(|c|c==cap))
@@ -96,23 +120,16 @@ impl TuiApp {
         let rows = Flex::vertical()
             .constraints([Constraint::Fixed(2), Constraint::Fill])
             .split(inner);
-        let peers=self.has_cap("peers");
-        let tabs = match (details.tab,peers) {
-            (DetailsTab::Overview,false)=>"[Overview]  Files  Log",
-            (DetailsTab::Files,false)=>"Overview  [Files]  Log",
-            (DetailsTab::Log,false)=>"Overview  Files  [Log]",
-            (DetailsTab::Overview,true)=>"[Overview]  Files  Peers  Log",
-            (DetailsTab::Files,true)=>"Overview  [Files]  Peers  Log",
-            (DetailsTab::Peers,_)=>"Overview  Files  [Peers]  Log",
-            (DetailsTab::Log,true)=>"Overview  Files  Peers  [Log]",
-        };
-        Paragraph::new(format!("{tabs}    [ / ] tabs"))
+        let tabs=self.details_tab_label();
+        Paragraph::new(&*tabs)
             .style(th.accented())
             .render(rows[0], frame);
         if self.selected_torrent().is_none() {
             Paragraph::new("This torrent is no longer in your list.")
                 .style(th.dimmed())
                 .render(rows[1], frame);
+        } else if details.tab==DetailsTab::Trackers {
+            self.view_trackers(rows[1],frame);
         } else if details.tab==DetailsTab::Peers {
             self.view_peers(rows[1],frame);
         } else if details.tab==DetailsTab::Log {

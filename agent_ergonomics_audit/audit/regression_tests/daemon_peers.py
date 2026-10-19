@@ -132,6 +132,11 @@ def tui_peers_tab(binary, systemd):
             for width,height in [(120,30),(160,45),(80,24)]:
                 resized=ui.tmux('resize-window','-t',target,'-x',str(width),'-y',str(height))
                 case.check(resized.returncode==0,'resize Peers tab to '+str((width,height)),resized.stderr)
+                x,y=(0,0) if width<100 or height<30 else ((width-100)//2,(height-30)//2)
+                def aligned():
+                    pane=ui.capture(target);lines=pane.splitlines()
+                    return len(lines)>y and lines[y].find('╭ peer-payload.bin')==x,pane
+                swarm.h.wait_for(aligned,'Peers panel redraws at the resized geometry')
                 ui.assert_pane(target,'127.0.0.1:')
                 ui.assert_pane(target,'yes')
                 ui.assert_pane(target,'no')
@@ -153,7 +158,7 @@ def tui_peers_tab(binary, systemd):
             case.check(any(p['downloaded']>previous.get(p['addr'],p['downloaded']) for p in observations[1][0]) and observations[0][1]!=observations[1][1],
                        'two reads two seconds apart show moving real counters and a changed terminal',json.dumps(observations))
             ui.keys(target,']')
-            ui.assert_pane(target,'[Log]')
+            ui.assert_pane(target,'[Trackers]')
             swarm.h.wait_for(lambda:((counts:=subscriptions()).get(topic,0)==0,json.dumps(counts)),'leaving Peers releases the detail topic')
             ui.keys(target,'[')
             ui.assert_pane(target,'[Peers]')

@@ -147,6 +147,7 @@ pub enum Msg {
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
     Files(String, Result<Vec<TorrentFile>, String>),
+    Trackers {connection:Option<u64>,hash:String,request:u64,forced:bool,result:Result<Vec<crate::api::Tracker>,String>},
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
 
