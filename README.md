@@ -97,15 +97,34 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 ## Install
 
 ```bash
-scripts/install.sh                 # locked build, atomic binary replacement, setup --magnet
-fbittorrent search --install        # provider scripts; Python 3 is required
-ln -s "$PWD/plugin/oliver.torrents" ~/.config/omarchy/plugins/oliver.torrents
-omarchy plugin enable oliver.torrents
-omarchy bar put oliver.torrents --before omarchy.tailscale
+scripts/install.sh                       # locked release build, atomic replacement, setup --magnet --plugin=link
+fbittorrent setup --magnet --plugin=copy  # stable plugin copy instead of a checkout symlink
+fbittorrent setup --magnet --plugin=link --dry-run --json  # exact plan, no changes
+fbittorrent search --install              # provider scripts; Python 3 required
 ```
 
-Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
-`torrents.*`.
+Setup writes the static user unit, desktop/MIME entries and icon, places the
+plugin in the bar only when missing, and updates only `torrents.*` menu entries.
+Open and Search summon the dashboard; Terminal keeps the TUI. Stop is shown
+while `fbittorrent status --quiet` succeeds. Repeating setup with the same
+options leaves files and commands unchanged. Nothing starts at login.
+
+For a private prefix or a build already produced by CI, use
+`scripts/install.sh --prefix /path/to/prefix --binary /path/to/fbittorrent` with
+an isolated HOME and XDG directories. The default prefix is `~/.local`.
+
+`fbittorrent setup --uninstall` removes desktop integration and keeps saved
+records, RSS, Shows and downloaded files. `setup --purge --yes` also removes
+application config/cache/state/data; it keeps downloaded payloads.
+
+Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activity):
+
+```lua
+o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
+```
+
+Add it to your own bindings file if desired. Setup does not change keybindings
+or reload your shell.
 
 ## Lifecycle
 

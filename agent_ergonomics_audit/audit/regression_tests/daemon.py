@@ -3811,6 +3811,8 @@ CASES = {function.__name__: function for function in
           api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
+from desktop_setup import CASES as DESKTOP_SETUP_CASES
+CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",

@@ -12,7 +12,7 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.2";
+pub const CONTRACT_VERSION: &str = "1.2.3";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
 const SERVE_LIMITATIONS: &str = "serve has no idle exit yet; systemd starts it on demand for writes or a TUI. API v1 serves torrents, files, mutations and IMDb and provides interactive presence and owner commands; subscriptions and automatic idle/upgrade policy follow their owner beads. CLI and TUI data still use the framed legacy socket (engine.sock). Settings use app.settings.get/set while running and the private config while stopped.";
@@ -184,7 +184,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs keys", aliases: &[], summary: "Keyboard catalogue; --surface tui|dashboard|popup|all, Markdown or --json", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text or JSON", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "setup", aliases: &[], summary: "Configure storage and desktop integration; --dry-run lists actions; --plugin link/copy; --uninstall keeps data", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
     let cmds = command_tree(&cmds);
@@ -205,7 +205,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
         },
         "caps": crate::api::ops::app::CAPS,
-        "changes": [{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
+        "changes": [{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
             "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
