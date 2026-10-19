@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("disk", include_str!("../../contracts/ipc/v1/disk.ndjson")),
     ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),

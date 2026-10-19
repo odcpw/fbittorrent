@@ -8,6 +8,7 @@ mod sdnotify;
 mod signals;
 mod upgrade;
 mod test_ready;
+pub(crate) mod supervisor;
 pub mod slot;
 
 use crate::{
@@ -38,6 +39,7 @@ pub struct Daemon {
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
     pub(crate) logs: Arc<log::Ring>,
+    pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
@@ -282,6 +284,22 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
+        if let Ok(engine::ops::EngineResult::Torrents(rows)) = daemon.execute(engine::ops::EngineOp::Info) {
+            let (retries, notify) = daemon.disk.lock().unwrap().sample(&rows, Instant::now());
+            if notify { daemon.notifier.disk_low(); }
+            for (hash, free) in retries {
+                let result = match &daemon.slot.read().unwrap().slot {
+                    Slot::Running(app) => app.dispatcher().retry_disk_full(&hash),
+                    _ => Ok(false),
+                };
+                // Consume this rise even when the attempt fails; the next
+                // ENOSPC observation records a fresh baseline for another rise.
+                daemon.disk.lock().unwrap().restarted(&hash);
+                if result.as_ref().is_ok_and(|retry| *retry) {
+                    eprintln!("INFO engine disk_full_recovered hash={hash} free_bytes={free}");
+                } else if let Err(error) = result { eprintln!("ERROR engine disk_full retry failed hash={hash} message={:?}",format!("{error:#}")); }
+            }
+        }
         let timeout = {
             let mut policy = daemon.policy.lock().unwrap();
             let now = Instant::now();
@@ -297,7 +315,7 @@ fn supervise(
         let timeout = if cfg.network_interface.is_some() {
             timeout.min(Duration::from_secs(1))
         } else { timeout };
-        let request = daemon.lifecycle.wait(timeout.min(upgrade.wait(Instant::now())));
+        let request = daemon.lifecycle.wait(timeout.min(Duration::from_secs(5)).min(upgrade.wait(Instant::now())));
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -362,6 +380,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
         logs: log_capture.ring.clone(),
+        disk: Default::default(),
         imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),

@@ -151,6 +151,8 @@ pub struct AddResult {
     pub duplicate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk: Option<DiskSpace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -148,11 +148,19 @@ pub struct TorrentView {
     pub completed_at: Option<i64>,
     pub force: bool,
     #[serde(skip)]
+    pub piece_length: Option<u64>,
+    #[serde(skip)]
     legacy: Legacy,
 }
 
 impl TorrentView {
     fn retain_restore_reason(&mut self) {
+        if self.error.as_deref().is_some_and(super::disk::is_full) {
+            self.state = TorrentState::Error;
+            self.reason = Some("disk_full".into());
+            if let Some(message) = &mut self.error { if !message.starts_with("Disk full") { *message = format!("Disk full: {message}"); } }
+            return;
+        }
         if self
             .error
             .as_deref()
@@ -202,6 +210,7 @@ impl TorrentView {
             added_at: record.added_on,
             completed_at: (record.completion_on > 0).then_some(record.completion_on),
             force: false,
+            piece_length: None,
             legacy: Legacy {
                 source,
                 facts,
@@ -241,6 +250,7 @@ impl TorrentView {
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
         if let Some(metadata) = metadata {
+            view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));
             let content = if metadata.file_infos.len() == 1 {
                 handle
                     .output_folder()

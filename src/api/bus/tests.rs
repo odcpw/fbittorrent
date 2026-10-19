@@ -28,6 +28,7 @@ fn rev_monotonic() {
         files: BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
+        disk: Disk {needed_bytes:0,low:false,free_bytes:None},
         daemon: json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),
     };
     subscription.update(&sample, &[], 1).unwrap();

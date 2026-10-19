@@ -3783,10 +3783,11 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 CASES = {function.__name__: function for function in
-         (alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
+         (disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,

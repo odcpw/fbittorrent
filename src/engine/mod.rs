@@ -36,6 +36,7 @@ mod ledger;
 mod bus;
 mod queue;
 mod settings;
+pub(crate) mod disk;
 pub mod ops;
 mod restore;
 mod dormant;

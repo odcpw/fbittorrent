@@ -62,6 +62,7 @@ impl Shared {
                         name: None,
                         duplicate: None,
                         deferred: None,
+                        disk: None,
                     });
                     if self.begin_confirmation(&job, pending, Confirmation::Worker, false) {
                         let result = ops::torrents::dispatch(&self.daemon, &job.request.call);

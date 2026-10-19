@@ -385,3 +385,36 @@ cap via changes[].cap; agent unit test pins fixture equality and this coverage.
 passes foreground and systemd (`caps-replay-{foreground,systemd}/`). No replay
 mask or deferral was added. Earlier full-suite failure is resolved for these rows;
 no additional full-suite run is claimed for this targeted bookkeeping delta.
+
+At approximately 10:33 CEST the worktree's entire ignored target tree disappeared
+while P5-07 was being edited; cause not established. Committed source is intact,
+but earlier raw target/test-logs artifacts are unavailable. SBH was observed
+running in enforce mode under disk pressure; this does not by itself establish
+causation. The recreated target tree and /tmp/fbt-track-a-evidence are protected;
+fresh logs are mirrored there. Earlier numerical results remain recorded above
+and in the session output, not promoted into currently available raw evidence.
+
+## P5-07 — daemon/API/CLI (fbt-p5-07-gei)
+
+Added five-second per-path statvfs sampling, filesystem-aware Summary.disk,
+ENOSPC classification, per-torrent recovery baselines under the ruling above,
+one-per-life disk notification, immediate explicit start retry, and add capacity
+warnings with binary units. Contract 1.2.8 adds DiskSpace/add.disk and disk.ndjson;
+neighbouring bus, API add/result/dispatch, CLI and notifier changes carry these
+fields without a new operation or cap. `python3 /tmp/fbt-track-a-run.py api`,
+`units engine::disk`, `units supervisor::`, `build` pass (89 API tests, four policy
+tests). `cases add_warns_disk disk_low_banner disk_full_reason disk_full_recovers`
+passes all four real 64 MiB tmpfs / 100 MiB local-peer cases, including actual
+ENOSPC, one window-action notice, warning before error, and increased allocated
+blocks/downloaded bytes after truncating a 32 MiB filler with no start request.
+Explicit start is acknowledged on the failed record. Evidence:
+`target/test-logs/fbt-p5-07-gei/{module-tests,unit-disk,unit-supervisor,build,live-disk}/`;
+the inner `live-disk/disk-workers/` JSONLs retain free/needed, row and retry-log
+observations. The tests run foreground in an owned user/mount namespace because
+a user unit outside it cannot see the tmpfs; no systemd-mode disk proof is claimed.
+`full` passes 378/0/3 ignored (`full-final/`, cargo test --locked -- --nocapture).
+Fresh exact hello/error replay passes both modes (`fresh-caps-{foreground,systemd}/`).
+Every fresh run is mirrored under `/tmp/fbt-track-a-evidence/fbt-p5-07-gei/`.
+UI banner/urgent icon/add-sheet refusal/goldens: deferred to track C/D. No all.sh
+between track beads by owner instruction. Follow-up: no disk-capacity proof yet
+for deferred URL/magnet metadata; these adds omit disk until size is known.

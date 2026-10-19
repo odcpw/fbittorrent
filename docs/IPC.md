@@ -165,7 +165,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
-| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}` | yes | P1-06, P1-09, P3-06, P7-09 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
@@ -662,3 +662,22 @@ Contract 1.2.7 updates hello/error fixture capability arrays to the nine live
 capabilities. Every added capability has a capabilities.changes[] entry with
 its `cap` name. Replay compares these arrays exactly; no normalization mask is
 added. The documented hello example is updated to the same fixture bytes.
+
+### P5-07: disk warnings and ENOSPC recovery (contract 1.2.8)
+
+Summary.disk is sampled every five seconds, once per distinct save path; free
+space is absent when statvfs fails. Needed bytes cover run-intent incomplete
+records, including disk-full errors; completed/paused/seeding/parked records are
+excluded. Filesystems shared by paths are counted once. Low means any destination
+has free < its needed + 512 MiB. A new ENOSPC records the affected destination's
+free space and piece length, and reports error/disk_full with “Disk full”. One
+normal “Disk almost full” notification offers the window action per daemon life.
+
+Per the 2026-10-19 orchestrator ruling, automatic retry requires a five-second
+sample with free >= the ENOSPC baseline + max(16 MiB, one piece). Retry consumes
+that rise; repeated ENOSPC records a new baseline. It logs disk_full_recovered.
+Explicit start retries immediately; paused intent is checked atomically before
+an automatic retry. `torrents.add` optionally adds `disk: {free_bytes: u64,
+needed_bytes: u64}` when known selected metadata exceeds free space; the CLI keeps
+exit 0 and adds warnings[].code=disk_low with a binary-unit message. The new
+disk.ndjson transcript covers add capacity, summary low and disk_full state.

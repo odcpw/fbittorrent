@@ -42,7 +42,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "torrents.get", mutating: false, idempotent: false, since: "P1-06",
         args: "`hash: hash`", result: "`{torrent: TorrentDetail}`" },
     Operation { name: "torrents.add", mutating: true, idempotent: true, since: "P1-06",
-        args: "`source: {magnet: str} | {url: str} | {path: str} | {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual|search|rss|shows|clipboard|handler|agent)?`", result: "`{state: enum(pending|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}`" },
+        args: "`source: {magnet: str} | {url: str} | {path: str} | {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual|search|rss|shows|clipboard|handler|agent)?`", result: "`{state: enum(pending|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}`" },
     Operation { name: "torrents.start", mutating: true, idempotent: true, since: "P1-06",
         args: "`hashes: [hash]` (1..256), `force: bool?`", result: "`{state: \"done\", started: [hash], skipped: [{hash, reason: open(complete_no_seed|already_running|staged)}]}`" },
     Operation { name: "torrents.stop", mutating: true, idempotent: true, since: "P1-06",

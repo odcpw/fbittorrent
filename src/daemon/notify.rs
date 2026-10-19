@@ -120,6 +120,11 @@ impl Notifier {
             actions,
         });
     }
+    pub fn disk_low(&self) {
+        self.enqueue(Notice { kind:"disk".into(), hash:"disk".into(), serial:0,
+            title:"Disk almost full".into(), body:String::new(), target:None,
+            actions:vec![("window","Open window")] });
+    }
     pub fn failed(&self) {
         self.enqueue(Notice {
             kind: "failed".into(),
