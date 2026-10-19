@@ -115,6 +115,7 @@ impl Shared {
                 ),
                 Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
                 Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
+                Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }

@@ -35,7 +35,11 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 mod ledger;
 mod bus;
 mod queue;
+mod queue_policy;
+mod queue_ops;
 pub mod recheck;
+pub mod undo;
+mod undo_ops;
 mod settings;
 pub mod ops;
 mod restore;
@@ -89,8 +93,10 @@ struct Inner {
     directory: PathBuf,
     default_folder: PathBuf,
     rechecks: recheck::Rechecks,
+    undo: std::sync::Mutex<Arc<undo::History>>,
     stopping: AtomicBool,
     max_active_downloads: AtomicUsize,
+    queue_pins: std::sync::Mutex<HashSet<String>>,
     network_blocked: AtomicBool,
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
     // Removing/retrying an intent does not end the previous task's cleanup.
@@ -190,8 +196,10 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         directory,
         default_folder,
         rechecks: Default::default(),
+        undo: Default::default(),
         stopping: AtomicBool::new(false),
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
+        queue_pins: Default::default(),
         network_blocked: AtomicBool::new(false),
         restores: std::sync::Mutex::new(HashMap::new()),
         retired_restores: std::sync::Mutex::new(Vec::new()),

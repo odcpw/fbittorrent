@@ -233,10 +233,10 @@
             upload_limit: NO_UPLOAD_LIMIT,
             ratio_limit: 0.0,
             category: String::new(),
-            tags: String::new(),
+            tags: String::new(), origin: "manual".into(),
             added_on: 1,
             completion_on: 0,
             paused: false,
-            resume_after_migration: false, deferred: false, staged: false,
+            resume_after_migration: false, deferred: false, staged: false, force: false,
         }
     }

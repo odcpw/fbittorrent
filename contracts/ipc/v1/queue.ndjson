@@ -1,0 +1,8 @@
+{"dir":"c2s","frame":{"args":{"hashes":["0123456789abcdef0123456789abcdef01234567"],"on":true},"id":1,"op":"torrents.force_start"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"args":{"hashes":["0123456789abcdef0123456789abcdef01234567"],"on":false},"id":2,"op":"torrents.force_start"}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"args":{"hash":"0123456789abcdef0123456789abcdef01234567","to":"top"},"id":3,"op":"torrents.queue_move"}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"queue_pos":1,"state":"done"}}}
+{"dir":"c2s","frame":{"args":{"force":true,"hashes":["0123456789abcdef0123456789abcdef01234567"]},"id":4,"op":"torrents.start"}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"skipped":[],"started":["0123456789abcdef0123456789abcdef01234567"],"state":"done"}}}

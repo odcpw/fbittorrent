@@ -262,6 +262,10 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.force_start")]
+    TorrentsForceStart { args: SetSeedArgs },
+    #[serde(rename="torrents.queue_move")]
+    TorrentsQueueMove { args: QueueMoveArgs },
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
     #[serde(rename = "app.settings.get")]
@@ -329,6 +333,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsForceStart {..} => "torrents.force_start",
+            Self::TorrentsQueueMove {..} => "torrents.queue_move",
             Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
@@ -374,3 +380,10 @@ fn deserialize_settings_patch<'de, D: Deserializer<'de>>(d: D) -> Result<serde_j
     }
     Ok(patch)
 }
+
+#[derive(Debug,Clone,Copy,PartialEq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum QueueTo { Top, Up, Down, Bottom }
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueMoveArgs { pub hash: Hash, pub to: QueueTo }
