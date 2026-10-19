@@ -43,7 +43,7 @@ function describe(svc) {
     result.rate=Model.barRate(dl,true)
   } else if (counts.seeding>0) {
     result.state="seeding"; result.glyph=Glyphs.upload; result.tone="normal"
-    result.tooltip="↑ " + Model.barRate(ul,false) + " · " + counts.seeding + " seeding"; result.rate=Model.barRate(ul,true)
+    result.tooltip="↑ " + Model.barRate(ul,false) + " · " + counts.seeding + " uploading"; result.rate=Model.barRate(ul,true)
   } else {
     result.state="idle"
     var remaining=summary.daemon && summary.daemon.idle_exit_in_s

@@ -45,10 +45,10 @@ PanelKeyCatcher {
   function unregisterConfirm(hash,strip){if(confirms[hash]===strip)delete confirms[hash]}
   function currentStrip(){return stopping ? stopStrip : pendingRemoval ? confirms[pendingRemoval.hash] : null}
   function rebuild() {
-    var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"OTHER",key:"other",rows:[]}]
-    svc.torrents.forEach(function(t){var group=Model.isActive(t) || t.state==="seeding" ? 0 : t.state==="queued" ? 1 : t.state==="paused" ? 2 : t.state==="done" ? 3 : 4;groups[group].rows.push(t)})
+    var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
+    svc.torrents.forEach(function(t){var group=t.staged ? 4 : Model.isActive(t) || t.state==="seeding" ? 0 : t.state==="queued" ? 1 : t.state==="paused" ? 2 : t.state==="done" ? 3 : 5;groups[group].rows.push(t)})
     var all=[],parts=[]
-    groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="other" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
+    groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
     var items=[];parts.forEach(function(g){items.push({header:true,group:g});g.visibleRows.forEach(function(t,i){items.push({header:false,torrent:t,index:g.start+i})})});syncEntries(items);sections=parts;rows=all;rowIndex=Math.max(0,Math.min(rowIndex,rows.length-1))
     if(!cursorActive)focusSection=rows.length ? "rows" : "header"
     if(pendingRemoval && !svc.store.torrents[pendingRemoval.hash])cancelRemove()
@@ -116,7 +116,7 @@ PanelKeyCatcher {
     Column {
       id:column;width:flick.width;spacing:Style.spacing.xxl
       PanelHero {
-        width:parent.width;title:"Torrents";meta:Model.heroMeta(svc.status);detail:(svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
+        width:parent.width;title:"Torrents";meta:svc.online && svc.status.total===0 && svc.store.counts.reviewing>0 ? "Reviewing…" : Model.heroMeta(svc.status);detail:(svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs

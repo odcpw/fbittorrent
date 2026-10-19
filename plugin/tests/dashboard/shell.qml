@@ -71,6 +71,7 @@ ShellRoot {
   IpcHandler {
     target:"fbt-dashboard"
     function renderedRows():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.tableRows(dashboard.item.torrents) : [])}
+    function viewTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.texts(dashboard.item.torrents) : [])}
     function detailTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? root.texts(dashboard.item.torrents.pane) : [])}
     function setting(key:string,valueJson:string):string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.settingsSheet)return "refused"

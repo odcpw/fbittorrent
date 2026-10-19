@@ -13,10 +13,10 @@ Column {
   signal chosen(string key)
   signal routed(string view)
   readonly property bool vpn:!!(service.store.network.selection || service.store.settings.network_interface)
-  readonly property var choices:[{key:"all",label:"All"},{key:"downloading",label:"Downloading"},{key:"ready",label:"Ready"},{key:"queued",label:"Queued"},{key:"paused",label:"Paused"},{key:"done",label:"Done"},{key:"seeding",label:"Seeding"},{key:"error",label:"Errors"}].concat(vpn ? [{key:"waiting_vpn",label:"Waiting for VPN"}] : [])
+  readonly property var choices:[{key:"all",label:"All"},{key:"downloading",label:"Downloading"},{key:"ready",label:"Ready"},{key:"queued",label:"Queued"},{key:"paused",label:"Paused"},{key:"reviewing",label:"Reviewing"},{key:"done",label:"Done"},{key:"seeding",label:"Uploading"},{key:"error",label:"Errors"}].concat(vpn ? [{key:"waiting_vpn",label:"Waiting for VPN"}] : [])
   function count(key) {
     if(!service.status.loaded)return undefined
-    var c=service.store.summary.counts || service.store.counts
+    var c=service.store.counts
     if(key==="all")return c.total || 0
     if(key==="downloading")return (c.downloading || 0)+(c.stalled || 0)+(c.metadata || 0)+(c.checking || 0)
     return c[key] || 0
