@@ -92,7 +92,7 @@ function create(io, options) {
     if (c.helloSent) return
     c.helloSent = true; c.connecting = true; c.graceful = false; c.lastFrame = now()
     write({ op: "hello", args: { proto: 1, client: { name: "oliver.torrents",
-      version: o.version || "0.2.0", kind: "bar" }, interactive: false } }, false)
+      version: o.version || "0.2.0", kind: "bar" }, interactive: c.dashboardVisible } }, false)
     changed()
   }
   c.disconnected = function() {
@@ -130,10 +130,15 @@ function create(io, options) {
     c.lastError = { code: "invalid_message", message: message, retryable: false }
     io.disconnect(); c.disconnected()
   }
+  function presence() {
+    var args = { interactive: c.dashboardVisible, glance: c.popupOpen }
+    if (c.caps.indexOf("dashboard_presence") >= 0) args.dashboard_visible = c.dashboardVisible
+    return args
+  }
   c.visibility = function(popup, dashboard, details) {
     c.popupOpen = !!popup; c.dashboardVisible = !!dashboard; c.details = details || []
     if (c.online) {
-      c.request("app.client", { interactive: c.dashboardVisible, glance: c.popupOpen })
+      c.request("app.client", presence())
       c.subscribeAll()
     }
   }
@@ -233,7 +238,7 @@ function create(io, options) {
         else fail(e, { code: "timeout", message: "no answer", retryable: true }, "no answer")
       })
       if (o.instance && previous !== c.instance) o.instance(c.instance)
-      c.request("app.client", { interactive: c.dashboardVisible, glance: c.popupOpen })
+      c.request("app.client", presence())
       c.subscribeAll()
     } else if (!frame.ok) fail(entry, frame.error)
     else if (entry.ref && c.actions[entry.ref]) {

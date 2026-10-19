@@ -221,3 +221,22 @@ def idle_exit_download_keeps_alive(binary, systemd):
                     h.lock_free()
                 shutdown(case, seedh, seed, seedclient)
                 seedh.lock_free()
+
+
+def dashboard_bar_presence(binary, systemd):
+    with owned('dashboard_bar_presence', binary, systemd) as (case, box, h, p), d.ApiConn(h) as client:
+        response=hello(client,'bar',interactive=True)
+        case.check('dashboard_presence' in response['result']['caps'],'server negotiates explicit shared-dashboard presence',json.dumps(response))
+        client.call('app.client',dict(interactive=True,dashboard_visible=True,glance=False))
+        _, summary=subscribe(client)
+        case.check('interactive' in summary['busy_reasons'] and 'idle_exit_in_s' not in summary,
+                   'visible dashboard on the shared bar socket cancels the idle countdown',json.dumps(summary))
+        hold(case,p,client,4,'visible dashboard keeps daemon alive beyond its two-second idle deadline')
+        # Clear the visibility marker while leaving the old interactive flag true:
+        # even a stale bar interactive claim must not keep a hidden dashboard alive.
+        client.call('app.client',dict(dashboard_visible=False))
+        summary=fresh(h)
+        case.check(summary['busy_reasons']==[] and 'idle_exit_in_s' in summary,
+                   'hiding dashboard clears interactive presence despite a stale interactive flag',json.dumps(summary))
+        client.call('app.client',dict(interactive=False,dashboard_visible=False,glance=False))
+        idle_exit(case,h,p,client)

@@ -1,0 +1,6 @@
+{"dir":"c2s","frame":{"id":1,"op":"app.client","args":{"interactive":true,"dashboard_visible":true,"glance":false}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{}}}
+{"dir":"c2s","frame":{"id":2,"op":"app.client","args":{"interactive":true,"dashboard_visible":false,"glance":false}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{}}}
+{"dir":"c2s","frame":{"id":3,"op":"app.client","args":{"interactive":false,"dashboard_visible":false,"glance":false}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{}}}

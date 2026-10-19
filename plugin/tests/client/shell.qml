@@ -105,6 +105,18 @@ ShellRoot {
     s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)
     console.log("FBTQS-PASS capabilities")
+    s=session();s.c.visibility(false,true,[]);s.hello(["torrents","subscribe","dashboard_presence"])
+    var declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",JSON.parse(s.writes[0]).args.interactive && declarations[0].args.dashboard_visible && declarations[0].args.interactive,
+      "already visible dashboard declares presence on connect",JSON.stringify(declarations))
+    s.c.visibility(false,false,[])
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",declarations[declarations.length-1].args.dashboard_visible===false && declarations[declarations.length-1].args.interactive===false,
+      "hiding dashboard clears shared-socket presence",JSON.stringify(declarations))
+    s=session();s.hello(["torrents","subscribe"])
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",!("dashboard_visible" in declarations[0].args),"older strict servers do not receive the additive marker",JSON.stringify(declarations))
+    console.log("FBTQS-PASS dashboard_presence")
     Qt.callLater(function() { Quickshell.execDetached(["qs", "kill", "-p", Quickshell.shellPath(".")]) })
   }
 }

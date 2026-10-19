@@ -3207,7 +3207,7 @@ from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_
 from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
 from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
-from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
+from daemon_policy import (dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
     idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
@@ -3818,7 +3818,7 @@ CASES = {function.__name__: function for function in
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
           notify_completed, notify_action_open, notify_action_default, notify_action_folder,
           notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
-          idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
           idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
           idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
           idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,

@@ -151,6 +151,9 @@ pub struct HelloArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppClientArgs {
+    /// The shared bar socket explicitly declares an open dashboard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dashboard_visible: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

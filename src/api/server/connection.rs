@@ -168,7 +168,7 @@ impl Shared {
     fn presence(&self, connection: &Connection) {
         let client = connection.client.lock().unwrap();
         let interactive = client.interactive && client.client.as_ref()
-            .is_some_and(|c| c.kind != ClientKind::Bar);
+            .is_some_and(|c| c.kind != ClientKind::Bar || client.dashboard_visible);
         let glance = client.glance;
         drop(client);
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
@@ -342,6 +342,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             *connection.client.lock().unwrap() = ClientState {
                 client: Some(args.client.clone()),
                 interactive: args.interactive.unwrap_or(false),
+                dashboard_visible: false,
                 glance: false,
                 caps: validation::NegotiatedCaps::from_hello(&hello),
             };
@@ -375,6 +376,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             if let Some(value) = args.interactive {
                 client.interactive = value;
             }
+            if let Some(value)=args.dashboard_visible {client.dashboard_visible=value;}
             if let Some(value) = args.glance {
                 client.glance = value;
             }

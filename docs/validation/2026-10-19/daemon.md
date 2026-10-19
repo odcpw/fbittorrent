@@ -588,3 +588,34 @@ all examples against exact fixture lines. Logs under
 `target/test-logs/fbt-p5-01-c1a/`. Intermediate compiling checkpoint: daemon
 swarm cases, final fork suite and full app suite remain pending while the
 owner-priority M1a dashboard-presence fix is taken next. No P5-01 closure claimed.
+
+## M1a priority — visible dashboard presence (fbt-m1a-kug)
+
+The shared bar/dashboard socket now declares negotiated
+`app.client.dashboard_visible`; a bar counts as interactive only when that
+marker and interactive are true. Hiding or disconnecting clears presence.
+The original `idle_exit_bar_does_not` assertion (bar sends interactive true)
+is unchanged. ApiClient declares visible state after connect/reconnect and
+clears both flags when hidden, omitting the additive marker for older strict
+servers. Contract 1.2.13 adds dashboard_presence, changes[], the new transcript,
+and exact hello/error caps. Neighbours: request/server state, capability/docs
+bookkeeping, plugin transport and its isolated Quickshell test.
+
+`FBT_BEAD=fbt-m1a-kug python3 /tmp/fbt-track-a-run.py check`, `build`, and the
+single `full` run pass: **384 passed, 0 failed, 3 ignored**. `cli_cases
+ dashboard_bar_presence idle_exit_no_torrents idle_exit_download_keeps_alive
+ idle_exit_interactive_keeps_alive idle_exit_bar_does_not
+ idle_exit_parked_keeps_alive idle_exit_disabled_never_exits
+ idle_exit_disabled_shutdown_drains idle_exit_glance_pauses
+ idle_exit_glance_drop_resumes idle_exit_mutation_keeps_alive` passes **11/11**
+in foreground (`foreground/`) and with `FBT_SYSTEMD=1` (`systemd/`). The visible
+case holds for 4 s past a 2 s idle policy, reports interactive, clears it even
+with a stale interactive=true after hiding, then receives bye:idle, exit 0 and
+both sockets removed (~2.95 s in foreground). Bar-only, transfer, parked,
+disabled, mutation and popup-glance rules all remain green. `qs` mode runs
+`plugin/tests/run-qs.py client plugin/tests/client` with a private shell and
+logs **13/13**, including visible-connect, hide and old-server declarations
+(`qs-final/`; initial wrapper import setup failure is retained in `qs/`).
+Evidence: `target/test-logs/fbt-m1a-kug/`, mirrored under
+`/tmp/fbt-track-a-evidence/fbt-m1a-kug/`. No live shell or owner state was used;
+no all.sh between track commits. All requested criteria met; no follow-up.
