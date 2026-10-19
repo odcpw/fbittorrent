@@ -62,6 +62,13 @@ ShellRoot {
   }
   IpcHandler {
     target:"fbt-dashboard"
+    function eventTrace():string{return JSON.stringify(service.store.events)}
+    function searchFocus():string {
+      var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null
+      return JSON.stringify({search:!!view,active:view ? view.activeFocus : null,visible:view ? view.visible : null,query:query ? {active:query.activeFocus,focus:query.focus,text:query.text,visible:query.visible} : null,state:service.dashboardState})
+    }
+    function fileEditing():bool{return dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? dashboard.item.torrents.pane.editing : false}
+    function logEntries():string{return JSON.stringify(service.store.logEntries(service.detailFlow ? service.detailFlow.hash : ""))}
     function confirmed(hash:string):string{return JSON.stringify(service.store.torrents[hash] || null)}
     function activeWindow():bool{return dashboard.item ? dashboard.item.isWindowActive() : false}
     function startScrolling():bool {

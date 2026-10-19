@@ -26,7 +26,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |_| true,
         Some(|a| a.on_files_action(Intent::Down)),
-        T,
+        TD,
         None,
         None,
         None
@@ -39,7 +39,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |_| true,
         Some(|a| a.on_files_action(Intent::Up)),
-        T,
+        TD,
         None,
         None,
         None
@@ -52,7 +52,7 @@ pub(super) const ACTIONS: &[Action] = &[
         20,
         |_| true,
         Some(|a| a.on_files_action(Intent::Toggle)),
-        T,
+        TD,
         None,
         None,
         None
@@ -65,7 +65,7 @@ pub(super) const ACTIONS: &[Action] = &[
         40,
         |_| true,
         Some(|a| a.on_files_action(Intent::All)),
-        T,
+        TD,
         None,
         None,
         None
@@ -78,7 +78,7 @@ pub(super) const ACTIONS: &[Action] = &[
         40,
         |_| true,
         Some(|a| a.on_files_action(Intent::None)),
-        T,
+        TD,
         None,
         None,
         None
@@ -186,7 +186,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |_| true,
         Some(|a| a.on_providers_action(Intent::Down)),
-        T,
+        TD,
         None,
         None,
         None
@@ -199,7 +199,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |_| true,
         Some(|a| a.on_providers_action(Intent::Up)),
-        T,
+        TD,
         None,
         None,
         None
@@ -212,7 +212,7 @@ pub(super) const ACTIONS: &[Action] = &[
         20,
         |_| true,
         Some(|a| a.on_providers_action(Intent::Toggle)),
-        T,
+        TD,
         None,
         None,
         None

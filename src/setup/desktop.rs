@@ -37,6 +37,23 @@ fn write(actions: &mut Vec<Action>, path: PathBuf, bytes: Vec<u8>) {
         actions.push(item);
     }
 }
+// Validate installation permissions even when the installed bytes already match.
+// A healthy idempotent run still has an empty plan and writes no probe file.
+fn plan_unit(actions: &mut Vec<Action>, path: PathBuf, bytes: Vec<u8>) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut parent = path.parent().context("no unit parent")?;
+    while !parent.exists() {
+        parent = parent.parent().context("no existing unit ancestor")?;
+    }
+    let name = std::ffi::CString::new(parent.as_os_str().as_bytes())?;
+    if !parent.is_dir() || unsafe {
+        libc::faccessat(libc::AT_FDCWD, name.as_ptr(), libc::W_OK | libc::X_OK, libc::AT_EACCESS)
+    } != 0 {
+        bail!("unit installation directory is not writable: {}", parent.display());
+    }
+    write(actions, path, bytes);
+    Ok(())
+}
 fn command(actions: &mut Vec<Action>, name: &str, args: &[&str]) {
     let mut item = action("command", name);
     item.args = args.iter().map(|s| s.to_string()).collect();
@@ -223,11 +240,11 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             );
         }
         let executable = std::env::current_exe()?;
-        write(
+        plan_unit(
             &mut actions,
             unit.clone(),
             super::daemon_unit(&executable)?.into_bytes(),
-        );
+        )?;
         if let Some(item) = actions.iter_mut().find(|a| a.path == unit) {
             item.kind = "unit";
             item.args = vec![
@@ -252,7 +269,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             write(
                 &mut actions,
                 icon,
-                include_bytes!("../../share/icons/hicolor/scalable/apps/fbittorrent.svg").to_vec(),
+                include_bytes!("../../assets/fbittorrent.svg").to_vec(),
             );
             let mime = config.join("mimeapps.list");
             let old = match std::fs::read_to_string(&mime) {
@@ -389,6 +406,34 @@ fn apply(item: &Action) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_plan_requires_writable_directory_before_and_after_install() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let root = std::env::temp_dir().join(format!("fbt-unit-plan-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let unit = root.join("fixture.service");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let missing = super::plan_unit(&mut Vec::new(), unit.clone(), b"static unit".to_vec());
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(missing.is_err(), "uninstalled unit requires a writable destination");
+        assert!(!unit.exists());
+        std::fs::write(&unit, b"static unit").unwrap();
+        let before = std::fs::metadata(&unit).unwrap();
+        let mut actions = Vec::new();
+        super::plan_unit(&mut actions, unit.clone(), b"static unit".to_vec()).unwrap();
+        assert!(actions.is_empty(), "healthy setup stays idempotent");
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), before.ino());
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let installed = super::plan_unit(&mut actions, unit.clone(), b"static unit".to_vec());
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(installed.is_err(), "equal unit bytes cannot bypass installation permissions");
+        assert!(actions.is_empty());
+        assert_eq!(std::fs::metadata(&unit).unwrap().ino(), before.ino());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+        println!("uninstalled/equal unit permission refusal and healthy no-write idempotence verified");
+    }
+
     #[test]
     fn purge_protects_nested_payload_directory() {
         let root = std::env::temp_dir().join(format!("fbt-purge-control-{}", std::process::id()));

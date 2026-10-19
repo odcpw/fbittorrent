@@ -180,6 +180,29 @@ hl.window_rule({
 })
 ```
 
+Search starts from a query payload or Enter in the focused query field. Results
+stream from the daemon, merge duplicate hashes, and keep provider names. Press
+`s` to sort Seeds, Size, Uploaded, Name or rating, and `S` to reverse; unknown
+measurements stay last. `b` opens browse lists and `P` manages providers. A result
+marked `+ In your list` selects its existing torrent on Enter. New results open
+the shared review sheet: staged add is used when the daemon advertises it; older
+daemons send `search.grab` only after Download. `y` copies a magnet, `O` opens the
+source page, and `f` follows an IMDb-linked show. The table renders at most 500 rows.
+
+The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
+logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
+closes it. Drag the divider to resize it; width and sort order survive reopening
+the window or restarting the shell. `h` / `l` change pane focus. In focused Files,
+Space toggles the selected file, `a` / `n` include or skip the filtered files, `/`
+filters names, and `o` opens the selected file. Files sort naturally by episode
+number. Overview loads the daemon's local IMDb poster and shows the confirmed
+seed policy. Log shares one bounded subscription and filters by torrent hash.
+
+Run `plugin/tests/qs-dashboard.sh --details --binary /path/to/fbittorrent` for the
+private-compositor acceptance cases. They use isolated state and a local IMDb
+server, restart their own daemon and shell, and retain JSONL plus native captures
+under `target/test-logs/qs_details/`; they never restart the owner's shell.
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become
@@ -498,6 +521,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Previous details tab | — | `[` | — |  |
+| `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
@@ -517,6 +542,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Sort results | — | `s` | — |  |
+| `screen:search` | Reverse results sort | — | `S` | — |  |
+| `pane:search.results` | Copy magnet | — | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -571,11 +599,11 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | EZTV | `O` | `O` | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
 | `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
-| `modal:files` | Next | `j`, `↓` | — | — |  |
-| `modal:files` | Previous | `k`, `↑` | — | — |  |
-| `modal:files` | Include/skip | `Space` | — | — |  |
-| `modal:files` | All | `a` | — | — |  |
-| `modal:files` | None | `n` | — | — |  |
+| `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:files` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:files` | Include/skip | `Space` | `Space` | — |  |
+| `modal:files` | All | `a` | `a` | — |  |
+| `modal:files` | None | `n` | `n` | — |  |
 | `modal:files` | Reload | `r` | — | — |  |
 | `modal:files` | First | `g`, `Home` | — | — |  |
 | `modal:files` | Last | `G`, `End` | — | — |  |
@@ -583,9 +611,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:files` | High (legacy) | `2` | — | — |  |
 | `modal:files` | Max (legacy) | `3` | — | — |  |
 | `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
-| `modal:providers` | Next | `j`, `↓` | — | — |  |
-| `modal:providers` | Previous | `k`, `↑` | — | — |  |
-| `modal:providers` | Toggle | `Space` | — | — |  |
+| `modal:providers` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:providers` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:providers` | Toggle | `Space` | `Space` | — |  |
 | `modal:providers` | All | `a` | — | — |  |
 | `modal:providers` | None | `n` | — | — |  |
 | `modal:providers` | Reload | `r` | — | — |  |
