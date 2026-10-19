@@ -339,3 +339,23 @@ fn native_sort_and_follow_replace_scheduling_toggles() {
     assert!(app.status.starts_with("Sorted by name"));
     assert!(all().find(|a|a.id=="torrents.follow").unwrap().keys.contains(&KeyChord::plain(KeyCode::Char('f'))));
 }
+
+#[test]
+fn dashboard_help_covers_live_aliases() {
+    for (id, required) in [
+        ("torrents.copy_magnet", vec!["y"]), ("torrents.undo_remove", vec!["U"]),
+        ("torrents.select_visible", vec!["Ctrl+A"]), ("torrents.filter", vec!["/"]),
+        ("torrents.focus_left", vec!["h", "←"]), ("torrents.focus_right", vec!["l", "→"]),
+        ("shows.new", vec!["n", "+"]), ("shows.remove", vec!["x", "d"]),
+        ("shows.filters", vec!["F"]), ("rss.remove", vec!["x", "d"]),
+        ("rss.mark", vec!["m", "Space"]), ("rss.refresh_all", vec!["R"]),
+        ("rss.filter_unread", vec!["u"]), ("search.follow", vec!["f", "F"]),
+    ] {
+        let action=all().find(|a| a.id==id).unwrap();
+        let keys=action.keys_for(Surface::Dashboard).unwrap().iter().map(|k| k.label()).collect::<Vec<_>>();
+        for key in required { assert!(keys.iter().any(|k| k==key), "{id} lacks {key}: {keys:?}"); }
+    }
+    for id in ["rss.imdb", "rss.follow", "shows.imdb", "shows.wiki", "shows.source"] {
+        assert!(all().find(|a| a.id==id).unwrap().keys_for(Surface::Dashboard).is_none(), "unimplemented dashboard action {id} must not appear in Help");
+    }
+}

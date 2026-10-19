@@ -46,25 +46,28 @@ Item {
   function acceptDrop(urls,text){var parsed=Source.drop(urls,text);if(!parsed)return false;return openAdd(parsed.source)}
   function publish() {
     if(disposing)return
+    if(svc && !svc.testHooks && svc.dashboardOwner===(window.visible ? root : null) && svc.dashboardVisible===window.visible)return
     if(!window || !window.visible){publishNow();return}
     // Loader items and their derived view state settle after onLoaded. Publish
     // once per event turn, rather than allocating intermediate partial states.
     Qt.callLater(root.publishNow)
   }
-  function publishNow() {
-    if (disposing || !svc || !window || !searchInput)return
+  function publishNow(inspect) {
+    if (disposing || !svc || !window)return
     if(!window.visible && svc.dashboardOwner!==root)return
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
+    if(!window.visible)svc.dashboardState=null
+    if(!svc.testHooks || inspect!==true)return
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
-    if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
-    if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
-    if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.viewState)
-    if(window.visible && currentView==="shows" && shows)svc.dashboardState=Object.assign({},svc.dashboardState,shows.viewState)
+      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:"view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+    if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.snapshot())
+    if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.snapshot())
+    if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.snapshot())
+    if(window.visible && currentView==="shows" && shows)svc.dashboardState=Object.assign({},svc.dashboardState,shows.snapshot())
     if(window.visible && settingsSheet)svc.dashboardState.settings=settingsSheet.state
     if(window.visible && logView)svc.dashboardState.log={level:logView.level,source:logView.source,hash:logView.hashFilter,count:logView.count,follow:logView.follow}
-    if(window.visible)svc.dashboardState.help=helpOpen
+    if(window.visible){svc.dashboardState.help=helpOpen;svc.dashboardState.stopping=stopConfirm.opened;svc.dashboardState.stopSelected=stopConfirm.selectedIndex}
     if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
 
   }
@@ -115,6 +118,8 @@ Item {
     close()
     if(shell && typeof shell.hide==="function")shell.hide("oliver.torrents")
   }
+  function textEditing(){var item=window.contentItem.Window.window.activeFocusItem;return !!item && item.cursorPosition!==undefined && item.readOnly!==true}
+  function requestStop(){if(!svc || !svc.online)return;if(svc.needsStopConfirm()){stopConfirm.selectedIndex=0;stopConfirm.opened=true;stopConfirm.forceActiveFocus()}else svc.quit()}
   function openSettings(){if(currentView!=="settings")settingsReturnView=currentView;currentView="settings";publish();Qt.callLater(focusView)}
   function selectView(index) {if(views[index]==="settings"){openSettings();return}currentView=views[index];publish();Qt.callLater(focusView);if(currentView==="search")Qt.callLater(function(){if(root.search)root.search.focusQuery()})}
   function cycleView(direction) {selectView((Math.max(0,views.indexOf(currentView))+direction+4)%4)}
@@ -157,6 +162,7 @@ Item {
       focus:true
       Keys.priority:Keys.AfterItem
       Keys.onPressed:function(event) {
+        if(stopConfirm.opened){stopConfirm.handleKey(event);event.accepted=true;return}
         if(helpLoader.active){event.accepted=true;return}
         if(settingsLoader.active)return
         if(addSheet.active){if(addSheet.item && addSheet.item.handleKey(event))event.accepted=true;return}
@@ -170,6 +176,7 @@ Item {
         if(root.currentView==="shows" && root.shows && root.shows.editing)return
         if(root.currentView==="rss" && root.rss){if(root.rss.handleKey(event))event.accepted=true;if(event.accepted || root.rss.editing || root.rss.dialogOpen)return}
         if((root.currentView==="torrents" && torrents && torrents.editing) || (root.currentView==="search" && root.search && root.search.editing))return
+        if(event.key===Qt.Key_Q && (event.text==="Q" || (event.modifiers & Qt.ControlModifier))){root.requestStop();event.accepted=true;return}
         if(event.text==="r"){root.svc.refresh();event.accepted=true;return}
         if(event.text===","){root.openSettings();event.accepted=true;return}
         if(event.text==="L"){root.selectView(5);event.accepted=true;return}
@@ -188,11 +195,12 @@ Item {
       }
       Shortcut {sequence:"Y";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && !!root.svc.clipboardOffer && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.svc.acceptOffer()}
       Shortcut {sequence:"Esc";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && !!root.svc.clipboardOffer && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.svc.cancelOffer()}
-      Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.svc.addClipboardSheet()}
-      Shortcut {sequence:"Ctrl+C";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.dismiss()}
-      Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online;onActivated:root.svc.quit()}
-      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsDialogOpen && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.cycleView(1)}
-      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsDialogOpen && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.cycleView(-1)}
+      Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !stopConfirm.opened && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.svc.addClipboardSheet()}
+      Shortcut {sequence:"Ctrl+C";context:Qt.WindowShortcut;enabled:window.visible && !stopConfirm.opened && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsEditing && (!root.search || !root.search.editing) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.dismiss()}
+      Shortcut {sequence:"Shift+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online && !stopConfirm.opened && !root.textEditing();onActivated:root.requestStop()}
+      Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online && !stopConfirm.opened;onActivated:root.requestStop()}
+      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !stopConfirm.opened && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsDialogOpen && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.cycleView(1)}
+      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !stopConfirm.opened && !addSheet.active && !settingsLoader.active && !helpLoader.active && !root.torrentsDialogOpen && (!root.search || !root.search.dialogOpen) && (!root.shows || !root.shows.dialogOpen) && (!root.rss || !root.rss.dialogOpen);onActivated:root.cycleView(-1)}
       ColumnLayout {
         anchors.fill:parent
         anchors.margins:Commons.Style.space(0)
@@ -283,24 +291,9 @@ Item {
             onLoaded:{root.publish();Qt.callLater(root.focusView)}
             sourceComponent:Views.ShowsView {service:root.svc;onChanged:root.publish();onFocusRequested:Qt.callLater(root.focusView)}
           }
-          ColumnLayout {
-            anchors.fill:parent
-            visible:!!root.svc && root.svc.online && root.currentView!=="torrents" && root.currentView!=="search" && root.currentView!=="settings" && root.currentView!=="log" && root.currentView!=="shows" && root.currentView!=="rss"
-            spacing:Commons.Style.spacing.panelGap
-            Text {text:root.labels[root.views.indexOf(root.currentView)];textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title;font.bold:true}
-            Ui.TextField {
-              id:searchInput
-              visible:root.currentView==="search"
-              Layout.fillWidth:true
-              placeholderText:"Search titles"
-              maximumLength:200
-              text:root.query
-              onTextEdited:root.query=text
-              onActiveFocusChanged:root.publish()
-            }
-            Item {Layout.fillWidth:true;Layout.fillHeight:true}
-          }
+
         }
+        Text {objectName:"dashboard-idle-countdown";Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.svc ? root.svc.idleLabel : "";visible:text!=="";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.caption}
         Components.RateStatus {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Text {
           visible:root.routeError!=="" || (!!root.svc && root.svc.lastError!=="")
@@ -312,6 +305,7 @@ Item {
       DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
       Loader {id:settingsLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
       Loader {id:helpLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.helpOpen;onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.HelpOverlay {service:root.svc;onDismissed:root.helpOpen=false}}
+      Ui.ConfirmDialog {id:stopConfirm;Keys.priority:Keys.BeforeItem;Keys.onPressed:function(event){stopConfirm.handleKey(event);event.accepted=true} anchors.fill:parent;z:1000;selectedIndex:0;confirmText:"Stop";message:root.svc ? root.svc.shutdownPrompt() : "";onOpenedChanged:root.publish();onSelectedIndexChanged:root.publish();onCanceled:{opened=false;Qt.callLater(root.focusView)} onConfirmed:{opened=false;root.svc.quit()}}
       Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusAfterAdd)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }
   }

@@ -16,7 +16,7 @@ ShellRoot {
     var cases=JSON.parse(input.text())
     check("format","load literal cases","at least 40 boundary cases",cases.length,cases.length>=40)
     cases.forEach(function(test){var actual=Model[test.fn].apply(null,test.args);check("format",test.fn+JSON.stringify(test.args),JSON.stringify(test.expect),actual,actual===test.expect)})
-    check("format","downloading rows do not describe upload caps as seeding","plain progress and explicit Details policy",Model.meta({state:"downloading",seed:false,progress:0.5}),Model.meta({state:"downloading",seed:false,progress:0.5})==="50%" && DetailText.policy({seed:true,upload_enabled:false})==="Upload: off" && DetailText.policy({seed:false,upload_enabled:true})==="Upload: on")
+    check("format","downloading rows do not describe upload caps as seeding","plain progress and explicit Details policy",Model.percent(0.5,false),Model.percent(0.5,false)==="50%" && DetailText.policy({seed:true,upload_enabled:false})==="Upload: off" && DetailText.policy({seed:false,upload_enabled:true})==="Upload: on")
     verdict("format")
     input.path=Quickshell.shellPath("ThemeExpected.json")
     var themes=JSON.parse(input.text()),names=Object.keys(themes)

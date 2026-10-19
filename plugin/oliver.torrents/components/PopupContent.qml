@@ -32,7 +32,7 @@ PanelKeyCatcher {
   property var rows:[]
   readonly property int delegateCount:owner.opened && !svc.modelReordering ? rows.length : 0
   property var entries:[]
-  ListModel {id:entryModel;dynamicRoles:true}
+  ListModel {id:entryModel;dynamicRoles:false}
   function syncEntries(items){
     var same=items.length===entries.length
     if(same)for(var i=0;i<items.length;i++)if((items[i].header ? items[i].group.key : items[i].torrent.hash)!==(entries[i].header ? entries[i].group.key : entries[i].torrent.hash)){same=false;break}
@@ -45,10 +45,11 @@ PanelKeyCatcher {
   function unregisterConfirm(hash,strip){if(confirms[hash]===strip)delete confirms[hash]}
   function currentStrip(){return stopping ? stopStrip : pendingRemoval ? confirms[pendingRemoval.hash] : null}
   function rebuild() {
-    var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
-    svc.torrents.forEach(function(t){var group=t.staged ? 4 : Model.isActive(t) || t.state==="seeding" ? 0 : t.state==="queued" ? 1 : t.state==="paused" ? 2 : t.state==="done" ? 3 : 5;groups[group].rows.push(t)})
+    var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"UPLOADING",key:"seeding",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
+    var indexes={};groups.forEach(function(g,i){indexes[g.key]=i})
+    svc.torrents.forEach(function(t){groups[indexes[PopupState.group(t)]].rows.push(t)})
     var all=[],parts=[]
-    groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
+    groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="seeding" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
     var items=[];parts.forEach(function(g){items.push({header:true,group:g});g.visibleRows.forEach(function(t,i){items.push({header:false,torrent:t,index:g.start+i})})});syncEntries(items);sections=parts;rows=all;rowIndex=Math.max(0,Math.min(rowIndex,rows.length-1))
     if(!cursorActive)focusSection=rows.length ? "rows" : "header"
     if(pendingRemoval && !svc.store.torrents[pendingRemoval.hash])cancelRemove()
@@ -60,7 +61,7 @@ PanelKeyCatcher {
   function requestRemoval(t){if(!t || svc.busy)return;pendingRemoval={hash:t.hash,name:t.name};stopping=false;Qt.callLater(function(){var strip=currentStrip();if(strip)strip.reset()})}
   function cancelRemove(){pendingRemoval=null;forceActiveFocus()}
   function confirmRemove(){var target=pendingRemoval;cancelRemove();if(target)svc.remove(target.hash,false)}
-  function power(){if(svc.activeTorrents.length || svc.transferring){pendingRemoval=null;stopping=true;Qt.callLater(function(){stopStrip.reset()})}else svc.quit()}
+  function power(){if(svc.needsStopConfirm()){pendingRemoval=null;stopping=true;Qt.callLater(function(){stopStrip.reset()})}else svc.quit()}
   function stop(){stopping=false;svc.quit();forceActiveFocus()}
   function dashboard(view){svc.openDashboard(view || "torrents");owner.close()}
   function toggleGroup(group){var next=Object.assign({},expanded);next[group.key]=!group.open;expanded=next;rebuild()}
@@ -104,7 +105,7 @@ PanelKeyCatcher {
     else if(t==="p")svc.toggleTorrent(selected())
     else if(t==="o")svc.openTorrent(selected())
     else if(t==="u"){svc.openTorrentDetails(selected());owner.close()}
-    else if(t==="d")requestRemoval(selected())
+    else if(t==="d" || t==="x")requestRemoval(selected())
   }
   function cursor(){var strip=currentStrip();return {keySerial:keySerial,qtFocus:activeFocus,section:focusSection,row:rowIndex,header:headerIndex,active:cursorActive,rows:rows.length,hashes:rows.map(function(t){return t.hash}),confirming:!!pendingRemoval,stopping:stopping,confirmFocused:strip && strip.cancelFocused ? "cancel" : "other",selected:strip ? strip.selected : null,group:sections[groupIndex] ? sections[groupIndex].key : "",pendingHash:pendingRemoval ? pendingRemoval.hash : "",hints:hints}}
   Connections {target:svc;function onTorrentsChanged(){root.rebuild()} function onClipboardOfferChanged(){if(!svc.clipboardOffer)root.forceActiveFocus()}}
@@ -127,7 +128,7 @@ PanelKeyCatcher {
         }}
       }
       Text {visible:text!=="";text:root.presentation.idle;textFormat:Text.PlainText;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.caption}
-      ConfirmStrip {id:stopStrip;width:parent.width;visible:root.stopping;message:"Stop fbittorrent? "+svc.activeTorrents.length+" downloads pause until it starts again.";confirmText:"Stop";onCanceled:{root.stopping=false;root.forceActiveFocus()} onConfirmed:root.stop()}
+      ConfirmStrip {id:stopStrip;width:parent.width;visible:root.stopping;message:svc.shutdownPrompt();confirmText:"Stop";onCanceled:{root.stopping=false;root.forceActiveFocus()} onConfirmed:root.stop()}
       ClipboardOffer {width:parent.width;service:svc}
       PanelSeparator {foreground:root.foreground}
       PopupBanner {width:parent.width;text:root.presentation.banner;urgent:root.presentation.urgent;showLog:svc.backendState==="error";onLogRequested:root.dashboard("log")}

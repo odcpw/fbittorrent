@@ -33,15 +33,15 @@ function parse(spec,value){
   var match=/^(\d+)([kKmM]?)$/.exec(text)
   if(!match)throw Error("Use bytes/s, K or M; leave empty for unlimited")
   var n=Number(match[1])*Math.pow(1024,match[2].toLowerCase()==="k" ? 1 : match[2].toLowerCase()==="m" ? 2 : 0)
-  if(!Number.isSafeInteger(n) || n>4294967295 || (n!==0 && n<16384))throw Error("Use16384..4294967295 bytes/s, or empty for unlimited")
+  if(!Number.isSafeInteger(n) || n>4294967295 || (n!==0 && n<16384))throw Error("Use 16384..4294967295 bytes/s, or empty for unlimited")
   return n===0 ? null : n
  }
  if(spec.kind==="number"){
   if(!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text)))throw Error("Use a whole nonnegative number")
   var number=Number(text)
-  if((spec.key==="max_active_downloads" || spec.key==="timeout_secs") && number<1)throw Error("Must be at least1")
-  if(spec.key==="idle_exit_secs" && number!==0 && number<30)throw Error("Use0 or at least30 seconds")
-  if(spec.key==="peer_port" && number>65535)throw Error("Use0..65535")
+  if((spec.key==="max_active_downloads" || spec.key==="timeout_secs") && number<1)throw Error("Must be at least 1")
+  if(spec.key==="idle_exit_secs" && number!==0 && number<30)throw Error("Use 0 or at least 30 seconds")
+  if(spec.key==="peer_port" && number>65535)throw Error("Use 0..65535")
   return number
  }
  if(!text)throw Error("This setting must not be empty")

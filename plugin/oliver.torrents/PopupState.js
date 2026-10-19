@@ -4,12 +4,12 @@ function diskBanner(disk) {
   if(!disk || !disk.low)return ""
   return "Not enough space for the running downloads: "+Model.size(disk.needed_bytes,false)+" needed, "+(disk.free_bytes===undefined ? "free space unknown" : Model.size(disk.free_bytes,false)+" free")
 }
+function idle(daemon,online){return online && daemon && daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null ? "Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min" : ""}
 function describe(s) {
   if(!s)return {message:"fbittorrent is not running",banner:"",urgent:false,dim:false}
-  var client=s.client || {},hello=client.hello || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
+  var client=s.client || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
   var r={message:"",banner:"",urgent:false,dim:!s.online,idle:""}
-  if(client.protocolMismatch){r.banner="This plugin speaks API 1; the running fbittorrent speaks API "+(hello.proto || "another version")+". Update the plugin or run `fbittorrent restart`.";r.urgent=true}
-  else if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
+  if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
   else if(s.reconnecting){r.message="Reconnecting… retry in "+Math.ceil((client.retryDelay || 500)/1000)+" s";r.dim=true}
   else if(!s.online)r.message=s.stoppedRecently ? "fbittorrent stopped. Enter Start · w Open window" : client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent is not running. Enter Start · w Open window"
   if(s.online && (s.backendState==="parked" || network.ready===false || network.state==="waiting")){
@@ -18,7 +18,7 @@ function describe(s) {
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
   if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
-  if(s.online && daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"
+  r.idle=idle(daemon,s.online)
   return r
 }
 function meta(t,parked) {
@@ -35,4 +35,5 @@ function verb(action) {
   return {"torrents.stop":"pausing…","torrents.start":"starting…","torrents.remove":"removing…","torrents.recheck":"checking files…","torrents.set_seed":"setting upload permission…"}[action.op] || "working…"
 }
 
+function group(t){return t.staged ? "reviewing" : Model.isActive(t) ? "live" : (t.state==="seeding" || t.state==="queued" || t.state==="paused" || t.state==="done") ? t.state : "other"}
 function dashboardFilter(group) {return group==="live" ? "downloading" : group==="other" ? "all" : group}

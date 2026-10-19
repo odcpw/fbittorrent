@@ -66,7 +66,7 @@ ShellRoot {
     var sample={name:pending.name,ms:Date.now()-pending.at,frame_at:Date.now(),spec:pending.spec,
       publications:stats.calls-pending.publications,publication_ms:stats.ms-pending.publicationMs,
       api_frames:service.perfFrames-pending.frames,row_syncs:service.perfSyncRows-pending.rowSyncs,
-      rows:d && d.torrents ? d.torrents.viewState.rows : 0}
+      rows:d && d.torrents ? d.torrents.snapshot().rows : 0}
     if(feedback){samples.push(Object.assign({},sample,{name:pending.name+"_frame"}));pending.feedback=true}
     if(!complete)return
     if(pending.spec.kind==="open"){

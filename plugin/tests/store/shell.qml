@@ -41,7 +41,11 @@ ShellRoot {
           else if (record.dir === "s2c") { store.apply(record.frame); count++ }
           else if (record.dir === "expect") {
             expectedCount++; totalExpected++
-            var model = store.model(Object.keys(record.model))
+            var model={}
+            Object.keys(record.model).forEach(function(key){
+              if(key!=="subscriptions")model[key]=store[key]
+              else {model.subscriptions={};Object.keys(store.subscriptions).forEach(function(id){var sub=store.subscriptions[id];model.subscriptions[id]={topic:sub.topics[0],rev:sub.rev,resync:sub.resync}})}
+            })
             ok = canonical(model) === canonical(record.model)
             observed = "expected=" + canonical(record.model) + "; observed=" + canonical(model)
           }

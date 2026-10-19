@@ -16,6 +16,7 @@ Flow {
   onModelChanged:Qt.callLater(syncValues)
   Component.onCompleted:syncValues()
   spacing:Commons.Style.spacing.md
+  function openFilters(){read.open()}
   function openPreference(){if(preference.enabled)preference.open()}
   Ui.Dropdown {
     id:read;objectName:"shows-read";width:Commons.Style.space(170);label:"Read state";value:root.model.readFilter

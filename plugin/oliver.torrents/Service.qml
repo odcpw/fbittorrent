@@ -32,7 +32,10 @@ Item {
   signal apiFrame(var frame,var request)
   function parseAddSource(text){return AddSource.parse(text)}
   property bool dashboardVisible: false
+  readonly property bool testHooks:Quickshell.env("FBT_TEST_HOOKS")==="1"
   property var dashboardState:null
+  property var topicVersions:({})
+  property int observedLogVersion:0
   property var dashboardOwner:null
   property var windowFocus:null
   property int windowFocusSteps:0
@@ -58,7 +61,12 @@ Item {
   }
   function setFiles(hash,indexes,included,callback){var args={hash:hash};args[included ? "include" : "skip"]=indexes;return mutate("torrents.set_files",args,"files",callback)}
   function lookupImdb(args,callback){return hasCap("imdb") ? client.request("imdb.lookup",args,{callback:callback,quiet:true}) : false}
-  function copyText(text){if(text!==undefined){Commons.Util.execArgv(["wl-copy","--",String(text)]);notify("Copied")}}
+  function copyText(text){
+    if(text===undefined)return false
+    if(copyOut.running){notify("Clipboard busy");return false}
+    if(ApiClient.utf8Bytes(String(text))>65536){notify("Clipboard exceeds 65536 bytes");return false}
+    copyOut.value=String(text);copyOut.stdinEnabled=true;copyOut.running=true;return true
+  }
   function openUrl(url){if(url && /^https?:\/\//.test(url))Commons.Util.execArgv(["xdg-open",url])}
   function scheduleDetail(hash){detailChoice.hash=hash;detailChoice.restart();imdbChoice.restart()}
   function showDetail(hash){detailChoice.stop();if(detailFlow)detailFlow.begin(hash);imdbChoice.restart()}
@@ -132,13 +140,10 @@ Item {
   function rowPending(hash) {var revision=actionRevision;return !!store.pendingByHash[hash]}
   function rowFailed(hash) {var revision=actionRevision;return !!store.failedByHash[hash]}
   function pendingAction(hash) {
-    if(!client)return null
-    var actions=client.actions,refs=Object.keys(actions)
-    for(var i=0;i<refs.length;i++){var action=actions[refs[i]],args=action.args || {};if(action.status==="pending" && ((args.hashes || []).indexOf(hash)>=0 || args.hash===hash))return action}
-    return null
+    var revision=actionRevision;return store.pendingActions[hash] || null
   }
   function pendingGlyph(hash) {var revision=actionRevision;return store.pendingByHash[hash] ? (Commons.Style.reduceMotion ? "…" : "⠋⠙⠹⠸⠼⠴⠦⠧"[pendingFrame]) : ""}
-  function clearFailures(){if(client){store.clearFailures(client.actions);actionRevision++}}
+  function clearFailures(){if(client){if(store.clearFailures(client.actions))actionRevision++}}
   function notify(text){lastMessageText=text;lastMessageAt=Date.now();toast={text:text,until:Date.now()+5000};toastTimer.restart()}
   function copyMagnet(hash){copyText("magnet:?xt=urn:btih:"+hash)}
   function titleLink(hash,wikipedia) {
@@ -146,16 +151,15 @@ Item {
     if(!row)return
     var card=detailFlow && detailFlow.hash===hash ? detailFlow.card : null
     var url=card && (wikipedia ? card.wiki_url : card.url) ? (wikipedia ? card.wiki_url : card.url) : wikipedia ? "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(row.name) : row.imdb_id ? "https://www.imdb.com/title/"+row.imdb_id+"/" : "https://www.imdb.com/find/?q="+encodeURIComponent(row.name)
-    Quickshell.execDetached(["xdg-open",url])
+    openUrl(url)
   }
   function follow(hash) {
     var row=store.torrents[hash]
     if(!row)return false
-    if(client.caps.indexOf("shows")<0){notify("Shows is unavailable; update the daemon");return false}
     return mutate("shows.follow",row.imdb_id ? {imdb:row.imdb_id} : {query:row.name},"shows")
   }
   readonly property alias torrentModel: rowsModel
-  ListModel { id: rowsModel; dynamicRoles: true }
+  ListModel { id: rowsModel; dynamicRoles: false }
   property bool modelReordering:false
   function orderBoundary(starting){if(starting)rowOrderChanging();modelReordering=starting;if(!starting)rowOrderChanged()}
   signal rowOrderChanging()
@@ -165,8 +169,6 @@ Item {
   }
   onSortKeyChanged: sortChanged()
   onSortReverseChanged: sortChanged()
-  readonly property var activeTorrents: torrents.filter(Model.isActive)
-  readonly property var otherTorrents: torrents.filter(function(t) { return !Model.isActive(t) })
   readonly property bool transferring: Number(status.dl) > 0 || Number(status.up) > 0
   property var status: ({ok:false, torrents:[]})
   property var store: Store.create()
@@ -190,6 +192,7 @@ Item {
 
 
   function syncClient(c) {
+    var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
       var connectionStatus = Object.assign({}, status)
       connectionStatus.ok = c.online; connectionStatus.running = c.online
@@ -197,10 +200,11 @@ Item {
     }
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
-    pending = c.state().pending
+    var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
-    store.syncActions(c.actions);actionRevision++
+    if(store.syncActions(c.actions))actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
+    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=({});toastTimer.stop();actionStatus=""}
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
@@ -221,9 +225,9 @@ Item {
     if(showsFlow)showsFlow.frame(frame,request)
     if(rssFlow)rssFlow.frame(frame,request)
     apiFrame(frame,request)
-    if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
+    topicVersions=store.topicVersions
     if(frame.topic==="stats" || (request && request.op==="hello"))statsRevision++
-    if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
+    if(observedLogVersion!==store.logVersion){observedLogVersion=store.logVersion;logRevision++}
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
@@ -234,11 +238,6 @@ Item {
   }
   function mutate(op, args, cap, callback) {
     if (!client) return false
-    if (cap && client.caps.indexOf(cap) < 0) {
-      lastError = "This daemon does not support " + cap
-      actionStatus=lastError;noticeTimer.restart()
-      return false
-    }
     return client.request(op, args, {mutating:true, callback:callback})
   }
   function refresh() { if (client) client.subscribeAll(true) }
@@ -249,9 +248,6 @@ Item {
     return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
-  function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
-  function commitStaged(hash, files, seed, savePath) { return mutate("torrents.commit", {hash:hash, files:files, seed:seed, save_path:savePath}, "staging") }
-  function discardStaged(hash) { return mutate("torrents.discard", {hash:hash}, "staging") }
   function openTarget(hash, file) {
     var args = {hash:hash}
     if (file !== undefined) args.file = file
@@ -275,6 +271,9 @@ Item {
       if(result)notify(result.state==="pending" ? "Recheck accepted · Checking files…" : "Recheck complete")
     })
   }
+  function needsStopConfirm(){return Number(status.active)>0 || Number(status.seeding)>0 || transferring}
+  function shutdownPrompt(){return "Stop fbittorrent? Transfers pause until it starts again."}
+  readonly property string idleLabel:{var confirmed=status;return PopupState.idle(store.summary.daemon,online)}
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard(hash) { return mutate("app.clipboard.dismiss", {hash:hash}, "clipboard") }
   function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}
@@ -343,14 +342,10 @@ Item {
     Qt.callLater(function() { reconnect.restart() })
     return "ok"
   }
-  function stateJson() { var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
+  function stateJson() { if(testHooks && dashboardOwner)dashboardOwner.publishNow(true);var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
   function toggleTorrent(t) { var current=t ? store.torrents[t.hash] : null; return current ? (Model.isStopped(current) ? resume(current.hash) : pause(current.hash)) : false }
-  function removeTorrent(t) { return t ? remove(t.hash, false) : false }
-  function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
   function openTorrentDetails(t) {return !!(t && shell && shell.summon("oliver.torrents",JSON.stringify({view:"torrents",hash:t.hash})))}
-  function stopBackend() { return quit() }
-  function startBackend() { startDaemon() }
   property bool clipboardTooLarge: false
   function addFromClipboard() {
     if (!clipboard.running) { clipboardTooLarge = false; clipboard.running = true }
@@ -417,6 +412,13 @@ Item {
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
   Timer { id: stoppedTimer; interval: 10000; onTriggered: root.stoppedRecently = false }
   Process {
+    id:copyOut
+    property string value:""
+    command:["wl-copy","--"]
+    onStarted:{write(value);value="";stdinEnabled=false}
+    onExited:function(code){value="";root.notify(code===0 ? "Copied" : "Could not copy to clipboard")}
+  }
+  Process {
     id: clipboard
     command: ["wl-paste", "--no-newline"]
     stdout: StdioCollector {
@@ -445,7 +447,7 @@ Item {
     showsFlow=ShowsFlow.create(root,function(){root.showsRevision++})
     rssFlow=RssFlow.create(root,function(){root.rssRevision++})
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
-    detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
+    detailFlow=DetailFlow.create(root,function(){root.topicVersions=root.store.topicVersions;root.detailRevision++})
     overviewFlow=OverviewFlow.create(root,function(){root.overviewRevision++})
     cleanupFlow=CleanupFlow.create(root,function(){root.cleanupRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")

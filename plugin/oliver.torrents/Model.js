@@ -3,29 +3,13 @@
 .import "Formats.js" as Formats
 .import "Palette.js" as Palette
 
-function parseStatus(raw) {
-  try {
-    var d = JSON.parse(raw)
-    if (!d) return { ok: false, error: "bad response" }
-    return d
-  } catch (e) {
-    return { ok: false, error: String(e) }
-  }
-}
-
-function bytes(n) {
-  if (n===undefined || n===null) return "—"
-  n = Math.max(0, Number(n) || 0)
-  var u = ["B", "KiB", "MiB", "GiB", "TiB"]
-  var i = 0
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
-  return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]
-}
-
 function rate(n, compact) { return Formats.rate(n,!!compact) }
 
+var ACTIVE_STATES=["metadata","checking","stalled","downloading"]
+function isActiveState(state){return ACTIVE_STATES.indexOf(state)>=0}
+function activeCount(counts){var total=0;for(var i=0;i<ACTIVE_STATES.length;i++)total+=counts[ACTIVE_STATES[i]] || 0;return total}
 function isActive(t) {
-  return !t.staged && ["metadata", "checking", "stalled", "downloading"].indexOf(t.state) >= 0
+  return !t.staged && isActiveState(t.state)
 }
 function isStopped(t) {
   return !t.staged && ["paused", "done"].indexOf(t.state) >= 0
@@ -69,16 +53,6 @@ function peerCount(t,compact) {
   return "Connected peers unknown"
 }
 
-// One-line meta under the torrent name.
-function meta(t) {
-  var values=[]
-  if(t.progress!==undefined && t.progress!==null)values.push(percent(t.progress,t.state==="done" || t.state==="seeding"))
-  if(t.dl_bps!==undefined && t.dl_bps!==null)values.push(rate(t.dl_bps))
-  if(t.eta_s!==undefined && t.eta_s!==null)values.push(Formats.eta(t.eta_s,false))
-  if(!values.length && t.size!==undefined && t.size!==null)values.push(Formats.size(t.size,false))
-  return values.join(" · ")
-}
-
 function heroMeta(s) {
   if (!s.ok) return "Backend offline"
   if (s.loaded === false) return "Loading torrents…"
@@ -88,18 +62,10 @@ function heroMeta(s) {
   return "Idle"
 }
 
-function detailPill(s) {
-  if (!s.ok) return ""
-  if (s.active > 0) return s.active + " ACTIVE"
-  if (s.seeding > 0) return s.seeding + " UPLOADING"
-  if (s.queued > 0) return s.queued + " QUEUED"
-  return ""
-}
-
 function apiStatus(store, online) {
   var summary = store.summary, counts = summary.counts || store.counts
   var result = {ok:online, loaded:!!summary.counts || store.hasTorrents, total:counts.total || 0,
-    active:(counts.downloading || 0) + (counts.metadata || 0) + (counts.checking || 0) + (counts.stalled || 0),
+    active:activeCount(counts),
     seeding:counts.seeding || 0, stopped:(counts.paused || 0) + (counts.done || 0), queued:counts.queued || 0,
     history:Array.isArray(summary.history) ? summary.history : [],
     dl:summary.dl_bps === undefined ? store.transfer.dl_bps : summary.dl_bps,
@@ -108,12 +74,6 @@ function apiStatus(store, online) {
   return result
 }
 
-function barRate(n, compact) {
-  if (n===undefined || n===null) return compact ? "" : "—"
-  var value=Math.max(0,Number(n)), units=compact ? ["B","K","M","G","T"] : ["B/s","KB/s","MB/s","GB/s","TB/s"], index=0
-  while (value>=1000 && index<units.length-1) {value/=1000;index++}
-  return value.toFixed(index>0 && value<10 ? 1 : 0) + (compact ? "" : " ") + units[index]
-}
 function plainTip(text) {
   text=String(text).replace(/</g,"‹").replace(/>/g,"›")
   return text.length>512 ? text.slice(0,511)+"…" : text

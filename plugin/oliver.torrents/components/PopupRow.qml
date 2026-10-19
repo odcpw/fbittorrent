@@ -12,7 +12,7 @@ CursorSurface {
   required property var torrent
   required property int rowIdx
   readonly property var svc:host.svc
-  readonly property bool pending:{var revision=svc.actionRevision;return svc.rowPending(torrent.hash)}
+  readonly property bool pending:!!action
   readonly property var action:{var revision=svc.actionRevision;return svc.pendingAction(torrent.hash)}
   readonly property bool parked:host.presentation.dim
   readonly property var accentSpec:Model.accentText(Commons.Color.accent,Commons.Color.popups.background,host.foreground)

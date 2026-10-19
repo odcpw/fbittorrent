@@ -5,7 +5,8 @@ Column {
  id:root
  property var snapshot:null
  property var torrent:null
- readonly property var map:PiecesModel.decode(snapshot)
+ property var decoded:undefined
+ readonly property var map:decoded===undefined ? PiecesModel.decode(snapshot) : decoded
  readonly property var cells:PiecesModel.cells(map,Math.floor(width/Commons.Style.space(4)))
  readonly property var state:map ? {count:map.data.count,have:map.have,priority:map.priority,playable_end:map.data.playable_end,cells:cells.length} : null
  spacing:Commons.Style.spacing.sm
@@ -14,8 +15,8 @@ Column {
   width:root.width;height:Commons.Style.space(28)
   Row {
    Repeater {
-    model:root.cells
-    PieceCell {}
+    model:root.cells.length
+    PieceCell {required property int index;modelData:root.cells[index]}
    }
   }
  }

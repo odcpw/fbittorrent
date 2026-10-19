@@ -101,9 +101,7 @@ real transfer every second. This avoids spawning 200 CLI processes during the
 measurement; the production guarded IPC scroll entry point is checked separately. It parses QSG_RENDER_TIMING's renderer timings, or
 the software backend's whole-frame timings (including polish/sync/render/swap),
 and fails on absent samples or any frame above 32 ms. Logs include every measured
-frame and actual completed-byte/rate samples. It qualifies the negotiated
-poll/subscription transport actually available in the tested binary; fallback
-results do not prove a pushed subscription. All compositor, DNS, network, state
+frame and actual completed-byte/rate samples. It qualifies the pushed API subscriptions used by the current daemon. All compositor, DNS, network, state
 and child-process boundaries described above apply.
 
 The table batches actual source-order changes: the installed Qt proxy otherwise
@@ -203,6 +201,11 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
 complete matrix.
 
 ## Responsiveness
+
+`python3 plugin/tests/run-qs.py reactivity plugin/tests/reactivity` checks unchanged
+action/detail updates, native keyed-model edits and the bounded append-only log
+ring. It prints call counts and the time for 1,000 appends; wall time is diagnostic.
+
 
 ```sh
 python3 plugin/tests/responsiveness.py --binary /path/to/current/fbittorrent \

@@ -736,7 +736,9 @@
     {
       "id": "torrents.copy_magnet",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "y"
+        ],
         "popup": null,
         "tui": [
           "y"
@@ -762,7 +764,9 @@
     {
       "id": "torrents.undo_remove",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "U"
+        ],
         "popup": null,
         "tui": [
           "U"
@@ -1081,6 +1085,56 @@
         ]
       },
       "label": "Follow show",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.select_visible",
+      "keys": {
+        "dashboard": [
+          "Ctrl+A"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Select all visible",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.filter",
+      "keys": {
+        "dashboard": [
+          "/"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Filter torrents",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.focus_left",
+      "keys": {
+        "dashboard": [
+          "h",
+          "←"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Parent pane",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.focus_right",
+      "keys": {
+        "dashboard": [
+          "l",
+          "→"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Child pane",
       "scope": "screen:torrents"
     },
     {
@@ -1570,7 +1624,8 @@
       "id": "rss.remove",
       "keys": {
         "dashboard": [
-          "x"
+          "x",
+          "d"
         ],
         "popup": null,
         "tui": [
@@ -1597,9 +1652,7 @@
     {
       "id": "rss.reload",
       "keys": {
-        "dashboard": [
-          "R"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "R"
@@ -1641,9 +1694,7 @@
     {
       "id": "rss.imdb",
       "keys": {
-        "dashboard": [
-          "i"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "i"
@@ -1655,10 +1706,7 @@
     {
       "id": "rss.follow",
       "keys": {
-        "dashboard": [
-          "f",
-          "F"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "f",
@@ -1667,6 +1715,30 @@
       },
       "label": "Follow show",
       "scope": "pane:rss.items"
+    },
+    {
+      "id": "rss.refresh_all",
+      "keys": {
+        "dashboard": [
+          "R"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Refresh all feeds",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.filter_unread",
+      "keys": {
+        "dashboard": [
+          "u"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Toggle unread filter",
+      "scope": "screen:rss"
     },
     {
       "id": "shows.sort",
@@ -1721,7 +1793,9 @@
     {
       "id": "shows.filters",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "F"
+        ],
         "popup": null,
         "tui": [
           "F"
@@ -1872,7 +1946,8 @@
       "id": "shows.new",
       "keys": {
         "dashboard": [
-          "n"
+          "n",
+          "+"
         ],
         "popup": null,
         "tui": [
@@ -1886,7 +1961,8 @@
       "id": "shows.remove",
       "keys": {
         "dashboard": [
-          "x"
+          "x",
+          "d"
         ],
         "popup": null,
         "tui": [
@@ -1957,9 +2033,7 @@
     {
       "id": "shows.imdb",
       "keys": {
-        "dashboard": [
-          "i"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "i"
@@ -1971,9 +2045,7 @@
     {
       "id": "shows.wiki",
       "keys": {
-        "dashboard": [
-          "w"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "w"
@@ -1985,9 +2057,7 @@
     {
       "id": "shows.source",
       "keys": {
-        "dashboard": [
-          "O"
-        ],
+        "dashboard": null,
         "popup": null,
         "tui": [
           "O"

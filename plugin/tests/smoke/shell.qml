@@ -35,8 +35,9 @@ ShellRoot {
       var row=svc.store.torrents[root.hash]
       if(root.phase==="connect" && svc.online) {
         root.initialInstance=svc.instance
-        svc.add({magnet:"magnet:?xt=urn:btih:"+root.hash+"&dn=fbt-smoke"},false);root.enter("add")
-      } else if(root.phase==="add" && row && row.state==="metadata") {
+        svc.beginAdd({magnet:"magnet:?xt=urn:btih:"+root.hash+"&dn=fbt-smoke"});root.enter("review")
+      } else if(root.phase==="review" && svc.addFlow.snapshot().canDownload){svc.addFlow.commit();root.enter("add")
+      } else if(root.phase==="add" && row && !row.staged && row.state==="metadata") {
         root.mark("add","metadata intent is saved without peers, with payload upload off",JSON.stringify(row),row.name==="fbt-smoke" && row.upload_enabled===false && row.seed===false && row.progress===undefined && row.size===undefined && svc.client.popupOpen)
         svc.pause(root.hash);root.enter("pause")
       } else if(root.phase==="pause" && row && row.state==="paused") {

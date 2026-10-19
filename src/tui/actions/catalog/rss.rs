@@ -143,7 +143,7 @@ pub(super) const ACTIONS: &[Action] = &[
         |a| a.selected_feed().is_some(),
         Some(|a| a.on_rss_action(Intent::Remove)),
         TD,
-        None,
+        Some(&[KeyChord::plain(KeyCode::Char('x')),KeyChord::plain(KeyCode::Char('d'))]),
         None,
         None
     ),
@@ -168,7 +168,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |_| true,
         Some(|a| a.on_rss_action(Intent::Reload)),
-        TD,
+        T,
         None,
         None,
         None
@@ -209,7 +209,7 @@ pub(super) const ACTIONS: &[Action] = &[
             && a.selected_feed()
                 .is_some_and(|f| a.item_list.borrow().selected().is_some_and(|i| i < f.articles.len())),
         Some(|a| a.on_rss_action(Intent::Imdb)),
-        TD,
+        T,
         None,
         None,
         None
@@ -224,9 +224,11 @@ pub(super) const ACTIONS: &[Action] = &[
             && a.selected_feed()
                 .is_some_and(|f| a.item_list.borrow().selected().is_some_and(|i| i < f.articles.len())),
         Some(|a| a.on_rss_action(Intent::Follow)),
-        TD,
+        T,
         None,
         None,
         None
     ),
+    action!("rss.refresh_all",Scope::Screen(Screen::Rss),&[],"Refresh all feeds",90,|_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('R'))]),None,None),
+    action!("rss.filter_unread",Scope::Screen(Screen::Rss),&[],"Toggle unread filter",90,|_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('u'))]),None,None),
 ];

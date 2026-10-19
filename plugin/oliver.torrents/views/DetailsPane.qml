@@ -14,6 +14,8 @@ ColumnLayout {
   readonly property var overviewState:overview.item ? overview.item.actionState : null
   readonly property string networkingText:overview.item ? overview.item.networkingText : ""
   readonly property bool posterLoaded:overview.item ? overview.item.posterLoaded : false
+  readonly property string pieceTopic:"torrent:"+(service.detailRevision>=0 ? flow.hash : "")+".pieces"
+  readonly property int pieceRevision:(service.topicVersions || {})[pieceTopic] || 0
   readonly property var piecesState:pieces.item ? pieces.item.state : null
   readonly property bool editing:(overview.item && overview.item.editing) || (files.item && files.item.editing) || (trackers.item && trackers.item.editing) || false
   readonly property bool trackerEditing:trackers.item && trackers.item.editing
@@ -30,7 +32,7 @@ ColumnLayout {
   Text {visible:!root.torrent;Layout.fillWidth:true;text:"Select a torrent and press Enter.";wrapMode:Text.Wrap;textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
   Loader {id:overview;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="overview";visible:active;sourceComponent:DetailsOverview {service:root.service;torrent:root.torrent;card:root.service.detailRevision>=0 ? root.flow.card : null;onRecheckRequested:function(hash){root.recheckRequested(hash)}}}
   Loader {id:files;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="files";visible:active;sourceComponent:DetailsFiles {service:root.service;flow:root.flow;torrent:root.torrent}}
-  Loader {id:pieces;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="pieces";visible:active;sourceComponent:Components.PiecesBar {torrent:root.torrent;snapshot:root.service.detailRevision>=0 ? root.service.store.topics["torrent:"+root.flow.hash+".pieces"] || null : null}}
+  Loader {id:pieces;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="pieces";visible:active;sourceComponent:Components.PiecesBar {torrent:root.torrent;snapshot:root.pieceRevision>=0 ? root.service.store.topics[root.pieceTopic] || null : null;decoded:root.pieceRevision>=0 ? root.service.store.pieces[root.pieceTopic] || null : null}}
   Loader {id:trackers;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="trackers";visible:active;sourceComponent:TrackersView {service:root.service;flow:root.flow}}
   Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="log";visible:active;sourceComponent:LogView {service:root.service;hash:root.flow.hash;consumer:"detail-log"}}
   Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && ["overview","files","trackers","pieces","log"].indexOf(root.tab)<0;visible:active;sourceComponent:DetailCollection {service:root.service;flow:root.flow}}
