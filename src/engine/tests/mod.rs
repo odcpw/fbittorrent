@@ -175,6 +175,7 @@ include!("startup.rs");
 include!("dormant.rs");
 include!("dormant_delete.rs");
 include!("tracker_edit.rs");
+include!("metadata_cache.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");

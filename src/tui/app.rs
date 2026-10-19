@@ -158,6 +158,7 @@ pub enum Msg {
     ApiDetail {connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>},
     Trackers {connection:Option<u64>,hash:String,request:u64,forced:bool,result:Result<Vec<crate::api::Tracker>,String>},
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
+    FilesSaved {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
 
 }

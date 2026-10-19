@@ -124,6 +124,12 @@ impl Inner {
         paused: bool,
         metadata: ListOnlyResponse,
     ) -> Result<Arc<ManagedTorrent>> {
+        // A newly resolved magnet needs durable metainfo before payload
+        // admission: file selection, offline reads and restart use this cache.
+        // Preserve existing caches (and their resume fingerprints) on restores.
+        if !self.torrent_path(&record.hash)?.exists() {
+            self.write_metadata(cx,&record.hash,&metadata.torrent_bytes).await?;
+        }
         // A paused torrent still opens and verifies its files. Validate the hash
         // before admitting any storage, then apply the saved cap at admission.
         let mut options = record.options(paused)?;

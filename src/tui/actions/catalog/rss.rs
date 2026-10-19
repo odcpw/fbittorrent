@@ -114,7 +114,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::Enter)],
         "Open/download",
         10,
-        |a| a.selected_feed().is_some_and(|f| !f.articles.is_empty()),
+        |a| a.selected_feed().is_some_and(|f| !a.rss_focus_items || !f.articles.is_empty()),
         Some(|a| a.on_rss_action(Intent::Primary)),
         TD,
         None,

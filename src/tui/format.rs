@@ -66,6 +66,11 @@ pub(super) fn file(row: &api::File) -> TorrentFile {
         priority: i64::from(row.included),
     }
 }
+pub(super) fn files<'a>(rows:impl IntoIterator<Item=&'a api::File>)->Vec<TorrentFile> {
+    let mut rows=rows.into_iter().collect::<Vec<_>>();
+    rows.sort_by(|a,b|a.sort_key.cmp(&b.sort_key).then(a.index.cmp(&b.index)));
+    rows.into_iter().map(file).collect()
+}
 pub(super) fn transfer(
     row: &api::TransferInfo,
     network: Option<&api::NetworkState>,

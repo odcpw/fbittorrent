@@ -72,6 +72,8 @@ use layout::*;
 mod footer;
 mod clipboard;
 #[cfg(test)]
+#[path="tests/journeys.rs"] mod journey_tests;
+#[cfg(test)]
 #[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
 mod text;
@@ -351,19 +353,23 @@ impl Model for TuiApp {
                 if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
                 self.update(Msg::Files(hash,result))
             }
+            Msg::FilesSaved {connection,hash,result}=>{
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                if let Some(panel)=self.files.as_mut().filter(|m|m.hash==hash){panel.saving=false;}
+                self.update(Msg::Files(hash,result))
+            }
             Msg::Files(hash, r) => {
                 if let Some(m) = self.files.as_mut() {
-                    if m.hash == hash {
+                    if m.hash == hash && !m.saving {
                         m.loading = false;
                         match r {
                             Ok(fs) => {
                                 let n = fs.len();
+                                m.error.clear();
+                                let selected=m.list.borrow().selected().and_then(|i|m.files.get(i)).map(|f|f.index);
                                 m.files = fs;
                                 let mut st = m.list.borrow_mut();
-                                match st.selected() {
-                                    Some(i) if i < n => {}
-                                    _ => st.select(if n > 0 { Some(0) } else { None }),
-                                }
+                                st.select(selected.and_then(|index|m.files.iter().position(|f|f.index==index)).or_else(||(n>0).then_some(0)));
                             }
                             Err(e) => m.error = e,
                         }

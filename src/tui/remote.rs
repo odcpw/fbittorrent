@@ -33,13 +33,7 @@ pub(super) fn read(connection: &attach::Presence) -> Result<ReadSnapshot> {
 }
 pub(super) fn files(connection: &attach::Presence, hash: &str) -> Result<Vec<TorrentFile>> {
     let reply: api::FilesResult = request(connection, "torrents.files", json!({"hash":hash}))?;
-    let mut files = reply.files;
-    files.sort_by(|left, right| {
-        left.sort_key
-            .cmp(&right.sort_key)
-            .then(left.index.cmp(&right.index))
-    });
-    Ok(files.iter().map(format::file).collect())
+    Ok(format::files(&reply.files))
 }
 pub(super) fn set_files(
     connection: &attach::Presence,
