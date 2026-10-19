@@ -125,7 +125,7 @@ impl Inner {
             RestoreOutcome::Failed {
                 reason: "missing_files",
                 message: format!(
-                    "{} restore failed: missing files",
+                    "Files missing: {} restore failed: missing files",
                     ledger.records[index].name
                 ),
             },

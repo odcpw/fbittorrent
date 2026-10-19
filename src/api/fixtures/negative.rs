@@ -610,7 +610,7 @@ fn missing_files_restore_errors_require_the_matching_reason() {
     assert_eq!(detail["name"], "Fixture error");
     assert_eq!(
         detail["error"],
-        "Fixture error restore failed: missing files"
+        "Files missing: Fixture error restore failed: missing files"
     );
     assert_eq!(detail["reason"], "missing_files");
     for op in ["torrents.list", "torrents.get"] {
@@ -630,7 +630,7 @@ fn missing_files_restore_errors_require_the_matching_reason() {
         check_group("missing-files-positive", &encode(detail.clone())).unwrap();
         for (message, reason) in [
             (
-                "Fixture error restore failed: missing files",
+                "Files missing: Fixture error restore failed: missing files",
                 Some("restore_failed"),
             ),
             ("Fixture error restore failed: missing files", None),

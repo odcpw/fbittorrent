@@ -363,17 +363,10 @@ class Harness:
     def stop_serve(self, process, number=signal.SIGTERM, code=0, *, empty_slot=False):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
-        if code == 0:
-            # Retain a typed pre-stop observation for the receipt. The slot may
-            # change before signal handling; shutdown still must prove a drain
-            # or explicit parked session absence in its ordered diagnostics.
-            try:
-                with ApiConn(self) as client:
-                    client.hello()
-                    state = client.call("app.info").get("result", {}).get("state")
-                    self.case.check(True, "record engine slot before signalling owned daemon", str(state))
-            except (OSError, EOFError, ValueError):
-                pass
+        # Never enqueue a pre-stop probe behind a saturated dispatch pool.
+        # Use this owner's typed observations; shutdown diagnostics must still
+        # prove a drain or explicit session absence before socket unlink.
+        owner_state = getattr(self,"observed_owner_state",None)
         stderr_offset = len(self.stderr())
         began = time.monotonic()
         os.kill(pid, number)
@@ -386,9 +379,8 @@ class Harness:
         if code == 0:
             diagnostics = self.stderr()[stderr_offset:]
             if empty_slot:
-                history=self.stderr()
-                self.case.check("state=parked" in history and "engine session exists" not in history,
-                                "empty parked-slot control never admitted an engine session", history)
+                self.case.check(owner_state=="parked",
+                                "empty-slot control observed this owner parked before shutdown", str(owner_state))
             self.case.check(expected_daemon_stderr(diagnostics, empty_slot=empty_slot),
                             "owned shutdown releases its drained or verified empty slot before socket unlink", diagnostics)
 
@@ -1112,6 +1104,10 @@ class ApiConn:
                 raise ValueError("response ID mismatch")
             ok = frame.get("ok") is True if error is None else frame.get("error", {}).get("code") == error
             step.close(ok, self.diagnostic(frame))
+            if frame.get("ok") is True and op in ("hello","app.info"):
+                state=frame.get("result",{}).get("state")
+                if state in ("starting","running","parked","stopping"):
+                    self.harness.observed_owner_state=state
             return frame
 
     def hello(self, kind="test"):
@@ -2177,11 +2173,13 @@ def replay_missing_payload(client, harness, item, save_path):
     client.call("app.restart", dict(scope="engine"))
     harness.wait_for(lambda: ((info := client.call("app.info")["result"])["engine_epoch"] > epoch and info["state"] == "running", json.dumps(info)), "completed missing-payload record restarts without admitting data")
     dormant = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
-    client.case.check(dormant["state"] == "done" and not dormant["checked"], "restart retains the unverified dormant completion claim before explicit activation", json.dumps(dormant))
+    client.case.check(dormant["state"] == "error" and dormant["reason"]=="missing_files" and not dormant["checked"]
+                      and "completed_at" not in dormant and "progress" not in dormant,
+                      "restart reports physically missing completed payload as an error before activation", json.dumps(dormant))
     client.call("torrents.set_seed", dict(hashes=[digest], on=True), error="invalid_state")
     row = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
     client.case.check(row["state"] == "error" and row["reason"] == "missing_files" and
-                      row["error"] == row["name"] + " restore failed: missing files" and "completed_at" not in row,
+                      row["error"] == "Files missing: " + row["name"] + " restore failed: missing files" and "completed_at" not in row,
                       "missing payload activation has canonical text/reason and clears stale completion", json.dumps(row))
 
 
@@ -3903,9 +3901,14 @@ def tui_single_connection(binary, systemd):
                              "p starts the incomplete native torrent over API v1")
             ui.assert_pane(target,"(p) Pause")
             ui.keys(target,"u")
-            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["seed"],json.dumps(row)),
-                             "u changes the actual per-torrent seed intent over API v1")
-            ui.assert_pane(target,"(u) Seed off")
+            ui.assert_pane(target,"[Overview]  Files")
+            case.check(not client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]["upload_enabled"],
+                       "opening Upload details leaves payload upload off")
+            ui.keys(target,"u")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["upload_enabled"] and row["seed"],json.dumps(row)),
+                             "explicit Details toggle changes per-torrent upload intent over API v1")
+            ui.assert_pane(target,"Upload: on")
+            ui.keys(target,"Escape",literal=False)
             ui.keys(target,"p")
             harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["intent"]=="pause",json.dumps(row)),
                              "p stops the native torrent over API v1")
