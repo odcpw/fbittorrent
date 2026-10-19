@@ -5007,6 +5007,12 @@ from daemon_fixture_ports import CASES as PORT_CASES
 CASES.update((function.__name__,function) for function in PORT_CASES)
 
 
+from daemon_magnet_commit import CASES as MAGNET_COMMIT_CASES
+CASES.update((function.__name__,function) for function in MAGNET_COMMIT_CASES)
+from daemon_live_missing import CASES as LIVE_MISSING_CASES
+CASES.update((function.__name__,function) for function in LIVE_MISSING_CASES)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
