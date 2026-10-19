@@ -212,7 +212,7 @@ fn dormant_missing_files() {
     let dispatcher = app.dispatcher();
     assert!(dormant_rows(&dispatcher)
         .iter()
-        .all(|r| r.state == TorrentState::Done && !r.checked));
+        .all(|r| r.state == TorrentState::Error && r.reason.as_deref()==Some("missing_files") && r.progress.is_none() && !r.checked));
     let hash = &records[0].hash;
     let error = dispatcher
         .execute(EngineOp::SetSeed {
@@ -244,9 +244,9 @@ fn dormant_missing_files() {
     assert!(rows
         .iter()
         .filter(|r| &r.hash != hash)
-        .all(|r| r.state == TorrentState::Done));
+        .all(|r| r.state == TorrentState::Error && r.reason.as_deref()==Some("missing_files") && r.progress.is_none()));
     dormant_diagnostic(
-        "missing files become an error only on seed",
+        "missing files are reported before seed and refused before admission",
         serde_json::json!(rows),
     );
     drop(app);

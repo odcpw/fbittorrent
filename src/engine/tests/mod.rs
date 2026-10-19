@@ -190,3 +190,4 @@ mod typed_seed {
 include!("legacy_wire.rs");
 include!("wire_probe.rs");
 include!("upload.rs");
+include!("absent_completed.rs");

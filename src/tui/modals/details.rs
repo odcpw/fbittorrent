@@ -40,7 +40,7 @@ impl TuiApp {
     pub(super) fn toggle_details_seed(&mut self)->Cmd<Msg> {
         let Some(details)=self.details.as_ref() else{return Cmd::none();};
         let Some(row)=self.store.torrents.get(&details.hash) else{return Cmd::none();};
-        let on=!row.seed;let hash=details.hash.clone();
+        let on=!row.upload_enabled;let hash=details.hash.clone();
         self.service_action("torrents.set_seed",serde_json::json!({"hashes":[hash],"on":on}),if on {"Upload: on"}else{"Upload: off"})
     }
 

@@ -45,7 +45,7 @@ def zero_upload(binary,systemd):
         def row():return c.call('torrents.get',dict(hash=pair.hash))['result']['torrent']
         initial=row()
         off=payload_request(pair.box,pair.hash)
-        case.check(initial['upload_enabled'] is False and off==0,'default downloading torrent serves zero piece payload',json.dumps(dict(row=initial,payload_bytes=off)))
+        case.check(initial['upload_enabled'] is False and 'upload_limit_bps' not in initial and off==0,'default downloading torrent serves zero piece payload without an implicit rate cap',json.dumps(dict(row=initial,payload_bytes=off)))
         reply=pair.h.cli('settings','--upload','on')
         case.check(reply.get('upload')=='on' and reply.get('restart') is False,'CLI enables global upload live without reopening the engine',json.dumps(reply))
         measurements=[]

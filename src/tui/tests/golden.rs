@@ -243,8 +243,18 @@ fn add_and_seeding_controls_keep_new_downloads_off() {
         .map(|line|serde_json::from_str::<serde_json::Value>(line).unwrap())
         .find(|line|line["frame"]["result"]["torrents"].is_array()).unwrap();
     let mut row:crate::api::Torrent=serde_json::from_value(value["frame"]["result"]["torrents"][0].clone()).unwrap();
-    row.hash=crate::api::Hash::new(hash.clone()).unwrap();row.seed=false;
-    app.store.torrents.insert(hash,row);
-    assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char('u'))),Cmd::Task(..)) && app.service_busy,
-        "Details retains an explicit upload opt-in");
+    row.hash=crate::api::Hash::new(hash.clone()).unwrap();
+    assert!(app.presence.is_none(), "request control uses no daemon connection");
+    for (seed,enabled) in [(false,false),(false,true),(true,false),(true,true)] {
+        row.seed=seed;row.upload_enabled=enabled;app.service_busy=false;
+        app.store.torrents.insert(hash.clone(),row.clone());
+        let Cmd::Task(_,task)=app.on_key(KeyEvent::new(KeyCode::Char('u'))) else {
+            panic!("Details retains an explicit upload toggle");
+        };
+        assert!(app.service_busy);
+        let Msg::ServiceDone {op,args,..}=task() else {panic!("upload mutation completion");};
+        assert_eq!(op,"torrents.set_seed");
+        assert_eq!(args,serde_json::json!({"hashes":[hash],"on":!enabled}),
+            "Details must invert effective permission independently of completion seeding");
+    }
 }

@@ -258,7 +258,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 sources: Vec::new(),
                 torrent: None,
                 save_path: args.save_path.clone().or(cfg.save_path.clone()),
-                upload_limit: if seed { 0 } else { 32768 },
+                upload_limit: 0,
                 ratio_limit: if seed { -2.0 } else { 0.0 },
                 stopped: args.stopped.unwrap_or(false),
                 category: args.category.clone().unwrap_or_default(),

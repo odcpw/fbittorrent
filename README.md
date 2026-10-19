@@ -85,13 +85,14 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   sources that carry IMDb ids (browse lists), filled in for others once their
   title lookup completes.
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
-  desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
-  seeding for that add), or the CLI.
+  desktop handler owns both), the clipboard, the TUI (`a`), or the CLI.
+  Per-torrent Upload opt-in lives in Details.
 - **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
   torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
   keeps files. Without the daemon staging capability, the sheet says that metadata
   arrives after Download and creates no record before confirmation. With staging,
-  it resolves metadata first and offers file selection, seeding and destination.
+  it offers file selection as metadata arrives and a destination. Enter can
+  confirm the download while metadata is still resolving.
   The desktop handler respects `handler = "confirm"` by opening this sheet;
   `handler = "add"` adds immediately. A local file drop uses the same sheet;
   file-manager drag and drop on Hyprland still needs manual qualification.
@@ -742,7 +743,9 @@ wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
 Completed stop-on-complete records restore as `done, checked:false` without
 opening their payloads for hashing. `seed` and nonempty file-selection actions
 verify them before use; `open` only stats the saved target and stays dormant.
-Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
+Listing stats selected file paths and sizes: missing or truncated data is shown
+as `Files missing` (`error`, `reason:missing_files`) without claiming completion
+or admitting a handle. Same-size content changes still require verification. Explicit
 `delete --files --yes` can remove a dormant record without creating a live handle.
 
 

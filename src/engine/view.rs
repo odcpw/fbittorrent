@@ -174,6 +174,17 @@ impl TorrentView {
         self.completed_at = None;
     }
 
+    pub(super) fn files_missing(&mut self) {
+        self.state = TorrentState::Error;
+        self.reason = Some("missing_files".into());
+        self.error = Some(format!("Files missing: {} restore failed: missing files", self.name));
+        self.checked = false;
+        self.progress = None;
+        self.completed_bytes = None;
+        self.completed_at = None;
+        self.legacy.progress_known = false;
+    }
+
     fn retain_restore_reason(&mut self) {
         if self.error.as_deref().is_some_and(super::disk::is_full) {
             self.state = TorrentState::Error;
@@ -436,6 +447,7 @@ impl TorrentView {
     pub fn to_cli_json(&self) -> Result<String> {
         let f = self.legacy.facts;
         let state = match self.legacy.source {
+            Source::Dormant if self.state == TorrentState::Error => "error",
             Source::Dormant => "stoppedUP",
             Source::Parked if !f.record_paused => "waitingVPN",
             Source::Parked => {
@@ -536,6 +548,7 @@ impl Inner {
                 }
                 view.content_path = Some(path.to_string_lossy().into());
                 view.legacy.content_path = view.content_path.clone().unwrap();
+                if !saved.selected_files_present { view.files_missing(); }
             }
         }
         view

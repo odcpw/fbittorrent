@@ -54,7 +54,7 @@ def tui_everyday(binary, systemd):
             case.check(copied.read_text()=='magnet:?xt=urn:btih:'+f'{1:040x}','sorting preserves selection identity through clipboard copy',copied.read_text())
             ui.keys(target,'F6',literal=False);ui.assert_pane(target,'Download settings')
             for _ in range(9):ui.keys(target,'Down',literal=False)
-            ui.keys(target,'Right',literal=False);ui.assert_pane(target,'Download destination · empty')
+            ui.keys(target,'Right',literal=False);ui.assert_pane(target,'Download destination · absolute folder path')
             destination=box.root/'chosen-downloads';destination.mkdir()
             ui.keys(target,'C-a',literal=False);ui.keys(target,str(destination));ui.keys(target,'Enter',literal=False)
             ui.keys(target,'Down',literal=False);ui.keys(target,'Right',literal=False)
@@ -77,6 +77,10 @@ def tui_everyday(binary, systemd):
             ui.tmux('resize-window','-t',target,'-x','80','-y','24')
             ui.assert_pane(target,'Waiting for VPN')
             case.check('Waiting for VPN' in ui.capture(target).splitlines()[0],'VPN state remains useful at 80 columns',ui.capture(target))
+            # Restore the owned binding before the common running-engine drain check.
+            client.call('app.settings.set',dict(network_interface='lo'))
+            assert h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='running',json.dumps(info)),
+                              'restored private binding unparks the same daemon before shutdown')
             ui.keys(target,'q');h.wait_for(lambda:(done.exists(),ui.capture(target)),'q detaches after everyday commands')
             case.check(process.child.poll() is None and payload.exists(),'detach preserves daemon and original payload')
         finally:ui.close()
