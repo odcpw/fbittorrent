@@ -18,7 +18,7 @@ function describe(s) {
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
   if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
-  if(daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"
+  if(s.online && daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"
   return r
 }
 function meta(t,parked) {

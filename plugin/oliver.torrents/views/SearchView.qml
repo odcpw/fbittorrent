@@ -73,8 +73,9 @@ FocusScope {
       Ui.BorderSurface {
         Layout.fillWidth:true;implicitHeight:Commons.Style.space(36);color:Commons.Color.background
         borderSpec:Commons.Border.controlSpec(root.editing ? "focus" : "normal",Commons.Color.foreground,Commons.Color.accent)
-        Ui.FilterInput {
+        TextInput {
           id:queryInput
+          clip:true;selectByMouse:true
           anchors.fill:parent;anchors.margins:Commons.Style.spacing.sm;maximumLength:256
           font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;color:Commons.Color.foreground
           onTextEdited:root.queryEdited(text)
