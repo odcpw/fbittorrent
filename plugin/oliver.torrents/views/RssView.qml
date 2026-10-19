@@ -18,7 +18,7 @@ FocusScope {
   readonly property bool editing:viewModel.modal==="add"
   readonly property bool dialogOpen:!!viewModel.modal
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:service.testHooks ? ({rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused}) : null
+  function snapshot(){return {rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused}}
   property string focusedModal:""
   signal changed()
   signal dismissRequested()
@@ -56,7 +56,6 @@ FocusScope {
   }
   Keys.priority:Keys.BeforeItem
   Keys.onPressed:function(event){if(root.handleKey(event))event.accepted=true}
-  onViewStateChanged:changed()
   Component.onCompleted:flow.mount()
   Component.onDestruction:flow.hide()
   onViewModelChanged:{if(focusedModal===viewModel.modal)return;focusedModal=viewModel.modal;if(viewModel.modal==="add")Qt.callLater(function(){url.text="";name.text="";url.forceActiveFocus()});else if(viewModel.modal==="remove")Qt.callLater(function(){removeConfirm.reset()});else Qt.callLater(function(){root.focusView();root.focusRequested()})}

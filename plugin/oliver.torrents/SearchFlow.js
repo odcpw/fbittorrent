@@ -36,7 +36,6 @@ function create(service,changed) {
   s.start=function(query){
     query=String(query).trim().slice(0,256)
     if(!query)return false
-    if(!cap("search")){error({message:"Search is unavailable; update the daemon"});return false}
     if(service.browsePosters)service.browsePosters.hide()
     stop(s.session);service.searchTopics=[]
     var generation=++epoch;s.query=query;s.label=query;s.mode="query";s.session=0;s.phase="searching";s.rows=[];s.gridRows=[];s.cursor="";s.card=null;s.message="";s.frames=0;s.warnings=[]
@@ -73,7 +72,7 @@ function create(service,changed) {
     return service.beginSearchAdd(row,s.mode==="query" ? s.session : 0)
   }
   s.providersOpen=function(){s.panel="providers";s.providersRefresh();publish()}
-  s.providersRefresh=function(){if(!cap("search"))return;service.client.request("search.providers",{}, {callback:function(result,failure){if(failure){s.message=failure.message}else s.providers=result.providers;publish()}})}
+  s.providersRefresh=function(){service.client.request("search.providers",{}, {callback:function(result,failure){if(failure){s.message=failure.message}else s.providers=result.providers;publish()}})}
   s.providerToggle=function(row){
     if(s.providerBusy[row.name])return
     var pending=Object.assign({},s.providerBusy);pending[row.name]=true;s.providerBusy=pending;publish()
@@ -91,7 +90,7 @@ function create(service,changed) {
     }) || ""
   }
   function installed(result){installRef="";s.message="Installed "+result.installed.length+" provider(s)"+(result.failed.length ? " · "+result.failed.map(function(f){return f.source+": "+f.message}).join("; ") : "");s.providersRefresh();publish()}
-  s.browseOpen=function(){if(!cap("search")){error({message:"Browse is unavailable; update the daemon"});return}s.panel="browse";service.client.request("search.browse_sources",{}, {callback:function(result,failure){if(failure)s.message=failure.message;else s.sources=result.sources;publish()}});publish()}
+  s.browseOpen=function(){s.panel="browse";service.client.request("search.browse_sources",{}, {callback:function(result,failure){if(failure)s.message=failure.message;else s.sources=result.sources;publish()}});publish()}
   s.browse=function(source){
     if(!source.in_app){service.openUrl(source.url);return}
     if(service.browsePosters)service.browsePosters.hide()

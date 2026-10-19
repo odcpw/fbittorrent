@@ -12,7 +12,7 @@ FocusScope {
   readonly property bool editing:followInput.activeFocus || controls.popupOpen
   readonly property bool dialogOpen:model.panel!=="" || controls.popupOpen
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:service.testHooks ? ({shows:model,controls:controls.state,focus:followInput.activeFocus ? "follow" : controls.popupOpen ? "controls" : model.focus,unfollowCancel:confirmation.cancelFocused}) : null
+  function snapshot(){return {shows:model,controls:controls.state,focus:followInput.activeFocus ? "follow" : controls.popupOpen ? "controls" : model.focus,unfollowCancel:confirmation.cancelFocused}}
   signal changed()
   signal focusRequested()
   Item {id:resultsFocus;focus:true}
@@ -51,7 +51,6 @@ FocusScope {
   }
   Keys.priority:Keys.BeforeItem
   Keys.onPressed:function(event){if(handleKey(event))event.accepted=true}
-  onViewStateChanged:changed()
   property string previousPanel:""
   onModelChanged:{if(model.panel!==previousPanel){previousPanel=model.panel;Qt.callLater(function(){if(model.panel==="follow")followInput.forceActiveFocus();else if(model.panel==="remove")confirmation.reset();else {root.service.cancelFocusTarget(followInput);root.focusResults()}})}}
   Component.onCompleted:flow.mount()

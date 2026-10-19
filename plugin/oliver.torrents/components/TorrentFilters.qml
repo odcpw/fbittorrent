@@ -18,7 +18,7 @@ Column {
     if(!service.status.loaded)return undefined
     var c=service.store.counts
     if(key==="all")return c.total || 0
-    if(key==="downloading")return (c.downloading || 0)+(c.stalled || 0)+(c.metadata || 0)+(c.checking || 0)
+    if(key==="downloading")return Model.activeCount(c)
     return c[key] || 0
   }
   function move(delta){cursor=Math.max(0,Math.min(choices.length-1,cursor+delta));chosen(choices[cursor].key)}

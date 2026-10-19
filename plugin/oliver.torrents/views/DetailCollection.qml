@@ -23,15 +23,9 @@ ListView {
     required property var entry
     readonly property var modelData:entry
     width:ListView.view.width
-    height:root.flow.tab==="peers" ? peer.implicitHeight : generic.implicitHeight
+    height:peer.implicitHeight
     function rendered(){return peer.rendered()}
-    PeerRow {id:peer;width:parent.width;visible:root.flow.tab==="peers";peer:row.modelData}
-    Text {
-      id:generic
-      width:parent.width;visible:root.flow.tab!=="peers";textFormat:Text.PlainText;wrapMode:Text.Wrap
-      text:"Piece "+row.modelData.index+" · "+(row.modelData.state || "")
-      color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body
-    }
+    PeerRow {id:peer;width:parent.width;peer:row.modelData}
   }
   Text {anchors.centerIn:parent;width:parent.width;wrapMode:Text.Wrap;visible:root.count===0;text:service.store.topics[topic]===undefined ? "Loading "+root.flow.tab+"…" : "No "+root.flow.tab+" reported";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
 }

@@ -102,7 +102,7 @@ Column {
       ListView.onPooled:pooled=true
       ListView.onReused:pooled=false
       visible:!pooled && !!model.hash
-      width:list.width;host:root;torrent:model
+      width:list.width;host:root;torrent:model.uiTorrent
       selected:!!root.selection[model.hash]
     }
   }

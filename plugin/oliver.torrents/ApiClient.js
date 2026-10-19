@@ -28,7 +28,7 @@ function create(io, options) {
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
     retryIndex: 0, retryDelay: 500, graceful: false, popupOpen: false,
-    dashboardVisible: false, quickVisible:false, protocolMismatch: false, details: [], mode: "connecting", lastError: null, pollAt: 0 }
+    dashboardVisible: false, quickVisible:false, protocolMismatch: false, details: [], mode: "connecting", lastError: null }
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
   function fail(entry, failure, status) {
@@ -61,13 +61,6 @@ function create(io, options) {
   }
   c.request = function(op, args, settings) {
     settings = settings || {}
-    var cap = op === "torrents.pieces" ? "pieces" : op === "torrents.files" || op === "torrents.set_files" ? "files" : op.indexOf("torrents.") === 0 ? "torrents" : ""
-    if (c.online && cap && c.caps.indexOf(cap) < 0) {
-      var unsupported = {code:"unsupported", message:"This daemon lacks " + cap + "; restart to update", retryable:false}
-      c.lastError = unsupported
-      if (settings.callback) settings.callback(null, unsupported)
-      changed(); return false
-    }
     var entry = { op: op, args: args, callback: settings.callback, instance: c.instance, quiet:settings.quiet===true && !settings.mutating, internal:settings.internal===true && !settings.mutating,
       ref: settings.mutating ? "qs-" + c.started + "-" + c.nextRef++ : undefined }
     if (entry.ref) {
@@ -137,9 +130,7 @@ function create(io, options) {
     c.lastError = { code: "invalid_message", message: message, retryable: false };changed()
   }
   function presence() {
-    var args = { interactive: c.dashboardVisible || c.quickVisible, glance: c.popupOpen, overlay_visible:c.quickVisible }
-    if (c.caps.indexOf("dashboard_presence") >= 0) args.dashboard_visible = c.dashboardVisible
-    return args
+    return {interactive:c.dashboardVisible || c.quickVisible,glance:c.popupOpen,overlay_visible:c.quickVisible,dashboard_visible:c.dashboardVisible}
   }
   c.visibility = function(popup, dashboard, details, quick) {
     var presenceChanged=c.popupOpen!==!!popup || c.dashboardVisible!==!!dashboard || c.quickVisible!==!!quick
@@ -194,9 +185,8 @@ function create(io, options) {
         c.request("subscribe",{topics:run.groups[run.index++],interval_ms:interval},{internal:true,callback:function(result,failure){
           if(subscriptionRun!==run)return
           if(failure){
-            if(failure.code==="unknown_op"){subscriptionRun=null;c.mode="poll";subscriptionWanted=false;c.pollAt=0;c.poll()}
-            else if(failure.retryable){subscriptionFailure=failure;subscriptionRun=null;subscriptionWanted=true;subscriptionRetryAt=now()+1000}
-            else advance()
+            if(failure.retryable){subscriptionFailure=failure;subscriptionRun=null;subscriptionWanted=true;subscriptionRetryAt=now()+1000}
+            else {c.reset("subscription failed: "+failure.message);return}
           }else if(result){
             if(run.generation!==subscriptionGeneration)run.remove.push(result.sub)
             else c.subs[result.sub]={topics:result.topics,rev:0,resync:false,interval:interval}
@@ -211,7 +201,6 @@ function create(io, options) {
   c.subscribeAll = function(force) {
     subscriptionForced=subscriptionForced || !!force
     subscriptionGeneration++
-    if(c.caps.indexOf("subscribe")<0 || c.mode==="poll"){c.mode="poll";c.pollAt=0;c.poll();return}
     subscriptionWanted=true;renewSubscriptions()
   }
 
@@ -220,17 +209,6 @@ function create(io, options) {
     // Rebuild its entire atomic group, never retain a partially ordered group.
     c.subscribeAll(true)
     if (o.resubscribe) o.resubscribe(topic)
-  }
-  c.poll = function() {
-    if (!c.online || c.mode !== "poll" || now() < c.pollAt) return
-    c.pollAt = now() + (c.popupOpen || c.dashboardVisible ? 1000 : 5000)
-    var active = Object.keys(c.pending).map(function(id) { return c.pending[id].op })
-    if (active.indexOf("app.info") < 0) c.request("app.info")
-    if (c.caps.indexOf("torrents") >= 0 && active.indexOf("torrents.list") < 0) c.request("torrents.list", {})
-    if(c.dashboardVisible && c.caps.indexOf("shows")>=0 && active.indexOf("shows.list")<0)c.request("shows.list")
-    if(c.dashboardVisible && c.caps.indexOf("rss")>=0 && active.indexOf("rss.feeds")<0)c.request("rss.feeds")
-    if (active.indexOf("app.network") < 0) c.request("app.network")
-    if (active.indexOf("transfer.info") < 0) c.request("transfer.info")
   }
   c.tick = function() {
     if (c.helloSent && now() - c.lastFrame >= 45000) { c.reset("45 seconds without a frame"); return }
@@ -242,7 +220,7 @@ function create(io, options) {
       var e = c.awaiting[ref]
       if (now() >= e.deadline) { delete c.awaiting[ref]; fail(e, { code: "timeout", message: "no answer", retryable: true }, "no answer") }
     })
-    pump(); renewSubscriptions(); c.poll(); changed()
+    pump(); renewSubscriptions(); changed()
   }
   c.receive = function(line) {
     if (utf8Bytes(line) + 1 > 1048576) { c.reset("server line exceeds 1048576 bytes"); return }

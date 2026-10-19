@@ -36,7 +36,7 @@ def write(config):
     add('stopped','stopped','download','dim','not running',online=False)
     add('idle','idle','download','normal','Idle · 8 done',counts=dict(done=8,total=8))
     add('idle-countdown','idle','download','normal','stops in 4 min',idle_exit_in_s=240)
-    add('seeding','seeding','upload','normal','↑ 120 KB/s · 1 uploading',counts=dict(seeding=1,total=1),ul_bps=120000)
+    add('seeding','seeding','upload','normal','↑ 120.0 KB/s · 1 uploading',counts=dict(seeding=1,total=1),ul_bps=120000)
     add('stopped-recently','stopped_recently','download','dim','stopped (idle)',online=False,stoppedRecently=True,byeReason='idle')
     add('downloading','downloading','download','normal','2 downloading · 1 queued',counts=dict(downloading=2,queued=1,total=3),dl_bps=4200000,ul_bps=32000)
     add('ready','ready','ready','normal','Ready to watch:',counts=dict(downloading=1,ready=1,total=1),caps=['watch'],rows=[playable],top=[playable],dl_bps=4200000)

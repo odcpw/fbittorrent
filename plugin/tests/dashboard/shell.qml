@@ -119,7 +119,7 @@ ShellRoot {
     }
     function gridState():string {
       var view=dashboard.item ? dashboard.item.search : null
-      return JSON.stringify(view ? {grid:view.gridShowing ? view.viewState.grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
+      return JSON.stringify(view ? {grid:view.gridShowing ? view.snapshot().grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
     }
     function eventTrace():string{return JSON.stringify(service.store.events)}
     function searchFocus():string {

@@ -156,7 +156,6 @@ Item {
   function follow(hash) {
     var row=store.torrents[hash]
     if(!row)return false
-    if(client.caps.indexOf("shows")<0){notify("Shows is unavailable; update the daemon");return false}
     return mutate("shows.follow",row.imdb_id ? {imdb:row.imdb_id} : {query:row.name},"shows")
   }
   readonly property alias torrentModel: rowsModel
@@ -170,8 +169,6 @@ Item {
   }
   onSortKeyChanged: sortChanged()
   onSortReverseChanged: sortChanged()
-  readonly property var activeTorrents: torrents.filter(Model.isActive)
-  readonly property var otherTorrents: torrents.filter(function(t) { return !Model.isActive(t) })
   readonly property bool transferring: Number(status.dl) > 0 || Number(status.up) > 0
   property var status: ({ok:false, torrents:[]})
   property var store: Store.create()
@@ -241,11 +238,6 @@ Item {
   }
   function mutate(op, args, cap, callback) {
     if (!client) return false
-    if (cap && client.caps.indexOf(cap) < 0) {
-      lastError = "This daemon does not support " + cap
-      actionStatus=lastError;noticeTimer.restart()
-      return false
-    }
     return client.request(op, args, {mutating:true, callback:callback})
   }
   function refresh() { if (client) client.subscribeAll(true) }
@@ -256,9 +248,6 @@ Item {
     return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
-  function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
-  function commitStaged(hash, files, seed, savePath) { return mutate("torrents.commit", {hash:hash, files:files, seed:seed, save_path:savePath}, "staging") }
-  function discardStaged(hash) { return mutate("torrents.discard", {hash:hash}, "staging") }
   function openTarget(hash, file) {
     var args = {hash:hash}
     if (file !== undefined) args.file = file
@@ -353,14 +342,10 @@ Item {
     Qt.callLater(function() { reconnect.restart() })
     return "ok"
   }
-  function stateJson() { var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
+  function stateJson() { if(testHooks && dashboardOwner)dashboardOwner.publishNow(true);var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
   function toggleTorrent(t) { var current=t ? store.torrents[t.hash] : null; return current ? (Model.isStopped(current) ? resume(current.hash) : pause(current.hash)) : false }
-  function removeTorrent(t) { return t ? remove(t.hash, false) : false }
-  function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
   function openTorrentDetails(t) {return !!(t && shell && shell.summon("oliver.torrents",JSON.stringify({view:"torrents",hash:t.hash})))}
-  function stopBackend() { return quit() }
-  function startBackend() { startDaemon() }
   property bool clipboardTooLarge: false
   function addFromClipboard() {
     if (!clipboard.running) { clipboardTooLarge = false; clipboard.running = true }

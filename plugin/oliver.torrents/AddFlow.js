@@ -2,10 +2,10 @@
 .import "AddSource.js" as Source
 .import "Model.js" as Model
 function create(service,changed,debug) {
-  var f={},epoch=0,trace=[],s={},readPending=false,filesRequested=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
+  var f={},epoch=0,trace=[],s={},filesRequested=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
   function publish(){changed()}
   function record(kind,op,data){if(debug){trace.push({kind:kind,op:op,data:data});if(trace.length>32)trace.shift()}}
-  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,stageSupported:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};readPending=false;filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
+  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
   reset()
   function requiredBytes(){
     if(s.files.length)return s.files.reduce(function(total,row){return total+(s.included[row.index] ? row.size : 0)},0)
@@ -63,22 +63,16 @@ function create(service,changed,debug) {
     s.name=row.name || s.name;s.size=row.size
     if(row.size!==undefined && !filesRequested){
       filesRequested=true
-      if(service.client.caps.indexOf("subscribe")>=0){service.addTopics=["torrent:"+s.hash+".files"];s.phase="files_loading"}
-      else {var generation=epoch;service.client.request("torrents.files",{hash:s.hash},{callback:function(result,failure){if(generation!==epoch || !s.visible)return;if(result)fileRows(result.files);else if(failure)error(failure.message)}})}
+      service.addTopics=["torrent:"+s.hash+".files"];s.phase="files_loading"
     }
     publish()
   }
   function inspect() {
-    if(!s.hash || readPending || !service.online)return
-    readPending=true;var generation=epoch
-    service.client.request("torrents.get",{hash:s.hash},{callback:function(result,failure){
-      if(generation!==epoch)return
-      readPending=false
-      if(result)metadata(result.torrent);else if(failure)error(failure.message)
-    }})
+    var row=service.store.torrents[s.hash]
+    if(row)metadata(row)
   }
   function adoptStage(row){
-    s.duplicate=false;s.owned=true;s.stageSupported=true;s.phase="resolving";s.origin=row.origin || s.origin
+    s.duplicate=false;s.owned=true;s.phase="resolving";s.origin=row.origin || s.origin
     s.name=row.name || s.name;s.size=row.size
     settings({save_path:s.requestedPath || row.save_path})
     if(s.cancelRequested)f.cancel();else if(s.commitRequested)f.commit();else metadata(row)
@@ -115,8 +109,6 @@ function create(service,changed,debug) {
   function stageSource(){
     if(!service.online){s.phase="connecting";publish();return}
     if(s.phase==="connecting")settings({save_path:s.requestedPath})
-    s.stageSupported=service.client.caps.indexOf("staging")>=0
-    if(!s.stageSupported){s.phase="preview";publish();return}
     s.phase="staging";send("torrents.add",{source:s.source,stage:true,seed:false,origin:s.origin},"staging",staged)
   }
   f.open=function(source,options){
@@ -131,54 +123,54 @@ function create(service,changed,debug) {
     s.source=parsed.source;s.hash=parsed.hash;s.name=Model.sourceName(s.source)
     var existing=s.hash && service.store.torrents[s.hash]
     if(existing){if(existing.staged){adoptStage(existing);return true}s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
-    s.stageSupported=service.client.caps.indexOf("staging")>=0
     stageSource()
     publish();return true
   }
-  // Search owns provider resolution. The same review sheet delays a legacy
-  // grab until Download, or receives the real staged hash when negotiated.
+  // Search resolves a provider result into the same staged review.
   f.search=function(row,session){
     if(s.visible){service.notify("Finish or discard the current add first");return false}
-    epoch++;reset();s.visible=true;s.phase="preview";s.origin="search";s.name=row.name;s.size=row.size
-    s.stageSupported=service.client.caps.indexOf("staging")>=0
-    s.searchArgs=s.stageSupported && session ? {search_id:session,key:row.key} : {result:row}
+    epoch++;reset();s.visible=true;s.phase="staging";s.origin="search";s.name=row.name;s.size=row.size
+    s.searchArgs=session ? {search_id:session,key:row.key} : {result:row}
     settings({})
-    if(s.stageSupported){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)}
+    s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)
     publish();return true
   }
   // Shared Shows/RSS entry: stage first, mark the source only on commit.
   f.release=function(op,args,row){
     if(s.visible){service.notify("Finish or discard the current add first");return false}
-    if(["shows.grab","rss.grab"].indexOf(op)<0 || service.client.caps.indexOf("staging")<0){service.notify("Staged review is unavailable");return false}
+    if(["shows.grab","rss.grab"].indexOf(op)<0){service.notify("Unknown release source");return false}
     epoch++;reset();s.visible=true;s.phase="staging";s.origin=op==="shows.grab" ? "shows" : "rss";s.name=row.title || "Release";s.size=row.size
-    s.stageSupported=true;s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
+    s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
     send(op,Object.assign({},args,{stage:true,seed:false}),s.origin,staged);publish();return true
   }
   f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
     if(s.visible)return false
-    epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.stageSupported=true;s.owned=true
-    adopting=true;inspect();publish();return true
+    epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.owned=true
+    adopting=true
+    var generation=epoch
+    service.client.request("torrents.get",{hash:hash},{callback:function(result,failure){if(generation!==epoch || !s.visible)return;if(result)metadata(result.torrent);else if(failure)error(failure.message)}})
+    publish();return true
   }
   f.toggle=function(index){if(busy())return;var next=Object.assign({},s.included);next[index]=!next[index];s.included=next;publish()}
   f.path=function(value){if(busy())return;s.commitRequested=false;pathDirty=true;s.savePath=value;scheduleSpace(false);publish()}
   f.checkPath=function(){checkSpace()}
-  f.retry=function(){s.error="";if(s.grabArgs && !s.owned){s.phase="staging";send(s.grabOp,Object.assign({},s.grabArgs,{stage:true,seed:false}),s.origin,staged)}else if(s.searchArgs && s.stageSupported && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)}else{s.phase=s.owned ? "resolving" : s.searchArgs ? "preview" : "input";if(s.owned)inspect()}publish()}
+  f.retry=function(){s.error="";if(s.grabArgs && !s.owned){s.phase="staging";send(s.grabOp,Object.assign({},s.grabArgs,{stage:true,seed:false}),s.origin,staged)}else if(s.searchArgs && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)}else{s.phase=s.owned ? "resolving" : "input";if(s.owned)inspect()}publish()}
   f.commit=function(){
     if(s.duplicate){service.finishAdd(s.hash);close();return}
-    if(["preview","ready","connecting","staging","resolving","files_loading","metadata_timeout"].indexOf(s.phase)<0)return
+    if(["ready","connecting","staging","resolving","files_loading","metadata_timeout"].indexOf(s.phase)<0)return
     if(s.savePath && s.savePath[0]!=="/"){error("Enter an absolute save folder");return}
     if(!spaceReady())return
     s.commitRequested=true
     if(s.phase==="connecting" || s.phase==="staging"){publish();return}
-    var args={seed:false},op="torrents.add"
+    if(!s.owned){publish();return}
+    var args={seed:false},op="torrents.commit"
     if(s.savePath)args.save_path=s.savePath
     if(s.owned){
       args.hash=s.hash;op="torrents.commit"
       if(s.files.length)args.files=s.files.filter(function(row){return s.included[row.index]}).map(function(row){return row.index})
       if(s.files.length && !args.files.length){error("Select at least one file");return}
-    }else if(s.searchArgs){op="search.grab";args=Object.assign({},s.searchArgs,args)}
-    else{args.source=s.source;args.origin=s.origin;if(s.stopped)args.stopped=true;if(s.category!==undefined)args.category=s.category}
+    }
     s.phase="committing"
     send(op,args,s.owned ? "staging" : s.searchArgs ? "search" : "",function(result){var hash=result.hash || s.hash;service.notify(result.duplicate ? "Already in your list" : "Download added");service.finishAdd(hash);close()})
     publish()
@@ -196,12 +188,12 @@ function create(service,changed,debug) {
     if(spaceDue && service.now>=spaceDue)checkSpace()
     s.elapsed_s=Math.max(0,Math.floor((service.now-s.created)/1000))
     if(s.phase==="resolving" && s.elapsed_s>=90)s.phase="metadata_timeout"
-    if(s.owned && s.phase==="resolving")inspect()
     publish()
   }
   f.frame=function(frame){
     if(!s.visible)return
     if(s.phase==="connecting" && service.online)stageSource()
+    if(s.owned && frame.topic==="torrents" && ["snapshot.end","delta"].indexOf(frame.ev)>=0)inspect()
     if(frame.topic==="events" && (frame.ev==="snapshot.end" || frame.ev==="delta") && s.pendingRef){
       var outcome=service.store.mutations[s.pendingRef]
       if(outcome)f.frame({ev:"mutation.result",ref:s.pendingRef,outcome:outcome.status,result:outcome.result,error:outcome.error})
@@ -215,6 +207,6 @@ function create(service,changed,debug) {
       var files=service.store.topics[frame.topic] || {};fileRows(Object.keys(files).map(function(key){return files[key]}))
     }
   }
-  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!(s.searchArgs || s.grabArgs),hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),neededBytes:requiredBytes(),insufficientSpace:tooLarge(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,stageSupported:s.stageSupported,elapsed_s:s.elapsed_s,canDownload:["preview","ready","connecting","staging","resolving","files_loading","metadata_timeout"].indexOf(s.phase)>=0 && !s.commitRequested && spaceReady(),commitRequested:s.commitRequested,busy:busy(),trace:trace}}
+  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!(s.searchArgs || s.grabArgs),hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),neededBytes:requiredBytes(),insufficientSpace:tooLarge(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,elapsed_s:s.elapsed_s,canDownload:["ready","connecting","staging","resolving","files_loading","metadata_timeout"].indexOf(s.phase)>=0 && !s.commitRequested && spaceReady(),commitRequested:s.commitRequested,busy:busy(),trace:trace}}
   return f
 }

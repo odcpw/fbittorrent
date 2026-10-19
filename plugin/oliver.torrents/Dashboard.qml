@@ -52,18 +52,19 @@ Item {
     // once per event turn, rather than allocating intermediate partial states.
     Qt.callLater(root.publishNow)
   }
-  function publishNow() {
+  function publishNow(inspect) {
     if (disposing || !svc || !window)return
     if(!window.visible && svc.dashboardOwner!==root)return
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
-    if(!svc.testHooks)return
+    if(!window.visible)svc.dashboardState=null
+    if(!svc.testHooks || inspect!==true)return
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
       clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:"view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
-    if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
-    if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
-    if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.viewState)
-    if(window.visible && currentView==="shows" && shows)svc.dashboardState=Object.assign({},svc.dashboardState,shows.viewState)
+    if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.snapshot())
+    if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.snapshot())
+    if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.snapshot())
+    if(window.visible && currentView==="shows" && shows)svc.dashboardState=Object.assign({},svc.dashboardState,shows.snapshot())
     if(window.visible && settingsSheet)svc.dashboardState.settings=settingsSheet.state
     if(window.visible && logView)svc.dashboardState.log={level:logView.level,source:logView.source,hash:logView.hashFilter,count:logView.count,follow:logView.follow}
     if(window.visible){svc.dashboardState.help=helpOpen;svc.dashboardState.stopping=stopConfirm.opened;svc.dashboardState.stopSelected=stopConfirm.selectedIndex}

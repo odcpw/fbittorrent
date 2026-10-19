@@ -17,7 +17,7 @@ function create(service,changed) {
     f.feeds=Object.keys(rows).map(function(id){return rows[id]}).sort(function(a,b){return a.name.localeCompare(b.name) || a.id.localeCompare(b.id)})
     if(!feed())f.chooseFeed(f.feeds.length ? f.feeds[0].id : "")
   }
-  function refreshRead(){service.client.request("rss.feeds",{}, {quiet:true});if(f.feed)service.client.request("rss.items",{feed:f.feed},{quiet:true})}
+  function refreshRead(){service.client.request("rss.feeds",{}, {quiet:true})}
   function send(op,args,done){
     if(Object.keys(pending).length>=8){failure({message:"Wait for the current RSS changes to finish"});return false}
     f.message="";var generation=epoch,ref=service.mutate(op,args,"rss",function(result,error){
@@ -67,9 +67,9 @@ function create(service,changed) {
     }
     if(frame.topic==="events" && (frame.ev==="snapshot.end" || frame.ev==="delta"))Object.keys(pending).forEach(function(ref){var result=service.store.mutations[ref];if(result)f.frame({ev:"mutation.result",ref:ref,outcome:result.status,result:result.result,error:result.error})})
     var committed=frame.ev==="snapshot.end" || frame.ev==="delta" || (frame.ok && request)
-    if(!committed || !(frame.topic==="rss.feeds" || frame.topic===topic() || (request && ["rss.feeds","rss.items"].indexOf(request.op)>=0)))return
+    if(!committed || !(frame.topic==="rss.feeds" || frame.topic===topic() || (request && request.op==="rss.feeds")))return
     if(frame.topic==="rss.feeds" || (request && request.op==="rss.feeds"))feeds()
-    if(frame.topic===topic() || (request && request.op==="rss.items" && request.args.feed===f.feed)){f.loading=false;items()}
+    if(frame.topic===topic()){f.loading=false;items()}
     publish()
   }
   f.snapshot=function(){return {feeds:f.feeds,items:f.items,feed:f.feed,item:f.item,pane:f.pane,modal:f.modal,message:f.message,loading:f.loading,unread:f.unread}}

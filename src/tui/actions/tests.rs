@@ -345,7 +345,7 @@ fn dashboard_help_covers_live_aliases() {
     for (id, required) in [
         ("torrents.copy_magnet", vec!["y"]), ("torrents.undo_remove", vec!["U"]),
         ("torrents.select_visible", vec!["Ctrl+A"]), ("torrents.filter", vec!["/"]),
-        ("torrents.focus_left", vec!["h", "Left"]), ("torrents.focus_right", vec!["l", "Right"]),
+        ("torrents.focus_left", vec!["h", "←"]), ("torrents.focus_right", vec!["l", "→"]),
         ("shows.new", vec!["n", "+"]), ("shows.remove", vec!["x", "d"]),
         ("shows.filters", vec!["F"]), ("rss.remove", vec!["x", "d"]),
         ("rss.mark", vec!["m", "Space"]), ("rss.refresh_all", vec!["R"]),

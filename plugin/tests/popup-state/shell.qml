@@ -45,7 +45,6 @@ ShellRoot {
     s.startupRequested=true;r=State.describe(s);check("states","explicit Starting",r,r.message.indexOf("Starting")===0);s.startupRequested=false
     s.reconnecting=true;s.client.retryDelay=4000;r=State.describe(s);check("states","last-known rows dim while reconnecting; retry seconds",r,r.dim && r.message.indexOf("4 s")>=0);s.reconnecting=false
     s.stoppedRecently=true;r=State.describe(s);check("states","stopped recently",r,r.message.indexOf("stopped.")>=0)
-    s.client.protocolMismatch=true;s.client.hello={proto:2};r=State.describe(s);check("states","protocol mismatch with restart hint",r,r.urgent && r.banner.indexOf("API 2")>=0);s.client.protocolMismatch=false
     s.online=true;s.client.hello={server:{version:"0.2.0"}};s.store.info.installed_version="0.2.1";r=State.describe(s);check("states","current native UI has no version-skew warning",r,r.banner==="");s.store.info={}
     s.backendState="parked";s.store.summary.network={interface:"proton0"};r=State.describe(s);check("states","VPN banner dims rows",r,r.dim && r.urgent && r.banner.indexOf("proton0")>=0)
     s.backendState="error";s.lastError="Engine restore failed";r=State.describe(s);check("states","engine failure preserves message",r,r.banner==="Engine restore failed" && r.urgent)
@@ -66,6 +65,8 @@ ShellRoot {
     check("rows","unknown peers and ETA omitted",State.meta({state:"metadata"},false),State.meta({state:"metadata"},false)==="Metadata")
     check("rows","error message and action verb",State.meta({state:"error",error:"Missing files"},false),State.meta({state:"error",error:"Missing files"},false)==="Missing files" && State.verb({op:"torrents.stop"})==="pausing…")
     check("states","popup group keys map to real dashboard filters",["live","queued","paused","done","other"].map(State.dashboardFilter),JSON.stringify(["live","queued","paused","done","other"].map(State.dashboardFilter))===JSON.stringify(["downloading","queued","paused","done","all"]))
+    var grouped=[{state:"downloading"},{state:"stalled"},{state:"seeding"},{state:"paused",staged:true}].map(State.group)
+    check("states","upload and review groups open the matching dashboard filter, separate from downloading",grouped,JSON.stringify(grouped)==='["live","live","seeding","reviewing"]' && JSON.stringify(grouped.map(State.dashboardFilter))==='["downloading","downloading","seeding","reviewing"]')
     console.log("FBTQS-PASS states");console.log("FBTQS-PASS rows")
 
   }

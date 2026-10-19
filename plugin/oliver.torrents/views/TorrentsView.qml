@@ -26,11 +26,11 @@ FocusScope {
   readonly property real dockWidth:Math.max(300,Math.min(service.detailsWidth,480,maxDockWidth))
   readonly property real maxDockWidth:windowLogicalWidth-TableLayout.chrome(windowLogicalWidth)+360-(TableLayout.columns(windowLogicalWidth,0,1).reduce(function(sum,c){return sum+(c.name==="name" ? 0 : c.width)},0))-210
   readonly property bool showingDetail:visible && (tier>=2 || detailsOpen)
-  readonly property var detailState:service.testHooks ? ({visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
+  function detailSnapshot(){return {visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
     hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
     overview:pane ? pane.overviewState : null,
     action:overviewSheet.item ? overviewSheet.item.state : null,actionStatus:service.overviewRevision>=0 && service.overviewFlow ? service.overviewFlow.status(cursorHash) : "",
-    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,networking:pane ? pane.networkingText : "",poster:pane && pane.posterLoaded ? "loaded" : "none"}) : null
+    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,networking:pane ? pane.networkingText : "",poster:pane && pane.posterLoaded ? "loaded" : "none"}}
   function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
   function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
   onCursorHashChanged:scheduleDetail()
@@ -38,15 +38,14 @@ FocusScope {
   Component.onCompleted:scheduleDetail()
   Component.onDestruction:service.hideDetail()
   readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
-  readonly property var viewState:service.testHooks ? ({errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
+  function snapshot(){return {errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
     cleanup:({undo:undoAvailable,hashes:service.cleanupFlow ? service.cleanupFlow.hashes : []}),toast:service.toast,cursor:cursorHash,rowProgress:service.detailRevision>=0 ? table.progress(cursorHash) : 0,stateLabel:service.detailRevision>=0 ? table.stateText(cursorHash) : "",selection:Object.keys(selection),filter:filter,query:query,
-    focus:focusPane,details:detailState,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
+    focus:focusPane,details:detailSnapshot(),dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
     panes:{sidebar:sideFrame.visible,detailsDocked:detailsFrame.visible,detailsSheet:sheet.visible},
-    hover:table.hoverHash,rows:table.count,listWidth:table.width}) : null
+    hover:table.hoverHash,rows:table.count,listWidth:table.width}}
   signal routed(string view)
   signal dismissRequested()
   signal changed()
-  onViewStateChanged:changed()
   readonly property bool undoAvailable:service.cleanupRevision>=0 && service.cleanupFlow && service.cleanupFlow.available(service.now)
   function selectVisible(){var next={};service.store.visibleKeys(filter,query,service.sortKey,service.sortReverse).forEach(function(hash){next[hash]=true});selection=next}
   function confirmRemove(files){

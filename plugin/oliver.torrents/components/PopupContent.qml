@@ -46,7 +46,8 @@ PanelKeyCatcher {
   function currentStrip(){return stopping ? stopStrip : pendingRemoval ? confirms[pendingRemoval.hash] : null}
   function rebuild() {
     var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"UPLOADING",key:"seeding",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
-    svc.torrents.forEach(function(t){var group=t.staged ? 5 : Model.isActive(t) ? 0 : t.state==="seeding" ? 1 : t.state==="queued" ? 2 : t.state==="paused" ? 3 : t.state==="done" ? 4 : 6;groups[group].rows.push(t)})
+    var indexes={};groups.forEach(function(g,i){indexes[g.key]=i})
+    svc.torrents.forEach(function(t){groups[indexes[PopupState.group(t)]].rows.push(t)})
     var all=[],parts=[]
     groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="seeding" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
     var items=[];parts.forEach(function(g){items.push({header:true,group:g});g.visibleRows.forEach(function(t,i){items.push({header:false,torrent:t,index:g.start+i})})});syncEntries(items);sections=parts;rows=all;rowIndex=Math.max(0,Math.min(rowIndex,rows.length-1))

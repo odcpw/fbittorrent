@@ -60,7 +60,6 @@ function create(service, changed) {
       var row=d.row()
       if(topic==="pieces" && pieceCache && row && row.checked===true && row.state===pieceState)service.store.setPieces("torrent:"+d.hash+".pieces",pieceCache,pieceMap)
       service.subscribeDetail(d.hash,[topic]);d.loading=topic==="files" && !service.store.topics["torrent:"+d.hash+".files"]
-      if(topic==="files" && (!cap("subscribe") || service.client.mode==="poll"))d.fetchFiles()
 
     }else service.unsubscribeDetail()
     d.refreshFiles()
@@ -84,7 +83,6 @@ function create(service, changed) {
   }
   d.selectTab=function(tab){if(d.tabs().indexOf(tab)<0)return;d.tab=tab;d.query="";d.cursor=0;if(d.hash)d.topics();changed()}
   d.cycle=function(delta){var tabs=d.tabs();d.selectTab(tabs[(tabs.indexOf(d.tab)+delta+tabs.length)%tabs.length])}
-  d.fetchFiles=function(){var hash=d.hash;if(!hash)return;d.loading=true;service.client.request("torrents.files",{hash:hash},{callback:function(){if(d.hash===hash){d.loading=false;changed()}}})}
   d.refreshFiles=function(){
     var keyed=service.store.topics["torrent:"+d.hash+".files"] || {},query=d.query.toLocaleLowerCase()
     d.files=Object.keys(keyed).map(function(k){return keyed[k]}).filter(function(f){return !query || f.path.toLocaleLowerCase().indexOf(query)>=0})
@@ -96,7 +94,7 @@ function create(service, changed) {
   d.setFiles=function(included,all){
     var row=d.row();if(!row || row.state==="checking")return false
     var selected=all ? d.files.map(function(f){return f.index}) : d.files[d.cursor] ? [d.files[d.cursor].index] : []
-    return service.setFiles(d.hash,selected,included,function(){if(d.hash && d.tab==="files" && !cap("subscribe"))d.fetchFiles()})
+    return service.setFiles(d.hash,selected,included)
   }
   d.toggle=function(){var f=d.files[d.cursor];return f ? d.setFiles(!f.included,false) : false}
   d.openFile=function(){var f=d.files[d.cursor];if(f)service.openTarget(d.hash,f.index)}
@@ -110,8 +108,8 @@ function create(service, changed) {
       return
     }
     var topic="torrent:"+d.hash+".files"
-    if(frame.topic===topic || (request && request.op==="torrents.files" && request.args.hash===d.hash)){
-      if(frame.ev==="snapshot.end" || (request && frame.ok))d.loading=false
+    if(frame.topic===topic){
+      if(frame.ev==="snapshot.end")d.loading=false
       if((service.store.topicVersions[topic] || 0)!==fileVersion && frame.ev!=="snapshot.chunk" && frame.ev!=="snapshot.begin"){fileVersion=service.store.topicVersions[topic] || 0;d.refreshFiles()}
     }
     var events=frame.topic==="events" ? frame.items || frame.added || [] : [frame]

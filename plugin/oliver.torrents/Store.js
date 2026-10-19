@@ -1,10 +1,11 @@
 .pragma library
+.import "Model.js" as Model
 .import "PiecesModel.js" as PiecesModel
 .import "LogBuffer.js" as LogBuffer
 
-// Declare optional display roles when a row is first inserted. The native
-// proxy cannot expose a role added later (for example, after staging ends).
-var DISPLAY_ROLES={staged:false,playable:null,size:null,progress:null,dl_bps:null,ul_bps:null,eta_s:null,peers:null,seeds:null,ratio:null,added_at:null,completed_at:null,reason:null}
+// Filtering uses native scalar roles; cells receive one immutable row snapshot.
+// Optional observations stay absent instead of inventing numeric/boolean values.
+var DISPLAY_ROLES={staged:false}
 var STATES = ["metadata", "checking", "downloading", "stalled", "queued", "paused", "done", "seeding", "waiting_vpn", "error"]
 function dictionary() { return Object.create(null) }
 function equal(a, b) {
@@ -310,7 +311,7 @@ function create(options) {
   }
   // Qt's model owns stable delegates. Only changed roles emit row updates.
   var mirror = {model:null, indexes:dictionary(), order:[], generation:-1, sorted:null}
-  function modelRow(hash,row){return Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)})}
+  function modelRow(hash,row){return Object.assign({},DISPLAY_ROLES,row,{uiTorrent:Object.assign({},row),uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)})}
   s.syncModel = function(model, key, reverse, reorder) {
     var structural = false
     if (mirror.model !== model) {
@@ -345,6 +346,7 @@ function create(options) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
           model.append(modelRow(change.hash,row)); structural = true
         } else {
+          model.setProperty(index,"uiTorrent",Object.assign({},row))
           change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? (field==="staged" ? false : null) : row[field]) })
           if(change.fields.some(function(field){return ["playable","name","state","staged"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
           if(change.fields.indexOf("playable")>=0 || change.fields.indexOf("staged")>=0)model.setProperty(index,"uiReady",ready(row))
@@ -407,22 +409,9 @@ function create(options) {
   }
   s.modelIndex = function(hash) {return mirror.indexes[hash]===undefined ? -1 : mirror.indexes[hash]}
   s.matches = function(state,ready,name,filter,text) {
-    var include=filter==="all" || filter===state || (filter==="downloading" && ["downloading","stalled","metadata","checking"].indexOf(state)>=0) || (filter==="ready" && ready)
+    var include=filter==="all" || filter===state || (filter==="downloading" && Model.isActiveState(state)) || (filter==="ready" && ready)
     return include && (!text || name.indexOf(text)>=0)
   }
   s.modelOrder = function() { return mirror.order }
-  s.model = function(keys) {
-    var result = {}
-    keys.forEach(function(key) {
-      if (key === "subscriptions") {
-        result.subscriptions = {}
-        Object.keys(s.subscriptions).forEach(function(sub) {
-          var value = s.subscriptions[sub]
-          result.subscriptions[sub] = {topic:value.topics[0], rev:value.rev, resync:value.resync}
-        })
-      } else result[key] = s[key]
-    })
-    return result
-  }
   return s
 }

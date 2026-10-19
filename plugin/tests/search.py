@@ -107,24 +107,22 @@ def run(binary):
                 q.wait(lambda:view(q).get('panelCount')==3)
                 press(case,q,['-k','space'],lambda:not client.call('search.providers')['result']['providers'][0]['enabled'],'Space changes a provider through the real durable API')
                 press(case,q,['-k','Escape'],lambda:not view(q).get('panel'),'Esc closes providers')
-            with Case('qs_search','search_enter_stages' if 'staging' in hello['caps'] else 'search_enter_review') as case:
-                # Search view's top result is Ten; a review must precede downloading on a legacy daemon.
+            with Case('qs_search','search_enter_stages') as case:
+                # Review stages a real provider result before any payload download.
                 press(case,q,['g'],lambda:view(q).get('cursor')==sources[0]['fixture'].info_hash,'g selects the new real metainfo result')
                 before=client.call('torrents.list',{})['result']['torrents']
                 press(case,q,['-k','Return'],lambda:view(q).get('add',{}).get('visible'),'Enter opens the shared add sheet')
                 add=view(q)['add']
-                if 'staging' in hello['caps']:
-                    q.wait(lambda:view(q).get('add',{}).get('phase')=='ready',timeout=12)
-                    row=client.call('torrents.get',dict(hash=sources[0]['fixture'].info_hash))['result']['torrent']
-                    case.check(row['staged'] and len(client.call('torrents.list',{})['result']['torrents'])==len(before)+1,'Enter stages exactly one torrent before Download',json.dumps(row))
-                else:
-                    case.check(add['phase']=='preview' and len(client.call('torrents.list',{})['result']['torrents'])==len(before),'legacy compatibility performs no grab before Download; staged acceptance remains pending P3-06',json.dumps(add))
+                q.wait(lambda:view(q).get('add',{}).get('phase')=='ready',timeout=12)
+                row=client.call('torrents.get',dict(hash=sources[0]['fixture'].info_hash))['result']['torrent']
+                case.check(row['staged'] and len(client.call('torrents.list',{})['result']['torrents'])==len(before)+1,'Enter stages exactly one torrent before Download',json.dumps(row))
                 press(case,q,['-k','Return'],lambda:not view(q).get('add',{}).get('visible'),'Download confirmation commits through search.grab')
                 row=client.call('torrents.get',dict(hash=sources[0]['fixture'].info_hash))['result']['torrent']
                 case.check(row['origin']=='search' and view(q).get('window',{}).get('view')=='torrents','confirmed real loopback metainfo retains search origin and selects its torrent',json.dumps(row))
+                def rendered():return json.loads(q.ipc('renderedRows'))
+                q.wait(lambda:len(rendered())==len(before)+1 and all(r.get('hash') for r in rendered()) and any(r['hash']==row['hash'] and row['name'] in r['texts'] and 'Reviewing' not in r['texts'] for r in rendered()))
+                case.check(not row['staged'],'Search commit updates the real rendered row name/state without leaving a review delegate',json.dumps(rendered()))
         finally:q.close()
-    if 'staging' not in hello['caps']:
-        print('UNMET: search_enter_stages requires P3-06 staging capability; legacy review is a separate passing case.',flush=True)
     return suite_status('qs_search') or suite_status('daemon')
 
 if __name__=='__main__':
