@@ -26,6 +26,7 @@ impl TuiApp {
                 }
             },
             Scope::Modal(kind) => match kind {
+                ModalKind::Clipboard => "Clipboard",
                 ModalKind::Log => "Log",
                 ModalKind::Files => "Files",
                 ModalKind::Details => "Details",

@@ -61,7 +61,7 @@ fn table_covers_appendix_b() {
     assert_eq!(all().find(|a| a.id == "torrents.seed").unwrap().keys[0].label(), "u");
     let popup = keymap("popup").to_string();
     assert!(!popup.contains("screen.torrents") && !popup.contains("torrents.wiki"));
-    assert_eq!(fixture::SURFACES.len(), 11);
+    assert_eq!(fixture::SURFACES.len(), 12);
     println!(
         "{} catalogue actions cover TUI and both documented popup exceptions",
         all().count()

@@ -243,6 +243,30 @@
       "scope": "global"
     },
     {
+      "id": "clipboard.offer_add",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Add",
+      "scope": "modal:clipboard"
+    },
+    {
+      "id": "clipboard.offer_dismiss",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Dismiss",
+      "scope": "modal:clipboard"
+    },
+    {
       "id": "daemon.start",
       "keys": {
         "dashboard": null,

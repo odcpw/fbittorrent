@@ -50,6 +50,9 @@ use mouse::*;
 mod layout;
 use layout::*;
 mod footer;
+mod clipboard;
+#[cfg(test)]
+#[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
 mod text;
 use text::*;

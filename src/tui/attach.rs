@@ -94,6 +94,7 @@ impl TuiApp {
 impl TuiApp {
     pub(in crate::tui) fn connection_lost(&mut self, intentional: bool) {
         if !self.recovery.lost(std::time::Instant::now(),intentional) {return;}
+        self.clipboard=Default::default();
         let pending = !self.store.pending.is_empty();
         self.store.disconnected();
         self.online=false;

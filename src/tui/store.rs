@@ -308,6 +308,7 @@ impl Store {
         }
     }
     fn push_event(&mut self, event: api::Event) {
+        if matches!(&event,api::Event::ClipboardMagnet {..}) {return;}
         self.settle(&event);
         if self.events.len() == MAX_EVENTS {
             self.events.pop_front();

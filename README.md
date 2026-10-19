@@ -350,6 +350,10 @@ include/skip. `seq` and `first-last` remain unsupported command stubs with an
 inspection hint; `reconcile` remains a successful no-op. Today's native ledger,
 RSS, Shows and settings files load directly; no source application is launched.
 
+With opt-in clipboard watching enabled, the TUI offers each new magnet in its
+footer: `Add '<name>'? (y/Esc)`. Press `y` to add or Esc to dismiss. An open text
+input or dialog keeps its keys; clipboard text is not saved in message history.
+
 ## Layout
 
 ```
@@ -496,6 +500,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `modal:clipboard` | Add | `y` | — | — |  |
+| `modal:clipboard` | Dismiss | `Esc` | — | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
 | `modal:details` | Back | `Esc`, `h` | — | — |  |
 | `modal:details` | Next tab | `]` | — | — |  |

@@ -47,6 +47,7 @@ impl TuiApp {
         let Some(connection)=self.presence.clone()else{return Cmd::none();};
         Cmd::task(move||{
             let mut topics=vec!["summary","torrents","network"];
+            if connection.hello.caps.iter().any(|cap|cap=="clipboard") {topics.push("events");}
             for (topic,cap) in [("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
                 if connection.hello.caps.iter().any(|c|c==cap){topics.push(topic);}
             }
@@ -116,6 +117,8 @@ impl TuiApp {
                     }
                     _ => {}
                 }
+                self.clipboard_event(&event);
+                if self.store.settings.as_ref().is_some_and(|settings|!settings.clipboard_watch) {self.clipboard.offer=None;}
                 if matches!(&event,api::Event::SnapshotEnd {topic:api::Topic::Search(_)|api::Topic::Events,..}
                     |api::Event::Delta {topic:api::Topic::Search(_)|api::Topic::Events,..}|api::Event::SearchDone {..}) {
                     self.sync_native_search();

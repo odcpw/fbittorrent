@@ -26,6 +26,7 @@ pub(super) fn pane(app: &TuiApp, screen: Screen) -> Scope {
     }
 }
 pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
+    if app.clipboard_visible() {return Scope::Modal(ModalKind::Clipboard);}
     if app.prompt.is_some() {
         Scope::Prompt
     } else if app.settings.is_some() {

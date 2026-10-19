@@ -17,6 +17,8 @@ impl TuiApp {
     pub(in crate::tui) fn footer_signature(&self, width: u16) -> u64 {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         width.hash(&mut hash);
+        self.clipboard.offer.hash(&mut hash);
+        self.clipboard_visible().hash(&mut hash);
         self.recovery.notice(std::time::Instant::now()).hash(&mut hash);
         self.screen.index().hash(&mut hash);
         self.footer_context().hash(&mut hash);
@@ -102,7 +104,8 @@ impl TuiApp {
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
         let show_status=self.recovery.notice(std::time::Instant::now()).is_none() && !self.daemon_stopped && !self.status.is_empty();
-        let feedback=if !show_status {self.footer_selection().unwrap_or_default()}
+        let feedback=if let Some(offer)=self.clipboard_label(usize::from(width)) {offer}
+            else if !show_status {self.footer_selection().unwrap_or_default()}
             else if th.low_chroma && self.status_is_error && !self.status.starts_with('!'){format!("! {}",self.status)}
             else if th.low_chroma && self.status_success && !self.status.starts_with('✓'){format!("✓ {}",self.status)}
             else{self.status.clone()};

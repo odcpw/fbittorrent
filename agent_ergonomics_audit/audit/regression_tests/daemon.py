@@ -4930,6 +4930,8 @@ SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_un
                  "cleanup_failed_stop", "cleanup_stop_timeout", "dashboard_routes", "install_atomic", "startup_failure_hint", "unit_exec_path"}
 
 
+from daemon_clipboard import clipboard_tui_offer
+CASES["clipboard_tui_offer"]=clipboard_tui_offer
 from daemon_native_data import native_data_unchanged
 CASES["native_data_unchanged"]=native_data_unchanged
 
