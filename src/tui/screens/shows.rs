@@ -12,7 +12,18 @@ impl TuiApp {
         self.show_list.borrow().selected().and_then(|i| self.show_at(i))
     }
 
+    pub(super) fn releases_ready(&self) -> bool {
+        // Before attachment there is no API projection; after hello, only the
+        // selected topic's complete snapshot can make cached rows actionable.
+        self.store.hello.is_none() || (self.store.connected && if self.full_show_inbox() {
+            self.show_controls.rows.is_some()
+        } else {
+            self.store.releases_topic.as_deref()==Some(self.selected_show().map_or("inbox",|s|s.imdb.as_str()))
+        })
+    }
+
     pub(super) fn episode_at(&self, index: usize) -> Option<(&Show, &Episode)> {
+        if !self.releases_ready() { return None; }
         if self.shows_inbox() {
             let target = self.inbox_rows.get(index)?;
             let show = self.shows.get(&target.imdb)?;
@@ -28,6 +39,7 @@ impl TuiApp {
     }
 
     pub(super) fn selected_release_target(&self) -> Option<ShowReleaseTarget> {
+        if !self.releases_ready() { return None; }
         if self.shows_inbox() {
             self.ep_list.borrow().selected().and_then(|i| self.inbox_rows.get(i)).cloned()
         } else {
@@ -36,6 +48,7 @@ impl TuiApp {
     }
 
     pub(super) fn episode_count(&self) -> usize {
+        if !self.releases_ready() { return 0; }
         if self.shows_inbox() { self.inbox_rows.len() } else { self.selected_show().map_or(0, |s| s.episodes.len()) }
     }
 
@@ -47,9 +60,9 @@ impl TuiApp {
              .filter(move |episode| (read==ReadFilter::All || show.is_new(&episode.key)==(read==ReadFilter::Unread))
                 && quality.is_none_or(|quality|quality==episode.quality))
             .map(move |episode| (show, episode))).collect();
-        releases.sort_by(|(a_show, a), (b_show, b)| release_sort::episode_order(a,b,self.release_sort,self.release_descending)
-            .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
-        self.inbox_rows = releases.into_iter().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() }).collect();
+        releases.sort_by(|(a_show,a),(b_show,b)|self.release_sort.compare(a,b,self.release_descending)
+            .then_with(||a_show.title.cmp(&b_show.title)).then_with(||a_show.imdb.cmp(&b_show.imdb)));
+        self.inbox_rows=releases.into_iter().map(|(show,episode)|ShowReleaseTarget {imdb:show.imdb.clone(),key:episode.key.clone()}).collect();
         self.ep_list.borrow_mut().hovered = None;
         self.last_click = None;
         if self.shows_inbox() {
@@ -132,8 +145,10 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
+                } else if !self.releases_ready() {
+                    self.set_status("Loading releases… select a visible row before marking it read",false);
                 } else {
-                    if let Some(target)=self.selected_release_target(){let read=!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
+                    if let Some(target)=self.selected_release_target(){let read=!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (u)ndo"}else{"release marked unread"});}
                 }
             }
             actions::Intent::Undo if self.shows_inbox() => {
@@ -151,6 +166,10 @@ impl TuiApp {
                 if !self.shows_focus_eps {
                     self.shows_focus_eps = true;
                     if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
+                    return Cmd::none();
+                }
+                if !self.releases_ready() {
+                    self.set_status("Loading releases… select a visible row before downloading", false);
                     return Cmd::none();
                 }
                 let picked = self.selected_episode().map(|(s, e)| (s.imdb.clone(), e.clone()));
@@ -183,7 +202,7 @@ impl TuiApp {
         let inbox = self.shows_inbox();
         let show = self.shows.get_mut(&target.imdb)?;
         let read = show.toggle_seen(&target.key);
-        let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (U)ndo" } else { "" });
+        let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (u)ndo" } else { "" });
         if inbox && read { self.inbox_last_read = Some(target); }
         self.rebuild_inbox();
         Some(label)
@@ -354,7 +373,7 @@ impl TuiApp {
         } else if let Some(show) = self.selected_show() {
             format!(
                 " Shows › {} · {} releases ",
-                show.label(),
+                format!("{} · {}",show.label(),show.quality.as_deref().unwrap_or("default quality")),
                 show.episodes.len()
             )
         } else {
@@ -450,7 +469,9 @@ impl TuiApp {
                 .render(rows[2], frame);
         }
         if self.episode_count() == 0 {
-            let message = if self.shows.shows.is_empty() {
+            let message = if !self.releases_ready() || (inbox && self.show_controls.read==ReadFilter::Unread && self.show_controls.quality.is_none() && unread > 0) {
+                "Loading releases…"
+            } else if self.shows.shows.is_empty() {
                 "No shows followed yet.\n\n(N) Follow a title or IMDb id\n(F)ollow a Search or RSS item\n(Shift+F) Follow a torrent\n\nChecks find releases. Enter downloads your choice."
             } else if inbox {
                 if !self.shows_refreshing.is_empty() {
@@ -581,7 +602,7 @@ pub(super) fn episode_metadata_width(width: usize) -> usize {
 
 pub(super) fn episode_metadata(episode: Option<&Episode>, width: usize) -> String {
     let (quality, size, seeds, date) = match episode {
-        Some(e) => (e.quality.clone(), human_bytes(e.size), e.seeds.to_string(), if e.released > 0 { ymd(e.released) } else { String::new() }),
+        Some(e) => (if e.quality.is_empty(){"—".into()}else{e.quality.clone()}, if e.size<0{"—".into()}else{human_bytes(e.size)}, if e.seeds<0{"—".into()}else{e.seeds.to_string()}, if e.released > 0 { ymd(e.released) } else { "—".into() }),
         None => ("QUAL".into(), "SIZE".into(), "SEEDS".into(), "DATE".into()),
     };
     if width >= 80 { format!(" {quality:>5}  {size:>9}  {seeds:>5}  {date:>10}") }

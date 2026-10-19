@@ -71,10 +71,6 @@ mod layout;
 use layout::*;
 mod footer;
 mod clipboard;
-mod everyday;
-#[cfg(test)]
-#[path="tests/everyday.rs"] mod everyday_tests;
-mod release_sort;
 #[cfg(test)]
 #[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
@@ -89,6 +85,14 @@ mod palette;
 mod feedback;
 mod limits;
 mod statistics;
+mod everyday;
+#[path="screens/release_sort.rs"]
+mod release_sort;
+#[path="screens/rss_sort.rs"]
+mod rss_sort;
+#[cfg(test)]
+#[path="tests/everyday.rs"]
+mod everyday_tests;
 #[cfg(test)]
 #[path="tests/statistics.rs"]
 mod statistics_tests;
@@ -104,6 +108,9 @@ mod overview_tests;
 #[cfg(test)]
 #[path="tests/services.rs"]
 mod service_tests;
+#[cfg(test)]
+#[path="tests/shows_selection.rs"]
+mod shows_selection_tests;
 #[cfg(test)]
 #[path="tests/disk.rs"]
 mod disk_tests;

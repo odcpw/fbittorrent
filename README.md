@@ -584,6 +584,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Copy magnet | `y` | — | — |  |
 | `screen:torrents` | Rename | `N` | `N` | — |  |
 | `screen:torrents` | Undo removal | `U` | — | — |  |
 | `screen:torrents` | Sort | `s` | `s` | — |  |
@@ -627,6 +628,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `pane:search.results` | Follow show | `f`, `F` | `f`, `F` | — |  |
 | `pane:search.query` | Search | `Enter` | `Enter` | — |  |
 | `pane:search.query` | Leave query | `Esc`, `↓` | `Esc`, `↓` | — |  |
+| `pane:rss.items` | Sort items | `s` | — | — |  |
+| `pane:rss.items` | Reverse item sort | `S` | — | — |  |
 | `screen:rss` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:rss` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:rss` | First | `g`, `Home` | `g`, `Home` | — |  |

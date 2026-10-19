@@ -4,8 +4,9 @@ pub(in crate::tui) struct ApiSub {
     pub connection: Arc<attach::Presence>,
 }
 impl Subscription<Msg> for ApiSub {
+    // Presence generations must never collide with local timer/search IDs.
     fn id(&self) -> SubId {
-        self.connection.id
+        (1 << 63) | self.connection.id
     }
     fn run(&self, sender: Sender<Msg>, stop: StopSignal) {
         while !stop.is_stopped() {

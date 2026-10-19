@@ -34,17 +34,51 @@ impl TuiApp {
         let index=fields.iter().position(|c|c.search_field()==Some(self.search_sort)).unwrap_or(0);
         self.sort_search_column(fields[if reverse {index}else{(index+1)%fields.len()}])
     }
-    pub(super) fn copy_search_magnet(&self)->Cmd<Msg> {
-        copy(self.selected_result().map(|r|r.file_url.clone()))
+    pub(super) fn copy_search_magnet(&mut self) -> Cmd<Msg> {
+        let magnet = self.selected_result().and_then(|r| {
+            self.wire_result(r)
+                .and_then(|row| row.magnet.clone())
+                .or_else(|| {
+                    r.file_url
+                        .starts_with("magnet:")
+                        .then(|| r.file_url.clone())
+                })
+        });
+        self.copy_magnet(magnet)
     }
-    pub(super) fn copy_episode_magnet(&self)->Cmd<Msg> {
-        copy(self.selected_episode().map(|(_,e)|e.magnet.clone()))
+    pub(super) fn copy_torrent_magnet(&mut self) -> Cmd<Msg> {
+        let magnet = self.selected_torrent().map(|t| {
+            format!(
+                "magnet:?xt=urn:btih:{}&dn={}",
+                t.hash,
+                crate::qbt::urlencode(&t.name)
+            )
+        });
+        self.copy_magnet(magnet)
+    }
+    fn copy_magnet(&mut self, magnet: Option<String>) -> Cmd<Msg> {
+        let Some(magnet) = magnet else {
+            self.set_status(
+                "No magnet supplied by this provider; use O for its source page",
+                true,
+            );
+            return Cmd::none();
+        };
+        copy(Some(magnet))
+    }
+    pub(super) fn copy_episode_magnet(&mut self)->Cmd<Msg> {
+        let magnet=self.selected_episode().map(|(_,e)|e.magnet.clone()).filter(|s|s.starts_with("magnet:"));
+        self.copy_magnet(magnet)
     }
     pub(super) fn can_undo_removal(&self)->bool {
         self.online&&!self.service_busy&&self.removal_undo.as_ref().is_some_and(|(_,until)|(crate::shows::now().max(0) as u64)<*until)
     }
     pub(super) fn undo_removal(&mut self)->Cmd<Msg> {
-        if !self.can_undo_removal() {return Cmd::none();}
+        if !self.online || self.service_busy {return Cmd::none();}
+        let Some((_,until))=self.removal_undo.as_ref() else {return Cmd::none()};
+        if *until<=crate::shows::now().max(0) as u64 {
+            self.removal_undo=None;self.set_status("Removal undo expired (10 seconds); your files were kept",true);return Cmd::none();
+        }
         let (hash,_)=self.removal_undo.take().unwrap();
         self.service_action("torrents.add",serde_json::json!({"source":{"restore":hash}}),"Removal undone")
     }

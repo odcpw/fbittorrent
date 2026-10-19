@@ -1,5 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("rss.sort",Scope::Pane(Screen::Rss,Pane::Items),&[KeyChord::plain(KeyCode::Char('s'))],"Sort items",90,
+        |_|true,Some(|a|a.sort_rss(false)),T,None,None,None),
+    action!("rss.reverse_sort",Scope::Pane(Screen::Rss,Pane::Items),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse item sort",90,
+        |_|true,Some(|a|a.sort_rss(true)),T,None,None,None),
     action!(
         "rss.next",
         Scope::Screen(Screen::Rss),

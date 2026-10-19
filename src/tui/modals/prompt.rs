@@ -42,6 +42,9 @@ impl TuiApp {
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         if matches!(kind,PromptKind::RenameTorrent {..}) {input=input.with_max_length(512);}
         if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
+        if kind==PromptKind::SettingIdleExit {input=input.with_max_length(20);}
+        if kind==PromptKind::SettingDestination {input=input.with_max_length(4096);}
+        if matches!(kind,PromptKind::ShowQuality {..}) {input=input.with_max_length(16);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (true, true, self.cfg.seed_by_default);

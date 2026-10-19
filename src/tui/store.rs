@@ -69,6 +69,7 @@ impl Store {
         self.lose_pending();
         self.subscriptions.clear();
         self.snapshots.clear();
+        self.releases_topic = None;
         // Subscriptions belong to the connection, even if the instance did not change.
         // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
         self.connected = hello.proto == api::PROTO;
@@ -144,12 +145,20 @@ impl Store {
     pub fn disconnected(&mut self) {
         self.connected = false;
         self.stale = true;
+        self.releases_topic = None;
         self.lose_pending();
         self.snapshots.clear();
     }
     pub fn unsubscribe(&mut self, sub: u64) {
-        self.subscriptions.remove(&sub);
+        if let Some(subscription) = self.subscriptions.remove(&sub) {
+            self.invalidate_releases(&subscription.topic);
+        }
         self.snapshots.retain(|(number, _), _| *number != sub);
+    }
+    fn invalidate_releases(&mut self, topic: &api::Topic) {
+        if matches!(topic, api::Topic::ShowReleases(_)) {
+            self.releases_topic = None;
+        }
     }
     pub fn event(&mut self, event: &api::Event) -> Result<Effect> {
         event.validate()?;
@@ -178,6 +187,7 @@ impl Store {
             }
             if subscription.rev.checked_add(1) != Some(rev) {
                 subscription.resync = true;
+                self.invalidate_releases(&topic);
                 self.snapshots.retain(|(number, _), _| *number != sub);
                 return Ok(Effect::Resubscribe { sub, topic });
             }
@@ -194,6 +204,7 @@ impl Store {
                 }
                 Err(error) => {
                     self.subscriptions.get_mut(&sub).unwrap().resync = true;
+                    self.invalidate_releases(&topic);
                     self.snapshots.retain(|(number, _), _| *number != sub);
                     Err(error.context(format!("subscription {sub} needs a fresh snapshot")))
                 }
@@ -244,6 +255,7 @@ impl Store {
                 );
                 self.snapshots
                     .insert((*sub, topic.clone()), Snapshot::new(*count as usize));
+                self.invalidate_releases(topic);
                 return Ok(Effect::None);
             }
             api::Event::SnapshotChunk {

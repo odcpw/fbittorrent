@@ -119,7 +119,7 @@ impl TuiApp {
                 _=>settings_fields::limit_label(&modal.cfg,i-4),
             }),frame);
         let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
-            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
+            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nNew destination/seed defaults apply to future adds.\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
         };
         let remaining = inner.height.saturating_sub(settings_fields::SETTINGS_ROWS as u16);
         Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(settings_fields::SETTINGS_ROWS as u16), inner.width, remaining), frame);

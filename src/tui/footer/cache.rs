@@ -28,6 +28,7 @@ impl TuiApp {
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.can_undo_removal().hash(&mut hash);
+        self.service_busy.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
         self.status_success.hash(&mut hash);
         self.poster_open.hash(&mut hash);

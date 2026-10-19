@@ -732,6 +732,18 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.copy_magnet",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Copy magnet",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.rename",
       "keys": {
         "dashboard": [
@@ -1375,6 +1387,30 @@
       },
       "label": "Leave query",
       "scope": "pane:search.query"
+    },
+    {
+      "id": "rss.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort items",
+      "scope": "pane:rss.items"
+    },
+    {
+      "id": "rss.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse item sort",
+      "scope": "pane:rss.items"
     },
     {
       "id": "rss.next",
