@@ -5,20 +5,23 @@ import "../Model.js" as Model
 
 Ui.ConfirmDialog {
   id:root
-  property var torrent:null
+  property var captured:[]
+  readonly property var torrent:captured.length ? captured[0] : null
   property bool deleteFiles:false
-  signal removeRequested(string hash,bool files)
+  signal removeRequested(var hashes,bool files)
   selectedIndex:0
   confirmText:deleteFiles ? "Delete files" : "Remove, keep files"
+  readonly property real bytes:captured.reduce(function(sum,row){return sum+Number(row.size || 0)},0)
+  readonly property string subject:captured.length===1 ? "'"+torrent.name+"'" : captured.length+" selected torrents"
   message:!torrent ? "" : deleteFiles
-    ? "Delete '"+torrent.name+"' and its files? "+Model.size(torrent.size,false)+" will be deleted from "+torrent.save_path+". This cannot be undone."
-    : "Remove '"+torrent.name+"'? "+Model.size(torrent.size,false)+" in "+torrent.save_path
-  function show(row,files) {torrent={hash:row.hash,name:row.name,size:row.size,save_path:row.save_path};deleteFiles=files;selectedIndex=0;opened=true}
+    ? "Delete "+subject+" and its files? "+Model.size(bytes,false)+" will be deleted. This cannot be undone."
+    : "Remove "+subject+"? Files stay in their current folders. Undo is available for 10 seconds."
+  function show(rows,files) {captured=rows.map(function(row){return {hash:row.hash,name:row.name,size:row.size,save_path:row.save_path}});deleteFiles=files;selectedIndex=0;opened=captured.length>0}
   function key(event) {
     if(!opened)return false
     if(event.text==="y"){confirmed();return true}
     return handleKey(event)
   }
   onCanceled:opened=false
-  onConfirmed:{if(torrent)removeRequested(torrent.hash,deleteFiles);opened=false}
+  onConfirmed:{if(captured.length)removeRequested(captured.map(function(row){return row.hash}),deleteFiles);opened=false}
 }

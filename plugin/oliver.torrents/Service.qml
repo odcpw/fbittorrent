@@ -15,6 +15,7 @@ import "SettingsFlow.js" as SettingsFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
 import "OverviewFlow.js" as OverviewFlow
+import "CleanupFlow.js" as CleanupFlow
 import "SearchFlow.js" as SearchFlow
 import "BrowsePosters.js" as BrowsePosters
 
@@ -57,6 +58,8 @@ Item {
   Timer {id:imdbChoice;interval:300;onTriggered:if(root.detailFlow)root.detailFlow.lookup()}
 
   property var overviewFlow:null
+  property int cleanupRevision:0
+  property var cleanupFlow:null
   property int overviewRevision:0
   property var searchTopics:[]
   property var searchFlow:null
@@ -196,6 +199,7 @@ Item {
     if(addFlow)addFlow.frame(frame)
     if(detailFlow)detailFlow.frame(frame,request)
     if(overviewFlow)overviewFlow.frame(frame)
+    if(cleanupFlow)cleanupFlow.frame(frame)
     if(searchFlow)searchFlow.frame(frame)
     if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
     if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
@@ -408,13 +412,14 @@ Item {
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
     overviewFlow=OverviewFlow.create(root,function(){root.overviewRevision++})
+    cleanupFlow=CleanupFlow.create(root,function(){root.cleanupRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
-      instance:function() { if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
+      instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
