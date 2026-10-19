@@ -59,14 +59,44 @@ def mounted(case,box):
 
 
 def summary(client):
-    client.call('subscribe',dict(topics=['summary'],interval_ms=250))
-    while True:
-        if client.pushed:frame=client.pushed.pop(0)
-        else:frame=client.receive()
-        if frame is None:raise EOFError('summary EOF')
-        if frame.get('ev')=='state' and frame.get('topic')=='summary':
-            client.call('unsubscribe',dict(sub=frame['sub']))
-            return frame['data']
+    sub=client.call('subscribe',dict(topics=['summary'],interval_ms=250))['result']['sub']
+    def matches(frame):
+        return frame.get('sub')==sub and frame.get('ev')=='state' and frame.get('topic')=='summary'
+    try:
+        for index,frame in enumerate(client.pushed):
+            if matches(frame):return client.pushed.pop(index)['data']
+        while True:
+            frame=client.receive()
+            if frame is None:raise EOFError('summary EOF')
+            if matches(frame):return frame['data']
+            client.pushed.append(frame)
+    finally:
+        # A queued state from another subscription must neither satisfy this
+        # sample nor choose its cleanup ID. Drop our trailing frames only.
+        client.call('unsubscribe',dict(sub=sub))
+        client.pushed[:]=[frame for frame in client.pushed if frame.get('sub')!=sub]
+
+
+def disk_summary_subscription_cleanup(binary,systemd):
+    with d.api_owned('disk_summary_subscription_cleanup',binary,systemd) as (case,box,h,p),d.ApiConn(h) as client:
+        client.hello()
+        other=client.call('subscribe',dict(topics=['summary'],interval_ms=250))['result']['sub']
+        # Retain a real state frame from a different, still-live subscription.
+        # The old helper accepted it and unsubscribed its ID instead of its own.
+        while not any(frame.get('sub')==other and frame.get('ev')=='state' for frame in client.pushed):
+            frame=client.receive()
+            if frame is None:raise EOFError('initial summary EOF')
+            client.pushed.append(frame)
+        original=next(frame for frame in client.pushed if frame.get('sub')==other and frame.get('ev')=='state')
+        for index in range(24):
+            value=summary(client)
+            counts=client.call('app.info')['result']['subscriptions']
+            case.check('disk' in value and counts['by_topic'].get('summary',0)==1 and original in client.pushed,
+                       'sample releases only its own subscription and preserves the unrelated queued state',
+                       json.dumps(dict(sample=index+1,subscriptions=counts,original_queued=original in client.pushed)))
+        client.call('unsubscribe',dict(sub=other))
+        counts=client.call('app.info')['result']['subscriptions']
+        case.check(counts['by_topic'].get('summary',0)==0,'all summary subscriptions are released',json.dumps(counts))
 
 
 def namespace_case(name,binary):
@@ -105,6 +135,8 @@ def namespace_case(name,binary):
                 value=summary(c);row=c.call('torrents.get',dict(hash=item.info_hash))['result']['torrent']
                 return value['disk']['low'] and row['state']!='error',json.dumps(dict(summary=value,row=row))
             h.wait_for(low,'low-space summary arrives before the first ENOSPC',timeout=8)
+            counts=c.call('app.info')['result']['subscriptions']
+            case.check(counts['by_topic'].get('summary',0)==0,'low-space polling leaves no summary subscriptions',json.dumps(counts))
             if name=='disk_low_banner':
                 h.wait_for(lambda:((log:=box.root/'shims/notify-send.log').exists() and 'Disk almost full' in log.read_text(),log.read_text() if log.exists() else 'not notified'),'one Disk almost full notice',timeout=3)
                 time.sleep(.2)
