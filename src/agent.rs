@@ -393,7 +393,11 @@ mod tests {
         for cap in crate::api::ops::app::CAPS.iter().filter(|cap| !base.contains(cap)) {
             assert!(value["changes"].as_array().unwrap().iter().any(|row| row["cap"] == *cap), "missing changes entry for {cap}");
         }
-        for fixture in [include_str!("../contracts/ipc/v1/hello.ndjson"), include_str!("../contracts/ipc/v1/errors.ndjson")] {
+        for fixture in [
+            include_str!("../contracts/ipc/v1/hello.ndjson"),
+            include_str!("../contracts/ipc/v1/errors.ndjson"),
+            include_str!("../contracts/ipc/v1/torrents.ndjson"),
+        ] {
             for line in fixture.lines() {
                 let row: serde_json::Value = serde_json::from_str(line).unwrap();
                 if let Some(caps) = row["frame"]["result"].get("caps") {
