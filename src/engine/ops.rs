@@ -58,6 +58,9 @@ impl EngineDispatcher {
         })
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
+        if let EngineOp::RecheckBatch { hashes } = &op {
+            return Ok(EngineResult::Recheck(self.inner.begin_recheck(cx, hashes.clone()).await?));
+        }
         if let Some(result) = self.execute_dormant(cx, &op).await {
             return result;
         }
@@ -84,6 +87,7 @@ impl EngineDispatcher {
                 let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
                 let (mut active, mut queued) = (0, 0);
                 for record in &ledger.records {
+                    if self.inner.rechecks.active(&record.hash) { continue; }
                     if let Ok(handle) = self.inner.handle(&record.hash) {
                         let stats = handle.stats();
                         if !stats.finished && !matches!(stats.state, TorrentStatsState::Error) {
@@ -212,7 +216,7 @@ impl EngineDispatcher {
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
-                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false,
+                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false,
                 };
                 ledger.records.push(record.clone());
                 self.inner.save(cx, &ledger).await?;
@@ -484,7 +488,7 @@ impl EngineDispatcher {
             added_on: now(),
             completion_on: 0,
             paused,
-            resume_after_migration: false, deferred: false,
+            resume_after_migration: false, deferred: false, staged: false,
         };
         let sources = if options.torrent.is_some() {
             vec![String::new()]

@@ -319,3 +319,17 @@ fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
         "normalized stats: progress=0.2 completed=2MiB uploaded=1MiB dl=1MiB/s ul=0.5MiB/s eta=8s ratio=0.5 peers=3; paused/zero-rate ETA absent"
     );
 }
+
+#[test]
+fn rechecking_set_forces_checking() {
+    for paused in [false, true] {
+        let record = crate::engine::tests::review_record("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Path::new("/fixture"));
+        let mut view = TorrentView::record(&record, StateFacts { activity: Activity::Checking,
+            paused, finished: false, stop_on_complete: true, record_paused: paused,
+            check_cancelled: true, receiving: false, parked: false }, Source::Handle);
+        view.rechecking();
+        assert_eq!(view.state, TorrentState::Checking);
+        assert!(!view.checked);
+        assert!(view.completed_at.is_none());
+    }
+}

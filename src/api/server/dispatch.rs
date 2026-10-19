@@ -41,6 +41,17 @@ impl Shared {
             .map(|ticket| ticket.reference.to_string())
             .unwrap_or_default();
         if !self.daemon.is_stopping() {
+            if let Call::TorrentsRecheck { args } = &job.request.call {
+                match ops::recheck::begin(&self.daemon, args) {
+                    Ok(batch) => {
+                        self.begin_confirmation(&job, Reply::TorrentsRecheck(RecheckReply::Pending(PendingResult {
+                            state: PendingState::Pending, reference: MutationRef::new(&reference).unwrap(),
+                        })), Confirmation::Recheck(batch), true);
+                    }
+                    Err(failure) => self.answer(&job, Err(failure)),
+                }
+                return;
+            }
             if let Call::TorrentsAdd { args } = &job.request.call {
                 if matches!(args.source, AddSource::Url(_)) {
                     if let Err(failure) = ops::torrents::validate_url_add(args) {

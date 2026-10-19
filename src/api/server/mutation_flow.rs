@@ -199,6 +199,11 @@ impl Shared {
             result
         };
         let (outcome, failure, result) = match result {
+            Ok(Reply::TorrentsRecheck(RecheckReply::Complete(report))) if !report.failed.is_empty() => (
+                MutationOutcome::Failed,
+                Some(error(ErrorCode::InvalidState, "one or more rechecks failed", None)),
+                Some(serde_json::to_value(report).unwrap().as_object().unwrap().clone()),
+            ),
             Ok(reply) => (
                 MutationOutcome::Done,
                 None,
@@ -255,6 +260,7 @@ impl Shared {
                 continue;
             }
             let result = match entry.confirmation {
+                Some(Confirmation::Recheck(batch)) => batch.result().map(|report| Ok(ops::recheck::complete(report))),
                 Some(Confirmation::Metadata(Reply::TorrentsAdd(mut added))) => {
                     let hash = added.hash.as_ref().unwrap().as_str();
                     // Reading the restore receipt never waits on a runtime or on

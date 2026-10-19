@@ -381,3 +381,51 @@ fn explicit_recheck_reconciliation_checks_once() {
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn async_recheck_shares_outcome_without_blocking_ledger_or_queue() {
+    let (app, directory, hash, counts, gate) = gated_fixture();
+    let _release = ReleaseOnDrop(gate.clone());
+    let dispatcher = app.dispatcher();
+    gate.wait_blocked();
+    gate.release();
+    wait_for_check(&dispatcher, &hash);
+    let before = counts.snapshot();
+    gate.arm();
+    let begin = || match dispatcher.execute(EngineOp::RecheckBatch { hashes: vec![hash.clone()] }).unwrap() {
+        EngineResult::Recheck(batch) => batch,
+        _ => panic!("expected verification receipt"),
+    };
+    let first = begin();
+    {
+        let state = gate.state.lock().unwrap();
+        let (state, _) = gate.changed.wait_timeout_while(state, Duration::from_secs(5), |s| !s.blocked).unwrap();
+        assert!(state.blocked, "second check must reach the read gate: report={:?}, counts={:?}, handle={:?}",
+            first.result(), counts.snapshot(), dispatcher.inner.handle(&hash).map(|h|h.stats()));
+    }
+    let second = begin();
+    assert!(first.result().is_none() && second.result().is_none());
+    let row = dispatcher.runtime.block_on(dispatcher.info(dispatcher.runtime.cx())).unwrap().pop().unwrap();
+    assert_eq!(row.state, TorrentState::Checking);
+    assert!(!row.checked);
+    let expected = counts.snapshot();
+    for _ in 0..8 {
+        dispatcher.runtime.block_on(dispatcher.inner.maintain(dispatcher.runtime.cx())).unwrap();
+        assert_eq!(counts.snapshot(),expected);
+    }
+    let EngineResult::Queue(queue) = dispatcher.execute(EngineOp::Queue).unwrap() else { panic!("queue"); };
+    assert_eq!(queue.active_downloads,0);
+    assert_eq!(queue.queued_downloads,0);
+    gate.release();
+    let began = std::time::Instant::now();
+    while first.result().is_none() || second.result().is_none() {
+        assert!(began.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(first.result().unwrap().have_bytes,second.result().unwrap().have_bytes);
+    assert_eq!(first.result().unwrap().have_bytes[&hash],PIECE as u64);
+    let after=counts.snapshot();
+    assert_eq!((after.0-before.0,after.1-before.1,after.2-before.2),(1,2,2*PIECE));
+    println!("two pending requests share one real check; ledger reads/reconciliation stay responsive; check uses no queue slot");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}

@@ -162,6 +162,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
 | `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
@@ -576,3 +577,22 @@ saves the private config without starting the daemon when stopped.
 Adds capability `settings`, the two operation-table rows, and the independent
 `settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
 `applied`, `restart` and `running`; existing CLI settings keys remain available.
+
+### P5-03: asynchronous verification
+
+Capability `recheck` adds `torrents.recheck`. Admission refuses staged or
+metadata-less torrents with `invalid_state`, unknown hashes with `not_found`,
+and parked engines with `engine_unavailable`. It immediately acknowledges the
+ref as pending; one terminal `mutation.result` carries measured verified bytes,
+successes and per-hash failures. Work is engine-owned, serial by hash and outside
+the dispatch pool/ledger lock during hashing, and has no operation timeout.
+Concurrent requests for a hash already in flight share its check and outcome.
+Checks preserve durable paused/run intent and take no queue slot. Completion is
+cleared durably before payload I/O and remains absent when data is missing, so a
+restart during repair cannot restore a corrupt record as dormant done. Restoring
+a dormant record performs the check once. Engine restart/shutdown cancels and
+joins this work before releasing its owner; clients receive the terminal receipt
+before shutdown bye. The independent `recheck.ndjson` transcript and contract
+patch 1.2.3 document the new operation without modifying earlier transcripts.
+Dashboard/TUI/CLI surfaces are integrated by their owner tracks; completion
+notifications and the pending busy reason consume P1-08/P1-12/P1-13's channels.

@@ -22,6 +22,8 @@ pub(super) struct Record {
     pub(super) resume_after_migration: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub(super) deferred: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) staged: bool,
 }
 fn is_false(value: &bool) -> bool { !value }
 
@@ -59,7 +61,7 @@ impl Record {
             upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
             category: options.category.clone(), tags: options.tags.clone(),
             added_on: now(), completion_on: 0, paused: options.stopped,
-            resume_after_migration: false, deferred: true,
+            resume_after_migration: false, deferred: true, staged: false,
         };
         record.options(true)?; // Physical transfer is paused; saved intent stays explicit.
         Ok(record)
