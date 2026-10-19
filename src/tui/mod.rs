@@ -41,6 +41,8 @@ use modals_settings::*;
 mod settings_fields;
 #[path = "modals/prompt.rs"]
 mod modals_prompt;
+#[path="modals/overview.rs"]
+mod modals_overview;
 use modals_prompt::*;
 mod imdb_card;
 mod imdb_cache;
@@ -64,6 +66,9 @@ mod limits;
 #[cfg(test)]
 #[path="tests/limits.rs"]
 mod limit_tests;
+#[cfg(test)]
+#[path="tests/overview.rs"]
+mod overview_tests;
 #[cfg(test)]
 #[path="tests/services.rs"]
 mod service_tests;

@@ -527,6 +527,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:details` | Previous tab | `[` | — | — |  |
 | `modal:files` | Next tab | `]` | — | — |  |
 | `modal:files` | Overview | `[` | — | — |  |
+| `modal:details` | Move… | `m` | `m` | — |  |
+| `modal:details` | Download cap… | `c` | `c` | — |  |
 | `modal:details` | Open | `o` | — | — |  |
 | `modal:details` | Pause/resume | `p` | — | — |  |
 | `modal:details` | Seed | `u` | — | — |  |

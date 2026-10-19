@@ -9,10 +9,10 @@
 │ upload    default upload cap · stops when complete  (u to seed)              │
 │ path      /tmp/fbt-fixture                                                   │
 │ added     1d ago                                                             │
+│ down cap  Unlimited · effective Unlimited                                    │
 │ origin    unknown                                                            │
 │                                                                              │
 │ IMDb card appears when the cursor rests here                                 │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

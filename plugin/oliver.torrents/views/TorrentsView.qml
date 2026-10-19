@@ -18,15 +18,18 @@ FocusScope {
   property var selection:({})
   property bool detailsOpen:false
   readonly property int tier:TableLayout.tier(windowLogicalWidth)
-  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened
+  readonly property bool overviewOpen:service.overviewRevision>=0 && service.overviewFlow && !!service.overviewFlow.modal
+  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || overviewOpen
   readonly property var pane:docked.item || floating.item
-  readonly property bool editing:filterInput.activeFocus || (pane ? pane.editing : false)
+  readonly property bool editing:overviewOpen || filterInput.activeFocus || (pane ? pane.editing : false)
   readonly property real scale:Commons.Style.effectiveSpacingScale
   readonly property real dockWidth:Math.max(300,Math.min(service.detailsWidth,480,maxDockWidth))
   readonly property real maxDockWidth:windowLogicalWidth-TableLayout.chrome(windowLogicalWidth)+360-(TableLayout.columns(windowLogicalWidth,0,1).reduce(function(sum,c){return sum+(c.name==="name" ? 0 : c.width)},0))-210
   readonly property bool showingDetail:visible && (tier>=2 || detailsOpen)
   readonly property var detailState:({visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
     hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
+    overview:pane ? pane.overviewState : null,
+    action:overviewSheet.item ? overviewSheet.item.state : null,actionStatus:service.overviewRevision>=0 && service.overviewFlow ? service.overviewFlow.status(cursorHash) : "",
     mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],poster:pane && pane.posterLoaded ? "loaded" : "none"})
   function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
   function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
@@ -71,10 +74,15 @@ FocusScope {
     return false
   }
   function handleKey(event) {
+    if(overviewSheet.item){return overviewSheet.item.handleKey(event)}
     if(recheckConfirm.opened){recheckConfirm.handleKey(event);return true}
     if(removeDialog.key(event))return true
     if(focusPane==="details" && pane && pane.editing)return pane.key(event)
     if((event.text==="[" || event.text==="]") && service.detailFlow){service.detailFlow.cycle(event.text==="]" ? 1 : -1);return true}
+    if(focusPane==="details" && service.detailFlow && service.detailFlow.tab==="overview" && current){
+      if(event.text==="m" && service.hasCap("move")){service.overviewFlow.open(current.hash,"move");return true}
+      if(event.text==="c" && service.hasCap("download_limit")){service.overviewFlow.open(current.hash,"limit");return true}
+    }
     if(focusPane==="details" && pane && pane.key(event))return true
     if(event.key===Qt.Key_Escape){back();return true}
     if(editing)return false
@@ -215,4 +223,10 @@ FocusScope {
     onConfirmed:{root.service.recheck(hash);opened=false}
   }
   Components.RemoveDialog {id:removeDialog;anchors.fill:parent;onRemoveRequested:function(hash,files){root.service.remove(hash,files)}}
+  Loader {
+    id:overviewSheet;anchors.fill:parent;z:100;active:root.overviewOpen
+    onActiveChanged:if(!active)Qt.callLater(root.focusTable)
+    sourceComponent:OverviewSheet {service:root.service;onChanged:root.changed()}
+  }
+
 }

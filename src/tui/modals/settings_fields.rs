@@ -67,7 +67,7 @@ pub(super) fn native_settings(cfg: &mut Config, settings: &crate::api::Settings)
     cfg.validate()?;
     Ok(())
 }
-fn parse_rate(value: &str) -> Result<Option<u32>> {
+pub(super) fn parse_rate(value: &str) -> Result<Option<u32>> {
     let value = value.trim().to_ascii_lowercase();
     if value.is_empty() {
         return Ok(None);

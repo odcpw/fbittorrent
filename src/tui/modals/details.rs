@@ -148,6 +148,7 @@ impl TuiApp {
                 kv("added", ago(t.added_on)),
             ]);
             if let Some(row) = api {
+                lines.push(kv("down cap",self.overview_cap_text(row)));
                 lines.push(kv(
                     "origin",
                     row.origin.clone().unwrap_or_else(|| "unknown".into()),

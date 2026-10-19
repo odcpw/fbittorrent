@@ -14,6 +14,8 @@ pub(super) struct Prompt {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum PromptKind {
     AddMagnet,
+    MoveTorrent { hash: String },
+    TorrentDownloadCap { hash: String },
     SettingLimit(usize),
     SettingPeerPort,
     AddFeed,
@@ -29,7 +31,8 @@ impl TuiApp {
         let mut input = TextInput::new()
             .with_style(self.theme.text())
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
-        if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
+        if matches!(kind,PromptKind::SettingLimit(_) | PromptKind::TorrentDownloadCap {..}){input=input.with_max_length(16);}
+        if matches!(kind,PromptKind::MoveTorrent{..}) {input=input.with_max_length(4096);}
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
@@ -94,6 +97,7 @@ impl TuiApp {
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
+                if matches!(kind,PromptKind::MoveTorrent{..} | PromptKind::TorrentDownloadCap{..}) {return self.apply_overview(kind,&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {
