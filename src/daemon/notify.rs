@@ -81,6 +81,9 @@ impl Notifier {
     }
     fn enqueue(&self, mut n: Notice) {
         let mut q = self.shared.queue.lock().unwrap();
+        // Each Shows check is distinct; separate checks must not collapse while
+        // an earlier notification is still waiting for its action.
+        if n.kind == "shows" { n.hash = format!("check-{}", q.serial); }
         if !q.enabled || q.stopped || q.pending.contains(&(n.kind.clone(), n.hash.clone())) {
             return;
         }
@@ -125,6 +128,12 @@ impl Notifier {
         self.enqueue(Notice { kind:"disk".into(), hash:"disk".into(), serial:0,
             title:"Disk almost full".into(), body:String::new(), target:None,
             actions:vec![("window","Open window")] });
+    }
+    pub fn new_episodes(&self, count: u64, names: &[String]) {
+        if count == 0 { return; }
+        let (title, body) = new_episodes_text(count, names);
+        self.enqueue(Notice { kind:"shows".into(), hash:String::new(), serial:0,
+            title, body, target:None, actions:vec![("window","Open Shows")] });
     }
     pub fn clipboard(&self, event: &Value) {
         self.enqueue(Notice { kind:"clipboard".into(), hash:event["hash"].as_str().unwrap_or("").into(), serial:0,
@@ -284,19 +293,25 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
                 run_action(shared, Command::new("xdg-open").arg(path))?;
             }
         }
-        "window" | "log" => {
-            run_action(
-                shared,
-                Command::new(std::env::current_exe()?).arg(if action == "window" {
-                    "dashboard"
-                } else {
-                    "log"
-                }),
-            )?;
-        }
+        "window" | "log" => { run_action(shared, &mut window_command(std::env::current_exe()?, &n.kind, action))?; }
         _ => {}
     }
     Ok(())
+}
+fn new_episodes_text(count: u64, names: &[String]) -> (String, String) {
+    let shown = names.len().min(count.min(3) as usize);
+    let mut body = names[..shown].join(", ");
+    if count > shown as u64 {
+        if !body.is_empty() { body.push_str(", "); }
+        body.push_str(&format!("+ {} more", count - shown as u64));
+    }
+    (format!("{count} new episode{}", if count == 1 { "" } else { "s" }), body)
+}
+fn window_command(exe: PathBuf, kind: &str, action: &str) -> Command {
+    let mut command = Command::new(exe);
+    command.arg(if action == "window" { "dashboard" } else { "log" });
+    if kind == "shows" && action == "window" { command.args(["--view", "shows"]); }
+    command
 }
 fn live(shared: &Shared) -> bool {
     let q = shared.queue.lock().unwrap();
@@ -358,6 +373,22 @@ fn request(op: &str, args: Value, reference: Option<&str>) -> anyhow::Result<Val
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn new_episodes_body() {
+        use super::*;
+        let names:Vec<_>=["Slow<& Horses S05E03","South Park S27E06","Third S01E01","Fourth S01E01","Fifth S01E01"].map(str::to_owned).into();
+        for (count,title,body) in [
+            (1,"1 new episode","Slow<& Horses S05E03"),
+            (3,"3 new episodes","Slow<& Horses S05E03, South Park S27E06, Third S01E01"),
+            (5,"5 new episodes","Slow<& Horses S05E03, South Park S27E06, Third S01E01, + 2 more"),
+        ] {
+            let text=new_episodes_text(count,&names);
+            assert_eq!(text,(title.into(),body.into()));
+            assert_eq!(escape_markup(&text.1),body.replacen("Slow<&", "Slow&lt;&amp;",1));
+        }
+        let command=window_command("/private/fbittorrent".into(),"shows","window");
+        assert_eq!(command.get_args().collect::<Vec<_>>(),["dashboard","--view","shows"]);
+    }
     #[test]
     fn pending_notices_are_deduplicated_and_queue_is_bounded() {
         use super::*;

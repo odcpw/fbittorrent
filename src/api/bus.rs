@@ -340,6 +340,11 @@ impl Bus {
         self.wake.signal();
         value
     }
+    pub fn new_episodes(&self, count: u64, names: &[String]) {
+        if !self.daemon.policy.lock().unwrap().interactive() {
+            self.daemon.notifier.new_episodes(count, names);
+        }
+    }
     fn sample(&self, topics: &[Topic]) -> ApiResult<Sample> {
         let files: Vec<_> = topics
             .iter()
