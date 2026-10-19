@@ -10,6 +10,7 @@ import "Model.js" as Model
 import "PopupState.js" as PopupState
 import "Focus.js" as Focus
 import "AddFlow.js" as AddFlow
+import "ClipboardFlow.js" as ClipboardFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
 import "SearchFlow.js" as SearchFlow
@@ -75,6 +76,7 @@ Item {
   property string byeReason: ""
   property bool startupRequested: false
   property var clipboardOffer: null
+  property var clipboardFlow:null
   property string instance: ""
   property string backendState: "stopped"
   property string lastError: ""
@@ -178,6 +180,7 @@ Item {
     try { rowsChanged = store.apply(frame, request) }
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
     syncRows();badgeCounts=store.badges
+    if(clipboardFlow)clipboardFlow.frame(frame)
     if(addFlow)addFlow.frame(frame)
     if(detailFlow)detailFlow.frame(frame,request)
     if(searchFlow)searchFlow.frame(frame)
@@ -228,7 +231,7 @@ Item {
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
   function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
-  function dismissClipboard() { return mutate("app.clipboard.dismiss", {}, "clipboard") }
+  function dismissClipboard(hash) { return mutate("app.clipboard.dismiss", {hash:hash}, "clipboard") }
   function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}
   function cancelWindowFocus(window) {
     if(windowFocus && windowFocus.window===window){windowFocus=null;focusRetry.stop()}
@@ -279,8 +282,14 @@ Item {
       actionStatus="Dashboard is not available; update the plugin"; noticeTimer.restart()
     }
   }
-  function acceptOffer() { var offer=clipboardOffer; clipboardOffer=null; if (offer) add(offer.source,false) }
-  function cancelOffer() { clipboardOffer=null }
+  function acceptOffer() {
+    var offer=clipboardOffer
+    if(offer && mutate("torrents.add",{source:offer.source,origin:"clipboard"}))clipboardOffer=null
+  }
+  function cancelOffer() {
+    var offer=clipboardOffer
+    if(!offer || !offer.watched || dismissClipboard(offer.hash))clipboardOffer=null
+  }
   function useRuntimeDir(path) {
     if (Quickshell.env("FBT_TEST_HOOKS") !== "1") return "refused: FBT_TEST_HOOKS=1 required"
     socket.connected = false
@@ -377,6 +386,7 @@ Item {
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }
   }
   Component.onCompleted: {
+    clipboardFlow=ClipboardFlow.create(root)
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
@@ -385,7 +395,7 @@ Item {
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
-      instance:function() { root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
+      instance:function() { if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }

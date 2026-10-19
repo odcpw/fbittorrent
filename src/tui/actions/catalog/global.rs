@@ -1,5 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("clipboard.accept_offer",Scope::Modal(ModalKind::Clipboard),&[KeyChord::plain(KeyCode::Char('y'))],"Add offered magnet",90,
+        |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
+    action!("clipboard.dismiss_offer",Scope::Modal(ModalKind::Clipboard),&[KeyChord::plain(KeyCode::Escape)],"Dismiss offered magnet",90,
+        |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
     action!("limits.toggle",Scope::Global,&[KeyChord::plain(KeyCode::Char('z'))],"Turtle limits",90,
         |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
     action!(

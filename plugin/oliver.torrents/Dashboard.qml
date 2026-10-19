@@ -37,7 +37,7 @@ Item {
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
     if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
@@ -100,7 +100,7 @@ Item {
   onFilterChanged:publish()
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
-  Connections {target:root.svc;function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
+  Connections {target:root.svc;function onClipboardOfferChanged(){root.publish()} function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
   Component.onDestruction:{disposing=true;if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window);svc.hideDetail()}}
 
   FloatingWindow {
@@ -120,10 +120,16 @@ Item {
     FocusScope {
       id:scope
       anchors.fill:parent
+      // Include the window background in item captures as well as live rendering.
+      Rectangle {anchors.fill:parent;color:Commons.Color.background;z:-1}
       focus:true
       Keys.priority:Keys.AfterItem
       Keys.onPressed:function(event) {
         if(addSheet.active){if(addSheet.item && addSheet.item.handleKey(event))event.accepted=true;return}
+        if(root.svc && root.svc.clipboardOffer && !(root.currentView==="search" && root.search && root.search.editing) && !(root.currentView==="torrents" && torrents && torrents.editing)){
+          if(event.text==="y"){root.svc.acceptOffer();event.accepted=true;return}
+          if(event.key===Qt.Key_Escape){root.svc.cancelOffer();event.accepted=true;return}
+        }
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
         if(root.currentView==="search" && root.search && root.search.handleKey(event)){event.accepted=true;return}
         if((root.currentView==="torrents" && torrents && torrents.editing) || (root.currentView==="search" && root.search && root.search.editing))return
@@ -139,6 +145,8 @@ Item {
           root.selectView(event.key-Qt.Key_1);event.accepted=true
         }
       }
+      Shortcut {sequence:"Y";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && !!root.svc.clipboardOffer && !addSheet.active && (!torrents || !torrents.editing) && (!root.search || !root.search.editing);onActivated:root.svc.acceptOffer()}
+      Shortcut {sequence:"Esc";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && !!root.svc.clipboardOffer && !addSheet.active && (!torrents || !torrents.editing) && (!root.search || !root.search.editing);onActivated:root.svc.cancelOffer()}
       Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active;onActivated:root.svc.addClipboardSheet()}
       Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online;onActivated:root.svc.quit()}
       Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen);onActivated:root.cycleView(1)}
@@ -156,6 +164,7 @@ Item {
           Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }
+        Components.ClipboardOffer {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Components.PopupBanner {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;text:root.svc ? root.svc.diskBanner : "";urgent:true}
         Ui.PanelSeparator {Layout.fillWidth:true}
         Item {
