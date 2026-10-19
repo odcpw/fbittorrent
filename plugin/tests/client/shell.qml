@@ -159,6 +159,26 @@ ShellRoot {
     s.c.receive(JSON.stringify({ev:"mutation.result",op:"torrents.recheck",ref:ref,outcome:"done",result:{rechecked:["a".repeat(40)],failed:[]}}))
     check("recheck_progress",s.c.lastError && s.c.lastError.message==="another operation failed","a recheck receipt preserves an unrelated operation's error",s.c.lastError)
     console.log("FBTQS-PASS recheck_progress")
+    ;["torrents.remove","torrents.add"].forEach(function(op){
+      s=session();s.c.visibility(false,true,[]);s.hello()
+      var args=op==="torrents.remove" ? {hashes:["a".repeat(40)],delete_files:false} : {source:{restore:"a".repeat(40)}}
+      var ref=s.c.request(op,args,{mutating:true}),request=JSON.parse(s.writes[s.writes.length-1])
+      s.reply({state:"pending",ref:ref},request.id)
+      s.time.ms=21000;s.c.receive(JSON.stringify({ev:"state",topic:"summary",data:{}}));s.c.tick()
+      check("cleanup_progress",s.c.actions[ref].status==="pending" && !s.c.lastError,"accepted removal/Undo remains pending past the ordinary reply deadline",s.c.actions[ref])
+      s.c.disconnected()
+      // Remove is never replayed; its outcome comes from the live receipt or
+      // event history. Do not clear any unrelated error during reconciliation.
+      var failure={code:"timeout",message:"no answer",retryable:true}
+      s.c.actions[ref].error=failure;s.c.lastError=failure
+      s.c.subs[801]={topics:["events"],rev:0}
+      s.c.receive(JSON.stringify({ev:"snapshot.chunk",topic:"events",sub:801,rev:1,items:[{ev:"mutation.result",op:op,ref:ref,outcome:"done",result:{state:"done"}}]}))
+      check("cleanup_progress",s.c.actions[ref].status==="done" && !s.c.lastError,"late event-history success clears the correlated timeout",s.c.actions[ref])
+      s.c.lastError={code:"upstream",message:"unrelated read failed",retryable:true}
+      s.c.receive(JSON.stringify({ev:"mutation.result",op:op,ref:ref,outcome:"done",result:{state:"done"}}))
+      check("cleanup_progress",s.c.lastError.message==="unrelated read failed","cleanup success preserves an unrelated failure",s.c.lastError)
+    })
+    console.log("FBTQS-PASS cleanup_progress")
     s=session();s.hello();s.c.disconnected()
     check("reconnecting",s.c.reconnecting,"unexpected EOF retains reconnecting state",s.c.reconnecting)
     for(i=0;i<6;i++)s.c.attempt()

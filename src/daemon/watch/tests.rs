@@ -7,10 +7,12 @@ fn sample(prefix: u64) -> Sample {
         path: PathBuf::from("/nonexistent/fixture.mkv"),
         size: 64 * MIB,
         prefix,
+        verified_bytes: prefix,
         last: true,
         downloading: true,
         active: true,
         dl_bps: Some(MIB),
+        download_limit: None,
     }
 }
 #[test]
@@ -120,6 +122,114 @@ fn no_duration_fallback() {
     assert!(!estimate_rate(64 * MIB, 100));
     assert_eq!(duration::parse(b"random bytes, not a container"), None);
     println!("no duration remains absent; 2h rate rule is only an estimate");
+}
+#[test]
+fn throttled_readiness_survives_bursts_and_zero_rate_gaps() {
+    let mut estimate = estimate::Estimate::default();
+    let mut s = sample(32 * MIB);
+    s.download_limit = Some(16 * 1024);
+    let now = Instant::now();
+    let mut states = Vec::new();
+    for second in 0..24 {
+        // Token-bucket bursts and intervening zero readings must never make
+        // a 16 KiB/s link look capable of feeding a 1 MiB/s video.
+        s.dl_bps = Some(if second % 3 == 0 { 4 * MIB } else { 0 });
+        s.downloading = s.dl_bps != Some(0);
+        let mut p = value(&s, Some(64.), false);
+        estimate.apply(&s, Some(64.), now + Duration::from_secs(second), &mut p);
+        assert_eq!(p.stall_free, Some(false), "second={second}");
+        states.push(p.stall_free);
+    }
+    s.download_limit = None;
+    s.dl_bps = Some(4 * MIB);
+    s.downloading = true;
+    for second in 24..28 {
+        let mut p = value(&s, Some(64.), false);
+        estimate.apply(&s, Some(64.), now + Duration::from_secs(second), &mut p);
+        states.push(p.stall_free);
+        if second >= 25 { assert_eq!(p.stall_free, Some(true)); }
+    }
+    assert_eq!(states.windows(2).filter(|pair| pair[0] != pair[1]).count(), 1);
+    for second in 28..48 {
+        s.dl_bps = Some(if second % 2 == 0 { MIB * 98 / 100 } else { MIB * 102 / 100 });
+        let mut p = value(&s, Some(64.), false);
+        estimate.apply(&s, Some(64.), now + Duration::from_secs(second), &mut p);
+        assert_eq!(p.stall_free, Some(true), "threshold noise must stay inside hysteresis");
+    }
+    s.download_limit = Some(16 * 1024);
+    for second in 48..51 {
+        let mut p = value(&s, Some(64.), false);
+        estimate.apply(&s, Some(64.), now + Duration::from_secs(second), &mut p);
+        if second >= 49 { assert_eq!(p.stall_free, Some(false)); }
+    }
+}
+#[test]
+fn decorating_stalled_rows_keeps_the_known_stall_warning() {
+    let mut watch = Watch::open(PathBuf::from("/nonexistent/watch-stalled-test.json"));
+    let s = sample(0);
+    watch.sample(vec![s]);
+    watch.rows.get_mut(&"a".repeat(40)).unwrap().value.stall_free = Some(false);
+    let mut row: api::Torrent = serde_json::from_value(json!({"hash":"a".repeat(40),"name":"Fixture",
+        "state":"stalled","intent":"run","staged":false,"checked":true,"seed":false,
+        "upload_policy":"off","save_path":"/tmp","added_at":1,"force":false,"dl_bps":0})).unwrap();
+    watch.decorate(std::slice::from_mut(&mut row));
+    assert_eq!(row.playable.as_ref().unwrap().stall_free, Some(false));
+    row.state = api::TorrentState::Paused;
+    watch.decorate(std::slice::from_mut(&mut row));
+    assert_eq!(row.playable.as_ref().unwrap().stall_free, None);
+}
+#[test]
+fn sustainable_bursty_link_does_not_flip_on_each_zero_rate_sample() {
+    let mut estimate = estimate::Estimate::default();
+    let mut s = sample(32 * MIB);
+    s.download_limit = Some(2 * MIB);
+    let now = Instant::now();
+    s.dl_bps = Some(MIB * 125 / 100);
+    let mut p = value(&s, Some(64.), false);
+    estimate.apply(&s, Some(64.), now, &mut p);
+    assert_eq!(p.stall_free, Some(true));
+    for second in 1..20 {
+        // Sustained 1.2 MiB/s beats the video's 1 MiB/s bitrate. Packet
+        // delivery is bursty but the link and its cap have not changed.
+        s.dl_bps = Some(if second % 2 == 0 { MIB * 24 / 10 } else { 0 });
+        s.downloading = s.dl_bps != Some(0);
+        estimate.apply(&s, Some(64.), now + Duration::from_secs(second), &mut p);
+        assert_eq!(p.stall_free, Some(true), "second={second}");
+    }
+}
+#[test]
+fn verified_receipts_refresh_the_rate_after_a_cap_change() {
+    let mut estimate = estimate::Estimate::default();
+    let now = Instant::now();
+    let mut s = sample(32 * MIB);
+    s.download_limit = Some(16 * 1024);
+    s.dl_bps = Some(16 * 1024);
+    let mut p = value(&s, Some(64.), false);
+    estimate.apply(&s, Some(64.), now, &mut p);
+    assert_eq!(p.stall_free, Some(false));
+    s.download_limit = Some(4 * MIB);
+    estimate.apply(&s, Some(64.), now + Duration::from_secs(1), &mut p);
+    assert_eq!(p.stall_free, Some(false), "lifting a cap alone is not evidence of a faster link");
+    // All verified pieces measure incoming work, even when a preceding piece
+    // delays the contiguous prefix and the speed counter has not caught up.
+    s.verified_bytes += 2 * MIB;
+    s.prefix += MIB;
+    estimate.apply(&s, Some(64.), now + Duration::from_secs(2), &mut p);
+    assert_eq!(p.stall_free, Some(true));
+    assert!(p.finishes_in_s.unwrap() < p.buffered_s.unwrap());
+}
+#[test]
+fn hysteresis_never_promises_stall_free_when_finish_exceeds_buffer() {
+    let mut estimate = estimate::Estimate::default();
+    let mut s = sample(32 * MIB);
+    let now = Instant::now();
+    let mut p = value(&s, Some(64.), false);
+    estimate.apply(&s, Some(64.), now, &mut p);
+    assert_eq!(p.stall_free, Some(true));
+    s.dl_bps = Some(MIB * 95 / 100);
+    estimate.apply(&s, Some(64.), now + Duration::from_secs(1), &mut p);
+    assert!(p.finishes_in_s.unwrap() > p.buffered_s.unwrap());
+    assert_eq!(p.stall_free, Some(false));
 }
 #[test]
 fn container_headers_bounded_and_validated() {

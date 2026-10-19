@@ -200,7 +200,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
-| `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
+| `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending admission, then mutation.result; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
 | `torrents.peers` | `{hash}` | `{peers: [Peer]}` | no | P5-01 |
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
@@ -335,7 +335,7 @@ creates no second ledger record.
 |---|---|
 | `Torrent` | `hash`, `name: str (≤ 1,024 in lists)`, `state: enum(metadata\|checking\|downloading\|stalled\|queued\|paused\|done\|seeding\|waiting_vpn\|error)`, `reason: open(user\|queue_full\|complete_no_seed\|vpn_down\|restore_failed\|metadata_timeout\|missing_files\|disk_full)?`, `error: str?`, `intent: enum(run\|pause)`, `staged: bool`, `checked: bool`, `progress: f64?`, `size: bytes?`, `completed_bytes: bytes?`, `uploaded_bytes: bytes?` (this torrent's upload in the current engine life, from `stats.live`), `dl_bps?`, `ul_bps?`, `eta_s: u64?`, `peers: u64?`, `seeds: u64?`, `seed: bool`, `upload_enabled: bool` (effective payload permission), `upload_policy: enum(off\|unlimited\|custom)`, `upload_limit_bps?`, `ratio: f64?`, `save_path: str`, `content_path: str?`, `added_at: ts`, `completed_at: ts?`, `origin: open(…)?`, `imdb_id: str?`, `queue_pos: u64?`, `force: bool`, `playable: Playable?` |
 | `TorrentDetail` | every `Torrent` field plus `file_count: u64?`, `piece_count: u64?`, `piece_size: bytes?`, `comment: str?`, `created_by: str?`, `private: bool`, `tracker_count: u64?`, `undo_until: ts?` |
-| `Playable` | `file: u64`, `ready: bool` (the DL-26 threshold), `stall_free: bool?` (at the current `dl_bps`, the rest of the file arrives before playback reaches the end of the prefix: `prefix_bytes / bitrate ≥ (file_size − prefix_bytes) / dl_bps`; absent when no duration is known or the torrent is not downloading), `prefix_bytes: bytes`, `buffered_s: u64?` (`prefix_bytes / bitrate`, with `bitrate = file_size / duration`), `finishes_in_s: u64?` (`(file_size − prefix_bytes) / dl_bps`, the right-hand side of the rule; absent when `dl_bps` is absent or 0), `acked: bool` |
+| `Playable` | `file: u64`, `ready: bool` (the DL-26 threshold), `stall_free: bool?` (at the smoothed, cap-bounded download rate, the rest of the file arrives before playback reaches the end of the prefix: `prefix_bytes / bitrate ≥ (file_size − prefix_bytes) / dl_bps`; absent when no duration is known or download intent is inactive), `prefix_bytes: bytes`, `buffered_s: u64?` (`prefix_bytes / bitrate`, with `bitrate = file_size / duration`), `finishes_in_s: u64?` (`(file_size − prefix_bytes) / smoothed_rate`, the right-hand side of the rule; absent without a usable active rate), `acked: bool` |
 | `File` | `index: u64`, `path: str`, `size: bytes`, `progress: f64`, `included: bool`, `sort_key: str` (computed by the daemon in `torrents.files` and the files topic, P1-06: the path lowercased with every run of ASCII digits left-padded with zeros to 10 digits, so that a plain string comparison yields natural order: `e2.mkv` < `e10.mkv`), `ready: bool?` (P5-05) |
 | `Summary` | `dl_bps?`, `ul_bps?`, `counts: {total, downloading, stalled, metadata, checking, queued, paused, done, seeding, waiting_vpn, error, staged, ready}` (all `u64`), `alt: bool`, `limits: Limits`, `network: {state: enum(ready\|waiting\|off), message: str, interface: str?}`, `daemon: {state: enum(starting\|running\|parked\|stopping), idle_exit_in_s: u64?, busy_reasons: [open(downloading\|seeding\|parked_waiting\|interactive\|search\|mutation)], upgrade_pending: bool}`, `top: [{hash, name, state, progress?, dl_bps?, eta_s?, playable?}]` (≤ 5), `disk: {free_bytes: bytes?, needed_bytes: bytes, low: bool}` (P5-07; the one place free space lives), `history: [u64]?` (last 60 download samples, P6-03) |
 | `Limits` | `download_bps?`, `upload_bps?`, `alt_download_bps?`, `alt_upload_bps?` |
@@ -696,7 +696,13 @@ separate buckets. The `manual` bucket includes manual, clipboard, handler,
 agent and unknown future values; an explicit other string matches exactly.
 
 `torrents.remove {hashes, delete_files:false}` accepts up to 256 hashes and
-returns `{state:"done", undo_until:<Unix seconds>}`. Every record and cached
+immediately answers `{state:"pending", ref}` before waiting for engine I/O.
+The correlated `mutation.result` confirms `{state:"done", undo_until:<Unix seconds>}`
+after the durable removal; Undo uses the same admission/confirmation path.
+Accepted removal/Undo work has no operation deadline; a lost connection still
+means an unknown outcome until its correlated receipt is observed. A late
+receipt, including event-history replay, clears that action's timeout without
+clearing an unrelated error. Every record and cached
 metainfo is retained under private `engine/undo/` for a single ten-second batch
 window. Payload files are never removed by this path. The daemon owns the
 monotonic authorization deadline: engine-slot restarts retain it, full daemon
@@ -1108,8 +1114,17 @@ The prefix begins at that file's offset; readiness requires both
 `max(32 MiB, 3% of file size)` and the file's last piece. Pausing retains the
 verified prefix. MKV Info/Duration or MP4 mvhd headers consume at most 1 MiB per
 file; absent/unreadable duration stays absent. `stall_free` is absent without a
-known duration, positive rate and active downloading. Buffer/finish counters
-coalesce; readiness and stall-free flips remain structural.
+known duration or active download intent. Its rate estimate uses a five-second
+exponential smoothing time constant, bounded by the effective download cap;
+short zero-rate gaps retain the verdict. Newly verified payload bytes also
+inform the rate when counters lag a changed cap. In the first three seconds after a cap change, the first verified
+progress refreshes the old rate history; lifting a cap alone never claims
+a faster link. Separate thresholds require finish time to fit inside the buffer to remain stall-free,
+and 10% extra buffer headroom to recover from a may-stall verdict, without
+adding a second debounce delay. A stalled active transfer with
+known duration can therefore truthfully keep `stall_free: false`, rather than
+falling back to Ready during token-bucket gaps. Buffer/finish counters coalesce;
+readiness and stall-free flips remain structural.
 
 `watch.json` is private durable history: a still-ready incomplete record does not
 notify again after restart. A verified lost prefix re-arms a later daemon's

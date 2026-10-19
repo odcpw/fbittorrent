@@ -138,9 +138,23 @@ impl Shared {
             self.answer(job, Err(failure));
             return false;
         }
+        // Admission is independent of the engine/dispatch queue. Once accepted,
+        // removal and Undo report their durable outcome through the same ref.
+        if let Some(pending) = queued_reply(&job.request.call, &job.mutation.as_ref().unwrap().reference) {
+            return self.begin_confirmation(job, pending, Confirmation::Worker, true);
+        }
         true
     }
     pub(super) fn answer(&self, job: &Job, answer: ApiResult<Reply>) {
+        let confirming = self.mutation_active.lock().unwrap()
+            .get(&(job.connection.number, job.generation))
+            .is_some_and(|entry| entry.confirmation.is_some());
+        if confirming {
+            // Includes an accepted job rejected by a full/closing dispatch
+            // queue: it needs a failed receipt, never a second initial reply.
+            self.confirm((job.connection.number, job.generation), answer);
+            return;
+        }
         if answer.is_err() && matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")) { self.daemon.notifier.failed(); }
         if let Some(ticket) = &job.mutation {
             let active = self
@@ -324,6 +338,16 @@ impl Shared {
                 self.confirm(key, result);
             }
         }
+    }
+}
+pub(super) fn queued_reply(call: &Call, reference: &MutationRef) -> Option<Reply> {
+    let pending = MutationResult::Pending { reference: reference.clone() };
+    match call {
+        Call::TorrentsRemove { .. } => Some(Reply::TorrentsRemove(RemoveResult { status: pending, undo_until: None })),
+        Call::TorrentsAdd { args } if matches!(args.source, AddSource::Restore(_)) => Some(Reply::TorrentsAdd(AddResult {
+            status: pending, hash: None, name: None, duplicate: None, deferred: None, disk: None,
+        })),
+        _ => None,
     }
 }
 pub(super) fn completed_payload(op: &str, reply: &Reply) -> Option<serde_json::Map<String, Value>> {

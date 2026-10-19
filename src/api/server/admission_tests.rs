@@ -115,3 +115,28 @@ fn recheck_pending_has_no_operation_deadline_and_is_not_idempotent() {
     assert_eq!(out.frames[0]["result"]["state"],"pending");
     assert!(ops::TABLE.iter().any(|row|row.name=="torrents.recheck" && row.mutating && !row.idempotent));
 }
+#[test]
+fn remove_and_undo_have_correlated_admission_before_engine_execution() {
+    for (op, args) in [
+        ("torrents.remove", json!({"hashes":["a".repeat(40)],"delete_files":false})),
+        ("torrents.remove", json!({"hashes":["a".repeat(40)],"delete_files":true})),
+        ("torrents.add", json!({"source":{"restore":"a".repeat(40)}})),
+    ] {
+        let request = decode(&serde_json::to_vec(&json!({"id":1,"op":op,"args":args})).unwrap()).unwrap();
+        let reference = MutationRef::new("queued-cleanup").unwrap();
+        let reply = queued_reply(&request.call, &reference).expect("admission before dispatch");
+        assert_eq!(reply.to_value().unwrap(), json!({"state":"pending","ref":"queued-cleanup"}));
+        // The same request/ref is retained for its final durable result.
+        let mut ring = mutations::Ring::default();
+        let (ticket, fresh) = ring.claim("client", reference, &request.call).unwrap();
+        assert!(fresh);
+        let mut deliveries = Vec::new();
+        ticket.attach(mutations::Waiter {connection:1,id:1,generation:1}, |d| deliveries.push(d));
+        ticket.answer(Ok(reply), |d| deliveries.push(d));
+        assert!(matches!(&deliveries[..], [mutations::Delivery::Response(_, Ok(_))]));
+        // A full/closing queue after admission is an explicit failed receipt.
+        ticket.finish(Event::MutationResult {seq:1,ts:1,reference:ticket.reference.clone(),op:op.into(),
+            outcome:MutationOutcome::Failed,error:Some(busy("dispatch")),result:None}, |d| deliveries.push(d));
+        assert!(matches!(&deliveries[1], mutations::Delivery::Event(1, Event::MutationResult {outcome:MutationOutcome::Failed,..})));
+    }
+}

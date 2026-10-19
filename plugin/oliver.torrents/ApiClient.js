@@ -31,6 +31,15 @@ function create(io, options) {
     dashboardVisible: false, quickVisible:false, protocolMismatch: false, details: [], mode: "connecting", lastError: null, pollAt: 0 }
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
+  function mutationResult(frame) {
+    delete c.awaiting[frame.ref]
+    var action=c.actions[frame.ref]
+    if(!action)return
+    if(c.lastError===action.error)c.lastError=null
+    action.status=frame.outcome==="timeout" ? "no answer" : frame.outcome
+    action.error=frame.error
+    if(frame.error)c.lastError=frame.error
+  }
   function fail(entry, failure, status) {
     if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
     if (entry.callback) entry.callback(null, failure)
@@ -259,13 +268,7 @@ function create(io, options) {
       if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false }
       if (frame.ev === "error") c.lastError = frame.error
       if (frame.ev === "mutation.result") {
-        delete c.awaiting[frame.ref]
-        var action = c.actions[frame.ref]
-        if (action) {
-          if (c.lastError === action.error) c.lastError = null
-          action.status = frame.outcome === "timeout" ? "no answer" : frame.outcome; action.error = frame.error
-          if (frame.error) c.lastError = frame.error
-        }
+        mutationResult(frame)
       }
       if (frame.sub !== undefined) {
         if (typeof frame.topic !== "string" || !Number.isSafeInteger(frame.sub) || frame.sub < 1 ||
@@ -277,6 +280,12 @@ function create(io, options) {
         if (!sub) return
         if (frame.rev !== sub.rev + 1) { c.resubscribe(frame.topic); changed(); return }
         sub.rev = frame.rev; c.topicRevs[frame.topic] = frame.rev
+      }
+      // Reconnection delivers the same confirmed receipt through event history.
+      // Resolve it exactly like a direct receipt, including its stale error.
+      if(frame.topic==="events") {
+        var events=frame.ev==="snapshot.chunk" ? frame.items : frame.ev==="delta" ? frame.added : []
+        ;(events || []).forEach(function(event){if(event && event.ev==="mutation.result")mutationResult(event)})
       }
       deliver(frame); changed(); return
     }

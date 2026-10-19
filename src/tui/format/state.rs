@@ -20,7 +20,7 @@ pub(in crate::tui) fn state_cell(legacy: &Torrent, row: Option<&api::Torrent>) -
 
 pub(in crate::tui) fn state_word(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
     if row.is_some_and(|r|r.state==api::TorrentState::Error && r.reason.as_deref()==Some("missing_files")) {return "Files missing";}
-    if let Some(p)=row.filter(|r|r.state==api::TorrentState::Downloading).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
+    if let Some(p)=row.filter(|r|matches!(r.state,api::TorrentState::Downloading|api::TorrentState::Stalled)).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
         if p.stall_free!=Some(true) && !(p.stall_free.is_none() && p.buffered_s.is_some_and(|s|s>=120)) {return "Playable · may stall";}
     }
     let key=key(legacy,row);
@@ -86,6 +86,9 @@ mod watch_tests {
         let legacy=Torrent::default();
         assert_eq!(state_cell(&legacy,Some(&row)).trim_end(),"▶ Ready");
         assert_eq!(state_word(&legacy,Some(&row)),"Playable · may stall");
+        row.state=api::TorrentState::Stalled;
+        assert_eq!(state_word(&legacy,Some(&row)),"Playable · may stall");
+        row.state=api::TorrentState::Downloading;
         row.playable.as_mut().unwrap().stall_free=Some(true);
         assert_eq!(state_word(&legacy,Some(&row)),"Ready to watch");
         row.playable.as_mut().unwrap().stall_free=None;

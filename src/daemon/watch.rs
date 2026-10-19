@@ -1,5 +1,6 @@
 //! Once-per-second verified video readiness. Ownership survives engine-slot swaps.
 mod duration;
+mod estimate;
 #[cfg(test)]
 mod tests;
 use crate::api::{self, Playable};
@@ -22,11 +23,13 @@ pub(crate) struct Sample {
     pub path: PathBuf,
     pub size: u64,
     pub prefix: u64,
+    pub verified_bytes: u64,
     pub last: bool,
     pub downloading: bool,
     /// Unpaused work still needs ticks even when its current rate is zero.
     pub active: bool,
     pub dl_bps: Option<u64>,
+    pub download_limit: Option<u64>,
 }
 pub(crate) fn video(path: &Path) -> bool {
     path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
@@ -99,6 +102,7 @@ struct Row {
     inspected: u64,
     path: PathBuf,
     size: u64,
+    estimate: estimate::Estimate,
 }
 pub(crate) struct Watch {
     path: PathBuf,
@@ -177,7 +181,10 @@ impl Watch {
         }
     }
     pub fn sample(&mut self, samples: Vec<Sample>) -> Vec<Value> {
-        self.next = Instant::now() + Duration::from_secs(1);
+        self.sample_at(samples, Instant::now())
+    }
+    fn sample_at(&mut self, samples: Vec<Sample>, now: Instant) -> Vec<Value> {
+        self.next = now + Duration::from_secs(1);
         self.active = samples.iter().any(|sample| sample.active);
         let mut dirty = false;
         let mut events = Vec::new();
@@ -188,7 +195,8 @@ impl Watch {
             let cached = self
                 .rows
                 .get(&s.hash)
-                .filter(|r| r.path == s.path && r.size == s.size);
+                .filter(|r| r.path == s.path && r.size == s.size && r.value.file == s.file);
+            let mut estimate = cached.map(|r| r.estimate.clone()).unwrap_or_default();
             let inspected = s.prefix.min(MIB);
             let seconds = if let Some(cached) =
                 cached.filter(|r| r.duration.is_some() || r.inspected >= inspected)
@@ -201,6 +209,7 @@ impl Watch {
             };
             let previous = self.saved.get(&s.hash).cloned().unwrap_or_default();
             let mut p = value(&s, seconds, previous.acked);
+            estimate.apply(&s, seconds, now, &mut p);
             if !p.ready {
                 p.acked = false;
             }
@@ -227,6 +236,7 @@ impl Watch {
                     inspected,
                     path: s.path,
                     size: s.size,
+                    estimate,
                 },
             );
         }
@@ -257,13 +267,10 @@ impl Watch {
                     }
                 }
                 let mut value = p.value.clone();
-                if row.state != api::TorrentState::Downloading {
+                if !matches!(row.state, api::TorrentState::Downloading | api::TorrentState::Stalled) {
                     value.stall_free = None;
+                    value.finishes_in_s = None;
                 }
-                value.finishes_in_s = row
-                    .dl_bps
-                    .filter(|v| *v > 0)
-                    .map(|rate| p.size.saturating_sub(value.prefix_bytes).div_ceil(rate));
                 if row.completed_at.is_some() {
                     value.prefix_bytes = p.size;
                     value.buffered_s = p.duration.map(|s| s.floor() as u64);
