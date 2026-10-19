@@ -172,14 +172,14 @@ def upgrade_idle_exit_75(binary, systemd):
 @contextmanager
 def downloading(case, box, h, client):
     with d.Sandbox() as source, d.Harness(case, _pair[0], source) as seed:
+        process = seed.start_serve(idle_exit_secs=0)
+        if not (seed.receive_ready() and seed.wait_engine()): raise RuntimeError('private seed not ready')
         cfg = tomllib.loads((Path(source.env['XDG_CONFIG_HOME']) / 'fbittorrent/config.toml').read_text())
         peers = socket.inet_aton('127.0.0.1') + struct.pack('>H', cfg['peer_port'])
         tracker_body = fixtures.bencode(dict(interval=1, peers=peers))
         with fixtures.HttpFixture(source.root, {'/announce': dict(base64=base64.b64encode(tracker_body).decode())}) as tracker:
             payload = source.downloads / 'upgrade-download.bin'; payload.write_bytes(bytes(range(256)) * 32768)
             item = fixtures.torrent_fixture(source.root, [payload], tracker=tracker.base + '/announce')
-            process = seed.start_serve(idle_exit_secs=0)
-            if not (seed.receive_ready() and seed.wait_engine()): raise RuntimeError('private seed not ready')
             with d.ApiConn(seed) as peer:
                 peer.hello()
                 peer.call('torrents.add', dict(source=dict(path=str(item.torrent)), save_path=str(source.downloads), seed=True))

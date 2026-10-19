@@ -71,13 +71,13 @@ def subscribed(h,client):
 
 def events_follow_completion(binary,systemd):
     with owned('events_follow_completion',binary,systemd) as (case,box,h,p,client),d.Sandbox() as source,d.Harness(case,binary,source) as seed:
+        sp=seed.start_serve()
+        if not(seed.receive_ready() and seed.wait_engine()):raise RuntimeError('private peer not ready')
         cfg=tomllib.loads((Path(source.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml').read_text())
         body=fixtures.bencode(dict(interval=1,peers=socket.inet_aton('127.0.0.1')+struct.pack('>H',cfg['peer_port'])))
         with fixtures.HttpFixture(source.root,{'/announce':dict(base64=base64.b64encode(body).decode())}) as tracker:
             payload=source.downloads/'stream-complete.bin';payload.write_bytes(os.urandom(65536))
             item=fixtures.torrent_fixture(source.root,[payload],tracker=tracker.base+'/announce')
-            sp=seed.start_serve()
-            if not(seed.receive_ready() and seed.wait_engine()):raise RuntimeError('private peer not ready')
             try:
                 with d.ApiConn(seed) as peer,follow(case,box,binary,'--kinds','torrent.completed') as (reader,path):
                     peer.hello();peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(source.downloads),seed=True))

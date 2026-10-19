@@ -70,9 +70,9 @@ class Sandbox:
         self.downloads.mkdir()
         directory = Path(self.env["XDG_CONFIG_HOME"]) / "fbittorrent"
         directory.mkdir()
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            peer_port = probe.getsockname()[1]
+        # The daemon binds :0 itself. Harness.wait_engine publishes the actual
+        # owned listener for tracker fixtures; no probe/close/rebind window.
+        peer_port = 0
         (directory / "config.toml").write_text(
             'engine = "native"\nautostart = false\nnotify = false\n'
             'network_interface = "lo"\npeer_encryption = "off"\n'

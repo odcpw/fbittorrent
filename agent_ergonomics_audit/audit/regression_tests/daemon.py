@@ -357,7 +357,11 @@ class Harness:
             with ApiConn(self) as client:
                 client.hello()
                 response=client.call("app.info")
-                return response.get("result",{}).get("state") in ("running","parked"),json.dumps(response)
+                state=response.get("result",{}).get("state")
+                if state=="running":
+                    from fixture_ports import publish
+                    publish(self.sandbox,self.daemon_pid())
+                return state in ("running","parked"),json.dumps(response)
         return self.wait_for(observed,"daemon API reports a ready engine slot")
 
     def stop_serve(self, process, number=signal.SIGTERM, code=0, *, empty_slot=False):
@@ -520,6 +524,7 @@ def cap_change_no_check(binary, systemd):
             Harness(case, binary, leechbox, systemd) as leechh:
         # A real local tracker advertises only the isolated seed's port. Payload
         # then travels between two real fbittorrent engines, never through HTTP.
+        seed, leech = cap_engine(seedh), cap_engine(leechh)
         config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
         peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
         tracker_body = fixtures.bencode(dict(interval=1, peers=peer))
@@ -527,7 +532,6 @@ def cap_change_no_check(binary, systemd):
             payload = seedbox.downloads / "daemon-fixture.bin"
             payload.write_bytes(os.urandom(8 * 1024 * 1024))
             fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
-            seed, leech = cap_engine(seedh), cap_engine(leechh)
             seedh.cli("add", str(fixture.torrent), "--seed", "--quiet")
             if not seedh.wait_for(lambda: (engine_row(seed, fixture.info_hash)["state"] == "seeding",
                                           str(engine_row(seed, fixture.info_hash))), "verified seed"):
@@ -1917,9 +1921,7 @@ def replay_namespace_child(manifest_path):
     else:
         subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
         subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
-    compact = socket.inet_aton("127.0.0.1") + struct.pack("!H", manifest["seed_port"])
-    tracker = fixtures.HttpFixture(Path(manifest_path).parent, {
-        "/announce": dict(base64=base64.b64encode(fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=compact))).decode())})
+    tracker = fixtures.HttpFixture(Path(manifest_path).parent, {})
     children = []
     def terminate(*_):
         for child in children:
@@ -1940,6 +1942,10 @@ def replay_namespace_child(manifest_path):
     try:
         seed = subprocess.Popen(manifest["seed"], env=manifest["seed_env"], stdin=subprocess.DEVNULL)
         children.append(seed)
+        from fixture_ports import wait_listener
+        manifest["seed_port"] = wait_listener(seed.pid)
+        compact = socket.inet_aton("127.0.0.1") + struct.pack("!H", manifest["seed_port"])
+        tracker.routes["/announce"] = dict(base64=base64.b64encode(fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=compact))).decode())
         main = subprocess.Popen(manifest["main"], stdin=subprocess.DEVNULL)
         children.append(main)
         Path(manifest["info"]).write_text(json.dumps(dict(namespace=os.readlink("/proc/self/ns/net"), tracker=tracker.base + "/announce",
@@ -1999,11 +2005,6 @@ def replay_owned(group, binary, systemd):
                 seedbox = harness.resources.enter_context(Sandbox())
                 seedconfig = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
                 select_replay_interface(seedconfig, None)
-                if tomllib.loads(seedconfig.read_text())["peer_port"] == tomllib.loads(config.read_text())["peer_port"]:
-                    with socket.socket() as reservation:
-                        reservation.bind(("127.0.0.1", 0))
-                        port = reservation.getsockname()[1]
-                    seedconfig.write_text(re.sub(r'^peer_port = .*$', 'peer_port = ' + str(port), seedconfig.read_text(), flags=re.M))
                 harness.seed_harness = harness.resources.enter_context(Harness(case, binary, seedbox))
                 harness.replay_seedbox = seedbox
                 manifest = sandbox.root / "replay-namespace.json"
@@ -5018,6 +5019,10 @@ CASES["native_data_unchanged"]=native_data_unchanged
 
 from daemon_delete_safety import CASES as DELETE_SAFETY_CASES
 CASES.update((function.__name__,function) for function in DELETE_SAFETY_CASES)
+
+from daemon_fixture_ports import CASES as PORT_CASES
+CASES.update((function.__name__,function) for function in PORT_CASES)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
