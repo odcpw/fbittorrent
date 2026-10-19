@@ -145,6 +145,17 @@ fn torrent(value: &Torrent, list_name: bool) -> Checked {
     if let Some(p) = value.progress {
         progress(p)?;
     }
+    if value
+        .error
+        .as_deref()
+        .is_some_and(|message| message.ends_with(" restore failed: missing files"))
+    {
+        require(
+            value.reason.as_deref() == Some("missing_files"),
+            "torrent.reason",
+            "missing-files restore errors require missing_files",
+        )?;
+    }
     Ok(())
 }
 impl Validate for Torrent {
