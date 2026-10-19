@@ -1,4 +1,13 @@
 mod agent;
+mod cli;
+#[path = "cli/local.rs"]
+mod cli_local;
+#[path = "cli/sources.rs"]
+mod cli_sources;
+use cli::{Cli, Cmd, RssCmd, ShowsCmd};
+use cli_local::*;
+use cli_sources::{resolve, resolve_in, tui_free_dedupe, short, local_torrent_source};
+pub use cli_sources::{magnet_hash, magnet_name};
 mod api;
 mod backend;
 mod browse;
@@ -23,295 +32,25 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use engine::migrate_legacy;
 #[cfg(test)]
 use engine::LegacyMigration;
-use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
 use std::time::{Duration, Instant};
-
-#[derive(Parser)]
-#[command(
-    name = "fbittorrent",
-    version,
-    about = "Torrent app for Omarchy: native engine, CLI, TUI, bar widget.",
-    long_about = "Torrent app for Omarchy. Native writes start the headless daemon on demand.\n\nBare `fbittorrent` opens the TUI on a terminal; without a TTY it prints `triage --json`.\nOrdinary CLI commands accept --json; serve logs to stderr. Agents: start with `fbittorrent robot-docs`.",
-    after_help = "Exit codes: 0 ok, 2 usage, 3 safety (needs --yes), 4 backend down, 5 upstream, 6 not found, 7 ambiguous, 8 timeout.\nSelect torrents by hash prefix or a unique part of the name; `all` selects every torrent."
-)]
-struct Cli {
-    /// Machine-readable JSON on stdout (errors too, with the same exit code)
-    #[arg(long, global = true)]
-    json: bool,
-    /// Require an already open app; never start the torrent engine
-    #[arg(long, global = true)]
-    no_start: bool,
-    /// Shortcut for `triage --json`
-    #[arg(long = "robot-triage", hide = true)]
-    robot_triage: bool,
-    #[command(subcommand)]
-    cmd: Option<Cmd>,
-}
-
-#[derive(Subcommand)]
-enum Cmd {
-    /// Run the torrent engine daemon (other commands start it on demand)
-    Serve {
-        /// Idle shutdown delay; 0 disables the idle safety net
-        #[arg(long, default_value_t = 300)]
-        idle_exit_secs: u64,
-        /// Disable desktop notifications (systemd readiness is still sent)
-        #[arg(long)]
-        no_notify: bool,
-    },
-    /// One-call overview for agents: backend, rates, torrents, warnings, next commands
-    #[command(alias = "robot-triage")]
-    Triage,
-    /// Machine-readable contract: commands, exit codes, conventions
-    Capabilities,
-    /// Agent handbook (plain text)
-    #[command(alias = "docs")]
-    RobotDocs {
-        /// Section name; only `guide` exists today
-        #[arg(default_value = "guide")]
-        section: String,
-    },
-    /// Transfer rates and torrent counts (used by the bar widget). Never starts the backend.
-    Status,
-    /// Start the daemon; --ui also opens the dashboard or TUI
-    Up { #[arg(long)] ui: bool },
-    /// Open the dashboard, falling back to the TUI when the panel is absent
-    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
-    /// Restart the running engine; daemon upgrade handling follows in P1-17
-    Restart,
-    /// Close the app and stop its engine (legacy mode stops the service)
-    Down,
-    /// List torrents
-    #[command(alias = "ls")]
-    List {
-        /// Only torrents still downloading
-        #[arg(long)]
-        active: bool,
-    },
-    /// Show one torrent in full: fields, files, and what `open` would launch
-    #[command(alias = "info")]
-    Show { selector: String },
-    /// Add a magnet link or URL. Sequential + first/last piece on, upload off, by default.
-    #[command(alias = "download", alias = "get")]
-    Add {
-        /// magnet:?…, http(s) URL, or a local .torrent file (file:// accepted)
-        source: String,
-        /// Do not enable sequential download
-        #[arg(long)]
-        no_seq: bool,
-        /// Do not prioritise first and last pieces
-        #[arg(long)]
-        no_first_last: bool,
-        /// Add in stopped state
-        #[arg(long)]
-        stopped: bool,
-        /// Allow uploading for this torrent (default: no upload, stop when complete)
-        #[arg(long)]
-        seed: bool,
-        /// Save path override
-        #[arg(long)]
-        save: Option<String>,
-        /// Category
-        #[arg(long)]
-        category: Option<String>,
-        /// Suppress the desktop notification
-        #[arg(long)]
-        quiet: bool,
-        /// Block until the download completes (see `wait`)
-        #[arg(long)]
-        wait: bool,
-        /// Give up waiting after N seconds (0 = forever)
-        #[arg(long, default_value_t = 0)]
-        timeout: u64,
-    },
-    /// Block until torrents complete. Progress on stderr, result on stdout. Exit 8 on timeout.
-    Wait {
-        selectors: Vec<String>,
-        /// Give up after N seconds (0 = forever)
-        #[arg(long, default_value_t = 0)]
-        timeout: u64,
-        /// Poll interval in seconds
-        #[arg(long, default_value_t = 2)]
-        interval: u64,
-    },
-    /// Start (resume) torrents
-    #[command(alias = "resume")]
-    Start { selectors: Vec<String> },
-    /// Stop (pause) torrents
-    #[command(alias = "pause")]
-    Stop { selectors: Vec<String> },
-    /// Remove torrents. Data is kept unless --files (which needs --yes).
-    #[command(alias = "rm", alias = "remove")]
-    Delete {
-        selectors: Vec<String>,
-        /// Also delete the downloaded files (irreversible; requires --yes)
-        #[arg(long)]
-        files: bool,
-        /// Confirm an irreversible deletion
-        #[arg(long)]
-        yes: bool,
-        /// Show what would be removed and exit
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// Toggle sequential download (legacy mode; native scheduling is intrinsic)
-    Seq { selectors: Vec<String> },
-    /// Toggle first/last piece priority (legacy mode; native scheduling is intrinsic)
-    FirstLast { selectors: Vec<String> },
-    /// Allow uploading/seeding
-    Seed { selectors: Vec<String> },
-    /// Limit uploading and stop when complete (default for new torrents)
-    Noseed { selectors: Vec<String> },
-    /// Native scheduling stub; legacy mode applies defaults to outside additions
-    Reconcile {
-        /// Only touch torrents added within the last N seconds (0 = all)
-        #[arg(long, default_value_t = 0)]
-        recent: i64,
-    },
-    /// Add whatever magnet/URL is on the Wayland clipboard
-    AddClipboard,
-    /// Open the file (single-file torrent) or folder in the desktop
-    Open { selector: String },
-    /// RSS feeds
-    #[command(subcommand)]
-    Rss(RssCmd),
-    /// Followed TV shows: a local list checked against EZTV (no service, no timer)
-    #[command(subcommand, alias = "show-list")]
-    Shows(ShowsCmd),
-    /// Search torrents through the enabled providers
-    #[command(alias = "find")]
-    Search {
-        /// Query words
-        query: Vec<String>,
-        /// Install/update the official plugins plus a curated set of community providers, then exit
-        #[arg(long)]
-        install: bool,
-        /// Install a search plugin from a URL (repeatable), then exit
-        #[arg(long = "install-url")]
-        install_url: Vec<String>,
-        /// List installed providers, then exit
-        #[arg(long)]
-        plugins: bool,
-        /// Seconds to wait for results
-        #[arg(long, default_value_t = 15)]
-        wait: u64,
-        /// Maximum results, best-seeded first
-        #[arg(long, default_value_t = 30)]
-        limit: usize,
-    },
-    /// Configure the app download folder (explicit legacy mode also sets up its service)
-    Setup {
-        #[arg(long, default_value_t = 8080)]
-        port: u16,
-        #[arg(long)]
-        save: Option<String>,
-        /// Also register fbittorrent as the magnet: handler
-        #[arg(long)]
-        magnet: bool,
-        /// Remove the static native systemd user unit; saved data is kept
-        #[arg(long, conflicts_with_all = ["magnet", "save"])]
-        uninstall: bool,
-    },
-    /// Register fbittorrent as the magnet: / .torrent handler
-    RegisterMagnet,
-    /// Open the terminal UI
-    Tui {
-        /// Start on the search screen
-        #[arg(long)]
-        search: bool,
-        /// Start on the RSS screen
-        #[arg(long)]
-        rss: bool,
-        /// Start on the Shows screen
-        #[arg(long)]
-        shows: bool,
-    },
-    /// Show config path and effective values
-    Config,
-    /// Download queue, peer encryption and VPN connection settings
-    Settings {
-        #[arg(long)]
-        max_downloads: Option<usize>,
-        /// off, prefer, or require
-        #[arg(long)]
-        encryption: Option<String>,
-        /// proton, an interface name, or off
-        #[arg(long)]
-        vpn: Option<String>,
-        /// List available network interface names
-        #[arg(long)]
-        interfaces: bool,
-    },
-    /// Look a release name up on IMDb (title, rating, blurb, poster)
-    Imdb {
-        name: Vec<String>,
-        /// Refresh the ratings dataset first
-        #[arg(long)]
-        refresh: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum RssCmd {
-    /// List feeds and unread counts
-    #[command(alias = "ls")]
-    List,
-    /// Add a feed
-    Add { url: String, #[arg(long)] name: Option<String> },
-    /// Remove a feed by name
-    #[command(alias = "rm")]
-    Remove { name: String },
-    /// Refresh one feed, or all
-    Refresh { name: Option<String> },
-    /// Show items of a feed
-    Items { name: String, #[arg(long)] unread: bool },
-    /// Add the torrent behind an RSS item (by article id)
-    Grab { name: String, article_id: String },
-}
-
-#[derive(Subcommand)]
-enum ShowsCmd {
-    /// Followed shows with new / seen / grabbed counts
-    #[command(alias = "ls")]
-    List,
-    /// Follow a show by IMDb id (tt…) or title
-    #[command(alias = "add")]
-    Follow {
-        query: Vec<String>,
-        /// Preferred quality for this show (default: config show_quality)
-        #[arg(long)]
-        quality: Option<String>,
-    },
-    /// Stop following a show (IMDb id or unique part of the title)
-    #[command(alias = "rm", alias = "remove")]
-    Unfollow { show: String },
-    /// Fetch the episode lists from EZTV; one show, or all. Prints what is new.
-    #[command(alias = "refresh")]
-    Check { show: Option<String> },
-    /// Episodes of a show from the last check
-    #[command(alias = "items")]
-    Episodes {
-        show: String,
-        /// Only releases not yet marked read
-        #[arg(long)]
-        new: bool,
-    },
-    /// Add the best torrent for an episode (S01E02) or season pack (S01)
-    Grab { show: String, episode: String },
-    /// Mark episodes seen (toggle); `all` marks every episode of the show
-    Seen { show: String, episodes: Vec<String> },
-}
 
 fn main() {
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli)=>cli,
+        Err(error)=>{
+            if std::env::args().any(|arg|arg=="--json") && !matches!(error.kind(),clap::error::ErrorKind::DisplayHelp|clap::error::ErrorKind::DisplayVersion) {
+                std::process::exit(agent::report(&AppError::new(Code::Usage,error.to_string()).into(),true));
+            }
+            error.exit();
+        }
+    };
     let json = cli.json;
     if let Some(Cmd::Serve { idle_exit_secs, no_notify }) = &cli.cmd {
         if no_start_requested(cli.no_start, std::env::var_os("FBITTORRENT_NO_START").as_deref()) {
@@ -321,7 +60,7 @@ fn main() {
         // No search session, TUI signal owner or background thread may start
         // before serve has blocked its shutdown signals.
         let result = std::panic::catch_unwind(|| Config::load()
-            .and_then(|cfg| daemon::run_serve(cfg, *idle_exit_secs, *no_notify)));
+            .and_then(|cfg| { let idle = idle_exit_secs.unwrap_or(cfg.idle_exit_secs); daemon::run_serve(cfg, idle, *no_notify) }));
         std::process::exit(match result {
             Ok(result) => result.unwrap_or_else(|error| {
                 let (_, message, hint) = agent::classify(&error);
@@ -350,10 +89,14 @@ fn main() {
 
 /// Print a JSON value or, when not in JSON mode, run the human printer.
 fn emit(json: bool, value: serde_json::Value, human: impl FnOnce()) {
-    if json { println!("{value}"); } else { human(); }
+    if json { println!("{}",agent::with_warnings(value)); } else { human(); }
 }
 
 fn run(cli: Cli) -> Result<Code> {
+    // Static key documentation must not read or create app state.
+    if let Some(Cmd::RobotDocs { section, surface }) = &cli.cmd {
+        return cli::robot_docs(section, surface, cli.json);
+    }
     let _search_cleanup = SearchCleanup;
     search::begin_session()?;
     let cfg = Config::load()?;
@@ -370,6 +113,8 @@ fn run(cli: Cli) -> Result<Code> {
     if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
+    if !cfg.native() { agent::warning("deprecated_engine", "engine = \"qbittorrent\" is deprecated and is removed in v0.4.0; see the README".into(), true); }
+    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
         return Err(AppError::new(Code::Usage, "native sequential and first/last scheduling are intrinsic; toggle commands require legacy mode")
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());
@@ -377,14 +122,7 @@ fn run(cli: Cli) -> Result<Code> {
 
     // Commands that never touch the backend.
     match cmd {
-        Cmd::Capabilities => { println!("{}", agent::capabilities_json()); return Ok(Code::Ok); }
-        Cmd::RobotDocs { section } => {
-            if section != "guide" {
-                return Err(AppError::new(Code::Usage, format!("unknown docs section '{section}'")).hint("fbittorrent robot-docs guide").into());
-            }
-            print!("{}", agent::ROBOT_GUIDE);
-            return Ok(Code::Ok);
-        }
+        Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
         Cmd::Setup { port, save, magnet, uninstall } => {
             if uninstall {
                 setup::uninstall()?;
@@ -422,7 +160,7 @@ fn run(cli: Cli) -> Result<Code> {
                 v["found"] = serde_json::json!(true);
                 v["url"] = serde_json::json!(t.url());
                 v["poster_path"] = serde_json::json!(poster);
-                println!("{v}");
+                println!("{}", agent::with_warnings(v));
                 return Ok(Code::Ok);
             }
             println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
@@ -439,31 +177,8 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
-        Cmd::Settings { max_downloads, encryption, vpn, interfaces } => {
-            anyhow::ensure!(cfg.native(), "these settings require the native engine");
-            let mut changed = cfg.clone();
-            if let Some(limit) = max_downloads { changed.max_active_downloads = limit; }
-            if let Some(policy) = encryption { changed.peer_encryption = policy; }
-            if let Some(selection) = vpn { changed.network_interface = if selection == "off" { None } else { Some(selection) }; }
-            changed.validate()?;
-            let altered = changed.max_active_downloads != cfg.max_active_downloads || changed.peer_encryption != cfg.peer_encryption || changed.network_interface != cfg.network_interface;
-            if altered {
-                let client = Client::from_config(&cfg);
-                if ipc::is_running(&cfg) && changed.peer_encryption == cfg.peer_encryption && changed.network_interface == cfg.network_interface {
-                    client.set_queue_limit(changed.max_active_downloads)?;
-                } else {
-                    changed.save()?;
-                    if ipc::is_running(&cfg) { client.restart_app()?; }
-                }
-            }
-            let available = if interfaces { Some(network_app::interfaces()?) } else { None };
-            emit(json, serde_json::json!({"ok": true, "max_active_downloads": changed.max_active_downloads, "peer_encryption": changed.peer_encryption, "network_interface": changed.network_interface, "network": network_app::state(&changed), "interfaces": available}), || {
-                println!("Simultaneous downloads: {}", changed.max_active_downloads);
-                println!("Peer encryption: {}", changed.peer_encryption);
-                println!("VPN: {}", network_app::state(&changed).message);
-                if let Some(names) = &available { println!("Connections: {}", names.join(", ")); }
-            });
-            return Ok(Code::Ok);
+        Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
+            return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
         }
         _ => {}
     }
@@ -471,8 +186,8 @@ fn run(cli: Cli) -> Result<Code> {
     let c = Client::from_config(&cfg);
 
     match cmd {
-        Cmd::Triage => { println!("{}", agent::triage(&cfg, &c)); Ok(Code::Ok) }
-        Cmd::Status => {
+        Cmd::Triage => { println!("{}", agent::with_warnings(agent::triage(&cfg, &c))); Ok(Code::Ok) }
+        Cmd::Status { quiet: _ } => {
             if c.version().is_err() {
                 let backend = if !cfg.native() && backend::is_active(&cfg.backend_unit) { "starting" } else { "stopped" };
                 emit(json, serde_json::json!({"ok": false, "backend": backend, "engine": cfg.engine, "app_open": false}), || {
@@ -541,9 +256,8 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() && ipc::is_running(&cfg) { tui::run(cfg, screen, Lifecycle::default())?; }
-            else if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
-            else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
+            if !cfg.native() { connect(&cfg, &c)?; }
+            tui::run(cfg, screen)?;
             Ok(Code::Ok)
         }
         Cmd::List { active } => {
@@ -588,7 +302,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, wait, timeout } => {
+        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, wait, timeout, origin: _ } => {
             if cfg.native() && (no_seq || no_first_last) {
                 return Err(AppError::new(Code::Usage, "the native engine downloads sequentially with first/last pieces prioritised; those settings cannot be disabled")
                     .hint("drop --no-seq and --no-first-last, or explicitly configure engine = \"qbittorrent\" for legacy scheduling").into());
@@ -741,7 +455,7 @@ fn run(cli: Cli) -> Result<Code> {
             let h = resolve_in(&ts, &[selector])?;
             let t = ts.iter().find(|t| t.hash == h[0]).unwrap();
             let target = qbt::open_target(t);
-            Command::new("xdg-open").arg(&target).spawn()?;
+            cfg.open_target(&target)?;
             emit(json, serde_json::json!({"ok": true, "action": "open", "hash": t.hash, "target": target}), || println!("opened {target}"));
             Ok(Code::Ok)
         }
@@ -884,7 +598,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 
 fn native_may_start(cmd: &Cmd) -> bool {
     matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
-        | Cmd::Noseed { .. } | Cmd::Wait { .. } | Cmd::Delete { files: true, .. }
+        | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
 }
@@ -904,52 +618,6 @@ fn reconcile_result(cfg: &Config, legacy: impl FnOnce() -> Result<usize>) -> Res
 struct SearchCleanup;
 impl Drop for SearchCleanup {
     fn drop(&mut self) { search::shutdown_all(); }
-}
-
-fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
-    if ipc::is_running(&cfg) { return backend::open_app(); }
-    let lifecycle = Lifecycle::default();
-    loop {
-    let snapshot = network_app::state(&cfg);
-    lifecycle.set_expected_network(Some(snapshot.clone()));
-    if !snapshot.ready {
-        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot, lifecycle.clone())?);
-        let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-        drop(parked);
-        result?;
-        if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-            cfg = Config::load()?;
-            continue;
-        }
-        return Ok(());
-    }
-    let mut engine_cfg = cfg.clone();
-    if cfg.network_interface.is_some() { engine_cfg.network_interface = snapshot.interface.clone(); }
-    let mut app = match engine::start(&engine_cfg, lifecycle.clone()) {
-        Ok(app) => app,
-        Err(error) if error.to_string().contains("already open") => return backend::open_app(),
-        Err(_) if cfg.network_interface.is_some() && network_app::state(&cfg) != snapshot => continue,
-        Err(error) => return Err(error),
-    };
-    let dispatcher = app.dispatcher();
-    migrate_legacy(&cfg, &dispatcher)?;
-    let controls_lifecycle = lifecycle.clone();
-    app.serve(&cfg, move |request| {
-        network_app::controls(request, &snapshot, &controls_lifecycle).or_else(|| dispatcher.dispatch(request))
-            .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
-    })?;
-    let app = tui::signals::AppGuard::new(app);
-    // The guard drops before run() returns, including a TUI initialization error.
-    // main() only calls process::exit after network activity and searches stop.
-    let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-    drop(app);
-    result?;
-    if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-        cfg = Config::load()?;
-        continue;
-    }
-    return Ok(());
-    }
 }
 
 #[cfg(test)]
@@ -985,319 +653,10 @@ mod migration_store_tests {
     }
 }
 
-fn rss(c: &Client, sub: RssCmd, json: bool, cfg: &Config) -> Result<Code> {
-    match sub {
-        RssCmd::List => {
-            let feeds = c.rss_feeds()?;
-            emit(json, serde_json::json!({"ok": true, "count": feeds.len(), "feeds": feeds}), || {
-                for f in &feeds {
-                    let unread = f.articles.iter().filter(|a| !a.is_read).count();
-                    println!("{:<30} {:>4} unread / {:>4}  {}{}", f.name, unread, f.articles.len(), f.url, if f.has_error { "  [error]" } else { "" });
-                }
-            });
-        }
-        RssCmd::Add { url, name } => {
-            let n = name.clone().or_else(|| host_of(&url)).unwrap_or_else(|| url.clone());
-            c.rss_add_feed(&url, Some(&n))?;
-            emit(json, serde_json::json!({"ok": true, "action": "rss-add", "name": n, "url": url}), || println!("added feed {n}"));
-        }
-        RssCmd::Remove { name } => {
-            let feeds = c.rss_feeds()?;
-            let f = find_feed(&feeds, &name)?;
-            c.rss_remove(&f.name)?;
-            emit(json, serde_json::json!({"ok": true, "action": "rss-remove", "name": f.name}), || println!("removed {}", f.name));
-        }
-        RssCmd::Refresh { name } => {
-            let feeds = c.rss_feeds()?;
-            let names: Vec<String> = match name {
-                Some(n) => vec![find_feed(&feeds, &n)?.name.clone()],
-                None => feeds.iter().map(|f| f.name.clone()).collect(),
-            };
-            for n in &names { c.rss_refresh(n)?; }
-            emit(json, serde_json::json!({"ok": true, "action": "rss-refresh", "feeds": names}), || println!("refreshing {} feed(s)", names.len()));
-        }
-        RssCmd::Items { name, unread } => {
-            let feeds = c.rss_feeds()?;
-            let f = find_feed(&feeds, &name)?;
-            let items: Vec<_> = f.articles.iter().filter(|a| !unread || !a.is_read).collect();
-            emit(json, serde_json::json!({"ok": true, "feed": f.name, "count": items.len(), "items": items}), || {
-                for a in &items { println!("{}  {}  {}  {}", if a.is_read { " " } else { "*" }, qbt::ymd(a.ts), a.id, a.title); }
-            });
-        }
-        RssCmd::Grab { name, article_id } => {
-            let feeds = c.rss_feeds()?;
-            let f = find_feed(&feeds, &name)?;
-            let Some(a) = f.articles.iter().find(|a| a.id == article_id) else {
-                return Err(AppError::new(Code::NotFound, format!("no item with id '{article_id}' in feed '{}'", f.name))
-                    .hint(format!("fbittorrent rss items \"{}\" --json | jq '.items[].id'", f.name)).into());
-            };
-            let url = if a.torrent_url.is_empty() { &a.link } else { &a.torrent_url };
-            c.add_url(url, &AddOptions {
-                sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,
-                save_path: cfg.save_path.clone(), category: cfg.category.clone(),
-            })?;
-            c.rss_mark_read(&f.name, Some(&a.id))?;
-            if cfg.notify { notify("Torrent added", &a.title, false); }
-            emit(json, serde_json::json!({"ok": true, "action": "rss-grab", "hash": magnet_hash(url), "name": a.title, "feed": f.name}), || println!("added: {}", a.title));
-        }
-    }
-    Ok(Code::Ok)
-}
-
-fn shows_cmd(cfg: &Config, c: &Client, sub: ShowsCmd, json: bool) -> Result<Code> {
-    use shows::{EpState, Shows};
-    let mut all = Shows::load()?;
-    let print_eps = |s: &shows::Show, eps: &[&shows::Episode]| {
-        for e in eps {
-            let mark = match s.state(&e.key) { EpState::New => "*", EpState::Grabbed => "↓", EpState::Seen => " " };
-            println!("{mark} {}  {:>5}  {:>9}  {:>4} seeds  {}", e.key, e.quality, human_bytes(e.size), e.seeds, e.title);
-        }
-    };
-    match sub {
-        ShowsCmd::List => {
-            emit(json, serde_json::json!({"ok": true, "count": all.shows.len(), "new": all.new_total(), "path": shows::path(),
-                "shows": all.shows.iter().map(|s| s.to_json()).collect::<Vec<_>>()}), || {
-                if all.shows.is_empty() { println!("no shows followed yet: fbittorrent shows follow \"<title or tt id>\""); }
-                for s in &all.shows {
-                    let checked = if s.last_checked > 0 { qbt::ymd(s.last_checked) } else { "never".into() };
-                    println!("{:<10}  {:<40} {:>3} new / {:>3} eps  checked {}{}", s.imdb, short(&s.label(), 40), s.new_count(), s.episodes.len(), checked,
-                        s.error.as_deref().map(|e| format!("  [error: {e}]")).unwrap_or_default());
-                }
-            });
-        }
-        ShowsCmd::Follow { query, quality } => {
-            let q = query.join(" ");
-            if q.trim().is_empty() { return Err(AppError::new(Code::Usage, "give a title or an IMDb id").hint("fbittorrent shows follow \"The Bear\"").into()); }
-            let t = shows::resolve_title(&q)?;
-            let added = all.follow(&t);
-            let s = all.get_mut(&t.id).unwrap();
-            if quality.is_some() { s.quality = quality; }
-            let fresh = shows::refresh(s, &cfg.show_quality).ok();
-            let (label, n_new, n_eps) = (s.label(), s.new_count(), s.episodes.len());
-            let warning = s.error.clone();
-            let catalogue_complete = s.catalogue_complete;
-            all.save()?;
-            emit(json, serde_json::json!({"ok": true, "action": "shows-follow", "added": added, "imdb": t.id, "title": t.name, "year": t.year,
-                "kind": t.kind, "episodes": n_eps, "new": n_new, "fetched": fresh.is_some(), "warning": warning, "catalogue_complete": catalogue_complete}), || {
-                    println!("{} {label} [{}]: {n_eps} releases on EZTV, {n_new} new", if added { "following" } else { "already following" }, t.id);
-                    if let Some(warning) = &warning { println!("warning: {warning}"); }
-                });
-        }
-        ShowsCmd::Unfollow { show } => {
-            let id = all.find(&show)?.imdb.clone();
-            let s = all.unfollow(&id).unwrap();
-            all.save()?;
-            emit(json, serde_json::json!({"ok": true, "action": "shows-unfollow", "imdb": s.imdb, "title": s.title}), || println!("unfollowed {}", s.label()));
-        }
-        ShowsCmd::Check { show } => {
-            let ids: Vec<String> = match show {
-                Some(sel) => vec![all.find(&sel)?.imdb.clone()],
-                None => all.shows.iter().map(|s| s.imdb.clone()).collect(),
-            };
-            let mut report = Vec::new();
-            let mut failed = 0;
-            for id in &ids {
-                let s = all.get_mut(id).unwrap();
-                let fresh = match shows::refresh(s, &cfg.show_quality) { Ok(n) => n, Err(_) => { failed += 1; 0 } };
-                report.push((s.imdb.clone(), s.label(), fresh, s.new_count(), s.error.clone()));
-            }
-            all.save()?;
-            emit(json, serde_json::json!({"ok": true, "action": "shows-check", "checked": ids.len(), "failed": failed, "new": all.new_total(),
-                "shows": report.iter().map(|(id, l, f, n, e)| serde_json::json!({"imdb": id, "title": l, "fresh": f, "new": n, "error": e})).collect::<Vec<_>>()}), || {
-                for (_, l, f, n, e) in &report {
-                    match e { Some(e) => println!("{l}: {e}"), None => println!("{l}: {f} fresh, {n} new") }
-                }
-                for s in all.shows.iter().filter(|s| ids.contains(&s.imdb)) {
-                    let eps: Vec<&shows::Episode> = s.episodes.iter().filter(|e| s.is_new(&e.key)).collect();
-                    if eps.is_empty() { continue; }
-                    println!("\n{}", s.label());
-                    print_eps(s, &eps);
-                }
-            });
-            if failed > 0 && failed == ids.len() { return Ok(Code::Upstream); }
-        }
-        ShowsCmd::Episodes { show, new } => {
-            let s = all.find(&show)?;
-            let eps: Vec<&shows::Episode> = s.episodes.iter().filter(|e| !new || s.is_new(&e.key)).collect();
-            emit(json, serde_json::json!({"ok": true, "imdb": s.imdb, "title": s.title, "last_checked": s.last_checked, "count": eps.len(),
-                "warning": s.error, "catalogue_complete": s.catalogue_complete,
-                "episodes": eps.iter().map(|e| s.episode_json(e)).collect::<Vec<_>>()}), || {
-                if eps.is_empty() { println!("{}: nothing listed{}", s.label(), if s.last_checked == 0 { " (never checked: fbittorrent shows check)" } else { "" }); }
-                if let Some(warning) = &s.error { println!("warning: {warning}"); }
-                print_eps(s, &eps);
-            });
-        }
-        ShowsCmd::Grab { show, episode } => {
-            let id = all.find(&show)?.imdb.clone();
-            let s = all.get_mut(&id).unwrap();
-            let Some(e) = s.episode(&episode).cloned() else {
-                return Err(AppError::new(Code::NotFound, format!("{} has no episode {}", s.title, episode.to_uppercase()))
-                    .hint(format!("fbittorrent shows episodes \"{}\" --json", s.imdb)).into());
-            };
-            connect(cfg, c)?;
-            c.add_url(&e.magnet, &AddOptions {
-                sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,
-                save_path: cfg.save_path.clone(), category: cfg.category.clone(),
-            })?;
-            s.mark_grabbed(&e.key, &e.magnet);
-            let title = s.title.clone();
-            all.save()?;
-            if cfg.notify { notify("Torrent added", &e.title, false); }
-            emit(json, serde_json::json!({"ok": true, "action": "shows-grab", "imdb": id, "show": title, "episode": e.key, "hash": magnet_hash(&e.magnet), "name": e.title}),
-                || println!("added: {}", e.title));
-        }
-        ShowsCmd::Seen { show, episodes } => {
-            let id = all.find(&show)?.imdb.clone();
-            let s = all.get_mut(&id).unwrap();
-            let mut changed = Vec::new();
-            if episodes.iter().any(|e| e == "all") {
-                let n = s.mark_all_seen();
-                changed.push(serde_json::json!({"all": true, "marked": n}));
-            } else {
-                if episodes.is_empty() { return Err(AppError::new(Code::Usage, "give release keys like S01E02 or S01, or `all`").into()); }
-                for k in &episodes {
-                    let key = k.to_ascii_uppercase();
-                    if s.episode(&key).is_none() {
-                        return Err(AppError::new(Code::NotFound, format!("{} has no episode {key}", s.title))
-                            .hint(format!("fbittorrent shows episodes \"{}\" --json", s.imdb)).into());
-                    }
-                    let seen = s.toggle_seen(&key);
-                    changed.push(serde_json::json!({"episode": key, "seen": seen}));
-                }
-            }
-            let (title, n_new) = (s.title.clone(), s.new_count());
-            all.save()?;
-            emit(json, serde_json::json!({"ok": true, "action": "shows-seen", "imdb": id, "show": title, "changed": changed, "new": n_new}),
-                || println!("{title}: {n_new} new left"));
-        }
-    }
-    Ok(Code::Ok)
-}
-
-fn find_feed<'a>(feeds: &'a [qbt::RssFeed], name: &str) -> Result<&'a qbt::RssFeed> {
-    if let Some(f) = feeds.iter().find(|f| f.name == name) { return Ok(f); }
-    let low = name.to_lowercase();
-    let m: Vec<&qbt::RssFeed> = feeds.iter().filter(|f| f.name.to_lowercase().contains(&low)).collect();
-    match m.len() {
-        1 => Ok(m[0]),
-        0 => Err(AppError::new(Code::NotFound, format!("no feed named '{name}'"))
-            .hint("fbittorrent rss list --json | jq -r '.feeds[].name'").into()),
-        n => Err(AppError::new(Code::Ambiguous, format!("'{name}' matches {n} feeds: {}", m.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", "))).into()),
-    }
-}
-
-/// Expand selectors (hash prefix, unique name substring, or `all`) to full hashes.
-fn resolve(c: &Client, selectors: &[String]) -> Result<Vec<String>> {
-    let ts = c.torrents()?;
-    resolve_in(&ts, selectors)
-}
-
-fn resolve_in(ts: &[Torrent], selectors: &[String]) -> Result<Vec<String>> {
-    if selectors.is_empty() {
-        return Err(AppError::new(Code::Usage, "no torrent selector given").hint("fbittorrent list --json | jq -r '.torrents[].hash'   # then pass a hash prefix, a unique part of the name, or `all`").into());
-    }
-    if selectors.len() == 1 && selectors[0] == "all" {
-        return Ok(ts.iter().map(|t| t.hash.clone()).collect());
-    }
-    let mut out: Vec<String> = Vec::new();
-    for sel in selectors {
-        let s = sel.trim();
-        let low = s.to_lowercase();
-        let is_hexish = low.len() >= 4 && low.chars().all(|c| c.is_ascii_hexdigit());
-        let by_hash: Vec<&Torrent> = if is_hexish { ts.iter().filter(|t| t.hash.starts_with(&low)).collect() } else { vec![] };
-        let matches: Vec<&Torrent> = if !by_hash.is_empty() { by_hash } else {
-            ts.iter().filter(|t| t.name.to_lowercase().contains(&low)).collect()
-        };
-        match matches.len() {
-            1 => { let h = matches[0].hash.clone(); if !out.contains(&h) { out.push(h); } }
-            0 => return Err(AppError::new(Code::NotFound, format!("no torrent matches '{s}'"))
-                .hint("fbittorrent list --json | jq -r '.torrents[] | \"\\(.hash[0:8])  \\(.name)\"'").into()),
-            n => return Err(AppError::new(Code::Ambiguous, format!("'{s}' matches {n} torrents: {}",
-                    matches.iter().take(6).map(|t| format!("{} ({})", &t.hash[..8], short(&t.name, 40))).collect::<Vec<_>>().join(", ")))
-                .hint("use a longer hash prefix, or the exact name").into()),
-        }
-    }
-    Ok(out)
-}
-
-/// Collapse duplicate torrents from several providers (same info hash), keeping the best-seeded copy.
-fn tui_free_dedupe(rs: Vec<qbt::SearchResult>) -> Vec<qbt::SearchResult> {
-    let mut best: std::collections::HashMap<String, qbt::SearchResult> = std::collections::HashMap::new();
-    for r in rs {
-        let k = magnet_hash(&r.file_url).unwrap_or_else(|| r.file_url.to_lowercase());
-        match best.get(&k) { Some(b) if b.seeders >= r.seeders => {}, _ => { best.insert(k, r); } }
-    }
-    best.into_values().collect()
-}
-
-fn short(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>()) }
-}
-
-/// Info hash from a magnet link (lowercase hex), if present.
-pub fn magnet_hash(src: &str) -> Option<String> {
-    let low = src.to_ascii_lowercase();
-    let i = low.find("urn:btih:")?;
-    let h: String = low[i + 9..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
-    if h.len() == 40 { Some(h) } else if h.len() == 32 { Some(base32_to_hex(&h)) } else { None }
-}
-
-fn base32_to_hex(s: &str) -> String {
-    let mut bits = 0u64;
-    let mut nbits = 0;
-    let mut out = String::new();
-    for c in s.chars() {
-        let v = match c { 'a'..='z' => c as u64 - 'a' as u64, '2'..='7' => c as u64 - '2' as u64 + 26, _ => continue };
-        bits = (bits << 5) | v; nbits += 5;
-        while nbits >= 8 { nbits -= 8; out.push_str(&format!("{:02x}", (bits >> nbits) & 0xff)); }
-    }
-    out
-}
-
-pub fn magnet_name(src: &str) -> Option<String> {
-    let q = src.split_once('?')?.1;
-    for kv in q.split('&') {
-        if let Some(v) = kv.strip_prefix("dn=") { return Some(percent_decode(v)); }
-    }
-    None
-}
-
-fn percent_decode(s: &str) -> String {
-    fn hex(c: u8) -> Option<u8> {
-        match c {
-            b'0'..=b'9' => Some(c - b'0'),
-            b'a'..=b'f' => Some(c - b'a' + 10),
-            b'A'..=b'F' => Some(c - b'A' + 10),
-            _ => None,
-        }
-    }
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => { out.push(b' '); i += 1; }
-            b'%' if i + 2 < b.len() => {
-                if let Some(v) = hex(b[i + 1]).zip(hex(b[i + 2])).map(|(a, b)| a * 16 + b) {
-                    out.push(v); i += 3;
-                } else { out.push(b'%'); i += 1; }
-            }
-            c => { out.push(c); i += 1; }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn local_torrent_source(source: &str) -> Result<String> {
-    if !source.starts_with("file:") { return Ok(source.to_owned()); }
-    let uri = url::Url::parse(source).context("invalid local torrent file URL")?;
-    let path = uri.to_file_path().map_err(|_| anyhow::anyhow!("torrent file URL must name a local file"))?;
-    path.into_os_string().into_string().map_err(|_| anyhow::anyhow!("torrent file path must be valid UTF-8"))
-}
-
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    use cli_sources::percent_decode;
 
     #[test]
     fn native_start_policy_matches_command_roles() {

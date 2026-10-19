@@ -14,7 +14,7 @@ use lifecycle::{Lifecycle, Request as LifecycleRequest, StopReason};
 use slot::{EngineSlot, Slot, State};
 use std::io::Read;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, RwLock,
 };
 use std::time::{Duration, Instant};
@@ -26,7 +26,8 @@ pub struct Daemon {
     pub slot: RwLock<EngineSlot>,
     pub instance: String,
     pub launcher: &'static str,
-    pub idle_exit_secs: u64,
+    pub idle_exit_secs: AtomicU64,
+    pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
@@ -89,16 +90,36 @@ impl Daemon {
         }
     }
 
+    /// Apply settings to the current slot while its read guard prevents replacement.
+    /// The durable config remains authoritative across a subsequent slot restart.
+    pub(crate) fn apply_settings(&self, cfg: &Config) -> Result<()> {
+        let began = Instant::now();
+        loop {
+            let slot = self.slot.read().unwrap();
+            if self.is_stopping() { return Err(Self::unavailable(State::Stopping)); }
+            match &slot.slot {
+                Slot::Running(app) => { app.dispatcher().apply_settings(cfg)?; break; },
+                Slot::Parked(_) => break,
+                Slot::Starting if began.elapsed() < Duration::from_secs(60) => {},
+                Slot::Starting => return Err(Self::unavailable(State::Starting)),
+                Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
+            }
+            drop(slot);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    }
+
     pub fn info(&self) -> serde_json::Value {
         let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
         serde_json::json!({
-            "server": {"version": env!("CARGO_PKG_VERSION"), "build": option_env!("FBT_BUILD_ID").unwrap_or("unknown"),
+            "server": {"version": env!("CARGO_PKG_VERSION"), "build": crate::api::build_id(),
                 "pid": std::process::id(), "launcher": self.launcher,
                 "log": if self.launcher == "systemd" { "journalctl --user -u fbittorrent" }
                     else { "the terminal running fbittorrent serve" }},
             "engine": format!("librqbit {}", librqbit::version()),
             "instance": self.instance, "engine_epoch": slot.engine_epoch,
-            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs},
+            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs.load(Ordering::Acquire)},
         })
     }
 
@@ -222,6 +243,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
         );
+        engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
     Ok(())
@@ -294,7 +316,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         } else {
             "foreground"
         },
-        idle_exit_secs,
+        idle_exit_secs: AtomicU64::new(idle_exit_secs),
+        settings: Default::default(),
         no_notify,
         imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),

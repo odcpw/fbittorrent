@@ -19,8 +19,12 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
   dashboard or TUI. Reads and status queries never start it. Nothing runs at
   login: the user unit is static. `down` stops the owner and drains the engine.
-  The current standalone TUI can still own an engine when started first;
-  full daemon attachment and quit verbs arrive in P1-15.
+  The TUI starts or attaches to that daemon in the current terminal, including
+  over SSH. `q` or Ctrl+C closes only the TUI; transfers continue. `Q` stops
+  fbittorrent, asking for lowercase `y` when transfers are active. `down` also
+  stops the daemon. The first `q` prints a one-time background-transfer notice
+  after restoring the terminal; its preference lives in
+  `$XDG_STATE_HOME/fbittorrent/notices.json`.
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
   app is open. Hover clipped names or details to see their full text.
@@ -30,9 +34,11 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
   a row to preview its full name; click selects it, double-click activates it,
   and the wheel moves the list under the pointer. Hover leaves the keyboard
-  target unchanged. Long hovered or selected names scroll after a short pause.
-  The bottom rows show contextual commands such as `(O)pen`, with `Shift`
-  spelled out where needed, and separate action feedback.
+  target unchanged. Selected names stay still. Hovered, unselected names scroll once after a
+  short pause, return to the start and stop. `reduce_motion = true` in the
+  config, or Reduce motion in Settings, disables hover scrolling.
+  The bottom rows show contextual commands such as `(o) Open`; uppercase keys
+  use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.
 - **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
   a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
@@ -100,6 +106,26 @@ omarchy bar put oliver.torrents --before omarchy.tailscale
 
 Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 `torrents.*`.
+
+## Lifecycle
+
+`fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
+`down` drains it, and `restart` replaces the engine slot while its sockets stay
+available. `dashboard` summons the desktop view. The static user unit starts on
+writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
+never start an owner. When it is down, saved reads report `running:false`; `stop`
+and keep-files `delete` update the saved ledger under the same instance lock.
+`--no-start` and `autostart=false` prevent automatic startup. Without a user
+manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
+replacement are delivered by their lifecycle work; this checkout reports the
+available daemon state without inventing missing idle counters.
+
+The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
+wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
+checked/reason/origin and optional `eta_s`/`seeds`. Stopped `status --json` now
+returns `ok:true,running:false`; `status --quiet` exits 4 when stopped. Magnets
+and local metainfo added while waiting for VPN return `deferred:true` and keep
+the requested intent until the interface returns. URL adds require a live engine.
 
 ## Dashboard window
 
@@ -180,8 +206,7 @@ It never enables or starts the unit. `setup --uninstall` removes the unit while
 keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
 harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
-stages; the current CLI uses the existing framed socket.
+unit, outside the CLI's 0–8 dictionary. The CLI uses API v1; TUI attachment follows in P1-15.
 
 ### For agents
 
@@ -361,3 +386,138 @@ test also needs the Omarchy shell running with the plugin enabled.
 - In legacy mode, search jobs in qBittorrent are bound to the WebUI session
   cookie; the client keeps one session per process for that reason.
 - Personal use is legal in Switzerland. Mind your local law elsewhere.
+
+## Keys
+
+<!-- keys:begin -->
+| Scope | Action | tui | dashboard | popup | Note |
+| --- | --- | --- | --- | --- | --- |
+| `global` | Torrents | `1` | `1` | — |  |
+| `global` | Search | `2` | `2` | — |  |
+| `global` | Shows | `3` | `3` | — |  |
+| `global` | RSS | `4` | `4` | — |  |
+| `global` | Next screen | `Tab` | `Tab` | — |  |
+| `global` | Previous screen | `Shift+Tab` | `Shift+Tab` | — |  |
+| `global` | Help | `?` | `?` | — |  |
+| `global` | Settings | `F6`, `,` | `,` | — |  |
+| `global` | Close this UI | `q`, `Ctrl+C` | `q`, `Ctrl+C` | `q`, `Esc` |  |
+| `global` | Stop fbittorrent | `Q` | `Q`, `Ctrl+Q` | `Q` |  |
+| `global` | Clipboard | `c` | — | — |  |
+| `global` | Refresh | `r` | `r` | — |  |
+| `pane:search.browse` | Load list | `Enter` | `Enter` | — |  |
+| `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
+| `global` | Open TUI | — | — | `t` |  |
+| `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `global` | Add | `a` | `a` | `a` |  |
+| `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
+| `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
+| `screen:torrents` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:torrents` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:torrents` | Files | `Enter` | `Enter` | — |  |
+| `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
+| `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
+| `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
+| `screen:torrents` | Remove, keep files | `d`, `x`, `Delete` | `d`, `x`, `Delete` | `d`, `x`, `Delete` |  |
+| `screen:torrents` | Delete with files | `D` | `D` | — |  |
+| `screen:torrents` | IMDb | `i` | `i` | — |  |
+| `screen:torrents` | Wikipedia | `w` | `w` | — |  |
+| `screen:torrents` | Follow show | `f`, `F` | `f` | — | Native TUI; legacy uses F while f is first/last priority. |
+| `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
+| `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:search` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:search` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:search` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:search` | Providers | `P` | `P` | — |  |
+| `screen:search` | Browse lists | `b` | `b` | — |  |
+| `screen:search` | Edit query | `/`, `e` | `/`, `e` | — |  |
+| `screen:search` | Stop search | `Esc` | `Esc` | — |  |
+| `pane:search.results` | Download | `Enter` | `Enter` | — |  |
+| `pane:search.results` | IMDb | `i` | `i` | — |  |
+| `pane:search.results` | Wikipedia | `w` | `w` | — |  |
+| `pane:search.results` | Source page | `O` | `O` | — |  |
+| `pane:search.results` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `pane:search.query` | Search | `Enter` | `Enter` | — |  |
+| `pane:search.query` | Leave query | `Esc`, `↓` | `Esc`, `↓` | — |  |
+| `screen:rss` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:rss` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:rss` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:rss` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:rss` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:rss` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:rss` | Parent pane | `h`, `←` | `h`, `←` | — |  |
+| `screen:rss` | Child pane | `l`, `→` | `l`, `→` | — |  |
+| `screen:rss` | Open/download | `Enter` | `Enter` | — |  |
+| `screen:rss` | New feed | `n` | `n` | — |  |
+| `screen:rss` | Remove feed | `x` | `x` | — |  |
+| `screen:rss` | Refresh | `r` | `r` | — |  |
+| `screen:rss` | Reload saved feeds | `R` | `R` | — |  |
+| `screen:rss` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
+| `screen:rss` | All read | `M` | `M` | — |  |
+| `screen:rss` | IMDb | `i` | `i` | — |  |
+| `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:shows` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:shows` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:shows` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:shows` | Parent pane | `h`, `←` | `h`, `←` | — |  |
+| `screen:shows` | Child pane | `l`, `→` | `l`, `→` | — |  |
+| `screen:shows` | Open/download | `Enter` | `Enter` | — |  |
+| `screen:shows` | Follow show | `n` | `n` | — |  |
+| `screen:shows` | Unfollow | `x` | `x` | — |  |
+| `screen:shows` | Refresh | `r` | `r` | — |  |
+| `screen:shows` | Check selected show | `R` | `R` | — |  |
+| `screen:shows` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
+| `screen:shows` | All read | `M` | `M` | — |  |
+| `screen:shows` | IMDb | `i` | `i` | — |  |
+| `screen:shows` | Wikipedia | `w` | `w` | — |  |
+| `screen:shows` | EZTV | `O` | `O` | — |  |
+| `screen:shows` | Undo read | `u` | `u` | — |  |
+| `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:files` | Next | `j`, `↓` | — | — |  |
+| `modal:files` | Previous | `k`, `↑` | — | — |  |
+| `modal:files` | Include/skip | `Space` | — | — |  |
+| `modal:files` | All | `a` | — | — |  |
+| `modal:files` | None | `n` | — | — |  |
+| `modal:files` | Reload | `r` | — | — |  |
+| `modal:files` | First | `g`, `Home` | — | — |  |
+| `modal:files` | Last | `G`, `End` | — | — |  |
+| `modal:files` | Include | `1` | — | — |  |
+| `modal:files` | High (legacy) | `2` | — | — |  |
+| `modal:files` | Max (legacy) | `3` | — | — |  |
+| `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:providers` | Next | `j`, `↓` | — | — |  |
+| `modal:providers` | Previous | `k`, `↑` | — | — |  |
+| `modal:providers` | Toggle | `Space` | — | — |  |
+| `modal:providers` | All | `a` | — | — |  |
+| `modal:providers` | None | `n` | — | — |  |
+| `modal:providers` | Reload | `r` | — | — |  |
+| `modal:providers` | Open site | `o` | — | — |  |
+| `modal:settings` | Cancel | `Esc` | — | — |  |
+| `modal:settings` | Save | `Enter` | — | — |  |
+| `modal:settings` | Next setting | `j`, `↓`, `Tab` | — | — |  |
+| `modal:settings` | Previous setting | `k`, `↑`, `Shift+Tab` | — | — |  |
+| `modal:settings` | Decrease | `h`, `←` | — | — |  |
+| `modal:settings` | Increase | `l`, `→`, `Space` | — | — |  |
+| `modal:help` | Close | `Esc`, `q`, `?` | — | — |  |
+| `modal:help` | Scroll down | `j`, `↓` | — | — |  |
+| `modal:help` | Scroll up | `k`, `↑` | — | — |  |
+| `modal:help` | Page down | `PgDn` | — | — |  |
+| `modal:help` | Page up | `PgUp` | — | — |  |
+| `modal:help` | First | `g`, `Home` | — | — |  |
+| `modal:help` | Last | `G`, `End` | — | — |  |
+| `prompt` | Remove | `y` | `y` | `y` |  |
+| `prompt` | Cancel | `Esc` | `Esc` | `Esc` |  |
+| `prompt` | Submit | `Enter` | `Enter` | — |  |
+| `prompt` | Sequential (legacy) | `F2` | — | — |  |
+| `prompt` | First/last (legacy) | `F3` | — | — |  |
+| `prompt` | Seed on/off | `F4` | — | — |  |
+<!-- keys:end -->

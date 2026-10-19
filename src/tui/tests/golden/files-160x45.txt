@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
-[Files] (Space) Include/skip  (1) Include  (A)ll  (N)one                                                                                             (Esc) Close
-
+[Files] (Esc) Close  (Space) Include/skip  (a) All  (n) None  (g) First  (G) Last  (1) Include  (j) Next  (k) Previous  (r) Reload                      (?) Help
+The.Diplomat.S04E01.mkv

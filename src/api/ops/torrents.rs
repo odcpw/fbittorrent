@@ -213,15 +213,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             if !matches!(origin, "manual" | "handler" | "agent") {
                 return Err(error(InvalidArgs, "unsupported origin", Some("origin")));
             }
-            let seed = args.seed.unwrap_or(
-                crate::config::Config::load()
-                    .map_err(engine_error)?
-                    .seed_by_default,
-            );
+            let cfg = crate::config::Config::load().map_err(engine_error)?;
+            let seed = args.seed.unwrap_or(cfg.seed_by_default);
             let mut add = engine::ops::AddRequest {
                 sources: Vec::new(),
                 torrent: None,
-                save_path: args.save_path.clone(),
+                save_path: args.save_path.clone().or(cfg.save_path),
                 upload_limit: if seed { 0 } else { 32768 },
                 ratio_limit: if seed { -2.0 } else { 0.0 },
                 stopped: args.stopped.unwrap_or(false),
@@ -250,7 +247,44 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                             Some("source.url"),
                         ));
                     }
-                    add.sources.push(url.clone());
+                    // Fetch through the live slot's interface-bound runtime,
+                    // then admit validated bytes through the usual atomic add.
+                    let began = std::time::Instant::now();
+                    let dispatcher = loop {
+                        if daemon.is_stopping() {
+                            return Err(engine_error(anyhow::anyhow!("engine is closing")));
+                        }
+                        let slot = daemon.slot.read().unwrap();
+                        match &slot.slot {
+                            crate::daemon::slot::Slot::Running(app) => break app.dispatcher(),
+                            crate::daemon::slot::Slot::Starting
+                                if began.elapsed() < std::time::Duration::from_secs(60) => {}
+                            _ => {
+                                return Err(engine_error(anyhow::anyhow!(
+                                    "engine_unavailable state={}",
+                                    slot.slot.state().name()
+                                )))
+                            }
+                        }
+                        drop(slot);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    };
+                    let network = daemon.network();
+                    let bytes = dispatcher
+                        .fetch_api_torrent(url, network.interface.as_deref())
+                        .map_err(|value| {
+                            let mut failure = engine_error(value);
+                            if failure.code == Internal {
+                                failure =
+                                    error(Upstream, "could not fetch valid torrent metainfo", None);
+                            }
+                            failure.details = Some(serde_json::Map::from_iter([(
+                                "source".into(),
+                                json!("url"),
+                            )]));
+                            failure
+                        })?;
+                    add.torrent = Some(("URL metadata.torrent".into(), bytes));
                     false
                 }
                 AddSource::Magnet(source) => {
@@ -266,12 +300,25 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                                 .join(","),
                         );
                     }
+                    if source
+                        .query_pairs()
+                        .any(|(key, value)| key == "xt" && value.starts_with("urn:btmh:"))
+                        && !source
+                            .query_pairs()
+                            .any(|(key, value)| key == "xt" && value.starts_with("urn:btih:"))
+                    {
+                        return Err(error(
+                            Unsupported,
+                            "v2-only magnets are unsupported",
+                            Some("source.magnet"),
+                        ));
+                    }
                     let parsed = librqbit::Magnet::parse(source.as_str()).map_err(|_| {
                         error(InvalidArgs, "invalid v1 magnet", Some("source.magnet"))
                     })?;
                     if parsed.as_id20().is_none() {
                         return Err(error(
-                            InvalidArgs,
+                            Unsupported,
                             "a v1 magnet hash is required",
                             Some("source.magnet"),
                         ));
@@ -280,7 +327,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     true
                 }
             };
-            if let (Some(indices), Some((_, bytes))) = (&args.files, &add.torrent) {
+            let selected = if let Some((_, bytes)) = &add.torrent {
                 let metadata = librqbit::torrent_from_bytes(bytes)
                     .map_err(|value| engine_error(value.into()))?;
                 let count = metadata
@@ -290,6 +337,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     .map_err(|value| engine_error(value.into()))?
                     .iter_file_details()
                     .count();
+                let indices = args.files.clone().unwrap_or_else(|| (0..count as u64).collect());
                 if indices.iter().any(|index| *index >= count as u64) {
                     return Err(error(
                         InvalidArgs,
@@ -297,15 +345,16 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                         Some("files"),
                     ));
                 }
-            }
+                Some(indices.into_iter().map(|index| index as usize).collect())
+            } else { None };
             let EngineResult::Added(mut added) = execute(
                 daemon,
                 if magnet {
                     EngineOp::AddMagnet(add)
-                } else if let Some(files) = &args.files {
+                } else if let Some(files) = selected {
                     EngineOp::AddSelected {
                         options: add,
-                        files: files.iter().map(|index| *index as usize).collect(),
+                        files,
                     }
                 } else {
                     EngineOp::Add(add)
@@ -322,7 +371,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 hash: Some(Hash::new(added.hash).unwrap()),
                 name: Some(added.name),
                 duplicate: Some(added.duplicate),
-                deferred: None,
+                deferred: added.deferred.then_some(true),
             })
         }
         Call::TorrentsStart { args } => {
@@ -598,4 +647,11 @@ pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn deferred_add_fixture_roundtrips() {
+    crate::api::fixtures::check_group("deferred-add", include_str!("../../../contracts/ipc/v1/deferred-add.ndjson")).unwrap();
+    println!("deferred-add fixture: parked hello, done/deferred add and waiting_vpn detail pass the frozen v1 types and bounds");
 }

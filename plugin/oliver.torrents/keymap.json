@@ -1,0 +1,1829 @@
+{
+  "actions": [
+    {
+      "id": "screen.torrents",
+      "keys": {
+        "dashboard": [
+          "1"
+        ],
+        "popup": null,
+        "tui": [
+          "1"
+        ]
+      },
+      "label": "Torrents",
+      "scope": "global"
+    },
+    {
+      "id": "screen.search",
+      "keys": {
+        "dashboard": [
+          "2"
+        ],
+        "popup": null,
+        "tui": [
+          "2"
+        ]
+      },
+      "label": "Search",
+      "scope": "global"
+    },
+    {
+      "id": "screen.shows",
+      "keys": {
+        "dashboard": [
+          "3"
+        ],
+        "popup": null,
+        "tui": [
+          "3"
+        ]
+      },
+      "label": "Shows",
+      "scope": "global"
+    },
+    {
+      "id": "screen.rss",
+      "keys": {
+        "dashboard": [
+          "4"
+        ],
+        "popup": null,
+        "tui": [
+          "4"
+        ]
+      },
+      "label": "RSS",
+      "scope": "global"
+    },
+    {
+      "id": "screen.next",
+      "keys": {
+        "dashboard": [
+          "Tab"
+        ],
+        "popup": null,
+        "tui": [
+          "Tab"
+        ]
+      },
+      "label": "Next screen",
+      "scope": "global"
+    },
+    {
+      "id": "screen.previous",
+      "keys": {
+        "dashboard": [
+          "Shift+Tab"
+        ],
+        "popup": null,
+        "tui": [
+          "Shift+Tab"
+        ]
+      },
+      "label": "Previous screen",
+      "scope": "global"
+    },
+    {
+      "id": "help",
+      "keys": {
+        "dashboard": [
+          "?"
+        ],
+        "popup": null,
+        "tui": [
+          "?"
+        ]
+      },
+      "label": "Help",
+      "scope": "global"
+    },
+    {
+      "id": "settings",
+      "keys": {
+        "dashboard": [
+          ","
+        ],
+        "popup": null,
+        "tui": [
+          "F6",
+          ","
+        ]
+      },
+      "label": "Settings",
+      "scope": "global"
+    },
+    {
+      "id": "ui.close",
+      "keys": {
+        "dashboard": [
+          "q",
+          "Ctrl+C"
+        ],
+        "popup": [
+          "q",
+          "Esc"
+        ],
+        "tui": [
+          "q",
+          "Ctrl+C"
+        ]
+      },
+      "label": "Close this UI",
+      "scope": "global"
+    },
+    {
+      "id": "app.shutdown",
+      "keys": {
+        "dashboard": [
+          "Q",
+          "Ctrl+Q"
+        ],
+        "popup": [
+          "Q"
+        ],
+        "tui": [
+          "Q"
+        ]
+      },
+      "label": "Stop fbittorrent",
+      "scope": "global"
+    },
+    {
+      "id": "clipboard.add",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "c"
+        ]
+      },
+      "label": "Clipboard",
+      "scope": "global"
+    },
+    {
+      "id": "refresh",
+      "keys": {
+        "dashboard": [
+          "r"
+        ],
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Refresh",
+      "scope": "global"
+    },
+    {
+      "id": "browse.open",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Load list",
+      "scope": "pane:search.browse"
+    },
+    {
+      "id": "popup.dashboard",
+      "keys": {
+        "dashboard": null,
+        "popup": [
+          "w"
+        ],
+        "tui": null
+      },
+      "label": "Open dashboard",
+      "note": "Popup: w opens the dashboard (exception 2).",
+      "scope": "global"
+    },
+    {
+      "id": "popup.tui",
+      "keys": {
+        "dashboard": null,
+        "popup": [
+          "t"
+        ],
+        "tui": null
+      },
+      "label": "Open TUI",
+      "scope": "global"
+    },
+    {
+      "id": "dashboard.paste",
+      "keys": {
+        "dashboard": [
+          "Ctrl+V"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Add from clipboard",
+      "scope": "global"
+    },
+    {
+      "id": "daemon.start",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Start fbittorrent",
+      "scope": "modal:stopped"
+    },
+    {
+      "id": "torrents.add",
+      "keys": {
+        "dashboard": [
+          "a"
+        ],
+        "popup": [
+          "a"
+        ],
+        "tui": [
+          "a"
+        ]
+      },
+      "label": "Add",
+      "scope": "global"
+    },
+    {
+      "id": "torrents.next",
+      "keys": {
+        "dashboard": [
+          "j",
+          "↓"
+        ],
+        "popup": [
+          "j",
+          "↓"
+        ],
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.previous",
+      "keys": {
+        "dashboard": [
+          "k",
+          "↑"
+        ],
+        "popup": [
+          "k",
+          "↑"
+        ],
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.first",
+      "keys": {
+        "dashboard": [
+          "g",
+          "Home"
+        ],
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.last",
+      "keys": {
+        "dashboard": [
+          "G",
+          "End"
+        ],
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.page_down",
+      "keys": {
+        "dashboard": [
+          "PgDn"
+        ],
+        "popup": null,
+        "tui": [
+          "PgDn"
+        ]
+      },
+      "label": "Page down",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.page_up",
+      "keys": {
+        "dashboard": [
+          "PgUp"
+        ],
+        "popup": null,
+        "tui": [
+          "PgUp"
+        ]
+      },
+      "label": "Page up",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.primary",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Files",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.open",
+      "keys": {
+        "dashboard": [
+          "o"
+        ],
+        "popup": [
+          "o",
+          "Enter"
+        ],
+        "tui": [
+          "o"
+        ]
+      },
+      "label": "Open",
+      "note": "Popup: Enter opens the file (exception 1).",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.pause",
+      "keys": {
+        "dashboard": [
+          "p",
+          "Space"
+        ],
+        "popup": [
+          "p",
+          "Space"
+        ],
+        "tui": [
+          "p",
+          "Space"
+        ]
+      },
+      "label": "Pause/resume",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.seed",
+      "keys": {
+        "dashboard": [
+          "u"
+        ],
+        "popup": [
+          "u"
+        ],
+        "tui": [
+          "u"
+        ]
+      },
+      "label": "Seed on/off",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.remove",
+      "keys": {
+        "dashboard": [
+          "d",
+          "x",
+          "Delete"
+        ],
+        "popup": [
+          "d",
+          "x",
+          "Delete"
+        ],
+        "tui": [
+          "d",
+          "x",
+          "Delete"
+        ]
+      },
+      "label": "Remove, keep files",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.delete",
+      "keys": {
+        "dashboard": [
+          "D"
+        ],
+        "popup": null,
+        "tui": [
+          "D"
+        ]
+      },
+      "label": "Delete with files",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.imdb",
+      "keys": {
+        "dashboard": [
+          "i"
+        ],
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.wiki",
+      "keys": {
+        "dashboard": [
+          "w"
+        ],
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.follow",
+      "keys": {
+        "dashboard": [
+          "f"
+        ],
+        "popup": null,
+        "tui": [
+          "f",
+          "F"
+        ]
+      },
+      "label": "Follow show",
+      "note": "Native TUI; legacy uses F while f is first/last priority.",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "legacy.follow",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "F"
+        ]
+      },
+      "label": "Follow show (legacy)",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "legacy.sequential",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sequential (legacy)",
+      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "legacy.first_last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "f"
+        ]
+      },
+      "label": "First/last priority (legacy)",
+      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "search.next",
+      "keys": {
+        "dashboard": [
+          "j",
+          "↓"
+        ],
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.previous",
+      "keys": {
+        "dashboard": [
+          "k",
+          "↑"
+        ],
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.first",
+      "keys": {
+        "dashboard": [
+          "g",
+          "Home"
+        ],
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.last",
+      "keys": {
+        "dashboard": [
+          "G",
+          "End"
+        ],
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.page_down",
+      "keys": {
+        "dashboard": [
+          "PgDn"
+        ],
+        "popup": null,
+        "tui": [
+          "PgDn"
+        ]
+      },
+      "label": "Page down",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.page_up",
+      "keys": {
+        "dashboard": [
+          "PgUp"
+        ],
+        "popup": null,
+        "tui": [
+          "PgUp"
+        ]
+      },
+      "label": "Page up",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.providers",
+      "keys": {
+        "dashboard": [
+          "P"
+        ],
+        "popup": null,
+        "tui": [
+          "P"
+        ]
+      },
+      "label": "Providers",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.browse",
+      "keys": {
+        "dashboard": [
+          "b"
+        ],
+        "popup": null,
+        "tui": [
+          "b"
+        ]
+      },
+      "label": "Browse lists",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.query",
+      "keys": {
+        "dashboard": [
+          "/",
+          "e"
+        ],
+        "popup": null,
+        "tui": [
+          "/",
+          "e"
+        ]
+      },
+      "label": "Edit query",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.cancel",
+      "keys": {
+        "dashboard": [
+          "Esc"
+        ],
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Stop search",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.download",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Download",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.imdb",
+      "keys": {
+        "dashboard": [
+          "i"
+        ],
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.wiki",
+      "keys": {
+        "dashboard": [
+          "w"
+        ],
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.source",
+      "keys": {
+        "dashboard": [
+          "O"
+        ],
+        "popup": null,
+        "tui": [
+          "O"
+        ]
+      },
+      "label": "Source page",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.follow",
+      "keys": {
+        "dashboard": [
+          "f",
+          "F"
+        ],
+        "popup": null,
+        "tui": [
+          "f",
+          "F"
+        ]
+      },
+      "label": "Follow show",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.submit",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Search",
+      "scope": "pane:search.query"
+    },
+    {
+      "id": "search.leave_query",
+      "keys": {
+        "dashboard": [
+          "Esc",
+          "↓"
+        ],
+        "popup": null,
+        "tui": [
+          "Esc",
+          "↓"
+        ]
+      },
+      "label": "Leave query",
+      "scope": "pane:search.query"
+    },
+    {
+      "id": "rss.next",
+      "keys": {
+        "dashboard": [
+          "j",
+          "↓"
+        ],
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.previous",
+      "keys": {
+        "dashboard": [
+          "k",
+          "↑"
+        ],
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.first",
+      "keys": {
+        "dashboard": [
+          "g",
+          "Home"
+        ],
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.last",
+      "keys": {
+        "dashboard": [
+          "G",
+          "End"
+        ],
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.page_down",
+      "keys": {
+        "dashboard": [
+          "PgDn"
+        ],
+        "popup": null,
+        "tui": [
+          "PgDn"
+        ]
+      },
+      "label": "Page down",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.page_up",
+      "keys": {
+        "dashboard": [
+          "PgUp"
+        ],
+        "popup": null,
+        "tui": [
+          "PgUp"
+        ]
+      },
+      "label": "Page up",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.left",
+      "keys": {
+        "dashboard": [
+          "h",
+          "←"
+        ],
+        "popup": null,
+        "tui": [
+          "h",
+          "←"
+        ]
+      },
+      "label": "Parent pane",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.right",
+      "keys": {
+        "dashboard": [
+          "l",
+          "→"
+        ],
+        "popup": null,
+        "tui": [
+          "l",
+          "→"
+        ]
+      },
+      "label": "Child pane",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.primary",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Open/download",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.new",
+      "keys": {
+        "dashboard": [
+          "n"
+        ],
+        "popup": null,
+        "tui": [
+          "n"
+        ]
+      },
+      "label": "New feed",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.remove",
+      "keys": {
+        "dashboard": [
+          "x"
+        ],
+        "popup": null,
+        "tui": [
+          "x"
+        ]
+      },
+      "label": "Remove feed",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.refresh",
+      "keys": {
+        "dashboard": [
+          "r"
+        ],
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Refresh",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.reload",
+      "keys": {
+        "dashboard": [
+          "R"
+        ],
+        "popup": null,
+        "tui": [
+          "R"
+        ]
+      },
+      "label": "Reload saved feeds",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.mark",
+      "keys": {
+        "dashboard": [
+          "m",
+          "Space"
+        ],
+        "popup": null,
+        "tui": [
+          "m",
+          "Space"
+        ]
+      },
+      "label": "Mark read/unread",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.mark_all",
+      "keys": {
+        "dashboard": [
+          "M"
+        ],
+        "popup": null,
+        "tui": [
+          "M"
+        ]
+      },
+      "label": "All read",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.imdb",
+      "keys": {
+        "dashboard": [
+          "i"
+        ],
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "screen:rss"
+    },
+    {
+      "id": "rss.follow",
+      "keys": {
+        "dashboard": [
+          "f",
+          "F"
+        ],
+        "popup": null,
+        "tui": [
+          "f",
+          "F"
+        ]
+      },
+      "label": "Follow show",
+      "scope": "pane:rss.items"
+    },
+    {
+      "id": "shows.next",
+      "keys": {
+        "dashboard": [
+          "j",
+          "↓"
+        ],
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.previous",
+      "keys": {
+        "dashboard": [
+          "k",
+          "↑"
+        ],
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.first",
+      "keys": {
+        "dashboard": [
+          "g",
+          "Home"
+        ],
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.last",
+      "keys": {
+        "dashboard": [
+          "G",
+          "End"
+        ],
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.page_down",
+      "keys": {
+        "dashboard": [
+          "PgDn"
+        ],
+        "popup": null,
+        "tui": [
+          "PgDn"
+        ]
+      },
+      "label": "Page down",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.page_up",
+      "keys": {
+        "dashboard": [
+          "PgUp"
+        ],
+        "popup": null,
+        "tui": [
+          "PgUp"
+        ]
+      },
+      "label": "Page up",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.left",
+      "keys": {
+        "dashboard": [
+          "h",
+          "←"
+        ],
+        "popup": null,
+        "tui": [
+          "h",
+          "←"
+        ]
+      },
+      "label": "Parent pane",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.right",
+      "keys": {
+        "dashboard": [
+          "l",
+          "→"
+        ],
+        "popup": null,
+        "tui": [
+          "l",
+          "→"
+        ]
+      },
+      "label": "Child pane",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.primary",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Open/download",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.new",
+      "keys": {
+        "dashboard": [
+          "n"
+        ],
+        "popup": null,
+        "tui": [
+          "n"
+        ]
+      },
+      "label": "Follow show",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.remove",
+      "keys": {
+        "dashboard": [
+          "x"
+        ],
+        "popup": null,
+        "tui": [
+          "x"
+        ]
+      },
+      "label": "Unfollow",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.refresh",
+      "keys": {
+        "dashboard": [
+          "r"
+        ],
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Refresh",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.reload",
+      "keys": {
+        "dashboard": [
+          "R"
+        ],
+        "popup": null,
+        "tui": [
+          "R"
+        ]
+      },
+      "label": "Check selected show",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.mark",
+      "keys": {
+        "dashboard": [
+          "m",
+          "Space"
+        ],
+        "popup": null,
+        "tui": [
+          "m",
+          "Space"
+        ]
+      },
+      "label": "Mark read/unread",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.mark_all",
+      "keys": {
+        "dashboard": [
+          "M"
+        ],
+        "popup": null,
+        "tui": [
+          "M"
+        ]
+      },
+      "label": "All read",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.imdb",
+      "keys": {
+        "dashboard": [
+          "i"
+        ],
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.wiki",
+      "keys": {
+        "dashboard": [
+          "w"
+        ],
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.source",
+      "keys": {
+        "dashboard": [
+          "O"
+        ],
+        "popup": null,
+        "tui": [
+          "O"
+        ]
+      },
+      "label": "EZTV",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.undo_read",
+      "keys": {
+        "dashboard": [
+          "u"
+        ],
+        "popup": null,
+        "tui": [
+          "u"
+        ]
+      },
+      "label": "Undo read",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "files.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "q",
+          "Enter"
+        ]
+      },
+      "label": "Close",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Space"
+        ]
+      },
+      "label": "Include/skip",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.all",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "a"
+        ]
+      },
+      "label": "All",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.none",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "n"
+        ]
+      },
+      "label": "None",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.reload",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Reload",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.first",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.include",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "1"
+        ]
+      },
+      "label": "Include",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.high",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "2"
+        ]
+      },
+      "label": "High (legacy)",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.max",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "3"
+        ]
+      },
+      "label": "Max (legacy)",
+      "scope": "modal:files"
+    },
+    {
+      "id": "providers.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "q",
+          "Enter"
+        ]
+      },
+      "label": "Close",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Space"
+        ]
+      },
+      "label": "Toggle",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.all",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "a"
+        ]
+      },
+      "label": "All",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.none",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "n"
+        ]
+      },
+      "label": "None",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.reload",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "r"
+        ]
+      },
+      "label": "Reload",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "providers.open",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "o"
+        ]
+      },
+      "label": "Open site",
+      "scope": "modal:providers"
+    },
+    {
+      "id": "settings.cancel",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Cancel",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "settings.save",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Save",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "settings.next",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "j",
+          "↓",
+          "Tab"
+        ]
+      },
+      "label": "Next setting",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "settings.previous",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "k",
+          "↑",
+          "Shift+Tab"
+        ]
+      },
+      "label": "Previous setting",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "settings.decrease",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "h",
+          "←"
+        ]
+      },
+      "label": "Decrease",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "settings.increase",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "l",
+          "→",
+          "Space"
+        ]
+      },
+      "label": "Increase",
+      "scope": "modal:settings"
+    },
+    {
+      "id": "help.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "q",
+          "?"
+        ]
+      },
+      "label": "Close",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "j",
+          "↓"
+        ]
+      },
+      "label": "Scroll down",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "k",
+          "↑"
+        ]
+      },
+      "label": "Scroll up",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.page_down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "PgDn"
+        ]
+      },
+      "label": "Page down",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.page_up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "PgUp"
+        ]
+      },
+      "label": "Page up",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.first",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "g",
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "modal:help"
+    },
+    {
+      "id": "help.last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "G",
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "modal:help"
+    },
+    {
+      "id": "prompt.confirm",
+      "keys": {
+        "dashboard": [
+          "y"
+        ],
+        "popup": [
+          "y"
+        ],
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Remove",
+      "scope": "prompt"
+    },
+    {
+      "id": "prompt.cancel",
+      "keys": {
+        "dashboard": [
+          "Esc"
+        ],
+        "popup": [
+          "Esc"
+        ],
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Cancel",
+      "scope": "prompt"
+    },
+    {
+      "id": "prompt.submit",
+      "keys": {
+        "dashboard": [
+          "Enter"
+        ],
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Submit",
+      "scope": "prompt"
+    },
+    {
+      "id": "prompt.sequential",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "F2"
+        ]
+      },
+      "label": "Sequential (legacy)",
+      "scope": "prompt"
+    },
+    {
+      "id": "prompt.first_last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "F3"
+        ]
+      },
+      "label": "First/last (legacy)",
+      "scope": "prompt"
+    },
+    {
+      "id": "prompt.seed",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "F4"
+        ]
+      },
+      "label": "Seed on/off",
+      "scope": "prompt"
+    }
+  ],
+  "version": 1
+}

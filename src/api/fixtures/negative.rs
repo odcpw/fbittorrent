@@ -655,3 +655,49 @@ fn missing_files_restore_errors_require_the_matching_reason() {
         println!("{op}: missing_files positive and unrelated restore_failed positive passed");
     }
 }
+
+#[test]
+fn checking_torrents_cannot_claim_a_completed_hash_check() {
+    let detail: Value = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1
+        .lines()
+        .nth(42)
+        .map(|line| {
+            serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()
+        })
+        .unwrap();
+    assert_eq!(detail["state"], "checking");
+    assert_eq!(detail["checked"], false);
+    assert_eq!(detail["completed_bytes"], 33_554_432);
+    assert_eq!(detail["progress"], 0.5);
+    for op in ["torrents.list", "torrents.get"] {
+        let encode = |mut torrent: Value| {
+            let (args, result) = if op == "torrents.list" {
+                torrent.as_object_mut().unwrap().remove("private");
+                (json!({}), json!({"torrents":[torrent]}))
+            } else {
+                (json!({"hash":torrent["hash"]}), json!({"torrent":torrent}))
+            };
+            format!(
+                "{}\n{}\n",
+                json!({"dir":"c2s","frame":{"id":1,"op":op,"args":args}}),
+                json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":result}})
+            )
+        };
+        check_group("checking-positive", &encode(detail.clone())).unwrap();
+        let mut invalid = detail.clone();
+        invalid["checked"] = json!(true);
+        let error = check_group("checking-negative", &encode(invalid)).unwrap_err();
+        assert_eq!(error, format!("contracts/ipc/v1/checking-negative.ndjson:2: {op} result: torrent.checked: must be false while state is checking"));
+        println!("{op}: checking/unchecked passed; checking/checked rejected {error}");
+
+        let mut paused = detail.clone();
+        paused["state"] = json!("paused");
+        paused["checked"] = json!(true);
+        check_group("checked-paused-positive", &encode(paused)).unwrap();
+        println!("{op}: paused/checked positive passed");
+    }
+}

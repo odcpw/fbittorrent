@@ -204,6 +204,7 @@ pub struct AddedTorrent {
     pub hash: String,
     pub name: String,
     pub duplicate: bool,
+    pub deferred: bool,
 }
 
 #[derive(Debug)]

@@ -244,3 +244,11 @@ Receipt: [P1-05b.md](P1-05b.md) (branch ntm/fbittorrent/cod_3-p1-05b, commits a3
 ## P1-05c
 
 Receipt: [P1-05c.md](P1-05c.md) (branch ntm/fbittorrent/cod_3-p1-05c, commits 7c07cdf and 84c17db with the orchestrator's merge a8c6dec; fixture corrections surfaced by P1-06's live replay, merged by the orchestrator after an Astra review with no findings; batch gate on main follows).
+
+## P1-05d
+
+Receipt: [P1-05d.md](P1-05d.md) (branch ntm/fbittorrent/cod_3-p1-05d, commit 28c64da; fixture correction surfaced by P1-06's live replay, merged by the orchestrator after an Astra review with no findings; fixture-only change, covered by the next batched gate on main).
+
+## Track integration 2026-10-19 (owner's track model)
+
+From 2026-10-19 the four coders work through long-lived tracks; beads are closed from their reports and merged continuously. Track receipts: [services.md](../2026-10-19/services.md) (P1-06, P7-09 checkpoint), [TUI.md](../2026-10-19/TUI.md) (P1-09, P4-01, P4-02, P4-06), [track-c.md](../2026-10-19/track-c.md) (P3-04, P2-01, P2-02, P2-04). One batched gate on main follows each integration batch.

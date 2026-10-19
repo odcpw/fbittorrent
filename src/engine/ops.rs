@@ -15,6 +15,27 @@ impl EngineDispatcher {
             .map(|(hash, restore)| (hash.clone(), restore.outcome.clone()))
             .collect()
     }
+    /// The API confirmation observer does not wait on a busy runtime owner.
+    pub(crate) fn restore_outcome(&self, hash: &str) -> Option<RestoreOutcome> {
+        self.inner.restores.try_lock().ok()?.get(hash).map(|restore| restore.outcome.clone())
+    }
+    /// API URL metadata fetch borrows this slot's runtime and cancellation.
+    /// Validate before admitting the bytes as a torrent; no ledger side effects.
+    pub(crate) fn fetch_api_torrent(&self, url: &str, interface: Option<&str>) -> Result<Vec<u8>> {
+        let binding = interface.map(rqbit_runtime::net::InterfaceBinding::new).transpose()?;
+        let client = rqbit_runtime::http::Client::new_bound("fbittorrent API metadata", binding);
+        let cx = self.runtime.cx();
+        self.runtime.block_on(async {
+            let bytes = rqbit_runtime::select! {
+                result = client.get(cx, url) => result?,
+                _ = self.inner.session.cancellation_token().cancelled() => bail!("native engine is closing"),
+            };
+            anyhow::ensure!(bytes.len() <= 16 * 1024 * 1024 && bytes.first() == Some(&b'd'),
+                "URL torrent must be bencoded metainfo at most 16 MiB");
+            librqbit::torrent_from_bytes(&bytes)?;
+            Ok(bytes)
+        })
+    }
     /// Legacy compatibility entry point. All execution below takes typed data.
     pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
         match EngineOp::parse(&request.path, request) {
@@ -181,7 +202,7 @@ impl EngineDispatcher {
                 let mut ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
                 if let Some(record) = ledger.records.iter().find(|record| record.hash == hash) {
                     return Ok(EngineResult::Added(vec![AddedTorrent {
-                        hash, name: record.name.clone(), duplicate: true,
+                        hash, name: record.name.clone(), duplicate: true, deferred: false,
                     }]));
                 }
                 let only_files = magnet.get_select_only();
@@ -191,13 +212,13 @@ impl EngineDispatcher {
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
-                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false,
+                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false,
                 };
                 ledger.records.push(record.clone());
                 self.inner.save(cx, &ledger).await?;
                 self.inner.spawn_restore(cx, record.clone())?;
                 self.inner.reconcile_queue(cx, &mut ledger, &HashSet::new()).await?;
-                return Ok(EngineResult::Added(vec![AddedTorrent { hash, name: record.name, duplicate: false }]));
+                return Ok(EngineResult::Added(vec![AddedTorrent { hash, name: record.name, duplicate: false, deferred: false }]));
             }
             EngineOp::ToggleSequentialDownload => bail!(
                 "the native engine always downloads each file sequentially; this setting cannot be disabled"
@@ -463,7 +484,7 @@ impl EngineDispatcher {
             added_on: now(),
             completion_on: 0,
             paused,
-            resume_after_migration: false,
+            resume_after_migration: false, deferred: false,
         };
         let sources = if options.torrent.is_some() {
             vec![String::new()]
@@ -510,7 +531,7 @@ impl EngineDispatcher {
                 added.push(AddedTorrent {
                     hash: handle.info_hash().as_string(),
                     name: handle.name().unwrap_or_default(),
-                    duplicate: true,
+                    duplicate: true, deferred: false,
                 });
                 continue;
             }
@@ -560,7 +581,7 @@ impl EngineDispatcher {
             added.push(AddedTorrent {
                 hash: record.hash.clone(),
                 name: record.name.clone(),
-                duplicate: false,
+                duplicate: false, deferred: false,
             });
         }
         Ok(added)

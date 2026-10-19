@@ -26,5 +26,5 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Files  (O)pen  (P)ause  (D) Remove  (Shift+D) Delete files  (U) Seed on  (A)dd  (C)lipboard  (?) Help
-(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
+[Torrents] (Enter) Files  (o) Open  (p) Pause  (u) Seed on  (d) Remove, keep files  (D) Delete with files …     (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

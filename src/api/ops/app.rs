@@ -7,13 +7,15 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
+pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb","settings"];
+
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
     if daemon.is_stopping() {
         info["state"] = json!("stopping");
     }
     info["proto"] = json!(PROTO);
-    info["caps"] = json!(["torrents", "files", "imdb"]);
+    info["caps"] = json!(CAPS);
     info["limits"] =
         json!({"line_in":LINE_IN,"line_out":LINE_OUT,"inflight":8,"subs":16,"hashes":256});
     serde_json::from_value(info).expect("daemon identity has the contract shape")
@@ -27,6 +29,8 @@ pub fn dispatch(
     uptime: u64,
 ) -> ApiResult<Reply> {
     Ok(match call {
+        Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),
+        Call::AppSettingsSet { args } => Reply::AppSettingsSet(super::settings::set(daemon, args)?),
         Call::AppInfo { .. } => {
             let mut value = serde_json::to_value(hello(daemon)).unwrap();
             value["uptime_s"] = json!(uptime);

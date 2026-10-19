@@ -20,5 +20,5 @@
 ╭DELETE 'The Diplomat S04E01 1080p WEB-DL H264-GROUP' AND ITS FILES? y/N───────╮
 │ y / N (default: No)                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Confirm] (y) Remove                                                (Esc) Cancel
-
+[Confirm] (y) Remove  (Esc) Cancel                                      (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

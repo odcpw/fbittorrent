@@ -41,6 +41,17 @@ pub struct Config {
     pub backend_unit: String,
     /// Preferred release quality for followed shows ("2160p", "1080p", "720p", "480p").
     pub show_quality: String,
+    /// Disable hover-name motion; selected rows are always static.
+    pub reduce_motion: bool,
+    pub idle_exit_secs: u64,
+    pub handler: String,
+    pub open_command: String,
+    pub clipboard_watch: bool,
+    pub download_limit_bps: Option<u32>,
+    pub upload_limit_bps: Option<u32>,
+    pub alt_download_limit_bps: Option<u32>,
+    pub alt_upload_limit_bps: Option<u32>,
+    pub alt_limits_on: bool,
 }
 
 impl Default for Config {
@@ -64,6 +75,16 @@ impl Default for Config {
             autostart: true,
             backend_unit: "qbittorrent-nox.service".into(),
             show_quality: "1080p".into(),
+            reduce_motion: false,
+            idle_exit_secs: 300,
+            handler: "confirm".into(),
+            open_command: "xdg-open".into(),
+            clipboard_watch: false,
+            download_limit_bps: None,
+            upload_limit_bps: None,
+            alt_download_limit_bps: None,
+            alt_upload_limit_bps: None,
+            alt_limits_on: false,
         }
     }
 }
@@ -79,6 +100,15 @@ pub fn config_path() -> PathBuf {
 }
 
 impl Config {
+    /// The command is an explicit local user preference. Pass the target as a
+    /// separate, quoted positional argument so filenames never become code.
+    pub fn open_target(&self, target: impl AsRef<std::ffi::OsStr>) -> Result<std::process::Child> {
+        self.validate()?;
+        Ok(std::process::Command::new("sh")
+            .arg("-c").arg(format!("exec {} \"$1\"", self.open_command))
+            .arg("fbittorrent-open").arg(target).spawn()?)
+    }
+
     pub fn native(&self) -> bool { self.engine == "native" }
     pub fn load() -> Result<Self> {
         let path = config_path();
@@ -94,10 +124,21 @@ impl Config {
 
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(matches!(self.engine.as_str(), "native" | "qbittorrent"), "engine must be native or qbittorrent");
-        anyhow::ensure!(self.max_active_downloads > 0, "simultaneous downloads must be at least 1");
-        anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer encryption must be off, prefer, or require");
+        anyhow::ensure!(self.max_active_downloads > 0, "max_active_downloads: must be at least 1");
+        anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer_encryption: must be off, prefer, or require");
         if let Some(name) = &self.network_interface {
-            anyhow::ensure!(!name.is_empty() && name.len() < libc::IFNAMSIZ && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')), "choose proton or a valid network interface name");
+            anyhow::ensure!(!name.is_empty() && name.len() < libc::IFNAMSIZ && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')), "network_interface: choose proton or a valid network interface name");
+        }
+        anyhow::ensure!(self.timeout_secs > 0, "timeout_secs: must be positive");
+        anyhow::ensure!(matches!(self.handler.as_str(), "add" | "confirm"), "handler: must be add or confirm");
+        anyhow::ensure!(!self.open_command.trim().is_empty(), "open_command: must not be empty");
+        anyhow::ensure!(!self.show_quality.trim().is_empty(), "show_quality: must not be empty");
+        anyhow::ensure!(self.save_path.as_ref().is_none_or(|p| !p.trim().is_empty()), "save_path: must not be empty");
+        for (key, limit) in [
+            ("download_limit_bps", self.download_limit_bps), ("upload_limit_bps", self.upload_limit_bps),
+            ("alt_download_limit_bps", self.alt_download_limit_bps), ("alt_upload_limit_bps", self.alt_upload_limit_bps),
+        ] {
+            anyhow::ensure!(limit.is_none_or(|v| v >= 16_384), "{key}: must be at least 16384 or null for unlimited");
         }
         Ok(())
     }
@@ -155,6 +196,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn open_command_keeps_arguments_and_literal_target() {
+        let root = std::env::temp_dir().join(format!("fbt-settings-open-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("player.py");
+        let output = root.join("arguments.json");
+        std::fs::write(&script, format!("import json,sys\nopen({:?}, 'w').write(json.dumps(sys.argv[1:]))\n", output.to_string_lossy())).unwrap();
+        let cfg = Config { open_command: format!("python3 {} --keep-open=yes",script.display()), ..Config::default() };
+        let target = root.join("video ; $(touch escaped).mkv");
+        assert!(cfg.open_target(&target).unwrap().wait().unwrap().success());
+        let observed: Vec<String> = serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+        assert_eq!(observed, ["--keep-open=yes".to_owned(), target.to_string_lossy().into_owned()]);
+        println!("configured player receives flags and one literal target argument: {observed:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn config_save_and_default_creation_are_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("fbittorrent-config-private-{}", std::process::id()));
@@ -180,6 +237,19 @@ mod tests {
         assert_eq!(cfg.max_active_downloads, 3);
         assert_eq!(cfg.peer_encryption, "prefer");
         assert_eq!(cfg.network_interface, None);
+    }
+    #[test]
+    fn reduce_motion_defaults_false_and_roundtrips_in_private_config() {
+        let mut cfg:Config=toml::from_str("engine='native'").unwrap();
+        assert!(!cfg.reduce_motion);
+        cfg.reduce_motion=true;
+        let dir=std::env::temp_dir().join(format!("fbt-p406-motion-{}",std::process::id()));
+        let path=dir.join("config.toml");
+        cfg.save_to(&path).unwrap();
+        let saved:Config=toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.reduce_motion);
+        println!("reduce_motion=true persisted to {}",path.display());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn invalid_settings_leave_saved_file_intact() {

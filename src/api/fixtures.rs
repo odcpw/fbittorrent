@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
     ("hello", include_str!("../../contracts/ipc/v1/hello.ndjson")),
     (
@@ -28,6 +29,10 @@ const GROUPS: &[(&str, &str)] = &[
     (
         "mutations",
         include_str!("../../contracts/ipc/v1/mutations.ndjson"),
+    ),
+    (
+        "settings-motion",
+        include_str!("../../contracts/ipc/v1/settings-motion.ndjson"),
     ),
 ];
 
@@ -428,6 +433,8 @@ fn operation_event_error_and_document_coverage() {
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "app.settings.get",
+        "app.settings.set",
         "imdb.lookup",
         "hello",
         "app.info",

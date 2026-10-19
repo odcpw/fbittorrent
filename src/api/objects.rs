@@ -269,6 +269,13 @@ pub struct Settings {
     pub handler: Handler,
     pub open_command: String,
     pub clipboard_watch: bool,
+    /// Wire presence is retained for old transcripts; omission means false.
+    #[serde(
+        default,
+        deserialize_with = "optional_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reduce_motion: Option<bool>,
     pub peer_port: u64,
     pub show_quality: String,
     pub alt_limits_on: bool,
@@ -340,4 +347,16 @@ pub struct ImdbCard {
     pub poster_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_path: Option<String>,
+}
+
+impl Settings {
+    /// Older daemons omit this preference. Their clients keep hover motion on.
+    pub fn reduce_motion(&self) -> bool {
+        self.reduce_motion.unwrap_or(false)
+    }
+}
+
+/// An absent optional boolean is allowed; a present null is not a boolean.
+fn optional_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }

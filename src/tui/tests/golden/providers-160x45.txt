@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
-[Providers] (Space) Toggle  (A)ll  (N)one  (O)pen site                                                                                               (Esc) Close
-
+[Providers] (Esc) Close  (Space) Toggle  (o) Open site  (a) All  (n) None  (j) Next  (k) Previous  (r) Reload                                           (?) Help
+EZTV
