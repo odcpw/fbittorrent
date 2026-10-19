@@ -228,9 +228,21 @@ pub(super) enum Cmd {
         /// Also register fbittorrent as the magnet: handler
         #[arg(long)]
         magnet: bool,
-        /// Remove the static native systemd user unit; saved data is kept
-        #[arg(long, conflicts_with_all = ["magnet", "save"])]
+        /// Link the checkout's plugin or copy it for a stable installation
+        #[arg(long, value_parser=["link", "copy"])]
+        plugin: Option<String>,
+        /// List exact planned actions without writing files or running commands
+        #[arg(long)]
+        dry_run: bool,
+        /// Remove desktop integration while keeping saved data
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
         uninstall: bool,
+        /// Remove integration and application data (never downloaded payloads)
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        purge: bool,
+        /// Confirm application-data removal with --purge
+        #[arg(long)]
+        yes: bool,
     },
     /// Register fbittorrent as the magnet: / .torrent handler
     RegisterMagnet,
