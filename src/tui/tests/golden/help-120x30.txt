@@ -13,6 +13,7 @@
 │                 │   (Q) Stop fbittorrent                                                           │                 │
 │                 │   (c) Clipboard                                                                  │                 │
 │                 │   (r) Refresh                                                                    │                 │
+│                 │   (L) Log                                                                        │                 │
 │                 │   (a) Add                                                                        │                 │
 │                 │   (v) Card                                                                       │                 │
 │                 │                                                                                  │                 │
@@ -23,8 +24,7 @@
 │                 │   (G/End) Last                                                                   │                 │
 │                 │   (PgDn) Page down                                                               │                 │
 │                 │   (PgUp) Page up                                                                 │                 │
-│                 │   (Enter) Details                                                                │                 │
-╰─────────────────│   (o) Open                                                                       │─────────────────╯
+╰─────────────────│   (Enter) Details                                                                │─────────────────╯
 ↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

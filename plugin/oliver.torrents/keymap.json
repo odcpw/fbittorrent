@@ -384,6 +384,140 @@
       "scope": "modal:details"
     },
     {
+      "id": "log.open",
+      "keys": {
+        "dashboard": [
+          "L"
+        ],
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Log",
+      "scope": "global"
+    },
+    {
+      "id": "log.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.level",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "l"
+        ]
+      },
+      "label": "Level",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.source",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "h"
+        ]
+      },
+      "label": "Source",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.first",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.previous_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "["
+        ]
+      },
+      "label": "Files",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.next_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "]"
+        ]
+      },
+      "label": "Next tab",
+      "scope": "modal:log"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [

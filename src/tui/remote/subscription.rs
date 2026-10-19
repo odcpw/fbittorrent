@@ -98,6 +98,7 @@ impl TuiApp {
                     |api::Event::Delta {topic:api::Topic::Search(_)|api::Topic::Events,..}|api::Event::SearchDone {..}) {
                     self.sync_native_search();
                 }
+                if matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Log,..}|api::Event::Delta{topic:api::Topic::Log,..}){self.feedback.dirty.set(true);}
                 if rows_changed {
                     let rows = self
                         .store

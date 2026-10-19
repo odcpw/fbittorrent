@@ -18,6 +18,7 @@
 │                                     │   (Q) Stop fbittorrent                                                           │                                     │
 │                                     │   (c) Clipboard                                                                  │                                     │
 │                                     │   (r) Refresh                                                                    │                                     │
+│                                     │   (L) Log                                                                        │                                     │
 │                                     │   (a) Add                                                                        │                                     │
 │                                     │   (v) Card                                                                       │                                     │
 │                                     │                                                                                  │                                     │
@@ -33,7 +34,6 @@
 │                                     │   (p/Space) Pause/resume                                                         │                                     │
 │                                     │   (u) Seed on/off                                                                │                                     │
 │                                     │   (d/x/Delete) Remove, keep files                                                │                                     │
-│                                     │   (D) Delete with files                                                          │                                     │
 │                                     │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │                                     │
 │                                     │                                                                                  │                                     │
 │                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │

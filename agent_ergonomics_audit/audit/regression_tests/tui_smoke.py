@@ -29,7 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
-CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers')
+CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history')
 
 
 class PaneUi(native.AttachedTui):
@@ -147,7 +147,9 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
                 ui.contains(']','Overview  [Files]')
                 ui.observe('read files','real file names and include controls are visible',
                            lambda pane:all(text in pane for text in('The.Diplomat.S04E01.mkv','English.srt','sample.mkv','include/skip')))
-                ui.contains(']','Overview  [Files]')
+                ui.contains(']','Overview  Files  [Log]')
+                ui.contains(']','Overview  Files  [Log]')
+                ui.contains('[','Overview  [Files]')
                 ui.contains('[','[Overview]  Files')
                 ui.contains('Escape','[Torrents]',literal=False)
                 before=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']['intent']
@@ -261,6 +263,44 @@ def low_chroma_theme_markers(binary,setup,sandbox,h,ui,process,torrent):
             cached.rmdir();cached.write_bytes(metainfo);cached.chmod(0o600)
 
 
+def log_history(binary):
+    """A real injected engine error and a failed open survive in the pushed log."""
+    import shutil
+    with Case('tui_smoke_setup','log_fixtures')as setup, fixtures.Sandbox()as sandbox:
+        source=sandbox.downloads/'history.mkv';source.write_bytes(b'local log fixture'*1024)
+        item=fixtures.torrent_fixture(sandbox.root,[source]);fixtures.corrupt_byte(source,0)
+        sandbox.env['FBT_TEST_INJECT_ERROR']=item.info_hash;sandbox.keys.append('FBT_TEST_INJECT_ERROR')
+        theme=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
+        theme.parent.mkdir(parents=True);shutil.copyfile(REPO/'contracts/ui/themes/owner.toml',theme)
+        with d.Harness(setup,binary,sandbox)as h:
+            process=h.start_serve()
+            if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('private log owner failed startup')
+            ui=PaneUi(setup,str(binary),sandbox,h,session='fbt-fbt-p4-08-p3e')
+            try:
+                with d.ApiConn(h)as client:
+                    client.hello()
+                    ui.start_owned();ui.tmux('resize-window','-t',ui.target,'-x','120','-y','30')
+                    h.wait_for(lambda:((info:=client.call('app.info')['result'])['subscriptions']['by_topic'].get('log',0)==1,json.dumps(info['subscriptions'])),'the TUI subscribes before the injected diagnostic occurs')
+                    client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(sandbox.downloads),stopped=True))
+                    h.wait_for(lambda:((entries:=client.call('app.log',dict(hash=item.info_hash,level='error'))['result']['entries'])and any('injected engine error'in row['message']for row in entries),json.dumps(entries)),'the real error-injection hook writes the engine log')
+                    source.unlink()
+                    with Case('tui_smoke','log_history')as case:
+                        ui.case=case;ui.context=f'private theme={theme}; injected hash={item.info_hash}'
+                        ui.observe('load torrent','the incomplete fixture appears in the attached terminal',lambda pane:'history.mkv'in pane)
+                        ui.press('o','the real open action fails with a worded monochrome status',lambda pane:pane.splitlines()[-1].lstrip().startswith('!'))
+                        failure=ui.capture(ui.target).splitlines()[-1].lstrip('! ').strip();needle=failure[:32]
+                        expires=time.monotonic()+10.5
+                        ui.observe('wait for the ten-second toast expiry','the action toast expires without changing the footer geometry',lambda pane:time.monotonic()>=expires and needle not in '\n'.join(pane.splitlines()[:-2]),timeout=12)
+                        ui.press('L','Log retains the failed action and the actual injected engine diagnostic',lambda pane:'injected engine error'in pane and needle in pane and 'level: warn'in pane)
+                        ui.contains('l','level: info')
+                        ui.press('Escape','Esc returns to the unchanged torrent list',lambda pane:'[Torrents]'in pane,literal=False)
+                        ui.press('q','q detaches the log test while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
+            finally:
+                ui.close()
+                if process.child.poll()is None:h.stop_serve(process)
+                h.lock_free()
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',nargs='?',type=Path,default=REPO/'target/debug/fbittorrent')
@@ -271,6 +311,8 @@ def main():
     if args.list:print('\n'.join(CASES));return 0
     private_net.enter()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
+    if args.case=='log_history':
+        log_history(args.binary.resolve());return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
             for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
@@ -292,6 +334,7 @@ def main():
                 low_chroma_theme_markers(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
 
 
+    if args.case is None:log_history(args.binary.resolve())
     return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
 
 

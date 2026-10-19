@@ -57,6 +57,12 @@ pub(crate) mod actions;
 mod store;
 mod format;
 mod palette;
+mod feedback;
+#[cfg(test)]
+#[path="tests/log.rs"]
+mod log_tests;
+#[path="modals/log.rs"]
+mod modals_log;
 #[cfg(test)]
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
@@ -95,7 +101,7 @@ impl Model for TuiApp {
         }
         self.rss_loaded = true;
         let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
-        let mut cmds = vec![first, self.load_plugins(), self.load_ratings(), self.load_rss()];
+        let mut cmds = vec![self.subscribe_log(),first, self.load_plugins(), self.load_ratings(), self.load_rss()];
         cmds.push(self.refresh_shows(false));
         Cmd::batch(cmds)
     }
@@ -143,6 +149,7 @@ impl Model for TuiApp {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
                 if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); self.status_is_error=false; self.status_success=false; }
+                self.feedback.tick();
                 let recovery=self.recovery_tick();
                 Cmd::batch(vec![recovery,self.on_hover()])
             }
@@ -191,7 +198,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,self.subscribe_log()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -201,6 +208,7 @@ impl Model for TuiApp {
                 Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_success("download settings saved"); self.poll() }
                 Err(error) => { if let Some(modal)=self.settings.as_mut() { modal.saving=false; modal.error=error; } Cmd::none() }
             },
+            Msg::LogAttached{connection,result}=>{if self.presence.as_ref().is_some_and(|c|c.id==connection){if let Err(error)=result{self.set_status(format!("Log: {error}"),true);}}Cmd::none()},
             Msg::ActionDone(r) => {
                 match r { Ok(s) => self.set_success(s), Err(e) => self.set_status(e, true) }
                 self.poll()
@@ -409,10 +417,12 @@ impl Model for TuiApp {
         let th = &self.theme;
         self.last_bounds.set(frame.bounds());
         self.rects.borrow_mut().begin();
+        self.feedback.rects.set([None;2]);
         self.poster_drawn.set(false);
-        let hard_overlay=self.files.is_some()||self.details.is_some()||self.providers.is_some()||self.settings.is_some()||self.show_help||self.prompt.is_some();
-        self.graphics_suppressed.set(hard_overlay||self.poster_open);
-        if hard_overlay {if let Some(kitty)=&self.kitty {kitty.borrow_mut().clear();}}
+        let hard_overlay=self.log_open||self.files.is_some()||self.details.is_some()||self.providers.is_some()||self.settings.is_some()||self.show_help||self.prompt.is_some();
+        let covered=hard_overlay||self.feedback.queue.visible_count()>0;
+        self.graphics_suppressed.set(covered||self.poster_open);
+        if covered {if let Some(kitty)=&self.kitty {kitty.borrow_mut().clear();}}
         let banner=self.priority_banner();
         let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
@@ -429,11 +439,13 @@ impl Model for TuiApp {
         if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
         self.rects.borrow_mut().footer=root[5];
         if self.details.is_none(){self.view_status(root[5], frame);}
-        self.graphics_suppressed.set(hard_overlay);
+        self.graphics_suppressed.set(covered);
         if self.details.is_some() { self.view_details(frame); }
         else if self.files.is_some() { self.view_files(frame); }
+        if !hard_overlay && !self.poster_open {self.feedback.view_toasts(root[1],th,frame);}
         if self.poster_open {self.view_poster_overlay(frame);}
         if self.providers.is_some() { self.view_providers(frame); }
+        if self.log_open {self.view_log(frame);}
         if self.settings.is_some() { self.view_settings(frame); }
         if self.show_help { self.view_help(frame); }
         if let Some(p) = &self.prompt {

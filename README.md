@@ -486,6 +486,17 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:details` | Delete files | `D` | — | — |  |
 | `modal:details` | IMDb | `i` | — | — |  |
 | `modal:details` | Wikipedia | `w` | — | — |  |
+| `global` | Log | `L` | `L` | — |  |
+| `modal:log` | Back | `Esc` | — | — |  |
+| `modal:log` | Back | `L` | — | — |  |
+| `modal:log` | Level | `l` | — | — |  |
+| `modal:log` | Source | `h` | — | — |  |
+| `modal:log` | Previous | `↑` | — | — |  |
+| `modal:log` | Next | `↓` | — | — |  |
+| `modal:log` | First | `Home` | — | — |  |
+| `modal:log` | Last | `End` | — | — |  |
+| `modal:log` | Files | `[` | — | — |  |
+| `modal:log` | Next tab | `]` | — | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |

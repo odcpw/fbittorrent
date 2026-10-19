@@ -6,6 +6,7 @@ pub(super) enum MouseList { Torrents, Results, Browse, Feeds, Items, Shows, Epis
 
 impl TuiApp {
     pub(super) fn mouse_list_at(&self, x: u16, y: u16) -> Option<(MouseList, Rect)> {
+        if self.log_open||self.feedback.rects.get().iter().flatten().any(|a|a.contains(x,y)){return None;}
         let b = self.last_bounds.get();
         if self.screen==Screen::Search && self.poster_open {return None;}
         if b.width == 0 || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
@@ -157,6 +158,7 @@ impl TuiApp {
             if m.kind == MouseEventKind::ScrollUp { return self.on_settings_key(KeyEvent::new(KeyCode::Up)); }
             return Cmd::none();
         }
+        if self.log_open {return match m.kind{MouseEventKind::ScrollDown=>self.on_log_action(actions::Intent::Down),MouseEventKind::ScrollUp=>self.on_log_action(actions::Intent::Up),_=>Cmd::none()};}
         if self.show_help {
             match m.kind {
                 MouseEventKind::ScrollDown => self.help_scroll = self.help_scroll.saturating_add(3).min(self.help_max_scroll()),

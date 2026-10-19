@@ -107,6 +107,8 @@ pub struct TuiApp {
     pub(super) status: String,
     pub(super) status_is_error: bool,
     pub(super) status_success: bool,
+    pub(super) feedback:super::feedback::Feedback,
+    pub(super) log_open:bool,
 }
 
 /// A row identity survives source reordering and the same episode key in another show.
@@ -123,6 +125,7 @@ pub enum Msg {
     SettingsSaved(Result<Config,String>),
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
+    LogAttached{connection:u64,result:Result<(),String>},
     Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
     NativeSearchStarted {connection:u64,sequence:u64,result:Result<super::remote::search::Session,String>},
     SearchDisposed,
@@ -251,18 +254,19 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
-            status_success:false,
+            status_success:false,feedback:Default::default(),log_open:false,
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();
         app
     }
 
-    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;}
+    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,false,hash);}
 
     pub(super) fn set_status(&mut self, s: impl Into<String>, err: bool) {
         self.status = s.into();
         self.status_is_error = err;
+        if err {let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,true,hash);}
         self.status_success=false;
         self.status_at = std::time::Instant::now();
     }

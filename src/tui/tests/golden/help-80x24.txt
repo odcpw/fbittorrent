@@ -13,12 +13,12 @@
 │   (Q) Stop fbittorrent                                                       │
 │   (c) Clipboard                                                              │
 │   (r) Refresh                                                                │
+│   (L) Log                                                                    │
 │   (a) Add                                                                    │
 │   (v) Card                                                                   │
 │                                                                              │
 │ SCREEN:TORRENTS                                                              │
 │   (j/↓) Next                                                                 │
-│   (k/↑) Previous                                                             │
 │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                          │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

@@ -35,7 +35,7 @@ fn frame_text(frame: &Frame) -> String {
     text
 }
 
-fn compare(path: &str, expected: &str, actual: &str) -> Result<(), String> {
+pub(super) fn compare(path: &str, expected: &str, actual: &str) -> Result<(), String> {
     if expected == actual { Ok(()) } else { Err(unified_diff(path, expected, actual)) }
 }
 
