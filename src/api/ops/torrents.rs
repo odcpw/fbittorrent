@@ -9,7 +9,9 @@ use crate::{
     },
 };
 use serde_json::json;
-use std::{fs::OpenOptions, io::Read, os::unix::fs::OpenOptionsExt, path::Path};
+use std::{
+    collections::HashSet, fs::OpenOptions, io::Read, os::unix::fs::OpenOptionsExt, path::Path,
+};
 
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
@@ -330,27 +332,77 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     Some("force"),
                 ));
             }
-            let selection = hashes(&args.hashes);
-            let EngineResult::Start(result) = execute(
-                daemon,
-                EngineOp::Start {
-                    hashes: selection,
-                    skip_complete: true,
-                },
-            )?
-            else {
-                unreachable!("typed start result")
-            };
+            // A read of already-durable run intent is a no-op. Do not claim
+            // that another start changed it; failed restores still retry.
+            let rows = list(daemon)?;
+            let mut seen = HashSet::new();
+            let requested: Vec<_> = args
+                .hashes
+                .as_slice()
+                .iter()
+                .filter(|hash| seen.insert(hash.to_string()))
+                .collect();
+            for hash in &requested {
+                if !rows.iter().any(|row| &row.hash == *hash) {
+                    let mut failure = error(NotFound, "torrent record not found", None);
+                    failure.details =
+                        Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
+                    return Err(failure);
+                }
+            }
             let mut started = Vec::new();
             let mut skipped = Vec::new();
-            for hash in result.started {
-                started.push(Hash::new(hash).unwrap());
+            let mut wanted = Vec::new();
+            for hash in &requested {
+                let row = rows.iter().find(|row| &row.hash == *hash).unwrap();
+                if !row.seed && (row.completed_at.is_some() || row.state == TorrentState::Done) {
+                    if requested.len() == 1 {
+                        let mut failure = error(
+                            InvalidState,
+                            "already complete; seeding is off for this torrent",
+                            None,
+                        );
+                        failure.hint = Some(format!("fbittorrent seed {hash}"));
+                        failure.details = Some(serde_json::Map::from_iter([
+                            ("state".into(), json!(row.state)),
+                            ("reason".into(), json!("complete_no_seed")),
+                        ]));
+                        return Err(failure);
+                    }
+                    skipped.push(Skipped {
+                        hash: (*hash).clone(),
+                        reason: "complete_no_seed".into(),
+                    });
+                } else if row.intent == Intent::Run && row.state != TorrentState::Error {
+                    skipped.push(Skipped {
+                        hash: (*hash).clone(),
+                        reason: "already_running".into(),
+                    });
+                } else {
+                    wanted.push(hash.to_string());
+                }
             }
-            for entry in result.skipped {
-                skipped.push(Skipped {
+            if !wanted.is_empty() {
+                let EngineResult::Start(result) = execute(
+                    daemon,
+                    EngineOp::Start {
+                        hashes: HashSelection::Hashes(wanted),
+                        skip_complete: requested.len() > 1,
+                    },
+                )?
+                else {
+                    unreachable!("typed start result")
+                };
+                started.extend(
+                    result
+                        .started
+                        .into_iter()
+                        .map(|hash| Hash::new(hash).unwrap()),
+                );
+                skipped.extend(result.skipped.into_iter().map(|entry| Skipped {
                     hash: Hash::new(entry.hash).unwrap(),
                     reason: entry.reason,
-                });
+                }));
             }
             Reply::TorrentsStart(StartResult {
                 state: DoneState::Done,

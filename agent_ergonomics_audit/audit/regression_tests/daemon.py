@@ -1066,8 +1066,8 @@ def shutdown_inflight_add(binary, systemd):
 
 class ApiConn:
     """Real bounded NDJSON connection; retains unsolicited frames separately."""
-    def __init__(self, harness, timeout=8):
-        self.harness, self.case = harness, harness.case
+    def __init__(self, harness, timeout=8, trace=None):
+        self.harness, self.case, self.trace = harness, harness.case, trace
         self.socket = socket.socket(socket.AF_UNIX)
         self.socket.settimeout(timeout)
         self.socket.connect(str(DaemonContract.socket_path(harness.sandbox)))
@@ -1090,8 +1090,25 @@ class ApiConn:
             frame["args"] = args
         if ref is not None:
             frame["ref"] = ref
-        self.socket.sendall(json.dumps(frame, separators=(",", ":")).encode() + b"\n")
+        self.send_frame(frame)
         return identifier
+
+    def send_frame(self, frame, typed=True):
+        self.socket.sendall(json.dumps(frame, separators=(",", ":")).encode() + b"\n")
+        if self.trace is not None and typed:
+            self.trace.append(dict(dir="c2s", frame=frame))
+        elif self.trace is not None:
+            artifact = self.case.path.with_suffix(".raw-inputs.ndjson")
+            with artifact.open("a") as output:
+                output.write(json.dumps(frame, sort_keys=True) + "\n")
+            step = self.case.step("send deliberately invalid typed input", "the exact input is retained separately from the typed transcript")
+            step.ok(json.dumps(frame, sort_keys=True), [artifact])
+
+    def response(self, identifier):
+        while (frame := self.receive()) is not None:
+            if frame.get("id") == identifier:
+                return frame
+        raise EOFError("EOF before response " + str(identifier))
 
     def receive(self):
         while b"\n" not in self.buffer:
@@ -1106,7 +1123,10 @@ class ApiConn:
         line, self.buffer = self.buffer.split(b"\n", 1)
         if len(line) + 1 > 1048576:
             raise ValueError("server frame exceeds 1 MiB")
-        return json.loads(line)
+        frame = json.loads(line)
+        if self.trace is not None:
+            self.trace.append(dict(dir="s2c", frame=frame))
+        return frame
 
     def call(self, op, args=None, ref=None, error=None):
         step = self.case.step("API " + op + " " + json.dumps(args, sort_keys=True),
@@ -1505,41 +1525,48 @@ def api_subscriptions_deferred(binary, systemd):
                        "unknown_op includes only implemented nearby names and a hint", str(frame))
         client.call("app.info")
 
-def contract_difference(expected, observed, volatile, path=""):
-    """First exact field mismatch, ignoring only the transcript's volatile paths."""
-    if path in volatile:
-        return None
-    if type(expected) is not type(observed):
-        return "/" + path.replace(".", "/"), expected, observed
-    if isinstance(expected, dict):
-        for key in sorted(expected.keys() | observed.keys()):
-            here = path + "." + key if path else key
-            if here in volatile:
-                continue
-            if key not in expected or key not in observed:
-                return "/" + here.replace(".", "/"), expected.get(key, "<missing>"), observed.get(key, "<missing>")
-            if difference := contract_difference(expected[key], observed[key], volatile, here):
-                return difference
-    elif isinstance(expected, list):
-        for index in range(max(len(expected), len(observed))):
-            here = path + "." + str(index)
-            if index >= len(expected) or index >= len(observed):
-                return "/" + here.replace(".", "/"), expected[index] if index < len(expected) else "<missing>", observed[index] if index < len(observed) else "<missing>"
-            if difference := contract_difference(expected[index], observed[index], volatile, here):
-                return difference
-    elif expected != observed:
-        return "/" + path.replace(".", "/"), expected, observed
-    return None
 
+def api_start_results(binary, systemd):
+    with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        client.hello()
+        complete_dir = sandbox.root / "complete"
+        complete_dir.mkdir()
+        payload = complete_dir / "complete.bin"
+        payload.write_bytes(os.urandom(4096))
+        complete = fixtures.torrent_fixture(complete_dir, [payload])
+        client.call("torrents.add", dict(source=dict(path=str(complete.torrent)), save_path=str(complete_dir), seed=True))
+        def seeded():
+            row = client.call("torrents.get", dict(hash=complete.info_hash))["result"]["torrent"]
+            return row["state"] == "seeding", json.dumps(row)
+        harness.wait_for(seeded, "real completed start fixture finishes hashing")
+        client.call("torrents.set_seed", dict(hashes=[complete.info_hash], on=False))
+        refusal = client.call("torrents.start", dict(hashes=[complete.info_hash]), error="invalid_state")
+        case.check(refusal["error"]["details"] == dict(state="done", reason="complete_no_seed") and
+                   refusal["error"]["hint"] == "fbittorrent seed " + complete.info_hash,
+                   "explicit completed start has a truthful refusal and seed hint", str(refusal))
+        partial_dir = sandbox.root / "partial"
+        partial_dir.mkdir()
+        partial = fixtures.two_file_fixture(partial_dir)
+        fixtures.corrupt_byte(partial.files[0], 0)
+        client.call("torrents.add", dict(source=dict(path=str(partial.torrent)), save_path=str(partial_dir), stopped=True))
+        harness.wait_for(lambda: ((row := client.call("torrents.get", dict(hash=partial.info_hash))["result"]["torrent"])["checked"], json.dumps(row)), "partial start fixture finishes hashing")
+        first = client.call("torrents.start", dict(hashes=[partial.info_hash]))["result"]
+        second = client.call("torrents.start", dict(hashes=[partial.info_hash]))["result"]
+        case.check(first == dict(state="done", started=[partial.info_hash], skipped=[]) and
+                   second == dict(state="done", started=[], skipped=[dict(hash=partial.info_hash, reason="already_running")]),
+                   "first start applies intent and repeated start reports already_running", f"first={first}; second={second}")
+        bulk = client.call("torrents.start", dict(hashes=[complete.info_hash, partial.info_hash]))["result"]
+        case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
+                   "bulk start preserves completed and already-running skip reasons", str(bulk))
 
-def validate_live_contract(case, sandbox, frames):
+def validate_live_contract(case, sandbox, frames, kind="live"):
     """Use P1-05's exact Rust decoder, not a Python schema approximation."""
-    trace = case.path.with_suffix(".live.ndjson")
+    trace = case.path.with_suffix("." + kind + ".ndjson")
     trace.write_text("".join(json.dumps(frame, separators=(",", ":")) + "\n" for frame in frames))
     validator = os.environ.get("FBT_API_CONTRACT_VALIDATOR")
     if not validator or not Path(validator).is_file():
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
-    output = case.path.with_suffix(".validation.log")
+    output = case.path.with_suffix("." + kind + ".validation.log")
     environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace))
     with output.open("w") as log:
         child = case.popen([validator, "--exact", "api::server::argument_tests::validate_live_transcript",
@@ -1549,6 +1576,455 @@ def validate_live_contract(case, sandbox, frames):
     step.close(result == 0, f"Rust validator exit={result}; transcript={trace}.", [trace, output])
 
 
+# The only live-replay normalization specification. Docs and the receipt copy
+# normalization_markdown() verbatim; no fixture file or hidden mask is changed.
+REPLAY_NORMALIZATION = (
+    ("/id", "identity:request", "positive u64, consistent first-occurrence bijection"),
+    ("/result/instance", "identity:instance", "32 lowercase hex, consistent first-occurrence bijection"),
+    ("/**/hash; /result/started/*; /result/stopped/*", "identity:hash", "40 lowercase hex; API-generated hashes bound to fixture identities"),
+    ("/ref; /result/ref", "identity:ref", "at most 64 ASCII characters, consistent first-occurrence bijection"),
+    ("/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at", "timestamp", "positive u64; presence preserved"),
+    ("/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps", "u64", "nonnegative u64; presence preserved"),
+    ("/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds", "u64", "nonnegative u64; presence preserved"),
+    ("/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*", "u64", "nonnegative u64; presence preserved"),
+    ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
+    ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
+    ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
+)
+
+
+def normalization_markdown():
+    return "| JSON pointer(s) | Comparison | Validity |\n|---|---|---|\n" + "".join(
+        f"| `{paths}` | {kind} | {rule} |\n" for paths, kind, rule in REPLAY_NORMALIZATION)
+
+
+class ReplayMismatch(ValueError):
+    pass
+
+
+class ReplayNormalizer:
+    def __init__(self):
+        self.identities = {kind: {} for kind in ("request", "instance", "hash", "ref")}
+
+    def bind(self, kind, fixture, live, pointer):
+        valid = (type(live) is int and 0 < live < 2**64) if kind == "request" else (
+            isinstance(live, str) and
+            (bool(re.fullmatch(r"[0-9a-f]{32}", live)) if kind == "instance" else
+             bool(re.fullmatch(r"[0-9a-f]{40}", live)) if kind == "hash" else
+             live.isascii() and len(live) <= 64))
+        if not valid:
+            raise ReplayMismatch(f"JSON pointer {pointer}: invalid live {kind} identity {live!r}")
+        mapping = self.identities[kind]
+        if fixture in mapping and mapping[fixture] != live:
+            raise ReplayMismatch(f"JSON pointer {pointer}: inconsistent {kind} mapping {fixture!r}: {mapping[fixture]!r} then {live!r}")
+        if fixture not in mapping and live in mapping.values():
+            raise ReplayMismatch(f"JSON pointer {pointer}: two fixture {kind} identities alias {live!r}")
+        mapping[fixture] = live
+        return live
+
+    def request(self, frame):
+        frame = json.loads(json.dumps(frame))
+        fixture_id = frame["id"]
+        mapping = self.identities["request"]
+        if type(fixture_id) is int and 0 < fixture_id < 2**64:
+            frame["id"] = self.bind("request", fixture_id, mapping.get(fixture_id, 1000 + len(mapping)), "/id")
+        def rewrite(value, key=""):
+            if isinstance(value, dict):
+                return {k: rewrite(v, k) for k, v in value.items()}
+            if isinstance(value, list):
+                return [rewrite(v, key) for v in value]
+            if isinstance(value, str):
+                if key == "ref":
+                    return self.bind("ref", value, self.identities["ref"].get(value, "live-ref-" + str(len(self.identities["ref"]))), "/ref")
+                for old, new in self.identities["hash"].items():
+                    value = value.replace(old, new)
+                return value
+            return value
+        return rewrite(frame)
+
+    @staticmethod
+    def matches(pattern, pointer):
+        if pattern == "/**/hash":
+            return pointer.endswith("/hash")
+        return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]+"), pointer) is not None
+
+    def compare(self, expected, live):
+        def walk(wanted, got, pointer=""):
+            rule = next((kind for patterns, kind, _ in REPLAY_NORMALIZATION
+                         for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
+            if rule.startswith("identity:"):
+                if wanted is None:  # Failure.id is the single nullable wire field.
+                    if got is not None:
+                        raise ReplayMismatch(f"JSON pointer {pointer}: expected null, observed {got!r}")
+                    return None
+                return self.bind(rule.split(":")[1], wanted, got, pointer)
+            if rule != "exact":
+                valid = ((type(got) is int and 0 <= got < 2**64) if rule == "u64" else
+                         (type(got) is int and 0 < got < 2**64) if rule == "timestamp" else
+                         (isinstance(got, str) and bool(got)) if rule == "text" else
+                         (isinstance(got, str) and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", got)))
+                if not valid:
+                    raise ReplayMismatch(f"JSON pointer {pointer}: invalid {rule}: {got!r}")
+                return got
+            if type(wanted) is not type(got):
+                raise ReplayMismatch(f"JSON pointer {pointer or '/'}: expected {wanted!r}, observed {got!r}")
+            if isinstance(wanted, dict):
+                for key in sorted(wanted.keys() | got.keys()):
+                    here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
+                    if key not in wanted or key not in got:
+                        raise ReplayMismatch(f"JSON pointer {here}: expected {wanted.get(key, '<missing>')!r}, observed {got.get(key, '<missing>')!r}")
+                return {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
+            if isinstance(wanted, list):
+                if len(wanted) != len(got):
+                    raise ReplayMismatch(f"JSON pointer {pointer}: expected {len(wanted)} items, observed {len(got)}")
+                return [walk(a, b, pointer + "/" + str(index)) for index, (a, b) in enumerate(zip(wanted, got))]
+            if wanted != got:
+                raise ReplayMismatch(f"JSON pointer {pointer}: expected {wanted!r}, observed {got!r}")
+            return wanted
+        normalized = walk(expected, live)
+        # The Rust check_group bridge also requires lossless P1-05 typed
+        # canonical round trips of the captured frames; this compares its bytes.
+        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if canonical(normalized) != canonical(live):
+            raise ReplayMismatch("JSON pointer /: canonical byte comparison failed")
+
+
+@contextmanager
+def replay_owned(group, binary, systemd):
+    with Case("daemon", "contract_" + group) as case, Sandbox() as sandbox, \
+            Harness(case, binary, sandbox, systemd) as harness:
+        payload_root = None
+        if group == "torrents":
+            lock_path = Path("/tmp/fbt-contract-replay-" + str(os.geteuid()) + ".lock")
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            lock = harness.resources.enter_context(os.fdopen(descriptor, "r+"))
+            if os.fstat(lock.fileno()).st_uid != os.geteuid():
+                raise RuntimeError("replay lock has a foreign owner")
+            def acquire():
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return True, str(lock_path)
+                except BlockingIOError:
+                    return False, "another literal-path replay owns the lock"
+            if not harness.wait_for(acquire, "exclusive literal fixture-path ownership"):
+                raise RuntimeError("literal fixture-path replay is busy")
+            # Match literal fixture paths, without ever adopting an existing
+            # directory. Cleanup is contingent on proving owned children gone.
+            payload_root = Path("/tmp/fbt-fixture")
+            payload_root.mkdir(mode=0o700)
+            owned_inode = payload_root.stat().st_ino
+        process = None
+        try:
+            command = DaemonContract.command(str(binary), 300, True)
+            if group == "torrents":
+                config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+                config.write_text(config.read_text().replace('network_interface = "lo"', 'network_interface = "fixture0"') + '\nmax_active_downloads = 1\n')
+                setup = 'set -e; ip link set lo name fixture0; ip link set fixture0 up; exec "$@"'
+                command = ["unshare", "--user", "--map-root-user", "--net", "--", "sh", "-c", setup, "fbt-replay", *command]
+            # No NOTIFY_SOCKET is injected: the hello fixture presupposes the
+            # documented foreground identity. All launches still use Harness.
+            process = harness.spawn(command)
+            if not harness.wait_engine():
+                raise RuntimeError("replay daemon did not answer")
+            with ApiConn(harness) as ready:
+                ready.hello()
+                harness.wait_for(lambda: ((info := ready.call("app.info")["result"])["state"] == "running", json.dumps(info)), "replay owner is running before transcript")
+            yield case, sandbox, harness, process, payload_root
+        finally:
+            if process is not None and process.child.poll() is None:
+                if harness.engine_path.exists():
+                    harness.stop_serve(process)
+                else:
+                    process.wait()
+            if process is not None:
+                harness.lock_free()
+            if payload_root is not None:
+                live = process is not None and (process.child.poll() is None or process.group_members())
+                if live:
+                    sandbox.retain()
+                    case.check(False, "retain payloads if owned process cleanup is unproved", str(payload_root))
+                elif payload_root.is_dir() and not payload_root.is_symlink() and payload_root.stat().st_ino == owned_inode:
+                    shutil.rmtree(payload_root)
+
+
+def replay_preconditions(lines, client, normalizer, root):
+    rows, details, file_lists = {}, {}, {}
+    for item in lines:
+        result = item.get("frame", {}).get("result", {})
+        for row in result.get("torrents", []):
+            rows.setdefault(row["hash"], row)
+        if "torrent" in result:
+            row = result["torrent"]
+            rows.setdefault(row["hash"], row)
+            details.setdefault(row["hash"], row)
+    previous = None
+    for item in lines:
+        if item["dir"] == "c2s": previous = item["frame"]
+        elif item["dir"] == "s2c" and previous and previous["op"] == "torrents.files":
+            file_lists[previous["args"]["hash"]] = item["frame"].get("result", {}).get("files", [])
+    root.mkdir(exist_ok=True)
+    prepared = {}
+    for fixture_hash, row in rows.items():
+        detail = details.get(fixture_hash, row)
+        directory = root / fixture_hash
+        directory.mkdir()
+        files = file_lists.get(fixture_hash)
+        if files:
+            specs = [(file["path"], file["size"], file["progress"]) for file in files]
+        else:
+            count = detail.get("file_count", 1)
+            total = row.get("size", 4096)
+            specs = [(row["name"] if count == 1 else row["name"] + f" {index + 1}.bin",
+                      total // count + (index < total % count), row.get("progress", 0.0)) for index in range(count)]
+        if files and "size" in row:
+            client.case.check(sum(size for _, size, _ in specs) == row["size"], "one fixture hash has consistent torrent and file totals",
+                              f"JSON pointer /preconditions/{fixture_hash}/size: torrent size={row['size']}; sum of file sizes={sum(size for _, size, _ in specs)}")
+        payloads = []
+        for name, size, _ in specs:
+            path = directory / name
+            if not path.resolve().is_relative_to(directory.resolve()):
+                raise RuntimeError("fixture payload path escapes its owned root")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(os.urandom(size))
+            payloads.append(path)
+        fixture = fixtures.torrent_fixture(directory, payloads, name=row["name"], piece_length=detail.get("piece_size", 1024))
+        fixture.info["private"] = int(detail.get("private", False))
+        document = dict(info=fixture.info)
+        for key, wire_key in (("comment", "comment"), ("created_by", "created by")):
+            if key in detail: document[wire_key] = detail[key]
+        fixture.torrent.write_bytes(fixtures.bencode(document))
+        fixture.info_hash = hashlib.sha1(fixtures.bencode(fixture.info)).hexdigest()
+        fixture.magnet = "magnet:?" + urllib.parse.urlencode(dict(xt="urn:btih:" + fixture.info_hash, dn=row["name"]))
+        for payload, (_, size, progress) in zip(payloads, specs):
+            keep = int(size * progress)
+            with payload.open("r+b") as output:
+                for offset in range(keep, size, fixture.info["piece length"]):
+                    output.seek(offset); value = output.read(1)
+                    output.seek(offset); output.write(bytes([value[0] ^ 1]))
+        source = dict(magnet=fixture.magnet) if row["state"] == "metadata" else dict(path=str(fixture.torrent))
+        reply = client.call("torrents.add", dict(source=source, save_path="/tmp/fbt-fixture/downloads", stopped=True, origin="manual", seed=row["seed"]))
+        if not reply.get("ok"):
+            raise RuntimeError("precondition add failed")
+        actual_hash = reply["result"]["hash"]
+        client.case.check(actual_hash == fixture.info_hash, "API add identity matches the generator's actual metainfo hash", f"expected={fixture.info_hash}; observed={actual_hash}")
+        normalizer.bind("hash", fixture_hash, actual_hash, "/preconditions/hash")
+        prepared[fixture_hash] = dict(row=row, fixture=fixture, hash=actual_hash, specs=specs)
+        # Establish files using the API's save_path, separate from the pristine
+        # source/generator directory. These are real payloads, never ledger edits.
+        for payload in payloads:
+            destination = root / "downloads" / payload.name
+            destination.parent.mkdir(exist_ok=True)
+            shutil.copyfile(payload, destination)
+        if row["state"] != "metadata":
+            # The add may already have verified missing payloads; remove and
+            # re-add after copying so the actual hash check sees these bytes.
+            client.call("torrents.remove", dict(hashes=[actual_hash], delete_files=False))
+            client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=True, origin="manual", seed=row["seed"]))
+            def checked():
+                result = client.call("torrents.get", dict(hash=actual_hash))["result"]["torrent"]
+                return result["checked"], json.dumps(result)
+            client.harness.wait_for(checked, "real precondition payload finishes hashing")
+        if row["state"] in ("done", "seeding"):
+            client.call("torrents.set_seed", dict(hashes=[actual_hash], on=True))
+            client.call("torrents.start", dict(hashes=[actual_hash]))
+            if row["state"] == "done": client.call("torrents.set_seed", dict(hashes=[actual_hash], on=False))
+        elif row["intent"] == "run":
+            client.call("torrents.start", dict(hashes=[actual_hash]))
+        observed = client.call("torrents.get", dict(hash=actual_hash))["result"]["torrent"]
+        client.case.check(True, "record real transcript preconditions and observed state",
+                          json.dumps(dict(fixture_hash=fixture_hash, live_hash=actual_hash, expected_state=row["state"], observed=observed), sort_keys=True))
+    return prepared
+
+
+def drive_replay_state(client, prepared, fixture_hash, harness):
+    """Establish each detail scenario using real intent/restart operations."""
+    item = prepared[fixture_hash]
+    row, digest = item["row"], item["hash"]
+    desired = row["state"]
+    available = client.call("torrents.list", {})["result"]["torrents"]
+    live_hashes = {value["hash"] for value in available}
+    if digest not in live_hashes:
+        client.case.check(False, "detail precondition survives preceding transcript operations", f"JSON pointer /result/torrent/hash: {fixture_hash} was removed earlier; no silent re-add")
+        return desired
+    if desired in ("queued", "stalled", "downloading"):
+        for other in prepared.values():
+            if other["hash"] != digest and other["hash"] in live_hashes:
+                client.call("torrents.stop", dict(hashes=[other["hash"]]))
+        if desired == "queued":
+            blocker = next(other for other in prepared.values() if other["hash"] != digest and other["hash"] in live_hashes and 0 < other["row"].get("progress", 0) < 1)
+            client.call("torrents.start", dict(hashes=[blocker["hash"]]))
+        client.call("torrents.start", dict(hashes=[digest]))
+    elif desired == "paused":
+        client.call("torrents.stop", dict(hashes=[digest]))
+    elif desired == "metadata":
+        client.call("torrents.start", dict(hashes=[digest]))
+    elif desired == "checking":
+        # A real new add starts verification; do not invent an activity flag or
+        # alter the immutable 4 KiB fixture to prolong the check artificially.
+        client.call("torrents.remove", dict(hashes=[digest], delete_files=False))
+        client.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=True))
+    elif desired == "error":
+        # Corrupt an owned cache only after the record was added via API, then
+        # genuinely restore it. This is not a synthetic ledger/error entry.
+        cache = Path(harness.sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine" / (digest + ".torrent")
+        original = cache.read_bytes()
+        cache.write_bytes(b"not bencoded metainfo")
+        client.call("app.restart", dict(scope="engine"))
+        try:
+            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "running", json.dumps(info)), "real cache-corruption owner restarts")
+            harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["state"] == "error", json.dumps(value)), "real cache corruption becomes a restore error")
+        finally:
+            cache.write_bytes(original)
+    elif desired == "waiting_vpn":
+        config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        harness.replay_network_config = config.read_text()
+        config.write_text(harness.replay_network_config.replace('network_interface = "fixture0"', 'network_interface = "fbmissing0"'))
+        client.call("app.restart", dict(scope="engine"))
+        harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "parked", json.dumps(info)), "missing private fixture interface parks the real owner")
+    return desired
+
+
+def restore_replay_interface(client, harness):
+    config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+    config.write_text(harness.replay_network_config)
+    client.call("app.restart", dict(scope="engine"))
+    harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "running", json.dumps(info)), "private fixture interface selection restarts the real owner")
+
+
+def api_replay_normalization(binary, systemd):
+    with Case("daemon", "api_replay_normalization") as case:
+        normalizer = ReplayNormalizer()
+        normalizer.compare(dict(id=1, result=dict(instance="0" * 32, server=dict(version="0.2.0"))),
+                           dict(id=123, result=dict(instance="a" * 32, server=dict(version="0.1.0"))))
+        case.check(True, "identity and version normalization accepts valid first occurrences", json.dumps(normalizer.identities, sort_keys=True))
+        for label, expected, actual, pointer in [
+            ("inconsistent identity", dict(id=1), dict(id=124), "/id"),
+            ("invalid volatile", dict(result=dict(dl_bps=1)), dict(result=dict(dl_bps=-1)), "/result/dl_bps"),
+            ("changed nonvolatile", dict(result=dict(checked=True)), dict(result=dict(checked=False)), "/result/checked"),
+            ("missing volatile", dict(result=dict(dl_bps=1)), dict(result={}), "/result/dl_bps"),
+        ]:
+            try:
+                normalizer.compare(expected, actual)
+                case.check(False, label + " fails comparison", "unexpected match")
+            except ReplayMismatch as error:
+                case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
+
+
+def replay_error(expected, fixture_request, client, normalizer, harness, number, frames):
+    """Drive the actual input/resource condition, without manufacturing output."""
+    request = normalizer.request(fixture_request)
+    identifier = request["id"]
+    code = expected["error"]["code"]
+    deferred = []
+    def send(frame, typed=True):
+        client.send_frame(frame, typed)
+        return client.response(identifier)
+    if code in ("invalid_message", "hello_required", "proto_unsupported"):
+        with ApiConn(harness, timeout=8, trace=frames) as fresh:
+            if code == "invalid_message":
+                fresh.socket.sendall(b"[]\n")
+                deferred.append(("/id", "P1-18", "fatal malformed input has a request-less error event, not the fixture's ID-bearing failure"))
+            elif code == "proto_unsupported":
+                fresh.send_frame(dict(id=identifier, op="hello", args=dict(proto=2, client=dict(name="fixture-test", version="0.2.0", kind="test"))))
+            else:
+                deferred.append(("/id", "P1-18", "silent hello deadline has a request-less error event, not the fixture's ID-bearing failure"))
+            frame = fresh.receive()
+            tail = list(fresh.events())
+            client.case.check(frame.get("error", {}).get("code") == code and tail[-1].get("ev") == "bye",
+                              "drive the real malformed/protocol/deadline condition", json.dumps(dict(code=code, actual=frame, tail=tail)))
+            return frame, deferred
+    if code == "unknown_op":
+        return send(dict(id=identifier, op="torrents.stpo"), False), deferred
+    if code == "invalid_args":
+        return send(dict(id=identifier, op="torrents.remove", args=dict(hashes=["f" * 40], delete_files="bad")), False), deferred
+    if code == "not_found":
+        fixture_hash = expected["error"]["details"]["hash"]
+        digest = hashlib.sha1(b"P1-06 isolated unknown hash").hexdigest()
+        normalizer.bind("hash", fixture_hash, digest, "/error/details/hash")
+        return send(dict(id=identifier, op="torrents.get", args=dict(hash=digest))), deferred
+    if code == "invalid_state":
+        directory = harness.sandbox.root / "completed-refusal"
+        directory.mkdir()
+        payload = directory / "completed.bin"
+        payload.write_bytes(os.urandom(4096))
+        fixture = fixtures.torrent_fixture(directory, [payload])
+        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(directory), seed=True))
+        def seeded():
+            value = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+            return value["state"] == "seeding", json.dumps(value)
+        harness.wait_for(seeded, "completed error fixture is actually checked and seeding")
+        client.call("torrents.set_seed", dict(hashes=[fixture.info_hash], on=False))
+        return send(dict(id=identifier, op="torrents.start", args=dict(hashes=[fixture.info_hash]))), deferred
+    if code == "engine_unavailable":
+        config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        original = config.read_text()
+        try:
+            config.write_text(original.replace('network_interface = "lo"', 'network_interface = "fbmissing0"'))
+            client.call("app.restart", dict(scope="engine"))
+            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "parked", json.dumps(info)), "real missing-interface owner parks")
+            frame = send(dict(id=identifier, op="torrents.add", args=dict(source=dict(magnet="magnet:?xt=urn:btih:" + "f" * 40))))
+        finally:
+            config.write_text(original)
+            client.call("app.restart", dict(scope="engine"))
+            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "running", json.dumps(info)), "real interface owner restarts")
+        return frame, deferred
+    if code in ("busy", "timeout"):
+        with stalled_api_source(client.case) as (source, entered):
+            jobs = [dict(id=90000 + number * 10 + index, op="torrents.add", args=dict(source=dict(url=source), stopped=True)) for index in range(8)]
+            if code == "busy":
+                batch = jobs + [dict(id=identifier, op="app.info")]
+                client.socket.sendall(b"".join(json.dumps(frame).encode() + b"\n" for frame in batch))
+                frames.extend(dict(dir="c2s", frame=frame) for frame in batch)
+            else:
+                for job in jobs: client.send_frame(job)
+                seen = set()
+                while len(seen) < 8:
+                    frame = client.receive()
+                    if frame.get("id") in {job["id"] for job in jobs}: seen.add(frame["id"])
+                client.case.check(entered.wait(3), "eight real URL dispatch jobs hold the pool", str(entered.is_set()))
+                client.send_frame(dict(id=identifier, op="app.info"))
+            began = time.monotonic()
+            frame = client.response(identifier)
+            client.case.check(frame.get("error", {}).get("code") == code,
+                              "drive bounded dispatch/in-flight pressure rather than inject a server error",
+                              f"elapsed={time.monotonic()-began:.3f}s; frame={frame!r}")
+            return frame, deferred
+    # These complete expected error frames have no P1-06 RPC producer. Do not
+    # mistake the old catalogue's app.info requests for a way to trigger them.
+    owners = {"ambiguous": "P1-11", "safety": "P1-11", "unsupported": "P1-18",
+              "already_running": "P1-18", "upstream": "P1-18", "internal": "P1-14"}
+    reasons = {
+        "ambiguous": "selector ambiguity is raised by the CLI before RPC",
+        "safety": "destructive-confirmation safety is raised by the CLI before RPC",
+        "unsupported": "the catalogue's unsupported legacy-only controls have no P1-06 RPC",
+        "already_running": "already_running belongs to starting a second process, not an RPC on this owner",
+        "upstream": "the fixture's tracker-source upstream failure requires later tracker/provider operations",
+        "internal": "the fixture's diagnostic entries require the unadvertised log capability",
+    }
+    deferred.append(("/error/details/entries" if code == "internal" else "/error", owners[code], reasons[code]))
+    return send(request), deferred
+
+
+def replay_frame_deferrals(expected, op):
+    found = []
+    def visit(value, pointer=""):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
+                if key == "playable" or (key == "ready" and pointer.startswith("/result/files/")):
+                    found.append((here, "P5-05", "expected frame depends on the unadvertised watch capability"))
+                elif key == "undo_until":
+                    found.append((here, "P6-08", "expected frame depends on undo/origin restoration"))
+                visit(child, here)
+        elif isinstance(value, list):
+            for index, child in enumerate(value): visit(child, pointer + "/" + str(index))
+    visit(expected)
+    if op in ("torrents.remove", "torrents.set_upload_limit") and expected.get("result", {}).get("state") == "pending":
+        found.append(("/result/state", "P1-09", "expected asynchronous mutation state requires the unadvertised mutations capability"))
+    return found
+
+
 CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-05",
                  queue="P6-05", origin="P6-08")
 
@@ -1556,92 +2032,73 @@ CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-
 def contract_group(group, binary, systemd):
     path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
-    volatile = set(lines[0]["paths"]) if lines[0]["dir"] == "volatile" else set()
-    deferred, frames, request = [], [], None
-    with api_owned("contract_" + group, binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
-        def defer(number, pointer, bead, reason):
-            record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead, reason=reason)
-            deferred.append(record)
-            case.check(True, "record the exact deferred fixture field and owner", json.dumps(record, sort_keys=True))
-        for number, line in enumerate(lines, 1):
-            if line["dir"] == "c2s":
-                request = line["frame"]
-                # No substitution of fixture requests, hashes or source paths.
-                client.socket.sendall(json.dumps(request).encode() + b"\n")
-                frames.append(dict(dir="c2s", frame=request))
-            elif line["dir"] == "s2c":
-                expected = line["frame"]
-                if request is None and group != "errors":
-                    actual = client.receive()
-                    frames.append(dict(dir="s2c", frame=actual))
-                    difference = contract_difference(expected, actual, volatile)
-                    case.check(difference is None, "unsolicited live event matches the fixture", str(difference))
-                    continue
-                if request is None:
-                    # The errors catalogue ends with server-only examples, with
-                    # no client input to cause them. Make the live probe explicit.
-                    probe = dict(id=1000 + number, op="app.info")
-                    client.socket.sendall(json.dumps(probe).encode() + b"\n")
-                    frames.append(dict(dir="c2s", frame=probe))
-                    actual = client.receive()
-                    frames.append(dict(dir="s2c", frame=actual))
-                    defer(number, "/", "P1-18", "server-only synthetic error catalogue; validated an explicit live app.info probe")
-                    continue
-                actual = client.receive()
-                frames.append(dict(dir="s2c", frame=actual))
-                current, request = request, None
-                if actual is None:
-                    case.check(False, "fixture request receives a live response", f"EOF at {path.name}:{number}")
-                    break
-                case.check(actual.get("id") == current["id"], "live reply retains the fixture request ID", str(actual.get("id")))
-                if group == "hello" and expected.get("result", {}).get("proto") == 2:
-                    defer(number, "/result/proto", "P1-18", "proto-2 acceptance is a future compatibility example; P1-06 speaks proto 1")
-                    case.check(actual.get("error", {}).get("code") == "invalid_state", "second live hello is invalid_state", str(actual))
-                    continue
-                if group == "errors" and expected.get("ok") is False and current["op"] == "app.info":
-                    defer(number, "/error", "P1-18", "synthetic " + expected["error"]["code"] + " cannot result from this valid app.info request")
-                    case.check(actual.get("ok") is True, "valid app.info produces a success rather than a fabricated fixture error", str(actual.get("ok")))
-                    continue
-                comparable = json.loads(json.dumps(expected))
-                if "caps" in comparable.get("result", {}):
-                    original = comparable["result"]["caps"]
-                    for index, cap in enumerate(original):
-                        if cap in CAP_BEADS:
-                            defer(number, f"/result/caps/{index}", CAP_BEADS[cap], "capability " + cap + " is not implemented in P1-06")
-                    comparable["result"]["caps"] = [cap for cap in original if cap not in CAP_BEADS]
-                observed = json.loads(json.dumps(actual))
-                def future_fields(wanted, got, pointer=""):
-                    if isinstance(wanted, dict):
-                        for key in list(wanted):
-                            here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                            owner = {"playable": "P5-05", "undo_until": "P6-08"}.get(key)
-                            if key == "ready" and pointer.startswith("/result/files/"):
-                                owner = "P5-05"
-                            if key == "ref" and current["op"] in ("app.restart", "app.shutdown"):
-                                owner = "P1-09"
-                            if owner:
-                                defer(number, here, owner, "future-capability fixture field " + key)
-                                wanted.pop(key)
-                                if isinstance(got, dict):
-                                    got.pop(key, None)
-                            else:
-                                future_fields(wanted[key], got.get(key) if isinstance(got, dict) else None, here)
-                    elif isinstance(wanted, list):
-                        for index, value in enumerate(wanted):
-                            future_fields(value, got[index] if isinstance(got, list) and index < len(got) else None, pointer + "/" + str(index))
-                future_fields(comparable, observed)
-                difference = contract_difference(comparable, observed, volatile)
-                step = case.step(f"replay {path.relative_to(REPO)}:{number}", "all non-deferred fields equal the fixture after documented volatile normalization")
-                if difference:
-                    pointer, wanted, got = difference
-                    step.fail(f"JSON pointer {pointer}: expected {wanted!r}; observed {got!r}.")
-                else:
-                    step.ok(f"Frame matched at line {number}.")
-        deferred_path = case.path.with_suffix(".deferred.json")
-        deferred_path.write_text(json.dumps(deferred, indent=2, sort_keys=True) + "\n")
-        validate_live_contract(case, sandbox, frames)
+    normalizer = ReplayNormalizer()
+    deferred, frames, request, prepared = [], [], None, {}
+    with replay_owned(group, binary, systemd) as (case, sandbox, harness, process, root):
         if group == "torrents":
-            process.wait()
+            with ApiConn(harness) as setup:
+                setup.hello()
+                prepared = replay_preconditions(lines, setup, normalizer, root)
+        with ApiConn(harness, timeout=20, trace=frames) as client:
+            def defer(number, pointer, bead, reason):
+                record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead, reason=reason)
+                deferred.append(record)
+                case.check(True, "record the exact deferred fixture field and owner", json.dumps(record, sort_keys=True))
+            for number, line in enumerate(lines, 1):
+                if line["dir"] == "c2s":
+                    request = line["frame"]
+                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared:
+                        drive_replay_state(client, prepared, request["args"]["hash"], harness)
+                    if group != "errors" or request["op"] == "hello":
+                        live_request = normalizer.request(request)
+                        client.send_frame(live_request)
+                elif line["dir"] == "s2c":
+                    expected = line["frame"]
+                    if request is None and group == "errors":
+                        # Dedicated input validation scenarios have no c2s line.
+                        raw = b'{"id":0,"op":"app.info"}\n' if number == 36 else b'x' * 65537 if number == 37 else None
+                        if raw:
+                            client.socket.sendall(raw)
+                            case.check(True, "drive the server-only fixture input validation scenario", f"line={number}; input bytes={len(raw)}")
+                    current, request = request, None
+                    condition_deferrals = []
+                    if group == "errors" and current and "error" in expected:
+                        actual, condition_deferrals = replay_error(expected, current, client, normalizer, harness, number, frames)
+                    elif "id" in expected and expected["id"] is not None:
+                        actual = client.response(normalizer.identities["request"][expected["id"]])
+                    else:
+                        actual = client.receive()
+                        while actual and (actual.get("ev") in ("heartbeat", "mutation.result")):
+                            actual = client.receive()
+                    if actual is None:
+                        case.check(False, "fixture receives a live response", f"EOF at {path.name}:{number}")
+                        break
+                    if group == "torrents" and current and current["op"] == "torrents.get" and current["args"]["hash"] in prepared and prepared[current["args"]["hash"]]["row"]["state"] == "waiting_vpn":
+                        restore_replay_interface(client, harness)
+                    # Frame-level deferral: its raw expected and live frame are
+                    # both run through frozen P1-05 validation, never synthesized.
+                    owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
+                    if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
+                        normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
+                    for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
+                        if cap in CAP_BEADS: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
+                        owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
+                    if owners:
+                        for pointer, bead, reason in owners: defer(number, pointer, bead, reason)
+                        continue
+                    step = case.step(f"replay {path.relative_to(REPO)}:{number}", "canonical bytes match under the single declared normalization table")
+                    try:
+                        normalizer.compare(expected, actual)
+                        step.ok("Canonical bytes matched; identity bindings and volatile validity checked.")
+                    except ReplayMismatch as failure:
+                        step.fail(str(failure))
+            case.path.with_suffix(".deferred.json").write_text(json.dumps(deferred, indent=2, sort_keys=True) + "\n")
+            case.path.with_suffix(".identities.json").write_text(json.dumps(normalizer.identities, indent=2, sort_keys=True) + "\n")
+            case.path.with_suffix(".normalization.md").write_text(normalization_markdown())
+            validate_live_contract(case, sandbox, frames)
+            validate_live_contract(case, sandbox, lines, "fixture")
+            if group == "torrents": process.wait()
 
 
 def contract_hello(binary, systemd):
@@ -2274,7 +2731,7 @@ CASES = {function.__name__: function for function in
           cap_change_no_check, seed_toggle_no_check,
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
-          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred,
+          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
           contract_hello, contract_errors, contract_torrents)}
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",

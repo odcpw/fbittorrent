@@ -329,7 +329,7 @@ timeouts are shorter so clients receive a typed timeout. Hash lists contain
 
 Each line is c2s/frame (Request), s2c/frame (typed reply/event), expect/model
 (expected client store) or a first-line volatile/paths. Paths are relative to a
-frame (for example result.instance). Live replay masks those paths; typed round
+frame (for example result.instance). Live replay uses the declared normalization below; typed round
 trips mask nothing. Files are independent conversations. A repeated hello in
 hello.ndjson begins a new mismatch-banner scenario for proto 2, not a serve flag.
 
@@ -340,6 +340,35 @@ revision: the suspect delta is not applied, resync becomes true, then c2s
 unsubscribe/subscribe and a new snapshot rebuild the store. This is a reducer
 fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
+
+
+**Live replay (P1-06, orchestrator ruling 3).** The hello/errors/torrents runner
+generates real payloads and metainfo from transcript names, sizes, files and
+selection, adds them through the API, and drives the available state/error
+preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
+user/network namespace; it never adopts an existing directory or edits a ledger.
+The following single table is defined in daemon.py and reproduced verbatim here
+and in the P1-06 receipt. Identity bindings are bijective and checked at every
+occurrence. Volatile fields retain their presence/type/validity checks. All other
+fields compare byte-for-byte after canonical P1-05 typed re-serialization. A
+future-capability/proto-2/unreachable-error frame is validated with the frozen
+P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
+mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
+
+| JSON pointer(s) | Comparison | Validity |
+|---|---|---|
+| `/id` | identity:request | positive u64, consistent first-occurrence bijection |
+| `/result/instance` | identity:instance | 32 lowercase hex, consistent first-occurrence bijection |
+| `/**/hash; /result/started/*; /result/stopped/*` | identity:hash | 40 lowercase hex; API-generated hashes bound to fixture identities |
+| `/ref; /result/ref` | identity:ref | at most 64 ASCII characters, consistent first-occurrence bijection |
+| `/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at` | timestamp | positive u64; presence preserved |
+| `/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps` | u64 | nonnegative u64; presence preserved |
+| `/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds` | u64 | nonnegative u64; presence preserved |
+| `/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*` | u64 | nonnegative u64; presence preserved |
+| `/result/server/pid` | timestamp | positive u64; presence preserved |
+| `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
+| `/result/server/version` | version | semantic version string; presence preserved |
+| `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
