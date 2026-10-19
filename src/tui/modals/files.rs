@@ -17,33 +17,21 @@ impl TuiApp {
     }
 
     pub(super) fn reload_files(&self, hash: String) -> Cmd<Msg> {
-        let cfg = self.cfg.clone();
         let presence = self.presence.clone();
         Cmd::task(move || {
-            if cfg.native() {
-                let id=presence.as_ref().map(|connection|connection.id);
-                let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::files(&connection,&hash));
-                return Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())};
-            }
-            let c = Client::from_config(&cfg, presence.clone());
-            let r = c.login().and_then(|_| c.files(&hash)).map_err(|e| e.to_string());
-            Msg::Files(hash, r)
+            let id=presence.as_ref().map(|connection|connection.id);
+            let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::files(&connection,&hash));
+            Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())}
         })
     }
 
     pub(super) fn set_file_prio(&self, hash: String, ids: Vec<i64>, prio: i64) -> Cmd<Msg> {
-        let cfg = self.cfg.clone();
         let presence = self.presence.clone();
         let h = hash.clone();
         Cmd::task(move || {
-            if cfg.native() {
-                let id=presence.as_ref().map(|connection|connection.id);
-                let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::set_files(&connection,&h,&ids,prio));
-                return Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())};
-            }
-            let c = Client::from_config(&cfg, presence.clone());
-            let r = c.login().and_then(|_| c.set_file_priority(&h, &ids, prio)).and_then(|_| c.files(&h)).map_err(|e| e.to_string());
-            Msg::Files(hash, r)
+            let id=presence.as_ref().map(|connection|connection.id);
+            let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::set_files(&connection,&h,&ids,prio));
+            Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())}
         })
     }
 

@@ -30,6 +30,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   app is open. Hover clipped names or details to see their full text.
 - **TUI** with four screens: (1) Torrents, (2) Search (streamed provider results),
   (3) Shows (your local show list and releases), and (4) RSS (feeds and items).
+  All four screens, provider lists and IMDb cards use one daemon API connection.
+  Updates arrive as pushed changes; a disconnected screen retains dimmed rows
+  while it reconnects.
   IMDb card per title:
   rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
   a row to preview its full name; click selects it, double-click activates it,

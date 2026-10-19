@@ -24,7 +24,7 @@ pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
 fn ensure(cfg: &Config) -> Result<()> {
     let mut explicit = cfg.clone();
     explicit.autostart = true;
-    crate::backend::ensure_running(&explicit, &LegacyClient::from_config(&explicit))?;
+    crate::api::client::ensure_daemon(&explicit, crate::backend::start_prevented())?;
     Ok(())
 }
 

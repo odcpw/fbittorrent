@@ -30,12 +30,6 @@ impl TuiApp {
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }
-            actions::Intent::Sequential if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
-                return self.action("toggled sequential", move |c| c.toggle_sequential(&[t.hash]));
-            },
-            actions::Intent::FirstLast if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
-                return self.action("toggled first/last", move |c| c.toggle_first_last(&[t.hash]));
-            },
             actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
                 let allow = !self.seed_allowed(&t);
                 return self.action(if allow { "seeding allowed" } else { "seeding off · upload capped" },

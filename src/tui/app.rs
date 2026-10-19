@@ -61,7 +61,6 @@ pub struct TuiApp {
     pub(super) plugins: Vec<SearchPlugin>,
     pub(super) ratings: Option<Arc<imdb::RatingsIndex>>,
     pub(super) name_ids: HashMap<String, String>,
-    pub(super) ids_inflight: bool,
     pub(super) status_at: std::time::Instant,
     pub(super) theme_mtime: Option<std::time::SystemTime>,
     pub(super) hover_key: Option<String>,
@@ -124,6 +123,7 @@ pub enum Msg {
     Raw(Event),
     Poll,
     Api {connection:u64,update:super::attach::ApiUpdate,ack:std::sync::mpsc::SyncSender<()>},
+    ApiBatch {connection:u64,updates:Vec<super::attach::ApiUpdate>,ack:std::sync::mpsc::SyncSender<()>},
     ApiRead {connection:Option<u64>,result:Result<super::remote::ReadSnapshot,String>},
     Attached(Result<Arc<super::attach::Presence>,super::attach::Failure>),
     OwnerShutdown(Result<(),String>),
@@ -140,23 +140,15 @@ pub enum Msg {
     SearchBatch { id: SubId, results: Vec<SearchResult>, done: bool, error: Option<String> },
     Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
-    RssReload,
     TopicsSelected{connection:u64,active:Vec<(u64,crate::api::Topic)>,result:Result<(),String>},
     ServiceDone{connection:Option<u64>,op:&'static str,args:serde_json::Value,label:String,result:Result<serde_json::Value,String>},
-    ShowGrab { imdb: String, episode: Episode, result: Result<(), String> },
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
     Files(String, Result<Vec<TorrentFile>, String>),
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
-    Ratings(Result<Arc<imdb::RatingsIndex>, String>),
-    /// Resolved (release name, IMDb id) pairs for the ratings column.
-    Ids(Vec<(String, String)>),
-    /// Episode list for a followed show (by IMDb id).
-    Episodes(String, Result<shows::EpisodeCheck, String>),
-    /// A show the user asked to follow, resolved on IMDb.
-    Followed(Result<Title, String>),
+
 }
 
 pub enum ImdbState {
@@ -223,7 +215,6 @@ impl TuiApp {
             plugins: vec![],
             ratings: None,
             name_ids: HashMap::new(),
-            ids_inflight: false,
             status_at: std::time::Instant::now(),
             theme_mtime: std::fs::metadata(theme::colors_path()).and_then(|m| m.modified()).ok(),
             hover_key: None,

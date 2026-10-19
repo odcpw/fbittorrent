@@ -116,3 +116,21 @@ fn merged_search_and_show_inbox_keep_distinct_removal_keys() {
         assert_eq!(removed, vec![json!(removed_key)]);
     }
 }
+
+#[test]
+fn fast_engine_transitions_are_delivered_once_per_connection_without_sampling() {
+    let sink=EventSink::testing();
+    let mut registry=Registry::default();
+    for sub in [1,2] {
+        registry.subscriptions.insert((sink.id(),sub),Subscription {
+            sub,sink:sink.clone(),rev:0,topics:vec![],since:None,epoch:None,active:true,
+        });
+    }
+    registry.engine_changed(2,"starting");
+    registry.engine_changed(2,"running");
+    let frames=sink.take_frames();
+    assert_eq!(frames.len(),2,"two topics on one connection cannot duplicate phases");
+    assert_eq!(frames.iter().map(|f|f["state"].as_str().unwrap()).collect::<Vec<_>>(),["starting","running"]);
+    assert!(frames.iter().all(|f|f["epoch"]==2&&f["reason"]=="engine_restart"));
+    assert_eq!(registry.events.replay(None).2,frames,"both phases remain replayable even without a sampler tick");
+}

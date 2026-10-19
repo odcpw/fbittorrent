@@ -42,6 +42,7 @@ pub struct Daemon {
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
+    event_bus: Mutex<std::sync::Weak<crate::api::bus::Bus>>,
     pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) logs: Arc<log::Ring>,
     resume: Arc<engine::resume::Store>,
@@ -225,12 +226,17 @@ impl Daemon {
             app.quiesce();
         }
         let mut slot = self.slot.write().unwrap_or_else(|error| error.into_inner());
+        let initialized=slot.engine_epoch>0;
         let old = slot.replace(next)?;
         eprintln!(
             "INFO engine state changed state={} engine_epoch={}",
             slot.slot.state().name(),
             slot.engine_epoch
         );
+        let (epoch,state)=(slot.engine_epoch,slot.slot.state().name());
+        drop(slot);
+        // Record transitions at their source: a fast restart can finish between sampler ticks.
+        if initialized {if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){bus.engine_changed(epoch,state);}}
         Ok(old)
     }
 }
@@ -398,6 +404,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
+        event_bus: Mutex::default(),
         inhibitor: inhibit::Inhibitor::new()?,
         clipboard: clipboard::Watcher::new()?,
         rss: rss::Service::new()?,
@@ -414,6 +421,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     let dispatch = daemon.clone();
     let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
+    *daemon.event_bus.lock().unwrap()=api.event_bus();
     let rss_bus=api.event_bus();
     daemon.shows.set_bus(api.event_bus());
     daemon.rss.set_waker(Arc::new(move || {if let Some(bus)=rss_bus.upgrade(){bus.refresh();}}));

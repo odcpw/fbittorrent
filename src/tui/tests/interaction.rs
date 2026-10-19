@@ -264,7 +264,7 @@
         assert!(app.show_grabbing.contains("tt111:S01E01"));
         assert!(!app.show_grabbing.contains("tt222:S01E01"));
         assert!(matches!(app.on_shows_key(KeyEvent::new(KeyCode::Enter)), Cmd::None));
-        app.update(Msg::ShowGrab { imdb: "tt111".into(), episode: episode("S01E01", 10), result: Err("fixture add failed".into()) });
+        app.update(Msg::ServiceDone { connection:None, op:"shows.grab", args:serde_json::json!({"imdb":"tt111","key":"S01E01"}), label:String::new(), result:Err("fixture add failed".into()) });
         assert_eq!(app.selected_release_target(), Some(selected));
         assert!(!app.shows.shows[0].seen.contains("S01E01"));
         assert_eq!(app.shows.new_total(), 4);

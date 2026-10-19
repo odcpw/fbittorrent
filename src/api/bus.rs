@@ -71,6 +71,15 @@ struct Registry {
     subscriptions: BTreeMap<(u64, u64), Subscription>,
     events: EventRing,
 }
+impl Registry {
+    fn engine_changed(&mut self,epoch:u64,state:&str) {
+        let event=self.events.append(json!({"ev":"engine.changed","epoch":epoch,"state":state,"reason":"engine_restart"}));
+        let mut connections=BTreeSet::new();
+        for sub in self.subscriptions.values().filter(|sub|sub.active) {
+            if connections.insert(sub.sink.id()) {let _=sub.sink.send(serde_json::from_value(event.clone()).unwrap());}
+        }
+    }
+}
 #[derive(Default)]
 struct EventRing {
     next: u64,
@@ -188,6 +197,7 @@ pub(crate) struct Bus {
 }
 impl Bus {
     pub(crate) fn refresh(&self) { self.wake.signal(); }
+    pub(crate) fn engine_changed(&self,epoch:u64,state:&str) {self.registry.lock().unwrap().engine_changed(epoch,state);self.wake.signal();}
     pub fn new(daemon: Arc<Daemon>) -> Arc<Self> {
         Arc::new(Self {
             daemon,
@@ -469,7 +479,6 @@ impl Bus {
         let mut seen_generation = 0;
         let mut identity = None;
         let mut previous_rows: BTreeMap<String, Torrent> = BTreeMap::new();
-        let mut previous_engine = None;
         let mut ready_seen = false;
         let mut dirty = true;
         let mut generation_threads = Vec::new();
@@ -582,18 +591,7 @@ impl Bus {
             match self.sample(&topics) {
                 Ok(sample) => {
                     let mut r = self.registry.lock().unwrap();
-                    let engine = (sample.epoch, sample.state.clone());
-                    if ready_seen && previous_engine.as_ref().is_some_and(|p| p != &engine) {
-                        let event=r.events.append(json!({"ev":"engine.changed","epoch":sample.epoch,"state":sample.state,"reason":"engine_restart"}));
-                        let mut connections = BTreeSet::new();
-                        for s in r.subscriptions.values() {
-                            if connections.insert(s.sink.id()) {
-                                let _ = s.sink.send(serde_json::from_value(event.clone()).unwrap());
-                            }
-                        }
-                    }
                     let restored_baseline = !ready_seen;
-                    previous_engine = Some(engine);
                     if !matches!(sample.state.as_str(), "starting" | "stopping") {
                         ready_seen = true;
                         for row in &sample.rows {
