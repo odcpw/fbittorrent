@@ -464,32 +464,29 @@ set `force_fail` to `native/quit_restart_down` to verify the failing JSONL
 artifact. The workflow's presence is not proof that a hosted run has passed.
 
 The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
-reference host before each release. Its checked-in baseline contains three
-idle and three verified loopback-download measurements,
-with the reference machine and workload. Both use a local empty IMDb ratings
-fixture; the active transfer uses the existing plaintext loopback seed.
-Each CPU/RSS observation must stay at
-or below the baseline median plus the larger of 10% of that median and three
-times the baseline range. A different host is rejected. To deliberately record
-a new reference, build `release-perf`, then run the following under the same
-release lock. Review the measured values before committing them. Comparison
-runs never rewrite the baseline.
+reference host before each release, after other builds and tests have finished.
+It measures the daemon with 10 and 100 paused local torrents and 0, 1 and 8
+summary subscribers: three 60-second windows per configuration, plus matched
+CLI polling references (about 24 minutes total). `FBT_TEST_DAEMON_RESOURCES=1`
+selects the same matrix; setting both runs it once.
+
+The checked-in P1-08 daemon baseline is in `baselines/resources.json` beside
+P0-06's original TUI measurements. The gate uses the daemon workloads because
+the TUI now attaches to the daemon and `q` detaches. Every CPU/RSS observation
+must be at or below its baseline median plus the larger of 10% of that median
+and three times the range of the three baseline runs. A different reference host
+or window is rejected. Comparison runs never rewrite the baseline.
+
+To run just the resource check after building `release-perf`, use the following
+under the release lock and memory scope. To deliberately record a new reference,
+replace `--baseline` with `--write-baseline` and review the values before committing.
 
 ```bash
 python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
-  --runs 3 \
-  --write-baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
+  --daemon --matrix --runs 3 --seconds 60 \
+  --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
   --output target/test-logs/resources/measurement.json
 ```
-
-The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
-It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
-three 60-second windows per configuration, plus matched CLI polling references
-(about 24 minutes total). The daemon entries share `baselines/resources.json`
-with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
---seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
-against the same median and spread rule; `--write-baseline` records a complete
-matrix deliberately. Use the reference host and the release-lock/memory scope.
 
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.
