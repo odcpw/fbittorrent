@@ -1,4 +1,5 @@
 import QtQuick
+import QtTest
 import Quickshell
 import Quickshell.Io
 import qs.Commons as Commons
@@ -60,8 +61,33 @@ ShellRoot {
     function summon(id:string,payload:string):bool{return facade.summon(id,payload)}
     function hide(id:string):bool{return facade.hide(id)}
   }
+  TestCase {id:preferencesInput;name:"PreferencesPointer";when:false}
+  function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
   IpcHandler {
     target:"fbt-dashboard"
+    function setting(key:string,valueJson:string):string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.settingsSheet)return "refused"
+      var sheet=dashboard.item.settingsSheet,item=sheet.row(key),value=JSON.parse(valueJson)
+      if(!item)return "unknown key"
+      sheet.focusSetting(key)
+      if(item.spec.kind==="bool")preferencesInput.mouseClick(item.toggle,item.toggle.width/2,item.toggle.height/2,Qt.LeftButton)
+      else if(item.spec.kind==="choice" || item.spec.kind==="interface")item.dropdown.changed(value===null ? "" : String(value))
+      else{item.textField.text=value===null ? "" : String(value);item.textField.accepted()}
+      return "ok"
+    }
+    function focusSetting(key:string):bool {return Quickshell.env("FBT_TEST_HOOKS")==="1" && dashboard.item && dashboard.item.settingsSheet ? dashboard.item.settingsSheet.focusSetting(key) : false}
+    function settingsTrace():string {return JSON.stringify({actions:service.client ? service.client.actions : {},results:service.store.mutations})}
+    function helpKeys():string{return JSON.stringify(dashboard.item && dashboard.item.helpOverlay ? dashboard.item.helpOverlay.listedKeys() : [])}
+    function logRows():string{return JSON.stringify(dashboard.item && dashboard.item.logView ? dashboard.item.logView.rendered() : [])}
+    function logFilter(kind:string,value:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.logView || ["level","source"].indexOf(kind)<0)return false
+      var button=root.find(dashboard.item.logView,"log-"+kind+"-"+(value || "all"));if(!button)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function gridState():string {
+      var view=dashboard.item ? dashboard.item.search : null
+      return JSON.stringify(view ? {grid:view.gridShowing ? view.viewState.grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
+    }
     function eventTrace():string{return JSON.stringify(service.store.events)}
     function searchFocus():string {
       var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null

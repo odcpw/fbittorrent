@@ -207,6 +207,7 @@
             output_folder: "/tmp/fixture".into(),
             only_files: Some(vec![1]),
             upload_limit: NO_UPLOAD_LIMIT,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             ratio_limit: 0.0,
             category: String::new(),
             tags: String::new(), origin: "manual".into(),

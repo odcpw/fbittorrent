@@ -42,8 +42,10 @@ pub(super) struct Store {
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
     pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
+    pub peers: BTreeMap<api::Hash, BTreeMap<String, api::Peer>>,
     pub rss_feeds:BTreeMap<String,api::Feed>,
     pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
+    pub releases_topic:Option<String>,
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
@@ -77,7 +79,7 @@ impl Store {
         self.caps.reply(&reply)?;
         match (call, reply) {
             (_,api::Reply::ShowsList(result))=>{ensure!(result.shows.len()<=MAX_ITEMS,"show list exceeds UI row budget");self.shows=result.shows.into_iter().map(|row|(row.imdb.clone(),row)).collect();},
-            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
+            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.releases_topic=Some(args.imdb.clone().unwrap_or_else(||"inbox".into()));self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
             (_,api::Reply::RssFeeds(result))=>{
                 ensure!(result.feeds.len()<=MAX_ITEMS,"feed list exceeds UI row budget");
                 self.rss_feeds=result.feeds.into_iter().map(|row|(row.id.clone(),row)).collect();
@@ -119,6 +121,10 @@ impl Store {
                         .map(|row| (row.index.to_string(), row))
                         .collect(),
                 );
+            }
+            (api::Call::TorrentsPeers {args},api::Reply::TorrentsPeers(result))=>{
+                ensure!(result.peers.len()<=MAX_ITEMS,"peer list exceeds UI row budget");
+                self.peers.clear();self.peers.insert(args.hash.clone(),result.peers.into_iter().map(|p|(p.addr.clone(),p)).collect());
             }
             (_, api::Reply::AppNetwork(result)) => self.network = Some(result.state),
             (api::Call::Unsubscribe { args }, api::Reply::Unsubscribe(_)) => {
@@ -264,6 +270,7 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Peers(hash) => patch(self.peers.entry(hash.clone()).or_default(),changed,added,removed,|item|match item{api::Item::Peer(p)=>Some((p.addr.clone(),p.clone())),_=>None})?,
                 api::Topic::Files(hash) => patch(
                     self.files.entry(hash.clone()).or_default(),
                     changed,
@@ -317,7 +324,7 @@ impl Store {
         ensure!(snapshot.len() == snapshot.count, "incomplete snapshot");
         match topic {
             api::Topic::Shows=>self.shows=snapshot.shows,
-            api::Topic::ShowReleases(_)=>self.show_releases=snapshot.releases,
+            api::Topic::ShowReleases(id)=>{self.releases_topic=Some(id.clone());self.show_releases=snapshot.releases;},
             api::Topic::RssFeeds=>self.rss_feeds=snapshot.feeds,
             api::Topic::RssItems(id)=>{self.rss_items.clear();self.rss_items.insert(id.clone(),snapshot.feed_items);},
             api::Topic::Torrents => {
@@ -325,6 +332,7 @@ impl Store {
                 self.stale = false;
                 self.fresh_rows();
             }
+            api::Topic::Peers(hash)=>{self.peers.clear();self.peers.insert(hash.clone(),snapshot.peers);},
             api::Topic::Files(hash) => {
                 self.files.clear();
                 self.files.insert(hash.clone(), snapshot.files);

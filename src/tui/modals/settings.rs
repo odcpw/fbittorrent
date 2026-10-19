@@ -11,8 +11,15 @@ pub(super) struct SettingsModal {
 }
 
 impl TuiApp {
-    pub(super) fn open_settings(&mut self) {
-        let mut cfg=self.cfg.clone();if let Some(settings)=&self.store.settings{if let Err(error)=settings_fields::native_settings(&mut cfg,settings){self.set_status(format!("Settings: {error}"),true);return;}}
+    pub(super) fn open_settings(&mut self)->Cmd<Msg> {
+        if self.settings_loading{return Cmd::none();}
+        if let Some(connection)=self.presence.clone(){
+            self.settings_loading=true;
+            return Cmd::task(move||Msg::SettingsOpened{connection:connection.id,result:connection.request("app.settings.get",serde_json::json!({})).and_then(|v|Ok(serde_json::from_value(v)?)).map_err(|e|e.to_string())});
+        }
+        self.show_settings(self.cfg.clone());Cmd::none()
+    }
+    pub(super) fn show_settings(&mut self,cfg:Config) {
         let mut connections = vec![Some("proton".into()), None];
         for name in crate::network_app::interfaces().unwrap_or_default() {
             if name != "lo" && !connections.contains(&Some(name.clone())) { connections.push(Some(name)); }

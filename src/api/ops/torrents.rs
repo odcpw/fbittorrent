@@ -16,6 +16,7 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::EditTracker { hash, .. }
         | EngineOp::Commit {hash, ..}
         | EngineOp::Discard {hash}
         | EngineOp::Files { hash }
@@ -223,6 +224,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
+            execute(daemon,EngineOp::EditTracker{hash:args.hash.to_string(),url:args.url.clone(),add:matches!(call,Call::TorrentsAddTracker{..})})?;
+            if matches!(call,Call::TorrentsAddTracker{..}) {Reply::TorrentsAddTracker(DoneResult{state:DoneState::Done})}
+            else {Reply::TorrentsRemoveTracker(DoneResult{state:DoneState::Done})}
+        },
+        Call::TorrentsPeers { args } => Reply::TorrentsPeers(PeersResult { peers: daemon.peers.read(daemon, &args.hash)? }),
         Call::TorrentsFiles { args } => Reply::TorrentsFiles(FilesResult {
             files: files(daemon, &args.hash)?,
         }),
@@ -562,6 +569,16 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 state: DoneState::Done,
             })
         }
+        Call::TorrentsSetDownloadLimit{args}=>{
+            let rows=list(daemon)?;
+            if let Some(hash)=args.hashes.as_slice().iter().find(|h|!rows.iter().any(|row|&row.hash==*h)){
+                let mut failure=error(NotFound,"torrent record not found",None);
+                failure.details=Some(serde_json::Map::from_iter([("hash".into(),json!(hash))]));
+                return Err(failure);
+            }
+            if !matches!(args.bps,Update::Unset){execute(daemon,EngineOp::SetDownloadLimit{hashes:hashes(&args.hashes),bps:match args.bps{Update::Set(bps)=>Some(bps),_=>None}})?;}
+            Reply::TorrentsSetDownloadLimit(DoneResult{state:DoneState::Done})
+        },
         Call::TorrentsSetUploadLimit { args } => {
             match args.bps {
                 Update::Unset => {}

@@ -171,6 +171,7 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Events { follow, since_seq, kinds } => return cli::stream::events(&cfg, follow, since_seq, kinds),
         Cmd::Api { op, list, args, json_args, reference } => return cli::raw::run(&cfg, json, no_start, op, list, args, json_args, reference),
+        Cmd::Limit{..}=>return Err(AppError::new(Code::Usage,"per-torrent download limits require the daemon API").into()),
         Cmd::Limits { down, up, alt, alt_down, alt_up } => return cli::limits::run(&cfg, json, down, up, alt, alt_down, alt_up),
         Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
         Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
@@ -541,7 +542,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 
@@ -609,7 +610,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+    matches!(cmd, Cmd::Limit { .. } | Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
         | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))

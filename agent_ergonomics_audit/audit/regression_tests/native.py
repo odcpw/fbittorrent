@@ -685,7 +685,7 @@ class peer_labels:
 
 def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session):
     """P0-11: real TUI captures; local provider fixtures, never public swarms."""
-    artifacts = REPO / "target/test-logs/native"
+    artifacts = case.suite.directory
     def check_capture(filename, ready, extra=lambda pane: True):
         step = case.step("Capture " + filename,
                          "The populated pane has no fabricated seed count.")
@@ -707,7 +707,7 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
         cli("add", str(root / "fixture.torrent"), "--quiet")
     tmux("resize-window", "-t", session, "-x", "160", "-y", "45")
     keys("1", "Home")
-    check_capture("01-torrents-160x45.txt", lambda pane: "peers connected" in pane)
+    check_capture("01-torrents-160x45.txt", lambda pane: "peers     unknown" in pane or "peers connected" in pane)
     keys("2", "/", "C-a")
     tmux("send-keys", "-t", session, "-l", "known peers")
     keys("Enter")
@@ -733,10 +733,30 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
                   blank_seed_column)
     keys("Escape", "4")
     check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
-    step = case.step("Read capabilities --json", "The native zero seed sentinel is documented as unknown.")
+    step = case.step("Read capabilities --json",
+                     "Native counts describe connected seeds when live; optional seeds distinguishes unknown.")
     capabilities = cli("capabilities")
     note = capabilities.get("field_notes", {}).get("list[].num_seeds")
-    (step.ok if note == "always 0 in native mode: unknown" else step.fail)(f"Field note: {note}.")
+    expected = "connected seeds for live native torrents; read optional seeds to distinguish unknown"
+    (step.ok if note == expected else step.fail)(f"Field note: {note}.")
+    # Unknown and a measured zero are different observations. This local fixture
+    # has no tracker or peer source, so its live count is independently zero.
+    info_hash = next(row["hash"] for row in cli("list")["torrents"]
+                     if row["name"].startswith("Fixture.with.a.long.filename."))
+    cli("stop", info_hash)
+    stopped = cli("show", info_hash)
+    case.check(stopped.get("native_state") == "paused" and "seeds" not in stopped,
+               "A stopped native torrent omits unknown seeds rather than claiming a measured zero.",
+               json.dumps(stopped))
+    cli("start", info_hash)
+    live = [{}]
+    def known_zero():
+        live[0] = cli("show", info_hash)
+        return (live[0].get("native_state") == "stalled" and live[0].get("seeds") == 0
+                and live[0].get("num_seeds") == 0 and live[0].get("peers") == [])
+    wait_for(known_zero, "the trackerless local torrent reports a measured zero connected seeds")
+    case.check(known_zero(), "A live zero seed count agrees with the actual empty peer list.", json.dumps(live[0]))
+    cli("stop", info_hash)
     keys("1")
     tmux("resize-window", "-t", session, "-x", "120", "-y", "30")
 
@@ -776,15 +796,16 @@ def store_modes(case, root, env, cli, base, fixture):
         for path in [by_name, by_id, ratings]:
             path.chmod(0o644)
         result = cli("imdb", "Private cache fixture")
-        poster = cache / "posters/poster_300.jpg"
-        case.check(result.get("found") is True and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
+        poster = Path(result.get("poster_path") or root / "missing-poster")
+        expected_poster = cache / "posters/tt1234567.jpg"
+        case.check(result.get("found") is True and poster == expected_poster and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
                    "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
-                   f"found={result.get('found')}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
+                   f"found={result.get('found')}; poster={poster}; expected={expected_poster}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
         if poster.is_file():
             poster.chmod(0o644)
             poster.parent.chmod(0o777)
-        cli("imdb", "Private cache fixture")
-        case.check(fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+        second = cli("imdb", "Private cache fixture")
+        case.check(second.get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
                    "The second IMDb CLI call repairs the existing poster without another HTTP request.",
                    f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
     finally:
@@ -1327,7 +1348,11 @@ def main():
     parser.add_argument("--list", action="store_true", help="list case slugs without launching anything")
     parser.add_argument("--case", choices=CASES + ATTACH_CASES,
                         help="log one case, replaying its prerequisites in the isolated fixture")
+    parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
     options = parser.parse_args()
+    if options.log_root:
+        import fbtlog
+        fbtlog.LOG_ROOT=options.log_root.resolve()
     if options.list:
         print("\n".join(CASES + ATTACH_CASES))
         return 0
@@ -1463,8 +1488,14 @@ def main():
                 record("tmux send-keys " + repr(key), "key delivered to isolated TUI", f"exit={result.returncode}", result.returncode == 0)
 
         def mouse_text(text, button):
-            rows = capture(log=False).splitlines()
-            y, row = next((y, row) for y, row in enumerate(rows) if text in row)
+            # Pushed data and ten-second feedback may briefly obscure a target.
+            # Locate it in one observed frame before sending its real coordinates.
+            located=[None]
+            def visible():
+                located[0]=next(((y,row) for y,row in enumerate(capture(log=False).splitlines()) if text in row),None)
+                return located[0] is not None
+            wait_for(visible,"mouse target visible: "+text,seconds=12)
+            y,row=located[0]
             x = row.index(text) + len(text) // 2
             sequence = f"\x1b[<{button};{x+1};{y+1}M"
             if button == 0:
@@ -1482,13 +1513,23 @@ def main():
                 error_file = case.suite.stderr_path
                 engine_stderr_offset = error_file.stat().st_size
                 app_launch = f"exec {shlex.quote(binary)} tui 2>>{shlex.quote(str(error_file))}"
-                launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(terminal_bytes))}"
+                # Record the actual tmux PTY output, avoiding a second PTY whose
+                # window size can lag tmux during the responsive layout checks.
+                launch_ready=root/"tui-launch.ready"
+                launch=f"while [ ! -e {shlex.quote(str(launch_ready))} ]; do sleep .01; done; {app_launch}"
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
                 cli("rss", "add", base + "/rss", "--name", "Local feed")
                 case.check(not socket_path.exists(), 'Local RSS commands leave the torrent engine closed.')
                 case.check(len(cli("rss", "items", "Local feed")["items"]) == 1, 'The local feed initially contains one article.')
                 fixture["version"] = 2
+                # The daemon refreshes stale feeds on an interactive open; the TUI does not fetch.
+                feed_store=Path(env["XDG_DATA_HOME"])/"fbittorrent/rss.json"
+                cached=json.loads(feed_store.read_text())
+                for feed in cached["feeds"]:feed["last_checked"]=int(time.time())-1801
+                feed_store.write_text(json.dumps(cached))
                 harness.start_tmux(tmux, session, launch)
+                tmux("pipe-pane","-O","-t",session,"cat >"+shlex.quote(str(terminal_bytes)))
+                launch_ready.touch()
                 wait_for(lambda: socket_path.exists(), "native socket")
                 wait_for(lambda: cli("status").get("ok"), "native status")
                 wait_for(lambda: terminal_bytes.exists() and b"\x1b[?1003h" in terminal_bytes.read_bytes(),
@@ -1621,6 +1662,7 @@ def main():
                 wait_for(lambda: show_episodes("tt1234002")["S01E02"]["read"], "inbox read saves the selected show episode")
                 wait_for(lambda: "3 Shows (2)" in capture() and "S01E02" not in "\n".join(capture().splitlines()[1:-2]), "read removes the inbox row")
                 case.check(not show_episodes("tt1234002")["S01E01"]["read"], 'The unselected Beta Show episode remains unread.')
+                wait_for(lambda: "(u) Undo read" in capture(), "confirmed read enables Undo")
                 keys("u")
                 wait_for(lambda: not show_episodes("tt1234002")["S01E02"]["read"], "undo restores exact inbox release")
                 wait_for(lambda: "3 Shows (3)" in capture() and "S01E02" in capture(), "undo restores the visible row")
@@ -1630,6 +1672,7 @@ def main():
                 wait_for(lambda: show_episodes("tt1234002")["S01E01"]["read"], "hover keeps clicked inbox target")
                 case.check(not show_episodes("tt1234002")["S01E02"]["read"], 'The other Beta Show release remains unread.')
                 case.check(not show_episodes("tt1234001")["S01"]["read"], 'The Alpha Show season pack remains unread.')
+                wait_for(lambda: "(u) Undo read" in capture(), "confirmed read enables Undo")
                 keys("u")
                 wait_for(lambda: not show_episodes("tt1234002")["S01E01"]["read"], "undo restores clicked release")
                 wait_for(lambda: "3 Shows (3)" in capture(), "restored inbox count")
@@ -1661,6 +1704,8 @@ def main():
                 keys("Escape")
                 wait_for(lambda: "GLOBAL" not in capture(), "help closes")
                 tmux("resize-window", "-t", session, "-x", "80", "-y", "24")
+                geometry=tmux("display-message","-p","-t",session,"#{pane_pid} #{pane_tty} #{pane_width} #{pane_height}").stdout.strip()
+                record("observe resized owned terminal","tmux pane is 80 by 24",geometry,geometry.endswith("80 24"))
                 keys("1")
                 wait_for(lambda: "[Torrents]" in capture() and "…" in capture().splitlines()[-2], "small terminal footer overflow")
                 pane = capture()
@@ -1677,7 +1722,9 @@ def main():
                 keys("Left", "Enter")
                 wait_for(lambda: "Download settings" not in capture(), "settings save closes panel")
                 case.check(cli("settings").get("max_active_downloads") == 2, 'The settings panel persists a two-download limit.')
-                keys("F6", "Right", "Enter")
+                keys("F6")
+                wait_for(lambda: "Download settings" in capture(), "second settings dialog has its authoritative baseline")
+                keys("Right", "Enter")
                 wait_for(lambda: "Download settings" not in capture() and cli("settings").get("max_active_downloads") == 3,
                          "settings panel changes queue limit and persists it")
                 extra_hashes = []
@@ -1846,7 +1893,8 @@ def main():
             raise
         finally:
             if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
-                terminal_artifact = REPO / "target/test-logs/native/no_fake_seed_counts.terminal.typescript"
+                terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
+                terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
                 terminal_artifact.write_bytes(terminal_bytes.read_bytes())
                 print(f"Terminal stream retained: {terminal_artifact}")
             tmux("kill-server", check=False)

@@ -81,6 +81,13 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
         .filter(|row| row["state"] == "checking")
         .filter_map(|row| row["hash"].as_str().map(str::to_owned))
         .collect();
+    let receiving: std::collections::BTreeSet<String> = lines
+        .iter()
+        .flat_map(captured_torrents)
+        .filter(|row| row["state"] == "downloading")
+        .filter_map(|row| row["hash"].as_str().map(str::to_owned))
+        .collect();
+    let mut measurements = BTreeMap::<String, (u64, String)>::new();
     let mut calls = BTreeMap::<u64, (Value, Call)>::new();
     let mut hello = Vec::<Value>::new();
     let mut geometry = TorrentFileSizes::default();
@@ -120,6 +127,31 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                 // round-trips through the unchanged frozen checker first.
                 validate(&context)?;
                 for row in captured_torrents(line) {
+                    // Receiving changes completion over time, unlike the static
+                    // catalogue. Validate the original tuple before removing a
+                    // dynamic measurement from the cross-frame geometry check.
+                    if let (Some(hash), Some(size), Some(completed), Some(progress)) = (
+                        row["hash"].as_str(), row["size"].as_u64(),
+                        row["completed_bytes"].as_u64(), row["progress"].as_f64(),
+                    ) {
+                        if completed > size {
+                            return Err(format!("{location}: /frame/result/torrent/completed_bytes: exceeds size"));
+                        }
+                        let ratio = if size == 0 { progress } else { completed as f64 / size as f64 };
+                        if !progress.is_finite() || (progress - ratio).abs() > 1e-9 {
+                            return Err(format!("{location}: /frame/result/torrent/progress: must equal completed_bytes/size within 1e-9"));
+                        }
+                        let state = row["state"].as_str().unwrap_or("");
+                        if !checking.contains(hash) {
+                            if let Some((earlier, previous)) = measurements.get(hash) {
+                                if completed != *earlier &&
+                                    (completed < *earlier || (state != "downloading" && previous != "downloading")) {
+                                    return Err(format!("{location}: /frame/result/torrent/completed_bytes: changed without receiving or verification"));
+                                }
+                            }
+                        }
+                        measurements.insert(hash.into(), (completed, state.into()));
+                    }
                     if row["state"] == "checking" {
                         if row["checked"] == true {
                             return Err(format!("{location}: /frame/result/torrent/checked: active check must be false"));
@@ -159,11 +191,12 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                         if matches!(result.status, MutationResult::Done) {
                             for hash in args.hashes.as_slice() {
                                 geometry.removed(hash);
+                                measurements.remove(hash.as_str());
                             }
                         }
                     }
                     let strip_measurement = |row: &mut Torrent| {
-                        if checking.contains(row.hash.as_str()) {
+                        if checking.contains(row.hash.as_str()) || receiving.contains(row.hash.as_str()) {
                             row.completed_bytes = None;
                         }
                     };
@@ -451,6 +484,8 @@ fn strict_type_errors_name_the_argument() {
         assert_eq!(failure.error.code, ErrorCode::InvalidArgs);
         assert_eq!(failure.error.details.unwrap()["key"], key);
     }
+    let download_clear=json!({"id":1,"op":"torrents.set_download_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
+    assert!(decode(&serde_json::to_vec(&download_clear).unwrap()).is_ok());
     let clear = json!({"id":1,"op":"torrents.set_upload_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
     assert!(decode(&serde_json::to_vec(&clear).unwrap()).is_ok());
 }
@@ -466,6 +501,18 @@ fn live_subscription_validation_retains_revision_history_and_rejects_gaps() {
     frame["frame"]["rev"] = json!(3);
     let failure = validate_live_capture(&text(&lines)).unwrap_err();
     assert!(failure.contains("must increase by exactly one"), "{failure}");
+}
+
+#[test]
+fn tracker_url_failures_name_the_key_without_echoing_values() {
+    for op in ["torrents.add_tracker","torrents.remove_tracker"] {
+        let bytes=serde_json::to_vec(&json!({"id":1,"op":op,"args":{"hash":"5656565656565656565656565656565656565656","url":"ftp://127.0.0.1/a?passkey=private"}})).unwrap();
+        let invalid=super::framing::decode(&bytes).err().expect("invalid scheme");
+        assert_eq!(invalid.error.code,ErrorCode::InvalidArgs);
+        assert_eq!(invalid.error.details.unwrap()["key"],"url");
+        assert!(!invalid.error.message.contains("private"));
+        println!("{op}: invalid URL names url, query value absent");
+    }
 }
 
 #[test]
@@ -512,4 +559,47 @@ fn live_readded_completion_starts_after_confirmed_removal() {
     later.push(json!({"dir":"s2c","frame":changed}));
     assert!(validate_live_capture(&capture_text(&later)).unwrap_err().contains("/completed_bytes"));
     println!("confirmed removal resets only completion; pending/failed/unrelated removal, later drift and changed geometry still fail");
+}
+
+#[test]
+fn live_receiving_progress_keeps_raw_invariants_and_static_catalogue() {
+    let mut rows = checking_capture();
+    for (index, completed) in [(1, 50), (3, 60), (5, 60)] {
+        let row = if index == 1 { &mut rows[index]["frame"]["result"]["torrents"][0] }
+                  else { &mut rows[index]["frame"]["result"]["torrent"] };
+        row["state"] = json!(if index == 5 { "paused" } else { "downloading" });
+        row["checked"] = json!(true);
+        row["completed_bytes"] = json!(completed);
+        row["progress"] = json!(completed as f64 / 100.0);
+    }
+    validate_live_capture(&capture_text(&rows)).unwrap();
+    assert!(crate::api::fixtures::check_group("strict-catalogue", &capture_text(&rows))
+        .unwrap_err().contains("/completed_bytes"));
+    for (key, value, pointer) in [
+        ("completed_bytes", json!(101), "/completed_bytes"),
+        ("completed_bytes", json!(40), "/progress"),
+        ("progress", json!(0.7), "/progress"),
+        ("size", json!(200), "/progress"),
+    ] {
+        let mut invalid = rows.clone();
+        invalid[3]["frame"]["result"]["torrent"][key] = value;
+        assert!(validate_live_capture(&capture_text(&invalid)).unwrap_err().contains(pointer));
+    }
+    let mut changed_size = rows.clone();
+    changed_size[3]["frame"]["result"]["torrent"]["size"] = json!(200);
+    changed_size[3]["frame"]["result"]["torrent"]["progress"] = json!(0.3);
+    assert!(validate_live_capture(&capture_text(&changed_size)).unwrap_err().contains("/size"));
+    let mut backwards = rows.clone();
+    backwards[3]["frame"]["result"]["torrent"]["completed_bytes"] = json!(40);
+    backwards[3]["frame"]["result"]["torrent"]["progress"] = json!(0.4);
+    assert!(validate_live_capture(&capture_text(&backwards)).unwrap_err().contains("/completed_bytes"));
+    let mut drift = rows;
+    drift.push(json!({"dir":"c2s","frame":{"id":4,"op":"torrents.get","args":{"hash":"ab".repeat(20)}}}));
+    let mut reply = drift[5].clone();
+    reply["frame"]["id"] = json!(4);
+    reply["frame"]["result"]["torrent"]["completed_bytes"] = json!(70);
+    reply["frame"]["result"]["torrent"]["progress"] = json!(0.7);
+    drift.push(reply);
+    assert!(validate_live_capture(&capture_text(&drift)).unwrap_err().contains("/completed_bytes"));
+    println!("live receiving advances; raw tuples, static geometry, backwards movement, paused drift and strict catalogue checks remain enforced");
 }

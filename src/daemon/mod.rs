@@ -6,11 +6,11 @@ mod log_capture;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
-pub(crate) mod watch;
 mod inhibit;
 mod clipboard;
 pub(crate) mod rss;
 pub(crate) mod shows;
+pub(crate) mod watch;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -50,6 +50,7 @@ pub struct Daemon {
     pub(crate) clipboard: clipboard::Watcher,
     pub(crate) rss: rss::Service,
     pub(crate) shows: shows::Service,
+    pub(crate) peers: crate::api::peers::Sampler,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
@@ -404,6 +405,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         clipboard: clipboard::Watcher::new()?,
         rss: rss::Service::new()?,
         shows: shows::Service::new()?,
+        peers: Default::default(),
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),

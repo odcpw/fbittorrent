@@ -1,12 +1,13 @@
 //! Available API read operations; one existing presence connection owns transport.
 use super::*;
 mod client;
+mod services;
+pub(super) mod topics;
 pub(super) mod search;
 pub(super) mod imdb;
 mod metadata;
 pub(super) use client::ScreenClient;
 mod subscription;
-pub(super) mod catalogue;
 use crate::api;
 use serde::de::DeserializeOwned;
 use serde_json::json;

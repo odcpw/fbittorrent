@@ -55,6 +55,7 @@ impl EngineDispatcher {
         if self.inner.stopping.load(Ordering::Acquire) {
             bail!("native engine is closing");
         }
+        if let EngineOp::Peers {hash}=&op {return self.peer_snapshot(hash).map(EngineResult::Peers);}
         let undo = self.inner.undo.lock().unwrap().clone();
         // The guard stays on the caller's stack, never across a Send future.
         let _undo_guard = matches!(&op, EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. })
@@ -78,6 +79,10 @@ impl EngineDispatcher {
         let _serial=if read {None}else{Some(OwnedMutexGuard::lock(self.inner.operations.clone(),cx).await?)};
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             return self.staged_operation(cx, op).await;
+        }
+        if let EngineOp::EditTracker {hash,url,add} = &op {
+            self.edit_tracker(cx,hash,url,*add).await?;
+            return Ok(EngineResult::Acknowledged);
         }
         match &op {
             EngineOp::Trackers {hash} => return self.trackers(cx,hash).await,
@@ -172,7 +177,10 @@ impl EngineDispatcher {
                         Err(error) => return Err(error),
                     }
                 };
-                return Ok(EngineResult::Detail(TorrentDetails::from_bytes(torrent, bytes.as_deref())?));
+                let mut detail=TorrentDetails::from_bytes(torrent, bytes.as_deref())?;
+                if let Ok(handle)=self.inner.handle(hash){detail.tracker_count=Some(handle.tracker_urls().len() as u64);}
+                else if let Some(bytes)=bytes.as_deref(){detail.tracker_count=Some(record.tracker_count(bytes)?);}
+                return Ok(EngineResult::Detail(detail));
             }
             EngineOp::Files { hash } => {
                 let handle = match self.inner.handle(hash) {
@@ -246,7 +254,7 @@ impl EngineDispatcher {
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
-                    only_files, upload_limit: options.upload_limit,
+                    only_files, trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
@@ -347,7 +355,7 @@ impl EngineDispatcher {
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
         if matches!(
             op,
-            EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
+            EngineOp::SetDownloadLimit { .. } | EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
         ) {
             for hash in &hashes {
                 if !matches!(op, EngineOp::Delete { .. }) || !self.inner.dormant(hash) {
@@ -437,6 +445,7 @@ impl EngineDispatcher {
                     record.paused = true;
                     record.resume_after_migration = false;
                 }
+                EngineOp::SetDownloadLimit{bps,..}=>{record.download_limit=*bps;record.options(record.paused)?;},
                 EngineOp::SetUploadLimit { limit, .. } => {
                     record.upload_limit = *limit;
                     record.options(record.paused)?;
@@ -475,6 +484,9 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
+            }
+            if matches!(op,EngineOp::SetDownloadLimit{..}){
+                handle.as_ref().expect("validated download-cap handle").set_download_bps(ledger.records[index].download_limit)?;
             }
             if matches!(op, EngineOp::SetUploadLimit { .. }) {
                 // Validate before saving, then apply synchronously under the
@@ -541,6 +553,7 @@ impl EngineDispatcher {
                 .clone()
                 .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
             only_files: files,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             upload_limit: options.upload_limit,
             ratio_limit: options.ratio_limit,
             category: options.category.clone(),
@@ -747,8 +760,11 @@ pub(crate) fn parked_get(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    Ok(EngineResult::Detail(TorrentDetails::from_bytes(
-        torrent,
-        bytes.as_deref(),
-    )?))
+    let mut detail=TorrentDetails::from_bytes(torrent,bytes.as_deref())?;
+    if let Some(bytes)=bytes.as_deref() {
+        let ledger=read_ledger(&directory.join("torrents.json"))?;
+        let record=ledger.records.iter().find(|r|r.hash==hash).context("torrent record not found")?;
+        detail.tracker_count=Some(record.tracker_count(bytes)?);
+    }
+    Ok(EngineResult::Detail(detail))
 }

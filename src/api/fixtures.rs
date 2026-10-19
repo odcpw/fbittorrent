@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("tracker-edit",include_str!("../../contracts/ipc/v1/tracker-edit.ndjson")),
+    ("download-limit",include_str!("../../contracts/ipc/v1/download-limit.ndjson")),
+    ("peers",include_str!("../../contracts/ipc/v1/peers.ndjson")),
     ("dashboard-presence",include_str!("../../contracts/ipc/v1/dashboard-presence.ndjson")),
     ("staging",include_str!("../../contracts/ipc/v1/staging.ndjson")),
     ("move",include_str!("../../contracts/ipc/v1/move.ndjson")),
@@ -487,9 +490,13 @@ fn operation_event_error_and_document_coverage() {
         "torrents.stop",
         "torrents.remove",
         "torrents.files",
+        "torrents.peers",
         "torrents.set_files",
         "torrents.set_seed",
         "torrents.set_upload_limit",
+        "torrents.set_download_limit",
+        "torrents.add_tracker",
+        "torrents.remove_tracker",
         "torrents.open_target",
         "subscribe",
         "unsubscribe",
@@ -727,3 +734,17 @@ fn gap_fixture_requires_recovery_and_preserves_last_revision() {
 mod coverage;
 #[path = "fixtures/negative.rs"]
 mod negative;
+
+#[test]
+fn tracker_edits_validate_url_without_echoing_passkeys() {
+    for op in ["torrents.add_tracker","torrents.remove_tracker"] {
+        for url in ["file:///tmp/a","https://","udp://127.0.0.1/announce"] {
+            let error=serde_json::from_value::<Request>(json!({"id":1,"op":op,"args":{"hash":"5656565656565656565656565656565656565656","url":url}})).unwrap_err();
+            assert!(error.to_string().contains("url:"));assert!(!error.to_string().contains(url));
+        }
+        let request:Request=serde_json::from_value(json!({"id":1,"op":op,"args":{"hash":"5656565656565656565656565656565656565656","url":"http://127.0.0.1/a?passkey=secret"}})).unwrap();
+        assert_eq!(request.call.op(),op);
+        assert!(Reply::decode(op,json!({"state":"done"})).is_ok());
+        println!("{op}: strict URL validation and done result round-trip passed; query redacted");
+    }
+}

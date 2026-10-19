@@ -961,6 +961,22 @@ not newly qualified. Follow-ups: qualify immediate Open after a completed move
 against the 1-second cached target refresh; refresh P1-06's old watch-fixture
 preconditions when removing its documented watch replay deferrals.
 
+### Integration of P3-07 and P5-05 (2026-10-19)
+
+Merged through c155727 after the dashboard-presence integration. The branch-local
+contract numbers above describe the owner's qualification snapshots; integration
+allocates P3-07 search provenance to 1.2.24 and P5-05 watch readiness to 1.2.25.
+Capabilities, the changes table, IPC examples and contract assertions agree.
+Disk monitoring and sleep inhibition remain alongside watch sampling; hidden bar
+connections do not acknowledge watch readiness without dashboard visibility.
+The IMDb harness still cleans up its actual replacement daemon.
+
+Integration evidence: target/test-logs/integration/batch11-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests: agent 6, API fixtures 30, bus 6, server argument
+validation 10 (one existing harness-only ignore), watch 7; 59 passed, no failures.
+No full suite, release build or live native gate was re-run by the integrator.
+
 
 ### Gate7 integration regressions (P5-03 / P3-06 / P7-02)
 
@@ -969,6 +985,24 @@ Reconciled authorized main `027886f` with the services track, retaining disk/inh
 `python3 target/test-logs/track-B-regressions/run-cases.py {foreground,systemd}-release /home/oliver/Projects/odcpw/fbittorrent-gate/target/release/fbittorrent recheck_staged_invalid_state api_torrent_operations move_verb`: all three pass in each mode; logs `target/test-logs/track-B-regressions/{foreground,systemd}-release/{daemon,agent_contract}/*.jsonl`. The same three plus `staged_discarded_at_restart`, `recheck_dormant`, `playable_two_file_mid_piece` pass on the merged debug binary in each mode, under `{foreground,systemd}-debug/` (12 cases). `cargo check --locked --tests`, `cargo build --locked`, the size ratchet, and catalogue `api_list_matches` pass (`check.*`, `debug.*`, `sizes.*`, `catalogue/`). The first full root test run passed 534 tests and exposed two integration-only assertions: missing patch-history documentation and the watch golden's missing Log tab. After correcting them, focused `cargo test --locked -p fbittorrent agent:: -- --nocapture` passes 7/7 (`merged-agent.*`) and the watch golden test passes (`merged-watch.*`); the failed full attempt is retained in `full.*`. No release build or all.sh was repeated for this requested focused repair.
 
 Final merged-tree `cargo test --locked`: **536 passed, 0 failed, 3 ignored** in 9.38 s (`target/test-logs/track-B-regressions/full-final.{log,jsonl}`); this second invocation only reran the now-cached suite after the first run identified the two repaired integration assertions. The requested three regression fixes are met. Follow-up: capture the actual kernel readiness error if the transient loopback failure recurs; existing logs showed only its waiting label.
+
+### Integration of the gate fixes and Torznab checkpoint (2026-10-19)
+
+Merged services tip b5ae95a, including the authorized partial P7-01 checkpoint
+3e93460, onto f086ed9. The checkpoint stays open: this integration does not
+claim live Torznab qualification. Current peers/download-limit capabilities,
+disk/inhibitor/watch ordering, and the actual IMDb replacement-daemon cleanup
+are preserved. The additive Torznab CLI/provider surface receives unique contract
+patch 1.2.28; preceding patches 1.2.26 and 1.2.27 remain unchanged.
+
+Integration evidence: target/test-logs/integration/batch13-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests pass: search 27 (including four Torznab controls),
+agent 6, API fixtures 30, watch rendering 1; 64 passed, no failures. The owner's
+retained foreground/systemd debug JSONL for recheck_staged_invalid_state,
+api_torrent_operations and move_verb was inspected: all six cases passed. Those
+are owner-run evidence, not new live runs by the integrator. No full suite, release
+build or all.sh was run for integration.
 
 
 ### P7-01 — native Torznab indexers (fbt-p7-01-cje)
@@ -991,3 +1025,21 @@ Native RSS/Shows commands now select a running capable owner with the existing 2
 Qualification: final debug build `nova-fixed-debug.{jsonl,log}`; `cargo test --locked` in `qualified-full.{jsonl,log}` **540 passed, 0 failed, 3 ignored**; size/whitespace/Python checks in `static-qualified.{jsonl,log}` pass. `foreground-functional` additionally covers the original RSS/Shows service cases and their real origin/read-history behaviour; `foreground-imdb-final` covers dedupe, parked/silent fallback and installation failure. Search's pre-existing intermittent empty-result failure reproduced on both sources: spawned multiprocessing workers inherited Nova's group-killing TERM handler, while Pool.__exit__ terminates those workers. `vendor/nova3/nova2.py` now resets workers to SIG_DFL; Nova parent group cancellation and workers' parent-death SIGKILL stay active. The shape fixture asserts this actual worker policy. Direct real-Nova old/fixed control in `nova-signal-policy/daemon/nova_signal_policy.jsonl`: prior code fails the assertion, fixed 8/8 exit 0. Final repeated CLI source agreement **8/8** in `search-repeat-qualified.{jsonl,log}` and `search-repeat/{0..7}/daemon/`; empty success, ordinary results, intentional provider failure and cancellation all remain tested. The per-trial directory was reused by this final repetition; earlier red aggregate `search-repeat.log` and independent complete red `systemd-final/daemon/cli_search_both_paths_identical.jsonl` remain retained. Search provider diagnostics now retain process status and stderr rather than only a generic failure.
 
 All three feature criteria met for the current native contract. Old-binary/v0.1 compatibility goldens deliberately skipped under the owner's no-backwards-compatibility decision; current rss.json/shows.json/config/ledger continue loading. No release/all.sh between track beads under the track policy; integrator owns the gate. Follow-ups: P3-18 supplies the existing-show quality setter (follow with a different quality is explicitly refused); A.9 lacks channel last-build date and separate live-transfer grab provenance, so the current renderer documents canonical/absent facts instead of inventing history. Next P7-03 is skipped until P3-10/P4-03 land; both are open in this branch, recorded in next-dependencies.jsonl. No other assigned unblocked bead remains.
+
+### Integration of qualified P7-01 (2026-10-19)
+
+Merged 12fd97c onto dcc7db5. Retained the integrated peers/download-limit caps,
+watch and P7-06 documentation, earlier checkpoint history and D's harness
+registration. Torznab's implemented API capability/search.install extension is
+patch 1.2.29, following the CLI/provider checkpoint at 1.2.28. All 25 exact caps
+and the unique ordered patch history agree across code, hello/error fixtures,
+docs and Python assertions; the README link names the integrated patch.
+
+Evidence: target/test-logs/integration/batch15-track-b/checks.jsonl. Locked
+check --tests, Python compilation, daemon case registration and size lint pass.
+Focused tests: Torznab/typed fixture 8, agent 6, API fixtures 30, provider goldens 3;
+47 passed, no failures. Inspected all seven owner-retained qualified cases in
+both foreground and systemd modes: 14 passed, indexed by owner-evidence.jsonl.
+Those are owner-run native results, not new integrator reruns. No full suite,
+release build or all.sh was run. P7-01's previously pending qualification is now
+supplied by the owner's retained evidence; no bead state was changed.

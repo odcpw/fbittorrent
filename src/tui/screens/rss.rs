@@ -3,6 +3,7 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn load_rss(&mut self) -> Cmd<Msg> {
+        if self.cfg.native(){return self.sync_topics();}
         if self.rss_busy || self.rss_loading { return Cmd::none(); }
         self.rss_loading = true;
         let revision = self.rss_revision;
@@ -40,6 +41,7 @@ impl TuiApp {
     }
 
     pub(super) fn refresh_rss(&mut self) -> Cmd<Msg> {
+        if self.cfg.native(){return self.service_action("rss.refresh",serde_json::json!({}),"feeds refreshed");}
         if self.rss_busy { return Cmd::none(); }
         let names: Vec<String> = self.feeds.iter().map(|f| f.name.clone()).collect();
         if names.is_empty() { return Cmd::none(); }
@@ -92,11 +94,13 @@ impl TuiApp {
                 if !self.rss_focus_items {
                     self.set_status("Enter opens items · Shift+M marks this feed's items read", false);
                 } else if let Some((feed, id, read)) = self.selected_feed().and_then(|f| self.item_list.borrow().selected().and_then(|i| f.articles.get(i)).map(|a| (f.name.clone(), a.id.clone(), !self.cfg.native() || !a.is_read))) {
+                    if self.cfg.native(){return self.native_feed_action("rss.set_read",&feed,Some(&id),Some(read),format!("item marked {}",if read{"read"}else{"unread"}));}
                     return self.rss_action(format!("item marked {}", if read { "read" } else { "unread" }), move |c| c.rss_set_read(&feed, &id, read));
                 }
             },
             actions::Intent::MarkAll => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
+                if self.cfg.native(){return self.native_feed_action("rss.mark_feed_read",&name,None,None,format!("marked {name} as read"));}
                 return self.rss_action(format!("marked {name} as read"), move |c| c.rss_mark_read(&name, None));
             },
             actions::Intent::Primary if !self.rss_focus_items => {
@@ -109,6 +113,7 @@ impl TuiApp {
                         let url = if a.torrent_url.is_empty() { a.link.clone() } else { a.torrent_url.clone() };
                         let (feed, id, label) = (f.name.clone(), a.id.clone(), short(&a.title, 40));
                         let opts = self.add_opts();
+                        if self.cfg.native(){return self.native_feed_action("rss.grab",&feed,Some(&id),None,format!("added {label}"));}
                         return self.rss_action(format!("added {label}"), move |c| { c.add_url(&url, &opts)?; c.rss_mark_read(&feed, Some(&id)) });
                     }
                 }
@@ -172,19 +177,15 @@ impl TuiApp {
                         layout::fingerprint(&(
                             &f.name,
                             f.articles.len(),
-                            f.articles.iter().filter(|a| !a.is_read).count(),
+                            self.feed_counts(f),
                             f.has_error,
                             f.is_loading,
                         ))
                     },
                     |i| {
                         let f = &self.feeds[i];
-                        let unread = f.articles.iter().filter(|a| !a.is_read).count();
-                        let count = format!(
-                            " {unread}/{}{}",
-                            f.articles.len(),
-                            if f.has_error { " !" } else { "" }
-                        );
+                        let (unread,total)=self.feed_counts(f);
+                        let count=format!(" {}{}",total.map_or_else(||format!("{unread} unread"),|n|format!("{unread}/{n}")),if f.has_error{" !"}else{""});
                         Line::from_spans([
                             Span::styled(
                                 readable_cell(

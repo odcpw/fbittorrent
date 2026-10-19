@@ -114,6 +114,9 @@ ShellRoot {
     s.c.receive(JSON.stringify({id:optional,ok:false,error:{code:"upstream",message:"optional poster unavailable",retryable:true}}))
     check("optional_error",optionalError && optionalError.code==="upstream" && !s.c.lastError,"optional read retains its typed callback failure without becoming a global mutation/error banner",optionalError)
     console.log("FBTQS-PASS optional_error")
+    s=session();s.hello(["torrents","subscribe","clipboard"])
+    check("clipboard_events",s.writes.some(function(w){var f=JSON.parse(w);return f.op==="subscribe" && f.args.topics.indexOf("events")>=0}),"clipboard-capable bar subscribes to live events even with both UIs closed",s.writes)
+    console.log("FBTQS-PASS clipboard_events")
     s=session();s.hello([]);length=s.writes.length
     s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)

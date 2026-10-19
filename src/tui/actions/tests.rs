@@ -87,6 +87,14 @@ fn no_handler_outside_table() {
 }
 
 #[test]
+fn action_ids_are_unique_across_surfaces() {
+    let mut seen = std::collections::HashSet::new();
+    for action in all() {
+        assert!(seen.insert(action.id), "duplicate action id: {}", action.id);
+    }
+}
+
+#[test]
 fn no_duplicate_key_per_scope() {
     for native in [true, false] {
         let mut app = fixture::app("torrents");

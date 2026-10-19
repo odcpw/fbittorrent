@@ -72,11 +72,13 @@ impl TuiApp {
     }
 
     pub(super) fn save_shows(&mut self) -> bool {
+        if self.cfg.native(){return true;}
         if let Err(e) = self.shows.save() { self.set_status(format!("saving shows: {e:#}"), true); false } else { true }
     }
 
     /// Fetch the episode list of one followed show in the background.
     pub(super) fn refresh_show(&mut self, imdb: String) -> Cmd<Msg> {
+        if self.cfg.native(){return self.service_action("shows.check",serde_json::json!({"imdb":imdb}),"shows checked");}
         let Some(show) = self.shows.get(&imdb).cloned() else { return Cmd::none() };
         if !self.shows_refreshing.insert(imdb.clone()) { return Cmd::none(); }
         let quality = self.cfg.show_quality.clone();
@@ -88,6 +90,7 @@ impl TuiApp {
 
     /// On launch and on `r`: refresh what is stale (or everything when forced).
     pub(super) fn refresh_shows(&mut self, force: bool) -> Cmd<Msg> {
+        if self.cfg.native(){return if force {self.service_action("shows.check",serde_json::json!({}),"shows checked")}else{Cmd::none()};}
         let now = shows::now();
         let ids: Vec<String> = self.shows.shows.iter().filter(|s| force || s.is_stale(now)).map(|s| s.imdb.clone()).collect();
         if ids.is_empty() { return Cmd::none(); }
@@ -97,6 +100,7 @@ impl TuiApp {
 
     /// Follow the show behind a release name (or a known IMDb id); resolved off-thread.
     pub(super) fn follow(&mut self, query: String, id: Option<String>) -> Cmd<Msg> {
+        if self.cfg.native(){let id=id.or_else(||crate::imdb::service::valid_id(&query).then(||query.clone()));let args=if let Some(id)=id{serde_json::json!({"imdb":id})}else{serde_json::json!({"query":query})};return self.service_action("shows.follow",args,"show followed");}
         self.set_status(format!("looking up {}…", short(&query, 40)), false);
         Cmd::task(move || {
             let r = match id.filter(|i| i.starts_with("tt")) {
@@ -152,11 +156,14 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
+                } else if self.cfg.native(){
+                    if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
                 } else if let Some(label) = self.mark_selected_release() {
                     if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::Undo if self.shows_inbox() => {
+                if self.cfg.native(){return self.service_action("shows.undo_read",serde_json::json!({}),"release restored to unread");}
                 if let Some(label) = self.undo_inbox_read() {
                     if self.save_shows() { self.set_success(label); }
                 }
@@ -164,6 +171,7 @@ impl TuiApp {
             actions::Intent::MarkAll => {
                 if let Some(s) = self.selected_show() {
                     let (imdb, title) = (s.imdb.clone(), s.title.clone());
+                    if self.cfg.native(){return self.service_action("shows.mark_show_read",serde_json::json!({"imdb":imdb}),format!("{title}: releases marked read"));}
                     let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
                     self.rebuild_inbox();
                     if self.save_shows() { self.set_success(format!("{title}: {n} release(s) marked read")); }
@@ -180,7 +188,9 @@ impl TuiApp {
                 let picked = self.selected_episode().map(|(s, e)| (s.imdb.clone(), e.clone()));
                 if let Some((imdb, e)) = picked {
                     let token = format!("{imdb}:{}", e.key);
+                    if self.service_busy{return Cmd::none();}
                     if !self.show_grabbing.insert(token) { return Cmd::none(); }
+                    if self.cfg.native(){return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":self.cfg.seed_by_default}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));}
                     let cfg = self.cfg.clone();
                     let presence = self.presence.clone();
                     let opts = self.add_opts();
@@ -291,7 +301,7 @@ impl TuiApp {
                     layout::fingerprint(&(
                         &show.title,
                         show.year,
-                        show.new_count(),
+                        self.show_unread(show),
                         self.shows_refreshing
                             .contains(&show.imdb)
                             .then_some(self.tick % 4),
@@ -311,7 +321,7 @@ impl TuiApp {
                     ]);
                 }
                 let show = &self.shows.shows[i - 1];
-                let n = show.new_count();
+                let n = self.show_unread(show);
                 let busy = self.shows_refreshing.contains(&show.imdb);
                 let warning =
                     show.error.is_some() || (show.last_checked > 0 && !show.catalogue_complete);
@@ -584,7 +594,7 @@ impl TuiApp {
                     ),
                     Span::styled(
                         if metadata > 0 {
-                            episode_metadata(Some(episode), width)
+                            self.release_metadata(show,episode,width)
                         } else {
                             String::new()
                         },

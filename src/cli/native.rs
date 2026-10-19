@@ -27,6 +27,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Noseed { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
+            | Cmd::Limit { .. }
             | Cmd::Restart
     )
 }
@@ -324,6 +325,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     value["open_target"] = json!(t.content_path.as_deref().unwrap_or(&t.save_path));
                     value["seed_allowed"] = json!(t.seed);
                     value["complete"] = json!(t.progress.map(|v| v >= 1.0));
+                    value["peers"] = if let Some(c)=&client {if c.hello.caps.iter().any(|cap|cap=="peers"){c.call("torrents.peers",json!({"hash":hashes[0]}))?["peers"].clone()}else{json!([])}}else{json!([])};
                     value["files"] = if let Some(c) = &client {
                         c.call("torrents.files", json!({"hash":hashes[0]}))
                             .map(|v| json!(v["files"].as_array().map(|files|files.iter().map(|f|json!({"index":f["index"],"name":f["path"],"size":f["size"],"progress":f["progress"],"progress_known":t.checked && t.state!=api::TorrentState::WaitingVpn,"priority":if f["included"]==true{1}else{0}})).collect::<Vec<_>>()).unwrap_or_default()))
@@ -386,6 +388,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 json!({"ok":true,"action":if stop{"stop"}else{"delete"},"count":hashes.len(),"hashes":hashes,"running":running}),
             );
         }
+        Cmd::Limit{selector,down}=>{
+            let bps=super::download_limit::parse(down)?;
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            bulk(&c,"torrents.set_download_limit",&hashes,json!({"bps":bps}))?;
+            emit(json_mode,json!({"ok":true,"action":"limit","hashes":hashes,"download_limit_bps":bps}));
+        },
         Cmd::Start { .. }
         | Cmd::Reannounce { .. }
         | Cmd::Seed { .. }
@@ -541,7 +550,7 @@ fn await_move(c:&ApiClient,result:Value)->Result<Value> {
         }
     }
 }
-fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
+pub(super) fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]
         .as_str()
         .context("pending result omitted ref")?;

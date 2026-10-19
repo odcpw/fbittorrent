@@ -111,9 +111,10 @@ impl PeerStates {
         })
     }
 
-    pub fn update_bitfield(&self, handle: PeerHandle, bitfield: BF) -> Option<()> {
+    pub fn update_bitfield(&self, handle: PeerHandle, bitfield: BF, total_pieces: usize) -> Option<()> {
         self.with_live_mut(handle, "update_bitfield", |live| {
             live.bitfield = bitfield;
+            live.total_pieces = total_pieces;
         })
     }
 

@@ -109,6 +109,10 @@ pub struct TuiApp {
     pub(super) feedback:super::feedback::Feedback,
     pub(super) log_open:bool,
     pub(super) alt_busy:bool,
+    pub(super) service_busy:bool,
+    pub(super) settings_loading:bool,
+    pub(super) follow_target:Option<String>,
+    pub(super) topic_selection:super::remote::topics::Selection,
 }
 
 /// A row identity survives source reordering and the same episode key in another show.
@@ -123,6 +127,7 @@ pub enum Msg {
     Attached(Result<Arc<super::attach::Presence>,super::attach::Failure>),
     OwnerShutdown(Result<(),String>),
     SettingsSaved(Result<Config,String>),
+    SettingsOpened{connection:u64,result:Result<crate::api::Settings,String>},
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
     AltDone(Result<String,String>),
@@ -135,7 +140,8 @@ pub enum Msg {
     Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
     RssReload,
-    ShowsCached {connection:u64,result:Result<super::remote::catalogue::ShowsSnapshot,String>},
+    TopicsSelected{connection:u64,active:Vec<(u64,crate::api::Topic)>,result:Result<(),String>},
+    ServiceDone{connection:Option<u64>,op:&'static str,args:serde_json::Value,label:String,result:Result<serde_json::Value,String>},
     ShowGrab { imdb: String, episode: Episode, result: Result<(), String> },
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
@@ -255,7 +261,7 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
-            status_success:false,feedback:Default::default(),log_open:false,alt_busy:false,
+            status_success:false,feedback:Default::default(),log_open:false,alt_busy:false,service_busy:false,settings_loading:false,follow_target:None,topic_selection:Default::default(),
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();

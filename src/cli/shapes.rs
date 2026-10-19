@@ -41,6 +41,8 @@ pub fn torrent(t: &api::Torrent) -> Value {
         ("origin", json!(t.origin)),
         ("eta_s", json!(t.eta_s)),
         ("seeds", json!(t.seeds)),
+        ("download_limit_bps",json!(t.download_limit_bps)),
+        ("effective_download_limit_bps",json!(t.effective_download_limit_bps)),
         ("playable", json!(t.playable)),
     ] {
         if !field.is_null() {

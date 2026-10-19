@@ -46,12 +46,16 @@ impl TuiApp {
     pub(in crate::tui) fn subscribe_ui(&self)->Cmd<Msg>{
         let Some(connection)=self.presence.clone()else{return Cmd::none();};
         Cmd::task(move||{
-            let mut topics=vec!["summary"];
-            for(cap,topic)in [("settings","settings"),("log","log"),("rss","rss.feeds"),("shows","shows")] {
-                if connection.hello.caps.iter().any(|value|value==cap){topics.push(topic);}
+            let mut topics=vec!["summary","torrents","network"];
+            for (topic,cap) in [("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
+                if connection.hello.caps.iter().any(|c|c==cap){topics.push(topic);}
             }
-            if connection.hello.caps.iter().any(|cap|cap=="shows"){topics.push("events");}
-            Msg::UiSubscribed{connection:connection.id,result:connection.request("subscribe",json!({"topics":topics})).map(|_|()).map_err(|e|e.to_string())}
+            let result=(||->Result<()> {
+                // Each topic has its own sub/revision so a gap can replace only that topic.
+                for topic in topics {connection.request("subscribe",json!({"topics":[topic]}))?;}
+                Ok(())
+            })().map_err(|e|e.to_string());
+            Msg::UiSubscribed{connection:connection.id,result}
         })
     }
 
@@ -69,6 +73,7 @@ impl TuiApp {
         }
         match update {
             attach::ApiUpdate::Event(event) => {
+                if event.subscription_revision().is_some_and(|(sub,_)|self.retired_topic(sub)){return Cmd::none();}
                 if let api::Event::Bye {reason}=&event {
                     self.connection_lost(matches!(reason,api::ByeReason::Shutdown|api::ByeReason::Idle));
                 }
@@ -111,16 +116,24 @@ impl TuiApp {
                     self.sync_native_search();
                 }
                 if matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Log,..}|api::Event::Delta{topic:api::Topic::Log,..}){self.feedback.dirty.set(true);}
-                let rss_changed=matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::RssFeeds,..}|api::Event::Delta{topic:api::Topic::RssFeeds,..});
-                let shows_changed=matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Shows,..}|api::Event::Delta{topic:api::Topic::Shows,..}|api::Event::ShowsChecked{..}) || match &event {
-                    api::Event::Delta{topic:api::Topic::Events,added,..}=>added.iter().flatten().any(|item|matches!(item,api::Item::Event(event) if matches!(&**event,api::Event::ShowsChecked{..}))),
-                    _=>false,
-                };
-                if rss_changed||shows_changed {
-                    let mut commands=Vec::new();
-                    if rss_changed{commands.push(self.load_rss());}
-                    if shows_changed{commands.push(self.reload_cached_shows());}
-                    return Cmd::batch(commands);
+                let committed=matches!(&event,api::Event::SnapshotEnd{..}|api::Event::Delta{..}|api::Event::State{..});
+                if committed {
+                    match &event {
+                        api::Event::SnapshotEnd{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}|api::Event::Delta{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}=>self.sync_native_feeds(),
+                        api::Event::SnapshotEnd{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}|api::Event::Delta{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}=>self.sync_native_shows(),
+                        api::Event::State{data:api::StateData::Settings(settings),..}=>{if let Err(e)=settings_fields::native_settings(&mut self.cfg,settings){self.set_status(e.to_string(),true);}},
+                        api::Event::State{data:api::StateData::Summary(summary),..}=>{
+                            let transfer=api::TransferInfo {session_downloaded:0,session_uploaded:0,dl_bps:summary.dl_bps,ul_bps:summary.ul_bps};
+                            self.transfer=format::transfer(&transfer,self.store.network.as_ref());
+                        },
+                        api::Event::SnapshotEnd{topic:api::Topic::Files(hash),..}|api::Event::Delta{topic:api::Topic::Files(hash),..}=>{
+                            if self.files.as_ref().is_some_and(|m|m.hash==hash.as_str()) {
+                                let files=self.store.files.get(hash).into_iter().flat_map(|rows|rows.values()).map(format::file).collect();
+                                self.update(Msg::Files(hash.to_string(),Ok(files)));
+                            }
+                        },
+                        _=>{}
+                    }
                 }
                 if rows_changed {
                     let rows = self
@@ -161,12 +174,12 @@ impl TuiApp {
                 self.connection_lost(false);
             }
         }
-        Cmd::none()
+        self.sync_topics()
     }
 }
 pub(in crate::tui) fn verb(op: &str) -> &'static str {
     match op {
-        "torrents.add" | "search.grab" => "Adding",
+        "torrents.add" | "search.grab" | "rss.grab" | "shows.grab" => "Adding",
         "search.start" => "Searching",
         "search.stop" => "Stopping search",
         "search.set_provider" => "Updating provider",

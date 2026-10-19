@@ -81,6 +81,7 @@ pub enum Pane {
 pub enum ModalKind {
     Log,
     Poster,
+    Clipboard,
     Details,
     Files,
     Providers,

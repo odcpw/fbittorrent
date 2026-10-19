@@ -192,7 +192,7 @@ pub struct ManagedTorrentShared {
     pub(crate) spawner: BlockingSpawner,
     /// Metainfo order (tiers first, then URLs within each tier). In particular,
     /// private first-tracker selection must happen before any set conversion.
-    pub trackers: Vec<url::Url>,
+    pub trackers: Arc<tracker_comms::TrackerSet>,
     pub tracker_stats: Arc<tracker_comms::TrackerStats>,
     pub peer_id: Id20,
     pub span: tracing::Span,
@@ -256,6 +256,12 @@ impl ManagedTorrent {
         self.shared.magnet_name.clone()
     }
 
+    pub fn tracker_urls(&self) -> Vec<url::Url> { self.shared.trackers.snapshot() }
+
+    pub fn add_tracker(&self, url: url::Url) -> anyhow::Result<bool> { self.shared.trackers.add(url) }
+
+    pub fn remove_tracker(&self, url: &url::Url) -> bool { self.shared.trackers.remove(url) }
+
     /// Ordered observations survive pause/run-region replacement.
     pub fn tracker_stats(&self) -> Vec<tracker_comms::TrackerStat> {
         self.shared.tracker_stats.snapshot()
@@ -285,6 +291,25 @@ impl ManagedTorrent {
         let limits = &self.shared.options.ratelimits;
         if limits.get_upload_bps() != limit { limits.set_upload_bps(limit); }
         Ok(())
+    }
+
+    /// Replace the download bucket in place; no handle/storage/state transition.
+    pub fn set_download_bps(&self, bps: Option<u64>) -> anyhow::Result<()> {
+        let limit=bps.map(|bps|{
+            anyhow::ensure!(bps>=16384,"download cap must be at least 16 KiB/s");
+            Ok::<_,anyhow::Error>(std::num::NonZeroU32::new(u32::try_from(bps).context("download cap exceeds the native engine maximum")?).unwrap())
+        }).transpose()?;
+        let limits=&self.shared.options.ratelimits;
+        if limits.get_download_bps()!=limit {limits.set_download_bps(limit);}
+        Ok(())
+    }
+
+    /// The session bucket already reflects the selected global/turtle policy.
+    pub fn effective_download_bps(&self) -> Option<u64> {
+        crate::limits::effective_rate([
+            self.shared.options.ratelimits.get_download_bps(),
+            self.shared.session.upgrade().and_then(|s|s.ratelimits.get_download_bps()),
+        ]).map(|v|u64::from(v.get()))
     }
 
     pub fn with_metadata<R>(

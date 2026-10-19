@@ -29,6 +29,9 @@ pub struct PeerStats {
     pub state: &'static str,
     pub conn_kind: Option<ConnectionKind>,
     pub client_name: Option<String>,
+    pub seed: bool,
+    pub encrypted: bool,
+    pub incoming: bool,
 }
 
 impl From<&super::atomic::PeerCountersAtomic> for PeerCounters {
@@ -60,6 +63,9 @@ impl From<&Peer> for PeerStats {
         Self {
             counters: peer.stats.counters.as_ref().into(),
             state: state.name(),
+            seed: peer.get_live().is_some_and(|l| l.total_pieces > 0 && l.has_full_torrent(l.total_pieces)),
+            encrypted: peer.get_live().is_some_and(|l| l.encrypted),
+            incoming: peer.get_live().is_some_and(|l| l.incoming),
             conn_kind: match state {
                 PeerState::Live(l) => Some(l.connection_kind),
                 _ => None,
