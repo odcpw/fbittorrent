@@ -65,6 +65,9 @@ mod limits;
 #[path="tests/limits.rs"]
 mod limit_tests;
 #[cfg(test)]
+#[path="tests/disk.rs"]
+mod disk_tests;
+#[cfg(test)]
 #[path="tests/log.rs"]
 mod log_tests;
 #[path="modals/log.rs"]

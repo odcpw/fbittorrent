@@ -90,7 +90,7 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster);
+goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk);
 
 #[test]
 fn done_row_offers_seed_instead_of_resume() {
