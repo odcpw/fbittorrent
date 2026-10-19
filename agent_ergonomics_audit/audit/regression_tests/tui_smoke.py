@@ -170,7 +170,10 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
                 ui.observe('read files','real file names and include controls are visible',
                            lambda pane:all(text in pane for text in('The.Diplomat.S04E01.mkv','English.srt','sample.mkv','include/skip')))
                 ui.details_tab('Log')
-                ui.contains(']','[Log]')
+                header=next(line for line in ui.capture(ui.target).splitlines() if '[Log]' in line)
+                last=re.findall(r'\b(?:Overview|Files|Peers|Trackers|Pieces|Log)\b',header)[-1]
+                ui.details_tab(last)
+                ui.contains(']','['+last+']')
                 ui.details_tab('Files')
                 ui.details_tab('Overview')
                 ui.contains('Escape','[Torrents]',literal=False)
@@ -352,6 +355,7 @@ def log_history(binary):
     import shutil
     with Case('tui_smoke_setup','log_fixtures')as setup, fixtures.Sandbox()as sandbox:
         source=sandbox.downloads/'history.mkv';source.write_bytes(b'local log fixture'*1024)
+        hidden=sandbox.root/'history.hidden'
         item=fixtures.torrent_fixture(sandbox.root,[source]);fixtures.corrupt_byte(source,0)
         sandbox.env['FBT_TEST_INJECT_ERROR']=item.info_hash;sandbox.keys.append('FBT_TEST_INJECT_ERROR')
         theme=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
@@ -367,7 +371,7 @@ def log_history(binary):
                     h.wait_for(lambda:((info:=client.call('app.info')['result'])['subscriptions']['by_topic'].get('log',0)==1,json.dumps(info['subscriptions'])),'the TUI subscribes before the injected diagnostic occurs')
                     client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(sandbox.downloads),stopped=True))
                     h.wait_for(lambda:((entries:=client.call('app.log',dict(hash=item.info_hash,level='error'))['result']['entries'])and any('injected engine error'in row['message']for row in entries),json.dumps(entries)),'the real error-injection hook writes the engine log')
-                    source.unlink()
+                    source.rename(hidden)
                     with Case('tui_smoke','log_history')as case:
                         ui.case=case;ui.context=f'private theme={theme}; injected hash={item.info_hash}'
                         ui.observe('load torrent','the incomplete fixture appears in the attached terminal',lambda pane:'history.mkv'in pane)
@@ -381,6 +385,9 @@ def log_history(binary):
                         ui.press('q','q detaches the log test while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
             finally:
                 ui.close()
+                # Undo the deliberate missing-file fault before demanding a
+                # healthy resume snapshot during fixture shutdown.
+                if hidden.exists():hidden.rename(source)
                 if process.child.poll()is None:h.stop_serve(process)
                 h.lock_free()
 
