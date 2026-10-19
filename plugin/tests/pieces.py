@@ -90,7 +90,11 @@ def run(binary):
                         wait(lambda:'[Overview]' in capture())
                         wait(lambda:'no DHT, no PeX' in capture())
                         case.check(True,'real TUI Overview identifies private networking',capture())
-                        tmux('send-keys','-t',session,'-l',']]]')
+                        # Each navigation key is a real key event. A pasted
+                        # multi-character sequence is deliberately not navigation.
+                        for label in ('Files','Peers','Trackers','Log','Pieces'):
+                            tmux('send-keys','-t',session,'-l',']')
+                            wait(lambda:'['+label+']' in capture())
                         wait(lambda:'257 / 1000 verified pieces' in capture())
                         text=capture();case.path.with_suffix('.txt').write_text(text)
                         case.check('[Pieces]' in text and '▲' in text and '▒' in text,'actual TUI consumes the real verified piece subscription',text)

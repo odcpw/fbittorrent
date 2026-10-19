@@ -67,6 +67,11 @@ def run(binary):
                         assert len(notify.calls(box))==1,'unchanged hidden check must not notify'
                         cli=subprocess.run([str(binary),'shows','quality',IMDB,'720p','--json'],env=box.env,capture_output=True,text=True,timeout=8)
                         assert cli.returncode==0 and show().get('quality')=='720p',cli.stderr
+                        q.shell('summon','{"view":"shows"}')
+                        q.wait(lambda:'shows' in view())
+                        keys(['hj'],lambda:state().get('selected')==IMDB)
+                        q.wait(lambda:view().get('controls',{}).get('preference')=='720p')
+                        q.shell('hide')
                         socket='fbt-fbt-p3-18-3pe';session=socket;env=dict(box.env,FBITTORRENT_NO_START='1')
                         def tmux(*args,check=True):return subprocess.run(['tmux','-L',socket,*args],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=check,timeout=4)
                         def capture():return tmux('capture-pane','-p','-t',session).stdout
@@ -79,7 +84,7 @@ def run(binary):
                         def text(value):tmux('send-keys','-t',session,'-l',value)
                         try:
                             tmux('new-session','-d','-s',session,'-x','120','-y','30',str(binary),'tui','--shows')
-                            wait(lambda:'Owned Quality Fixture' in capture());text('j=');wait(lambda:'Show quality:' in capture())
+                            wait(lambda:'(y) Copy magnet' in capture());text('=');wait(lambda:'Show quality:' in capture())
                             tmux('send-keys','-t',session,'C-a');text('480p');tmux('send-keys','-t',session,'Enter');wait(lambda:show().get('quality')=='480p')
                             text('F');wait(lambda:'Inbox filter:' in capture());tmux('send-keys','-t',session,'C-a');text('read 720p');tmux('send-keys','-t',session,'Enter');wait(lambda:'read 720p' in capture() and 'S01E02' in capture())
                             case.check(True,'TUI = saves quality and F filters the real read history',capture())
