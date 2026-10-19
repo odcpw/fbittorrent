@@ -409,8 +409,11 @@ capabilities and canonical round trips, and retains revision checks. Its
 cross-reply agreement still checks static sizes and file totals. For any hash
 observed checking, its measurements are excluded from that history's agreement,
 including earlier samples and later cancellation; their raw values remain
-validated and non-checking fixture comparisons remain exact. Fixture transcripts
-continue to use the unchanged strict whole-group agreement hook. Deferrals record
+validated and non-checking fixture comparisons remain exact. A confirmed completed
+removal clears only that hash's completion history: a later re-add is a new torrent
+instance. Pending or failed removals do not clear it, and static size/file totals
+remain checked across re-adds. Fixture transcripts continue to use the unchanged
+strict whole-group agreement hook. Deferrals record
 file:line, pointer, class, target bead and reason. Capability/protocol deferrals
 apply only while that feature is unavailable; advertised features stay under
 active comparison. The receipt distinguishes undrivable catalogue frames from
@@ -677,7 +680,7 @@ connected clients; reconnects increment cumulative counts again. Both are local
 memory only. CLI `log --follow` emits one LogEntry JSON object per line; `log`
 never starts a daemon and exits 4 when closed, with up/journalctl hints.
 
-Changelog: P1-14 adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
+Changelog: P1-14 (CLI contract 1.2.6) adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
 existing fixture files remain byte-for-byte unchanged.
 
 ### P1-17: executable upgrades
@@ -692,7 +695,7 @@ app.restart with scope daemon drains immediately, including while busy. CLI
 restart never starts an absent owner, and waits at most 30 seconds for a different
 hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
 keeps the process and API connections. No capability or frozen fixture changes;
-P1-17 implements the existing fields and operation. CLI contract 1.2.4 adds the
+P1-17 implements the existing fields and operation. CLI contract 1.2.7 adds the
 replacement instance/server to restart output.
 
 ### P1-18: agent event stream and raw operation catalogue
@@ -718,9 +721,9 @@ Levenshtein distance <=2; unrelated names have an empty nearest list and the
 api --list hint. api --list and robot-docs api show the same args/results,
 mutating/idempotent/since metadata; a unit test compares every documented row.
 
-Changelog P1-18: CLI contract 1.2.5 adds events/api and capabilities.api_operations.
-The original planned 1.2.1 number predates already-integrated additive changes;
-all earlier fields and frozen fixture bytes remain intact. No new API operation.
+Changelog P1-18: CLI contract 1.2.8 adds events, and 1.2.9 adds the raw API
+catalogue and capabilities.api_operations. Both patches follow the integrated
+merge order; earlier fields and frozen fixture bytes remain intact. No new API operation.
 ### P3-01: daemon search sessions
 
 The `search` capability implements `search.start`, `search.stop`, `search.providers`,
@@ -756,7 +759,7 @@ either `{search_id,key}` or `{result}`, plus the usual add options, and uses
 `engine_unavailable` and a VPN hint; provider download hooks remain forbidden
 with VPN binding enabled.
 
-Contract 1.2.4 adds this namespace and keyed topic; existing transcripts stay
+Contract 1.2.10 adds this namespace and keyed topic; existing transcripts stay
 unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 
 ```json
@@ -774,7 +777,7 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 | `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
 | `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
 
-### Tracker observations (P6-01, contract 1.2.6)
+### Tracker observations (P6-01, contract 1.2.12)
 
 The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
 `Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
@@ -798,17 +801,17 @@ fields; null and numeric zero clear a global limit (unlimited), omission leaves 
 unchanged. Nonzero values must be at least 16384 and fit u32. `transfer.set_alt`
 persists the turtle switch. Both use the settings transaction and live session
 limiters, independently of per-torrent upload caps. Summary.alt and Summary.limits
-publish the effective saved policy as structural state. CLI contract 1.2.6 adds
+publish the effective saved policy as structural state. CLI contract 1.2.14 adds
 `limits --down/--up/--alt/--alt-down/--alt-up`; stopped edits never start a daemon.
 
 ### 2026-10-19 orchestrator ruling: exact hello capability bookkeeping
 
-Contract 1.2.7 introduced exact hello/error fixture capability arrays matching
+Contract 1.2.15 introduced exact hello/error fixture capability arrays matching
 the integrated live capabilities; later additions keep those arrays current. Every added capability has a capabilities.changes[] entry with
 its `cap` name. Replay compares these arrays exactly; no normalization mask is
 added. The documented hello example is updated to the same fixture bytes.
 
-## P6-11 additive destination inspection (contract 1.2.8)
+## P6-11 additive destination inspection (contract 1.2.16)
 
 Capability `free_space` adds read-only `app.free_space` (since P6-11):
 
@@ -826,3 +829,32 @@ filesystem without creating a probe file. An absent/non-directory path returns
 can still fail. Native `add --save` uses the same check and exits 2 before
 submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
 covers known, absent and zero space.
+
+### Integrated CLI contract patch history
+
+The current CLI contract is **1.2.16**. Each additive change after the 1.2.0
+baseline has its own patch, assigned in first-parent integration merge order.
+Changes arriving together retain their feature order; the P1-18 event and raw
+API entries receive successive patches. Future merges allocate after the latest
+integrated patch and update this table, capabilities, and contract assertions.
+API hello still negotiates wire version 1; these CLI patches do not change
+NDJSON framing or the capability arrays in the wire fixtures.
+
+| CLI contract patch | capabilities.changes field |
+|---|---|
+| `1.2.1` | `add.deferred` |
+| `1.2.2` | `settings` |
+| `1.2.3` | `api.torrents.recheck` |
+| `1.2.4` | `api.queue` |
+| `1.2.5` | `api.origin` |
+| `1.2.6` | `log` |
+| `1.2.7` | `restart.server` |
+| `1.2.8` | `events` |
+| `1.2.9` | `api` |
+| `1.2.10` | `api.search` |
+| `1.2.11` | `setup.actions` |
+| `1.2.12` | `trackers` |
+| `1.2.13` | `add.confirmation_required` |
+| `1.2.14` | `limits` |
+| `1.2.15` | `caps.imdb` |
+| `1.2.16` | `app.free_space` |

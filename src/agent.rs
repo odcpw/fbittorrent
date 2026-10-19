@@ -12,7 +12,7 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.8";
+pub const CONTRACT_VERSION: &str = "1.2.16";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
 const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; replaced binaries restart the daemon when idle; restart switches immediately.";
@@ -211,7 +211,7 @@ pub fn capabilities_json() -> serde_json::Value {
         },
         "caps": crate::api::ops::app::CAPS,
         "api_operations": crate::api::ops::TABLE,
-        "changes": [{"since":"1.2.8","version":"1.2.8","breaking":false,"field":"app.free_space","cap":"free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"},{"since":"1.2.7","version":"1.2.7","breaking":false,"field":"caps.imdb","cap":"imdb","note":"P3-04 implemented IMDb capability recorded in exact hello/error fixtures"},{"since":"1.2.6","version":"1.2.6","breaking":false,"field":"limits","cap":"limits","note":"live global/turtle limits, persisted alt switch, structural summary fields and offline CLI edits"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"},{"since":"1.2.6","version":"1.2.6","breaking":false,"field":"trackers","cap":"trackers","note":"tracker diagnostics and rate-limited reannounce; show adds trackers and tracker_count"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.search","cap":"search","note":"daemon search sessions, keyed deduplicated results, providers, browse and grab"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api.origin","cap":"origin","note":"durable open origin, manual-bucket filters, keep-files batch undo_until and restore source"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.queue","cap":"queue","note":"queue capability, force-start, queue movement and positioned torrent rows"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"api.torrents.recheck","cap":"recheck","note":"recheck capability, pending ref acknowledgement and measured verification result"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"events","note":"NDJSON history/follow with instance and seq, replay cursors and resync metadata"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api","note":"unchanged raw response envelope; compiled operation catalogue and per-operation startup/retry policy"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"restart.server","note":"restart drains the daemon and waits for its replacement instance; binary replacement is deferred while busy"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"log","cap":"log","note":"app.log, log topic and CLI history/follow; app.stats distinguishes active clients and cumulative connections"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","cap":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","cap":"deferred_add","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
+        "changes": [{"since":"1.2.16","version":"1.2.16","breaking":false,"field":"app.free_space","cap":"free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"},{"since":"1.2.15","version":"1.2.15","breaking":false,"field":"caps.imdb","cap":"imdb","note":"P3-04 implemented IMDb capability recorded in exact hello/error fixtures"},{"since":"1.2.14","version":"1.2.14","breaking":false,"field":"limits","cap":"limits","note":"live global/turtle limits, persisted alt switch, structural summary fields and offline CLI edits"},{"since":"1.2.13","version":"1.2.13","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"},{"since":"1.2.12","version":"1.2.12","breaking":false,"field":"trackers","cap":"trackers","note":"tracker diagnostics and rate-limited reannounce; show adds trackers and tracker_count"},{"since":"1.2.11","version":"1.2.11","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.10","version":"1.2.10","breaking":false,"field":"api.search","cap":"search","note":"daemon search sessions, keyed deduplicated results, providers, browse and grab"},{"since":"1.2.9","version":"1.2.9","breaking":false,"field":"api","note":"unchanged raw response envelope; compiled operation catalogue and per-operation startup/retry policy"},{"since":"1.2.8","version":"1.2.8","breaking":false,"field":"events","note":"NDJSON history/follow with instance and seq, replay cursors and resync metadata"},{"since":"1.2.7","version":"1.2.7","breaking":false,"field":"restart.server","note":"restart drains the daemon and waits for its replacement instance; binary replacement is deferred while busy"},{"since":"1.2.6","version":"1.2.6","breaking":false,"field":"log","cap":"log","note":"app.log, log topic and CLI history/follow; app.stats distinguishes active clients and cumulative connections"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api.origin","cap":"origin","note":"durable open origin, manual-bucket filters, keep-files batch undo_until and restore source"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.queue","cap":"queue","note":"queue capability, force-start, queue movement and positioned torrent rows"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"api.torrents.recheck","cap":"recheck","note":"recheck capability, pending ref acknowledgement and measured verification result"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","cap":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","cap":"deferred_add","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
             "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
@@ -396,6 +396,36 @@ mod tests {
     }
 
     #[test]
+    fn additive_contract_versions_are_unique_and_documented() {
+        let value = capabilities_json();
+        let docs = include_str!("../docs/IPC.md");
+        let mut patches = std::collections::BTreeMap::new();
+        let changes = value["changes"].as_array().unwrap();
+        let mut previous = u32::MAX;
+        for row in changes.iter().filter(|row| row["since"] != "1.2.0") {
+            let version = row["since"].as_str().unwrap();
+            let patch: u32 = version.strip_prefix("1.2.").unwrap().parse().unwrap();
+            let field = row["field"].as_str().unwrap();
+            assert_eq!(row["version"], version, "since/version mismatch for {field}");
+            assert_eq!(row["breaking"], false, "patch must be additive: {field}");
+            assert!(patch > 0 && patch < previous, "changes must be newest first: {field}");
+            previous = patch;
+            assert!(patches.insert(patch, field).is_none(), "duplicate contract patch {version}");
+            assert!(docs.lines().any(|line| line == format!("| `{version}` | `{field}` |")),
+                "undocumented contract patch {version}: {field}");
+        }
+        let latest = *patches.keys().next_back().unwrap();
+        assert_eq!(patches.keys().copied().collect::<Vec<_>>(), (1..=latest).collect::<Vec<_>>());
+        assert_eq!(CONTRACT_VERSION, format!("1.2.{latest}"));
+        let documented = docs.lines().filter(|line| line.starts_with("| `1.2.")).count();
+        assert_eq!(documented, patches.len(), "stale or duplicate documented contract patches");
+        let limits = value["commands"].as_array().unwrap().iter()
+            .find(|row| row["name"] == "limits").unwrap();
+        let limits_change = changes.iter().find(|row| row["field"] == "limits").unwrap();
+        assert_eq!(limits["since"], limits_change["since"]);
+    }
+
+    #[test]
     fn native_seed_sentinel_is_documented_as_unknown() {
         let capabilities = capabilities_json();
         assert_eq!(capabilities["contract_version"], CONTRACT_VERSION);
@@ -570,7 +600,7 @@ fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
             let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
             let old=metadata.iter().find(|m|m.name==name);
             let starts=matches!(name.as_str(),"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
-            out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":if name=="limits" {"1.2.6"} else {"1.2.0"}}));
+            out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":if name=="limits" {"1.2.14"} else {"1.2.0"}}));
             walk(child,&name,metadata,out);
         }
     }

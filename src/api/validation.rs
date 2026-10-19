@@ -259,6 +259,15 @@ struct FileSizeObservations {
     file_totals: BTreeSet<u64>,
 }
 impl TorrentFileSizes {
+    /// A confirmed removal ends this torrent instance's measured completion.
+    /// The info hash's static geometry still applies after re-admission.
+    #[cfg(test)]
+    pub(crate) fn removed(&mut self, hash: &Hash) {
+        if let Some(observed) = self.by_hash.get_mut(hash) {
+            observed.completed_bytes.clear();
+        }
+    }
+
     fn torrent(&mut self, value: &Torrent, path: &str) -> Checked {
         let observed = self.by_hash.entry(value.hash.clone()).or_default();
         if let Some(size) = value.size {
