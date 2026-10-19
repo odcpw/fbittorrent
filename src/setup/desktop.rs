@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 #[path="quick.rs"]
 mod quick;
+#[path="plugin_reload.rs"]
+mod plugin_reload;
 
 #[derive(Default)]
 pub struct Options {
@@ -127,6 +129,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
     let config = dirs::config_dir().context("no config directory")?;
     let data = dirs::data_local_dir().context("no data directory")?;
     let mut actions = Vec::new();
+    let mut plugin_sources=Vec::new();
     let unit = crate::api::client::unit_path()?;
     let plugin = config.join("omarchy/plugins/oliver.torrents");
     let menu = config.join("omarchy/extensions/omarchy-menu.jsonc");
@@ -313,6 +316,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             if manifest["id"] != "oliver.torrents" {
                 bail!("unexpected plugin source identity");
             }
+            plugin_sources.push(source.clone());
             let metadata = plugin.symlink_metadata().ok();
             if mode == "link" {
                 if std::fs::read_link(&plugin).ok().as_ref() != Some(&source) {
@@ -351,8 +355,10 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
         if let Some(chord)=options.quick {
             anyhow::ensure!(options.plugin.is_some() || plugin.join("manifest.json").is_file(),"install the shared service first: fbittorrent setup --plugin copy --quick");
             quick::install(&mut actions,&config,options.plugin.as_deref().unwrap_or("copy"),&chord)?;
+            plugin_sources.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("plugin/oliver.torrents-quick"));
         }
     }
+    plugin_reload::plan(&mut actions,&config,&plugin_sources,uninstall)?;
     if !options.dry_run {
         for item in &actions {
             apply(item)?;

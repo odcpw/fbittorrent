@@ -173,6 +173,7 @@ Item {
     }
     updatePopup()
   }
+  function closePopups() {widgets.slice().forEach(function(widget){widget.close()});updatePopup()}
   function updatePopup() { popupOpen = widgets.some(function(w) { return w.opened }) }
 
 

@@ -123,6 +123,9 @@ fbittorrent setup --magnet --plugin=link --dry-run --json  # exact plan, no chan
 fbittorrent search --install              # provider scripts; Python 3 required
 ```
 
+Changed plugin installs restart the Omarchy shell after all files are installed,
+so open dashboards use the new code.
+
 Setup writes the static user unit, desktop/MIME entries and icon, places the
 plugin in the bar only when missing, and updates only `torrents.*` menu entries.
 Open and Search summon the dashboard; Terminal keeps the TUI. Stop is shown

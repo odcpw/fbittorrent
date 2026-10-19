@@ -77,9 +77,25 @@ function create(service,changed,debug) {
       if(result)metadata(result.torrent);else if(failure)error(failure.message)
     }})
   }
+  function adoptStage(row){
+    s.duplicate=false;s.owned=true;s.stageSupported=true;s.phase="resolving";s.origin=row.origin || s.origin
+    s.name=row.name || s.name;s.size=row.size
+    settings({save_path:s.requestedPath || row.save_path})
+    if(s.cancelRequested)f.cancel();else if(s.commitRequested)f.commit();else metadata(row)
+    publish()
+  }
   function staged(result) {
     s.hash=result.hash || s.hash
-    if(result.duplicate){s.duplicate=true;s.owned=false;s.phase="duplicate";publish();return}
+    if(result.duplicate && s.cancelRequested){close();return}
+    if(result.duplicate){
+      s.phase="checking_existing";var generation=epoch
+      service.client.request("torrents.get",{hash:s.hash},{callback:function(result,failure){
+        if(generation!==epoch || !s.visible)return
+        if(failure){error(failure.message);return}
+        if(result && result.torrent.staged){adoptStage(result.torrent);return}
+        s.commitRequested=false;s.duplicate=true;s.owned=false;s.phase="duplicate";publish()
+      }});publish();return
+    }
     if(!s.hash){error("The daemon did not return a torrent hash");return}
     s.owned=true;s.phase="resolving"
     if(s.cancelRequested){f.cancel();return}
@@ -114,7 +130,7 @@ function create(service,changed,debug) {
     if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}
     s.source=parsed.source;s.hash=parsed.hash;s.name=Model.sourceName(s.source)
     var existing=s.hash && service.store.torrents[s.hash]
-    if(existing){s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
+    if(existing){if(existing.staged){adoptStage(existing);return true}s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
     s.stageSupported=service.client.caps.indexOf("staging")>=0
     stageSource()
     publish();return true
