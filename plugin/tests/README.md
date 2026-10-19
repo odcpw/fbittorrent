@@ -72,3 +72,48 @@ This boundary is required: the P3-08 FD investigation found background DNS
 sockets in the older debug binary despite the engine's loopback configuration.
 Earlier captures/mutation tests exercised real local payloads, but their DNS was
 not fully contained. Requalified runs are retained with the Track C receipt.
+
+## Torrents table
+
+`python3 plugin/tests/dashboard-table.py --binary <debug-binary>` checks the real
+native table at 900 and each tier boundary ±1, including live header widths,
+sidebar/details docking, a native double-click, no right-click action, Cancel-first
+remove/delete, typed sort persistence across a service restart, confirmed
+pause/resume and seed policy, recorded argv for open/copy/title links, and real
+Ctrl+Q shutdown. A missing Shows cap is an explicit unqualified positive-follow
+case. `python3 plugin/tests/run-qs.py table plugin/tests/table` covers the Qt proxy,
+extra typed sorts, pending/failed ref indexes, unread badges and visible ranges.
+`lint.sh` rejects collection loops in Service/view frame handlers with positive
+and negative controls.
+
+The native pointer sender builds in ignored test storage using `cc`,
+`wayland-scanner` and `pkg-config wayland-client`. Its checked-in MIT protocol XML
+comes from [wlr-protocols](https://github.com/swaywm/wlr-protocols/blob/master/unstable/wlr-virtual-pointer-unstable-v1.xml).
+It requires an explicit private display plus the private-network marker, and
+keeps the device alive until the table reports the hover before sending buttons.
+There is no owner-display fallback. The native proxy uses the installed Qt 6.12
+`model` property and a native ValueFilter over the store’s cached visibility role; a real empty ListModel avoids
+Qt's null-source crash during panel construction.
+
+`python3 plugin/tests/dashboard-table.py --profile --binary <debug-binary>` creates
+200 genuine daemon records (199 paused and one 8 MiB private seed/leech transfer
+at 32 KiB/s). The same fixture is `daemon.py <binary> --serve-fixture table-200`.
+After window creation, a guarded private recipe Timer calls the production scroll
+method 200 times at 50 ms intervals (elapsed time is checked), and samples the
+real transfer every second. This avoids spawning 200 CLI processes during the
+measurement; the production guarded IPC scroll entry point is checked separately. It parses QSG_RENDER_TIMING's renderer timings, or
+the software backend's whole-frame timings (including polish/sync/render/swap),
+and fails on absent samples or any frame above 32 ms. Logs include every measured
+frame and actual completed-byte/rate samples. It qualifies the negotiated
+poll/subscription transport actually available in the tested binary; fallback
+results do not prove a pushed subscription. All compositor, DNS, network, state
+and child-process boundaries described above apply.
+
+The table batches actual source-order changes: the installed Qt proxy otherwise
+resets delegates for each individual source move. One detach/reattach surrounds
+the move group and preserves contentY; ordinary role patches keep the same proxy.
+The source ListModel remains patched in place. The unit regression observes the
+real Qt rowsMoved signal and requires every move inside one boundary, and none
+for an unchanged-order role patch. `FBT_TEST_QS_DIAG=1` enables per-owned-process
+ptrace authorization and a bounded GDB stack capture if the profile stalls; it
+never changes the system ptrace policy or inspects an owner process.

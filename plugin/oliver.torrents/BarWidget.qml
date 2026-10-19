@@ -167,10 +167,15 @@ Ui.Panel {
     function tui(): string { root.openTui(); return "ok" }
     // Test hook: where the keyboard cursor is. Lets a script verify key handling
     // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
-    function state(): string { var state=JSON.parse(svc.stateJson());state.geometry=root.geometry();return JSON.stringify(state) }
+    function state(): string { var state=JSON.parse(svc.stateJson());state.geometry=root.geometry();state.popupDelegates=popupRows.count;return JSON.stringify(state) }
     function summonView(payload: string): string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused: FBT_TEST_HOOKS=1 required"
       return root.shell && root.shell.summon("oliver.torrents",payload) ? "ok" : "unavailable"
+    }
+    function scroll(dy: real): string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused: FBT_TEST_HOOKS=1 required"
+      if(!svc.dashboardOwner)return "unavailable"
+      svc.dashboardOwner.scroll(Math.max(-10000,Math.min(10000,dy)));return "ok"
     }
     function useRuntimeDir(path: string): string { return svc.useRuntimeDir(path) }
     function cursor(): string {
@@ -373,7 +378,8 @@ Ui.Panel {
             spacing: Style.space(6)
 
             Repeater {
-              model: svc ? svc.torrentModel : null
+              id:popupRows
+              model: root.opened && svc && !svc.modelReordering ? svc.torrentModel : null
               TorrentRow {
                 host: root
                 required property var model

@@ -3107,7 +3107,7 @@ SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_un
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
-    parser.add_argument("--serve-fixture", choices=("empty", "downloading", "paused"),
+    parser.add_argument("--serve-fixture", choices=("empty", "downloading", "paused", "table-200"),
                         help="hold a private real-engine UI state until stdin EOF")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
     parser.add_argument("--case", choices=CASES,

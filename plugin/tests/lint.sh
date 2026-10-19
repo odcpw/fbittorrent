@@ -4,6 +4,7 @@ set -euo pipefail
 root="${FBT_PLUGIN_SOURCE:-$(dirname "$0")/../oliver.torrents}"
 model="$root/Model.js"
 python3 "$(dirname "$0")/check-structure.py" "$root"
+python3 "$(dirname "$0")/check-frame-handlers.py" "$root"
 python3 "$(dirname "$0")/../../scripts/check-widget-online.py" --self-test "$root/Service.qml"
 if rg -n 'num_seeds\s*\+\s*["\x27]s["\x27]' "$model"; then
   echo 'Unknown native seed counts must not become an s-suffixed widget count.' >&2
