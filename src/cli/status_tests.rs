@@ -31,7 +31,7 @@ fn exchange(cut:Option<&str>,state:&str,initially_stopping:bool)->Result<Value> 
                 "torrents.list"=>json!({"torrents":[]}),
                 "app.info"=>json!({"state":"running","upgrade_pending":false}),
                 "transfer.info"=>json!({"dl_bps":0,"ul_bps":0}),
-                "app.stats"=>json!({"all_time":{"downloaded":1,"uploaded":0,"completed":0}}),
+                "app.stats"=>json!({"all_time":{"downloaded":1,"uploaded":0,"completed":0},"session":{"downloaded":1,"uploaded":0,"started_at":123}}),
                 "subscribe"=>json!({"sub":11}),
                 "unsubscribe"=>json!({}),
                 other=>panic!("unexpected status request {other}"),
@@ -57,7 +57,7 @@ fn status_observes_shutdown_between_every_pair_of_requests() {
         let value=exchange(Some(op),"stopping",false).unwrap();
         assert_eq!(value["ok"],true,"{op}");assert_eq!(value["running"],true,"{op}");
         assert_eq!(value["daemon"]["state"],"stopping","{op}");
-        for key in ["total","active","dl","up","torrents","all_time","app_open"] {
+        for key in ["total","active","dl","up","torrents","all_time","session","app_open"] {
             assert!(value.get(key).is_none(),"{op}: unavailable {key} must not be invented");
         }
     }
@@ -75,5 +75,6 @@ fn status_does_not_misreport_engine_restart_as_daemon_shutdown() {
 fn status_running_snapshot_keeps_real_counts_and_statistics() {
     let value=exchange(None,"running",false).unwrap();
     assert_eq!(value["running"],true);assert_eq!(value["total"],0);
+    assert_eq!(value["session"],json!({"downloaded":1,"uploaded":0,"started_at":123}));
     assert_eq!(value["all_time"]["downloaded"],1);assert_eq!(value["torrents"],json!([]));
 }
