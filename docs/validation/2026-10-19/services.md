@@ -266,3 +266,233 @@ VPN on: 55 extra optional field occurrences. Values and pointers below are copie
 ## P1-06 — preparation for the P1-09 merge
 
 The orchestrator assigned structural ownership to cod_4's P1-09 (`c2269c1`). My independent split had already been committed in `d00abc2`, so a forward reconciliation commit removes those ten modules and restores the preceding 2,203-line `server.rs` layout. All ruling-7 functionality remains, including the live-frame/checking-history validation helpers and controls, daemon.py normalization, the P1-05d exact checked diagnostic assertion, and the retained missing_files reason fix/regression. Proof: server.rs equals dd2b17d's source plus only the exact checked diagnostic adaptation; daemon.py, engine/view.rs, its regression and IPC.md are byte-identical to d00abc2. Focused `cargo test --locked -p fbittorrent api::server:: -- --nocapture`: 17 passed, 1 ignored (`target/test-logs/fbt-p1-06-tt1/p109-reconcile-focused.{jsonl,log}`). Full `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`: 279 passed, 2 ignored (`p109-reconcile-unit.{jsonl,log}`). Runs retain isolated XDG and CARGO_BUILD_JOBS=4. Final replay/gate qualification is pending integration of P1-09; the prior qualification above describes d00abc2, not the coming merged tree. The temporary monolith follows the explicit reconciliation instruction; the size gate is unchanged. For the merge, port ruling 7's inline argument_tests helpers/controls to cod_4's server/argument_tests.rs. Ready for the P1-09 merge.
+
+## P1-06 — final qualification on the P1-09 split
+
+On merge 27f8cd1, ported ruling 7's original live-validation helpers/controls into cod_4's argument_tests.rs; daemon normalization and the engine missing_files reason fix/regression survived the merge byte-identically. The P1-09 server façade and module layout are untouched; its largest child module is 467 lines (server.rs itself 561). Live replay exposed an invalid app.restart completion payload: the frozen primary owner reply is pending-only, so completed owner mutations now use outcome=done without an optional result. A new regression rejects the old done payload, round-trips the corrected event and preserves ordinary result payloads. Updated the exact capability assertion to torrents/files/mutations. Added torrents.ndjson:61 /result to the established P6-08 post-remove class: P1-09 exposes that catalogue request after its hash was removed; replay checks the actual not_found error before deferring it. This is an extension of the accepted class, not a new normalization mask. The single normalization table above and in IPC.md is unchanged; frozen fixtures/types/validators, ten legacy wire fixtures, and the 768-row state table remain intact (`r9-integrity.json`, `p109-functional-port.json`).
+
+All evidence below is under target/test-logs/fbt-p1-06-tt1/; private XDG and CARGO_BUILD_JOBS=4 remain enforced.
+
+| Criterion/check | Command | Log/artifact | Observed |
+|---|---|---|---|
+| Live fixture replay, VPN off/on | `python3 run-r9.py r9-contract-qualified python3 run-contract.py r9-contract-qualified`; same with r9-vpn-contract-qualified | `r9-contract-qualified/daemon/contract_*.jsonl`; `r9-vpn-contract-qualified/daemon/contract_*.jsonl` | All three groups pass in both modes; no remaining mismatch |
+| 33rd connection busy; over-cap and non-object close | `python3 run-r9.py r9-api python3 run-daemon.py r9-api target/debug/fbittorrent <18 named cases>` | `r9-api/daemon/{connection_limit,line_cap,non_object_line}.jsonl` | All pass with typed errors and closure |
+| Foreign uid refused | `cargo test --locked -p fbittorrent api::server:: -- --nocapture` | `r9-server-final.log` | Kernel same-user accepted, injected foreign uid refused; 19 server tests pass, 1 ignored |
+| Hello deadline at 5 seconds | Named API batch above | `r9-api/daemon/{hello_deadline,slow_hello_bytes}.jsonl` | Both pass; trickled bytes do not reset deadline |
+| Build, size and frozen preservation | `cargo check --locked`; `scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`; integrity checks | `r9-check-final.{jsonl,log}`, `r9-size.jsonl`, `r9-integrity.json` | Check and size pass; protected bytes unchanged |
+| Full Rust suite | `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture` | `r9-unit.{jsonl,log}` | 287 passed; 2 deliberately ignored harness entry points |
+| Wrapped gate | `flock -w 7200 /tmp/fbittorrent-release.lock systemd-run --user --scope -p MemoryHigh=10G -p MemoryMax=14G --quiet -- env RUST_TEST_THREADS=4 <private XDG vars> bash agent_ergonomics_audit/audit/regression_tests/all.sh` | Exact command in `r9-all.jsonl`; output `r9-all.log`; archived `r9-gate-suites/` | PASS |
+
+Qualification history retained: r9-contract initially found the invalid owner event and line-61 post-remove mismatch; both replay modes are now green after the fixes. The named API batch was 17/18 with an obsolete two-capability assertion; the updated exact three-capability check passes in the focused r9-api-cap run. No acceptance criterion remains unmet. Remaining deferrals: 39 VPN off / 38 on, namely 22 capability-conditioned fields, 8 undrivable catalogue frames, 1 protocol acceptance, 7 post-remove fields, plus the environment-conditional fixture0 line only when VPN opt-in is off. P1-09's advertised mutation capability is actively compared. Follow-up: P1-08 must extend the exact capability expectation when it implements subscriptions; the server mutation event fix belongs on the integrated P1-09 stack.
+
+<details>
+<summary>Final deferred records and extra optional fields, copied from successful merged-stack replay</summary>
+
+VPN off: 39 deferred records.
+
+```jsonl
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 5, "pointer": "/id", "reason": "fatal malformed input has a request-less error event, not the fixture's ID-bearing failure"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 7, "pointer": "/id", "reason": "silent hello deadline has a request-less error event, not the fixture's ID-bearing failure"}
+{"bead": "P1-11", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 17, "pointer": "/error", "reason": "selector ambiguity is raised by the CLI before RPC"}
+{"bead": "P1-11", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 19, "pointer": "/error", "reason": "destructive-confirmation safety is raised by the CLI before RPC"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 23, "pointer": "/error", "reason": "the catalogue's unsupported legacy-only controls have no P1-06 RPC"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 25, "pointer": "/error/details/state", "reason": "ruling 4A: three READY-window retries did not produce starting refusal; engine dispatch waits for session; retry evidence target/test-logs/fbt-p1-06-tt1/r9-contract-qualified/daemon/contract_errors.starting-retries.json"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 27, "pointer": "/error", "reason": "already_running belongs to starting a second process, not an RPC on this owner"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 29, "pointer": "/error", "reason": "the fixture's tracker-source upstream failure requires later tracker/provider operations"}
+{"bead": "P1-14", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 35, "pointer": "/error/details/entries", "reason": "the fixture's diagnostic entries require the unadvertised log capability"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 6, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-18", "class": "protocol", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 6, "pointer": "/result/proto", "reason": "proto-2 acceptance is not implemented"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P5-01", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/4", "reason": "unadvertised capability peers"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/5", "reason": "unadvertised capability watch"}
+{"bead": "P6-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/6", "reason": "unadvertised capability queue"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/7", "reason": "unadvertised capability origin"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P5-01", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/4", "reason": "unadvertised capability peers"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/5", "reason": "unadvertised capability watch"}
+{"bead": "P6-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/6", "reason": "unadvertised capability queue"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/7", "reason": "unadvertised capability origin"}
+{"bead": "ENVIRONMENT-CONDITIONAL", "class": "environment-conditional", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 9, "pointer": "/result/state", "reason": "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 13, "pointer": "/result/torrents/0/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 13, "pointer": "/result/torrents/6/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 15, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 23, "pointer": "/result/undo_until", "reason": "expected frame depends on undo/origin restoration"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 25, "pointer": "/result/files/0/ready", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 27, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 29, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 31, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 35, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 37, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 39, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 39, "pointer": "/result/torrent/hash", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 49, "pointer": "/result/torrent/undo_until", "reason": "expected frame depends on undo/origin restoration"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 51, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 61, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+```
+
+VPN off: 55 extra optional field occurrences.
+
+```jsonl
+{"fixture": "contracts/ipc/v1/errors.ndjson", "line": 21, "live_line": 57, "pointer": "/error/details/hash", "value": "906fd7edee2fe50bcb23df1fd2f863efe9c2a1fb"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 41, "live_line": 44, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 41, "live_line": 44, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/piece_count", "value": 65536}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/content_path", "value": "/tmp/fbt-fixture/downloads/Fixture waiting_vpn"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/size", "value": 4096}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/content_path", "value": "/tmp/fbt-fixture/downloads/New transfer"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/eta_s", "value": 25}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/piece_count", "value": 8}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/piece_size", "value": 1048576}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/tracker_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 258, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+```
+
+VPN on: 38 deferred records.
+
+```jsonl
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 5, "pointer": "/id", "reason": "fatal malformed input has a request-less error event, not the fixture's ID-bearing failure"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 7, "pointer": "/id", "reason": "silent hello deadline has a request-less error event, not the fixture's ID-bearing failure"}
+{"bead": "P1-11", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 17, "pointer": "/error", "reason": "selector ambiguity is raised by the CLI before RPC"}
+{"bead": "P1-11", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 19, "pointer": "/error", "reason": "destructive-confirmation safety is raised by the CLI before RPC"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 23, "pointer": "/error", "reason": "the catalogue's unsupported legacy-only controls have no P1-06 RPC"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 25, "pointer": "/error/details/state", "reason": "ruling 4A: three READY-window retries did not produce starting refusal; engine dispatch waits for session; retry evidence target/test-logs/fbt-p1-06-tt1/r9-vpn-contract-qualified/daemon/contract_errors.starting-retries.json"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 27, "pointer": "/error", "reason": "already_running belongs to starting a second process, not an RPC on this owner"}
+{"bead": "P1-18", "class": "undrivable-catalogue-frame", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 29, "pointer": "/error", "reason": "the fixture's tracker-source upstream failure requires later tracker/provider operations"}
+{"bead": "P1-14", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/errors.ndjson", "line": 35, "pointer": "/error/details/entries", "reason": "the fixture's diagnostic entries require the unadvertised log capability"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 6, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P1-18", "class": "protocol", "fixture": "contracts/ipc/v1/hello.ndjson", "line": 6, "pointer": "/result/proto", "reason": "proto-2 acceptance is not implemented"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P5-01", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/4", "reason": "unadvertised capability peers"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/5", "reason": "unadvertised capability watch"}
+{"bead": "P6-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/6", "reason": "unadvertised capability queue"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 3, "pointer": "/result/caps/7", "reason": "unadvertised capability origin"}
+{"bead": "P1-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/2", "reason": "unadvertised capability subscribe"}
+{"bead": "P5-01", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/4", "reason": "unadvertised capability peers"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/5", "reason": "unadvertised capability watch"}
+{"bead": "P6-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/6", "reason": "unadvertised capability queue"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 5, "pointer": "/result/caps/7", "reason": "unadvertised capability origin"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 13, "pointer": "/result/torrents/0/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 13, "pointer": "/result/torrents/6/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 15, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 23, "pointer": "/result/undo_until", "reason": "expected frame depends on undo/origin restoration"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 25, "pointer": "/result/files/0/ready", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 27, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 29, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 31, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 35, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 37, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 39, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 39, "pointer": "/result/torrent/hash", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+{"bead": "P6-08", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 49, "pointer": "/result/torrent/undo_until", "reason": "expected frame depends on undo/origin restoration"}
+{"bead": "P5-05", "class": "capability-conditioned", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 51, "pointer": "/result/torrent/playable", "reason": "expected frame depends on the unadvertised watch capability"}
+{"bead": "P6-08", "class": "post-remove", "fixture": "contracts/ipc/v1/torrents.ndjson", "line": 61, "pointer": "/result", "reason": "ruling 4E: operation after preceding remove requires a surviving/undo record"}
+```
+
+VPN on: 55 extra optional field occurrences.
+
+```jsonl
+{"fixture": "contracts/ipc/v1/errors.ndjson", "line": 21, "live_line": 57, "pointer": "/error/details/hash", "value": "ba9696954bdd3b58d87f551cf8b94deb057cbc30"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 41, "live_line": 44, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 41, "live_line": 44, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/piece_count", "value": 65536}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 43, "live_line": 50, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 45, "live_line": 84, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/ratio", "value": 0.0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 47, "live_line": 90, "pointer": "/result/torrent/uploaded_bytes", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/content_path", "value": "/tmp/fbt-fixture/downloads/Fixture waiting_vpn"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/size", "value": 4096}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 53, "live_line": 106, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 55, "live_line": 179, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/piece_count", "value": 4}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/piece_size", "value": 1024}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/tracker_count", "value": 0}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 57, "live_line": 203, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/content_path", "value": "/tmp/fbt-fixture/downloads/New transfer"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/eta_s", "value": 25}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/file_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/origin", "value": "manual"}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/piece_count", "value": 8}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/piece_size", "value": 1048576}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/tracker_count", "value": 1}
+{"fixture": "contracts/ipc/v1/torrents.ndjson", "line": 63, "live_line": 270, "pointer": "/result/torrent/upload_limit_bps", "value": 32768}
+```
+
+</details>

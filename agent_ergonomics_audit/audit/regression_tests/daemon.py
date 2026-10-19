@@ -1518,7 +1518,7 @@ def api_collection_cap(binary, systemd):
 def api_subscriptions_deferred(binary, systemd):
     with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files"], "P1-06 advertises exactly its implemented capabilities", str(hello["caps"]))
+        case.check(hello["caps"] == ["torrents", "files", "mutations"], "P1-06 plus P1-09 advertise exactly their implemented capabilities", str(hello["caps"]))
         for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
             frame = client.call(op, args, error="unknown_op")
             nearest = ["torrents.list"] if op == "torrents.lis" else []
@@ -2385,7 +2385,11 @@ def contract_group(group, binary, systemd):
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
-                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39) and "origin" not in available_caps:
+                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39, 61) and "origin" not in available_caps:
+                        if number == 61:
+                            case.check(actual.get("error", {}).get("code") == "not_found",
+                                       "post-remove upload-limit fixture reaches the actual missing-record condition",
+                                       json.dumps(actual, sort_keys=True))
                         pointer = "/result/torrent/hash" if number == 39 else "/result"
                         owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):

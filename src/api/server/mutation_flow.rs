@@ -202,7 +202,7 @@ impl Shared {
             Ok(reply) => (
                 MutationOutcome::Done,
                 None,
-                Some(reply.to_value().unwrap().as_object().unwrap().clone()),
+                completed_payload(&task.op, &reply),
             ),
             Err(failure) => (
                 if failure.code == ErrorCode::Timeout {
@@ -308,6 +308,15 @@ impl Shared {
                 self.confirm(key, result);
             }
         }
+    }
+}
+pub(super) fn completed_payload(op: &str, reply: &Reply) -> Option<serde_json::Map<String, Value>> {
+    // Owner operations have a pending-only reply type. Completion is carried
+    // by outcome=done; their optional result must not invent a done reply DTO.
+    if matches!(op, "app.restart" | "app.shutdown") {
+        None
+    } else {
+        Some(reply.to_value().unwrap().as_object().unwrap().clone())
     }
 }
 pub(super) fn mutation_timeout(op: &str) -> Error {

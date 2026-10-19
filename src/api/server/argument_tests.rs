@@ -57,8 +57,144 @@ fn oversized_collection_is_an_id_bearing_error_and_does_not_end_connection() {
 
 // Python owns process lifecycle and E.1 records. This opt-in adapter only
 // runs the frozen P1-05 Rust decoder/validator on captured live frames.
+fn captured_torrents(line: &Value) -> Vec<&Value> {
+    let mut rows = Vec::new();
+    if let Some(torrent) = line.pointer("/frame/result/torrent") {
+        rows.push(torrent);
+    }
+    if let Some(torrents) = line
+        .pointer("/frame/result/torrents")
+        .and_then(Value::as_array)
+    {
+        rows.extend(torrents);
+    }
+    rows
+}
+
+fn validate_live_capture(text: &str) -> Result<(), String> {
+    use crate::api::validation::{Revisions, TorrentFileSizes};
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).map_err(|error| error.to_string()))
+        .collect::<Result<_, _>>()?;
+    // A recheck changes the measurement through checking and cancellation.
+    // Exclude it from cross-time agreement for that hash's whole history;
+    // every original value still receives raw type/bounds validation, and
+    // Python's non-checking fixture comparisons remain exact.
+    let checking: std::collections::BTreeSet<String> = lines
+        .iter()
+        .flat_map(captured_torrents)
+        .filter(|row| row["state"] == "checking")
+        .filter_map(|row| row["hash"].as_str().map(str::to_owned))
+        .collect();
+    let mut calls = BTreeMap::<u64, (Value, Call)>::new();
+    let mut hello = Vec::<Value>::new();
+    let mut geometry = TorrentFileSizes::default();
+    let mut revisions = Revisions::default();
+    for (index, line) in lines.iter().enumerate() {
+        let location = format!("live capture line {}", index + 1);
+        let validate = |context: &[Value]| {
+            let text = context
+                .iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>();
+            crate::api::fixtures::check_group("live-P1-06", &text)
+                .map_err(|error| format!("{location}: {error}"))
+        };
+        match line["dir"].as_str() {
+            Some("c2s") => {
+                validate(std::slice::from_ref(line))?;
+                let request: Request = serde_json::from_value(line["frame"].clone())
+                    .map_err(|error| format!("{location}: {error}"))?;
+                calls.insert(request.id.get(), (line.clone(), request.call));
+            }
+            Some("s2c") => {
+                let frame = &line["frame"];
+                let call = frame["id"].as_u64().and_then(|id| calls.get(&id));
+                let mut context = hello.clone();
+                if let Some((request, _)) = call {
+                    context.push(request.clone());
+                }
+                context.push(line.clone());
+                // The original frame, including every volatile member,
+                // round-trips through the unchanged frozen checker first.
+                validate(&context)?;
+                for row in captured_torrents(line) {
+                    if row["state"] == "checking" {
+                        if row["checked"] == true {
+                            return Err(format!("{location}: /frame/result/torrent/checked: active check must be false"));
+                        }
+                        if let (Some(size), Some(completed), Some(progress)) = (
+                            row["size"].as_u64(),
+                            row["completed_bytes"].as_u64(),
+                            row["progress"].as_f64(),
+                        ) {
+                            if completed > size {
+                                return Err(format!("{location}: /frame/result/torrent/completed_bytes: exceeds size"));
+                            }
+                            let ratio = if size == 0 {
+                                0.0
+                            } else {
+                                completed as f64 / size as f64
+                            };
+                            if !progress.is_finite() || (progress - ratio).abs() > 1e-9 {
+                                return Err(format!("{location}: /frame/result/torrent/progress: must equal completed_bytes/size within 1e-9"));
+                            }
+                        }
+                    }
+                }
+                if frame["ok"] == true {
+                    let (request, call) =
+                        call.ok_or_else(|| format!("{location}: response has no request"))?;
+                    let mut reply = Reply::decode(call.op(), frame["result"].clone())
+                        .map_err(|error| format!("{location}: {error}"))?;
+                    if matches!(reply, Reply::Hello(_)) {
+                        hello = vec![request.clone(), line.clone()];
+                    }
+                    if let Call::Unsubscribe { args } = call {
+                        revisions.unsubscribe(args.sub);
+                    }
+                    let strip_measurement = |row: &mut Torrent| {
+                        if checking.contains(row.hash.as_str()) {
+                            row.completed_bytes = None;
+                        }
+                    };
+                    match &mut reply {
+                        Reply::TorrentsList(result) => {
+                            result.torrents.iter_mut().for_each(strip_measurement)
+                        }
+                        Reply::TorrentsGet(result) => {
+                            strip_measurement(&mut result.torrent.torrent)
+                        }
+                        _ => {}
+                    }
+                    // The hook itself is unchanged. Size and file totals
+                    // are still checked across all captured replies.
+                    geometry
+                        .reply(call, &reply)
+                        .map_err(|error| format!("{location}: {error}"))?;
+                } else if frame.get("ev").is_some() {
+                    let event: Event = serde_json::from_value(frame.clone())
+                        .map_err(|error| format!("{location}: {error}"))?;
+                    if let Some((sub, rev)) = event.subscription_revision() {
+                        revisions
+                            .observe(sub, rev)
+                            .map_err(|error| format!("{location}: {error}"))?;
+                    }
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "{location}: live trace must contain c2s/s2c frames"
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_optional_fields(text: &str, checks: &Value) -> Result<(), String> {
-    crate::api::fixtures::check_group("live-P1-06", text)?;
+    validate_live_capture(text)?;
     let lines: Vec<Value> = text
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -90,8 +226,9 @@ fn validate_optional_fields(text: &str, checks: &Value) -> Result<(), String> {
             .iter()
             .map(|line| format!("{line}\n"))
             .collect::<String>();
-        crate::api::fixtures::check_group("optional-P1-06", &modified)
-            .map_err(|e| format!("extra optional field {pointer} is required or invalid: {e}"))?;
+        validate_live_capture(&modified).map_err(|e| {
+            format!("extra optional field {pointer} is required or invalid: {e}")
+        })?;
         println!("extra optional field live_line={line} pointer={pointer}: present and absent forms pass frozen P1-05 validation");
     }
     Ok(())
@@ -102,23 +239,27 @@ fn validate_optional_fields(text: &str, checks: &Value) -> Result<(), String> {
 fn validate_live_transcript() {
     let path = std::env::var("FBT_API_CONTRACT_TRACE").expect("live transcript path");
     let text = std::fs::read_to_string(&path).unwrap();
-    crate::api::fixtures::check_group("live-P1-06", &text).unwrap();
+    let kind = std::env::var("FBT_API_CONTRACT_KIND").unwrap_or_else(|_| "live".into());
+    match kind.as_str() {
+        "fixture" => crate::api::fixtures::check_group("fixture-P1-06", &text).unwrap(),
+        "live" => validate_live_capture(&text).unwrap(),
+        _ => panic!("unknown transcript kind: {kind}"),
+    }
     if let Ok(optional) = std::env::var("FBT_API_CONTRACT_OPTIONALS") {
         let checks = serde_json::from_str(&std::fs::read_to_string(optional).unwrap()).unwrap();
         validate_optional_fields(&text, &checks).unwrap();
     }
-    println!(
-        "P1-05 types, bounds, negotiated capabilities and canonical round trips validated: {path}"
-    );
+    println!("P1-05 types, bounds, negotiated capabilities and canonical round trips validated ({kind}): {path}");
 }
 
 #[test]
 fn optional_extras_require_the_frozen_types_in_both_forms() {
     let text = concat!(
-            "{\"dir\":\"c2s\",\"frame\":{\"id\":1,\"op\":\"transfer.info\"}}\n",
-            "{\"dir\":\"s2c\",\"frame\":{\"id\":1,\"ok\":true,\"result\":{\"session_downloaded\":0,\"session_uploaded\":0,\"dl_bps\":0}}}\n"
-        );
-    validate_optional_fields(text, &json!([{"live_line":2,"pointer":"/result/dl_bps"}])).unwrap();
+        "{\"dir\":\"c2s\",\"frame\":{\"id\":1,\"op\":\"transfer.info\"}}\n",
+        "{\"dir\":\"s2c\",\"frame\":{\"id\":1,\"ok\":true,\"result\":{\"session_downloaded\":0,\"session_uploaded\":0,\"dl_bps\":0}}}\n"
+    );
+    validate_optional_fields(text, &json!([{"live_line":2,"pointer":"/result/dl_bps"}]))
+        .unwrap();
     assert!(validate_optional_fields(
         text,
         &json!([{"live_line":2,"pointer":"/result/session_downloaded"}])
@@ -129,11 +270,113 @@ fn optional_extras_require_the_frozen_types_in_both_forms() {
         &json!([])
     )
     .is_err());
-    assert!(
-        validate_optional_fields(&text.replace("\"dl_bps\":0", "\"invented\":0"), &json!([]))
-            .is_err()
-    );
+    assert!(validate_optional_fields(
+        &text.replace("\"dl_bps\":0", "\"invented\":0"),
+        &json!([])
+    )
+    .is_err());
     println!("optional extra: valid present/absent accepted; required removal, invalid type and undeclared field rejected");
+}
+
+fn checking_capture() -> Vec<Value> {
+    let hash = "ab".repeat(20);
+    let paused = json!({"hash":hash,"name":"checking fixture","state":"paused",
+        "intent":"pause","staged":false,"checked":true,"seed":false,
+        "upload_policy":"default_cap","save_path":"/tmp/fbt-fixture",
+        "added_at":1,"force":false,"size":100,"completed_bytes":50,"progress":0.5});
+    let mut checking = paused.clone();
+    checking["state"] = json!("checking");
+    checking["checked"] = json!(false);
+    checking["completed_bytes"] = json!(25);
+    checking["progress"] = json!(0.25);
+    checking["private"] = json!(false);
+    let mut cancelled = checking.clone();
+    cancelled["state"] = json!("paused");
+    cancelled["completed_bytes"] = json!(60);
+    cancelled["progress"] = json!(0.6);
+    vec![
+        json!({"dir":"c2s","frame":{"id":1,"op":"torrents.list","args":{}}}),
+        json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":{"torrents":[paused]}}}),
+        json!({"dir":"c2s","frame":{"id":2,"op":"torrents.get","args":{"hash":hash}}}),
+        json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":{"torrent":checking}}}),
+        json!({"dir":"c2s","frame":{"id":3,"op":"torrents.get","args":{"hash":hash}}}),
+        json!({"dir":"s2c","frame":{"id":3,"ok":true,"result":{"torrent":cancelled}}}),
+    ]
+}
+
+fn capture_text(rows: &[Value]) -> String {
+    rows.iter().map(|row| format!("{row}\n")).collect()
+}
+
+#[test]
+fn live_checking_measurements_preserve_static_geometry_and_strict_fixtures() {
+    let rows = checking_capture();
+    let text = capture_text(&rows);
+    validate_live_capture(&text).unwrap();
+    let strict = crate::api::fixtures::check_group("fixture-P1-06", &text).unwrap_err();
+    assert!(
+        strict.contains(":4:") && strict.contains("/completed_bytes"),
+        "{strict}"
+    );
+    let mut changed_size = rows.clone();
+    changed_size[3]["frame"]["result"]["torrent"]["size"] = json!(200);
+    changed_size[3]["frame"]["result"]["torrent"]["progress"] = json!(0.125);
+    assert!(validate_live_capture(&capture_text(&changed_size))
+        .unwrap_err()
+        .contains("/size"));
+    let mut nonchecking = rows.clone();
+    nonchecking[3]["frame"]["result"]["torrent"]["state"] = json!("paused");
+    nonchecking[3]["frame"]["result"]["torrent"]["checked"] = json!(true);
+    assert!(validate_live_capture(&capture_text(&nonchecking))
+        .unwrap_err()
+        .contains("/completed_bytes"));
+    let mut wrong_files = rows;
+    wrong_files.push(json!({"dir":"c2s","frame":{"id":4,"op":"torrents.files","args":{"hash":"ab".repeat(20)}}}));
+    wrong_files.push(json!({"dir":"s2c","frame":{"id":4,"ok":true,"result":{"files":[{
+        "index":0,"path":"file","sort_key":"file","size":99,"progress":0.0,"included":true}]}}}));
+    assert!(validate_live_capture(&capture_text(&wrong_files))
+        .unwrap_err()
+        .contains("/frame/result/files"));
+    println!("ruling 7: live check/cancellation measurements change; static sizes/file totals and full fixture agreement remain strict");
+}
+
+#[test]
+fn live_checking_measurements_reject_invalid_raw_values() {
+    for (key, value, pointer) in [
+        ("checked", json!(true), "torrent.checked: must be false while state is checking"),
+        ("completed_bytes", json!(101), "/completed_bytes"),
+        ("progress", json!(0.5), "/progress"),
+    ] {
+        let mut rows = checking_capture();
+        rows[3]["frame"]["result"]["torrent"][key] = value;
+        let error = validate_live_capture(&capture_text(&rows)).unwrap_err();
+        assert!(error.contains(pointer), "{key}: {error}");
+    }
+    for value in [json!(-1), json!(true), json!("25")] {
+        let mut rows = checking_capture();
+        rows[3]["frame"]["result"]["torrent"]["completed_bytes"] = value;
+        assert!(validate_live_capture(&capture_text(&rows)).is_err());
+    }
+    let mut zero = checking_capture();
+    for row in &mut zero {
+        if let Some(torrent) = row.pointer_mut("/frame/result/torrent") {
+            torrent["size"] = json!(0);
+            torrent["completed_bytes"] = json!(0);
+            torrent["progress"] = json!(0.0);
+        }
+        if let Some(torrents) = row
+            .pointer_mut("/frame/result/torrents")
+            .and_then(Value::as_array_mut)
+        {
+            for torrent in torrents {
+                torrent["size"] = json!(0);
+                torrent["completed_bytes"] = json!(0);
+                torrent["progress"] = json!(0.0);
+            }
+        }
+    }
+    validate_live_capture(&capture_text(&zero)).unwrap();
+    println!("ruling 7: checking checked=true, invalid byte types/bounds and inconsistent ratios reject before agreement projection; zero size is valid");
 }
 
 #[test]

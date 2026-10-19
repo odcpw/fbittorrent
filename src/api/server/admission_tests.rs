@@ -1,5 +1,31 @@
 use super::*;
 #[test]
+fn restart_completion_obeys_the_pending_only_owner_reply_contract() {
+    use crate::api::validation::Validate;
+    let mut event = Event::MutationResult {
+        seq: 1,
+        ts: 1,
+        reference: MutationRef::new("restart-fixture").unwrap(),
+        op: "app.restart".into(),
+        outcome: MutationOutcome::Done,
+        error: None,
+        result: Some(serde_json::Map::from_iter([("state".into(), json!("done"))])),
+    };
+    assert!(event.validate().is_err(), "the old invented done payload is invalid");
+    let Event::MutationResult { result, .. } = &mut event else { unreachable!() };
+    *result = completed_payload("app.restart", &Reply::TorrentsSetUploadLimit(MutationResult::Done));
+    assert!(result.is_none());
+    event.validate().unwrap();
+    let roundtrip: Event = serde_json::from_value(serde_json::to_value(&event).unwrap()).unwrap();
+    assert_eq!(roundtrip, event);
+    for op in ["app.restart", "app.shutdown"] {
+        assert!(completed_payload(op, &Reply::TorrentsSetUploadLimit(MutationResult::Done)).is_none());
+    }
+    let payload = completed_payload("torrents.set_upload_limit", &Reply::TorrentsSetUploadLimit(MutationResult::Done)).unwrap();
+    assert_eq!(payload, serde_json::Map::from_iter([("state".into(), json!("done"))]));
+    println!("owner completion keeps outcome=done, omits optional pending-only result, and round-trips the frozen event type; synchronous result payloads remain intact");
+}
+#[test]
 fn dispatch_queue_is_64_and_closed_pool_refuses_work() {
     let pool = Pool::default();
     let (connection, _) = super::tests::connection();
