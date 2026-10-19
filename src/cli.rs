@@ -262,14 +262,17 @@ pub(super) enum Cmd {
         /// Link the checkout's plugin or copy it for a stable installation
         #[arg(long, value_parser=["link", "copy"])]
         plugin: Option<String>,
+        /// Opt into the quick palette and its Hyprland shortcut (choose an unused chord)
+        #[arg(long, num_args=0..=1, default_missing_value="SUPER + CTRL + ALT + T")]
+        quick: Option<String>,
         /// List exact planned actions without writing files or running commands
         #[arg(long)]
         dry_run: bool,
         /// Remove desktop integration while keeping saved data
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         uninstall: bool,
         /// Remove integration and application data (never downloaded payloads)
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         purge: bool,
         /// Confirm application-data removal with --purge
         #[arg(long)]

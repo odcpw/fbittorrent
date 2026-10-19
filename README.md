@@ -140,8 +140,23 @@ Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activ
 o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
 ```
 
-Add it to your own bindings file if desired. Setup does not change keybindings
-or reload your shell.
+Add it to your own bindings file if desired. Normal setup keeps keybindings unchanged.
+
+The quick-add/search palette is a separate, optional overlay. To install it and
+an unused shortcut, opt in explicitly (the default chord below can be replaced):
+
+```bash
+fbittorrent setup --plugin copy --quick 'SUPER + CTRL + ALT + T'
+```
+
+Setup adds the `oliver.torrents-quick` plugin and an owned block in
+`hypr/bindings.lua`, preserving the bar route and unrelated bindings. Repeating
+setup is idempotent; `setup --uninstall` removes that block. Hyprland reloads Lua
+changes automatically. Choose a chord that is not already used by your desktop.
+The palette shares the existing Torrents daemon connection. Paste a magnet or
+absolute `.torrent` path and press Enter to add directly; ordinary text searches
+after a short pause. Use ↑/↓ and Enter to send a result to dashboard review.
+Esc closes only the palette and leaves transfers running.
 
 ## Lifecycle
 
@@ -293,6 +308,12 @@ unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
 
 The daemon posts completion notifications with Open File / Open Folder actions.
+Give a torrent a display name with `fbittorrent rename <selector> 'My title'`,
+`N` in the TUI/dashboard, or a double-click on its dashboard Overview title.
+An empty name clears the override. Display names survive restart and metadata
+refresh; payload file names and the info hash stay unchanged. Filters, sorting
+and CLI name selectors use the display name.
+
 Browser handlers use `add --origin handler`: the daemon posts Added with Undo
 (keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
 or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.

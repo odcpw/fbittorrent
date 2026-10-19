@@ -733,7 +733,11 @@ impl Subscription {
     fn update(&mut self, sample: &Sample, events: &[Value], oldest: u64) -> ApiResult<()> {
         // A slot without a usable ledger is transitional, not an empty saved
         // history. Keep detail subscriptions until the replacement is ready.
-        if matches!(sample.state.as_str(), "starting" | "stopping") {
+        // A new stats subscription can arrive while the worker samples an
+        // older topic set. Wait for its first actual sample, rather than emit
+        // null and tear down the shared UI connection.
+        if matches!(sample.state.as_str(), "starting" | "stopping")
+            || (sample.stats.is_null() && self.topics.iter().any(|t|t.topic==Topic::Stats)) {
             // An initial snapshot stays pending, but must not leave a past-due
             // deadline spinning the sampler while the engine opens/drains.
             for topic in &mut self.topics {

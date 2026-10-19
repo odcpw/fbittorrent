@@ -107,8 +107,14 @@ struct ClientState {
     client: Option<Client>,
     interactive: bool,
     dashboard_visible: bool,
+    overlay_visible:bool,
     glance: bool,
     caps: validation::NegotiatedCaps,
+}
+impl ClientState {
+    fn is_interactive(&self)->bool {
+        self.interactive && self.client.as_ref().is_some_and(|c|c.kind!=ClientKind::Bar || self.dashboard_visible || self.overlay_visible)
+    }
 }
 struct Connection {
     number: u64,
@@ -625,5 +631,28 @@ impl EventSink {
             })?;
         }
         Ok(rev)
+    }
+}
+
+#[cfg(test)]
+mod quick_presence_tests {
+    use super::*;
+    #[test]
+    fn quick_palette_presence_requires_a_visible_surface() {
+        let mut state=ClientState::default();
+        state.client=Some(serde_json::from_value(json!({"name":"shared-bar","version":"0.2.0","kind":"bar"})).unwrap());
+        state.interactive=true;
+        assert!(!state.is_interactive(),"bar-only socket cannot keep daemon alive");
+        state.overlay_visible=true;assert!(state.is_interactive());
+        state.overlay_visible=false;assert!(!state.is_interactive());
+        state.dashboard_visible=true;assert!(state.is_interactive());
+        state.interactive=false;assert!(!state.is_interactive());
+        for value in [true,false] {
+            let request:Request=serde_json::from_value(json!({"id":1,"op":"app.client","args":{"interactive":value,"overlay_visible":value}})).unwrap();
+            assert!(matches!(request.call,Call::AppClient{args} if args.overlay_visible==Some(value)));
+        }
+        let failure=framing::decode(br#"{"id":1,"op":"app.client","args":{"overlay_visible":"true"}}"#).err().unwrap();
+        assert_eq!(failure.error.details.as_ref().unwrap()["key"],"overlay_visible");
+        assert_eq!(failure.error.details.as_ref().unwrap()["expected"],"boolean");
     }
 }

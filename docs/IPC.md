@@ -165,7 +165,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
 | `app.stats` | `history?: bool` | `{active_clients: ClientCounts, connections: ClientCounts, session: SessionTotals, all_time: AllTimeTotals, history?: RateHistory}`; current clients, cumulative connections, session/all-time totals, optional 600 samples | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
-| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
+| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?`, `overlay_visible: bool?` (drop resets presence; bar interactive needs a visible dashboard or palette) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
 | `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
@@ -1229,3 +1229,7 @@ request; it never creates an engine session or acquires the daemon lock.
 Names contain at most 512 Unicode characters and no control characters. `name` in
 torrent rows, selectors, filters and sorting uses this override; `original_name` in
 `torrents.get` remains metadata-derived. Payload paths and hashes never change.
+
+An optional quick palette on the shared bar socket declares `app.client` with
+`interactive:true, overlay_visible:true` while visible, then clears `overlay_visible`
+on close. A bar with neither dashboard nor palette visible never prevents idle exit.

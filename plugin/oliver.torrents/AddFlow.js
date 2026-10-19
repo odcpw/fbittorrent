@@ -122,7 +122,7 @@ function create(service,changed,debug) {
     s.searchArgs=s.stageSupported && session ? {search_id:session,key:row.key} : {result:row}
     settings({})
     if(s.stageSupported){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}
-    publish();return true
+    publish();return true;return true
   }
   f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
