@@ -201,11 +201,13 @@ pub(super) struct Prepared {
     committed: bool,
 }
 impl Prepared {
+    #[cfg(test)]
     pub(super) fn new(source: &Path, target: &Path, paths: &[PathBuf]) -> Result<Self> {
         Self::with_io(source, target, paths, strategy, |source, target| {
             copy(&mut &*source, target)
         })
     }
+    #[cfg(test)]
     fn with_io(
         source: &Path,
         target: &Path,
@@ -425,6 +427,7 @@ impl Drop for Prepared {
         self.clean_stage();
     }
 }
+#[cfg(test)]
 fn copy(source: &mut impl Read, target: &mut impl Write) -> Result<()> {
     copy_checked(source, target, &|| Ok(()))
 }

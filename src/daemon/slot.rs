@@ -1,5 +1,5 @@
 //! Replaceable engine state; the daemon owns the listener, lock and lifecycle.
-use crate::{engine::{AppEngine, ParkedLedger}, engine::ops::{EngineOp, EngineResult, HashSelection}};
+use crate::engine::{AppEngine, ParkedLedger};
 use anyhow::{bail, Result};
 
 pub enum Slot {
@@ -75,6 +75,7 @@ impl EngineSlot {
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::ops::{EngineOp, EngineResult, HashSelection};
     use super::*;
     #[test]
     fn parked_adapter_retains_typed_generation() {

@@ -52,9 +52,6 @@ impl Store {
             self.pending.remove(reference);
         }
     }
-    pub fn pending_for(&self, hash: &api::Hash) -> Option<&str> {
-        self.pending_for_key(hash.as_str())
-    }
     pub fn pending_for_key(&self, hash: &str) -> Option<&str> {
         self.pending
             .values()
@@ -106,7 +103,7 @@ mod tests {
                 vec![hash.clone()],
             )
             .unwrap();
-        assert_eq!(store.pending_for(&hash), Some("torrents.stop"));
+        assert_eq!(store.pending_for_key(hash.as_str()), Some("torrents.stop"));
         assert!(
             store.torrents.is_empty(),
             "pending must never invent the expected end state"
@@ -122,7 +119,7 @@ mod tests {
                 result: None,
             })
             .unwrap();
-        assert!(store.pending_for(&hash).is_none());
+        assert!(store.pending_for_key(hash.as_str()).is_none());
         assert!(
             store.torrents.is_empty(),
             "even completion events leave rows to authoritative data"
@@ -142,7 +139,7 @@ mod tests {
             .unwrap();
         store.disconnected();
         assert_eq!(store.pending[&reference].status, Status::Unknown);
-        assert!(store.pending_for(&hash).is_none());
+        assert!(store.pending_for_key(hash.as_str()).is_none());
         assert!(store.torrents.is_empty());
     }
 }

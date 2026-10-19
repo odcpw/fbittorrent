@@ -132,12 +132,7 @@ pub struct AppEngine {
     dispatcher: EngineDispatcher,
     runtime: Option<NativeRuntime>,
     // Released only after the socket, workers, session and runtime have stopped.
-    instance: Arc<InstanceLock>,
-}
-
-pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
-    cfg.validate()?;
-    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?), None)
+    _instance: Arc<InstanceLock>,
 }
 
 /// Start one replaceable session under the daemon owner's existing lock. The
@@ -255,7 +250,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     Ok(AppEngine {
         dispatcher,
         runtime: Some(runtime),
-        instance,
+        _instance: instance,
     })
 }
 

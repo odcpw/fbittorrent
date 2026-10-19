@@ -72,14 +72,14 @@ fn removal_undo_requires_confirmed_keep_files_receipt_and_expires() {
     let mut app=fixture::app("torrents");
     assert!(!app.can_undo_removal());
     let hash=app.torrents[0].hash.clone();
-    let until=shows::now() as u64+60;
+    let until=crate::shows::now() as u64+60;
     app.service_done(None,"torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":false}),"Removed".into(),Ok(serde_json::json!({"state":"done","undo_until":until})));
     assert!(app.can_undo_removal());
     assert!(matches!(key(&mut app,'U'),Cmd::Task(..)));
     assert!(app.removal_undo.is_none(),"an outgoing restore cannot be retried implicitly");
     app.service_done(None,"torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":true}),"Deleted".into(),Ok(serde_json::json!({"state":"pending","undo_until":until})));
     assert!(!app.can_undo_removal(),"deleting payloads can never advertise Undo");
-    app.service_busy=false;app.removal_undo=Some((hash,shows::now() as u64-1));
+    app.service_busy=false;app.removal_undo=Some((hash,crate::shows::now() as u64-1));
     assert!(!app.can_undo_removal());
     assert!(!matches!(key(&mut app,'U'),Cmd::Task(..)));
 }
@@ -99,14 +99,14 @@ fn top_bar_uses_idle_vpn_unread_and_errors_without_hiding_turtle() {
         assert!(!header.contains(&app.theme.name));
     }
     app.store.summary.as_mut().unwrap().network.state=api::NetworkReadiness::Waiting;
-    app.sync_activity_label();assert_eq!(app.activity_label(),Some("Waiting for VPN"));
+    app.sync_activity_label();assert_eq!(app.activity_text.as_deref(),Some("Waiting for VPN"));
     app.store.summary.as_mut().unwrap().alt=true;
     let pane=super::golden::render(&app,120,30);let header=pane.lines().next().unwrap();
     assert!(header.contains("Waiting for VPN")&&header.contains("Turtle"),"{header}");
     app.store.summary.as_mut().unwrap().network.state=api::NetworkReadiness::Ready;
     app.store.summary.as_mut().unwrap().daemon.idle_exit_in_s=None;
     app.store.summary.as_mut().unwrap().counts.error=2;
-    app.sync_activity_label();assert_eq!(app.activity_label(),Some("! 2 errors"));
+    app.sync_activity_label();assert_eq!(app.activity_text.as_deref(),Some("! 2 errors"));
 }
 #[test]
 fn follow_affordance_uses_tv_identity_and_does_not_offer_movies() {
@@ -215,7 +215,7 @@ fn removal_undo_is_granted_by_confirmation_never_by_delete_or_failure() {
         "torrents.remove",
         args,
         "removed".into(),
-        Ok(serde_json::json!({"undo_until":shows::now()+10})),
+        Ok(serde_json::json!({"undo_until":crate::shows::now()+10})),
     );
     assert_eq!(app.removal_undo.as_ref().unwrap().0, hash);
     assert!(matches!(key(&mut app, 'U'), Cmd::Task(..)));

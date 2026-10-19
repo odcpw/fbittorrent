@@ -127,9 +127,13 @@ fn resume_unknown_completion_timestamp_keeps_incomplete_controls() {
     }
 }
 
+const SURFACES: [&str; 12] = [
+    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done", "clipboard",
+];
+
 #[test]
 fn all_surfaces_render_at_60x20_without_panics() {
-    for surface in fixture::SURFACES {
+    for surface in SURFACES {
         let text = render(&fixture::app(surface), 60, 20);
         assert_eq!(text.lines().count(), 20);
         eprintln!("rendered {surface} at 60x20 without panic");

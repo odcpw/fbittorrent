@@ -3,7 +3,7 @@
 //!  - rating + votes: the official daily ratings dataset, cached locally
 //!  - blurb: Wikipedia REST summary
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -140,35 +140,6 @@ pub fn search(query: &str, year: Option<u16>) -> Result<Vec<Title>> {
     Ok(out)
 }
 
-/// Poster URL resized server-side (IMDb image CDN understands `_V1_UX<width>_`).
-pub fn poster_url_sized(url: &str, width: u32) -> String {
-    match url.rfind("._V1_") {
-        Some(i) => format!("{}._V1_UX{width}_.jpg", &url[..i]),
-        None => url.to_string(),
-    }
-}
-
-pub fn fetch_poster(url: &str, width: u32) -> Result<PathBuf> {
-    fetch_poster_in(&cache_dir(), url, width)
-}
-
-fn fetch_poster_in(root: &Path, url: &str, width: u32) -> Result<PathBuf> {
-    let dir = root.join("posters");
-    private_cache_dir(root, &dir)?;
-    let key = url.rsplit('/').next().unwrap_or("poster").split('.').next().unwrap_or("poster");
-    let path = dir.join(format!("{key}_{width}.jpg"));
-    if path.exists() {
-        private_cached_file(root, &path)?;
-        return Ok(path);
-    }
-    let sized = poster_url_sized(url, width);
-    let mut resp = agent(10).get(&sized).call().context("poster download")?;
-    if resp.status().as_u16() != 200 { return Err(anyhow!("poster HTTP {}", resp.status())); }
-    let bytes = resp.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec()?;
-    write_cache_file(root, &path, &bytes, None)?;
-    Ok(path)
-}
-
 // ---------- ratings dataset ----------
 
 pub fn ratings_path() -> PathBuf { cache_dir().join("title.ratings.tsv") }
@@ -182,17 +153,10 @@ pub fn ratings_stale() -> bool {
     }
 }
 
-/// Download and unpack the official ratings dataset (about 9 MB gzipped).
+/// Serializes ratings downloads and index replacement.
 static REFRESH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub fn refresh_ratings() -> Result<()> {
-    // Several background tasks may notice staleness at once (index loader, hover
-    // lookups); only one downloads, the others find a fresh file when they get the lock.
-    let _guard = REFRESH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    if !ratings_stale() { return Ok(()); }
-    download_ratings_to(&cache_dir(), RATINGS_URL)
-}
-
+/// Download and unpack the official ratings dataset (about 9 MB gzipped).
 fn download_ratings_to(root: &Path, url: &str) -> Result<()> {
     let gz = service::read_http(url, 120, 64 * 1024 * 1024)?;
     let mut tsv = Vec::with_capacity(gz.len() * 3);
@@ -241,44 +205,6 @@ impl RatingsIndex {
         let i = self.ids.binary_search(&id).ok()?;
         Some((self.ratings[i] as f32 / 10.0, self.votes[i]))
     }
-}
-
-/// Look one title up in the cached dataset. Ok(None) when unknown or no cache yet.
-pub fn rating_for(id: &str) -> Result<Option<(f32, u32)>> {
-    if !ratings_path().exists() { return Ok(None); }
-    private_cached_file(&cache_dir(), &ratings_path())?;
-    let Ok(data) = std::fs::read(ratings_path()) else { return Ok(None) };
-    Ok(find_rating(&data, id))
-}
-
-pub fn find_rating(data: &[u8], id: &str) -> Option<(f32, u32)> {
-    let needle = format!("\n{id}\t");
-    let pos = memfind(data, needle.as_bytes())?;
-    let start = pos + 1;
-    let end = data[start..].iter().position(|&b| b == b'\n').map(|e| start + e).unwrap_or(data.len());
-    let line = std::str::from_utf8(&data[start..end]).ok()?;
-    let mut it = line.split('\t');
-    it.next()?;
-    let rating: f32 = it.next()?.parse().ok()?;
-    let votes: u32 = it.next()?.trim().parse().ok()?;
-    Some((rating, votes))
-}
-
-fn memfind(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || hay.len() < needle.len() { return None; }
-    let first = needle[0];
-    let mut i = 0;
-    while i + needle.len() <= hay.len() {
-        match hay[i..].iter().position(|&b| b == first) {
-            None => return None,
-            Some(off) => {
-                let s = i + off;
-                if s + needle.len() <= hay.len() && &hay[s..s + needle.len()] == needle { return Some(s); }
-                i = s + 1;
-            }
-        }
-    }
-    None
 }
 
 // ---------- Wikipedia blurb ----------
@@ -356,36 +282,6 @@ fn store_title(t: &Title) {
     if let Ok(v) = serde_json::to_value(t) { cache_write("by-id", &t.id, &v); }
 }
 
-/// Lookup by IMDb id (the suggestion endpoint resolves "tt…" queries directly).
-pub fn lookup_id(id: &str) -> Result<Option<Title>> {
-    if let Some(t) = cached_title(id) { return Ok(Some(t)); }
-    let mut cands = search(id, None)?;
-    let Some(pos) = cands.iter().position(|t| t.id == id) else { return Ok(None) };
-    let mut t = cands.remove(pos);
-    enrich(&mut t);
-    store_title(&t);
-    Ok(Some(t))
-}
-
-/// Cheap id resolution for a release name: one suggestion call, cached by name.
-/// No rating, blurb or poster fetch. Used to fill the ratings column of search results.
-pub fn resolve_id(release_name: &str) -> Option<String> {
-    if let Some(v) = cache_read(NAME_CACHE_KIND, release_name) {
-        if v.get("missing").and_then(|m| m.as_bool()) == Some(true) { return None; }
-        return v.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
-    }
-    let r = crate::release::parse(release_name);
-    if r.title.is_empty() { return None; }
-    let mut cands = candidates(&r).ok()?;
-    if cands.is_empty() {
-        cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"missing": true}));
-        return None;
-    }
-    let t = cands.remove(0);
-    cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"id": t.id}));
-    Some(t.id)
-}
-
 /// IMDb suggestions must match the parsed title. IMDb also returns popular titles
 /// sharing only a prefix ("Dark" can suggest "Dark Matter" first).
 fn candidates(r: &crate::release::Release) -> Result<Vec<Title>> {
@@ -424,37 +320,6 @@ pub(crate) fn matching_candidates(r: &crate::release::Release, prefer_tv: bool, 
         *rank,
     ));
     matches.into_iter().map(|(_, t)| t).collect()
-}
-
-/// Best-effort full lookup for a release name: title + rating + blurb.
-/// Cached on disk for a week, by name and by id, so the same show under
-/// several release names costs one network round trip.
-pub fn lookup(release_name: &str) -> Result<Option<Title>> {
-    if let Some(v) = cache_read(NAME_CACHE_KIND, release_name) {
-        if v.get("missing").and_then(|m| m.as_bool()) == Some(true) { return Ok(None); }
-        if let Some(id) = v.get("id").and_then(|i| i.as_str()) {
-            if let Some(t) = cached_title(id) { return Ok(Some(t)); }
-            return lookup_id(id);
-        }
-    }
-    let r = crate::release::parse(release_name);
-    if r.title.is_empty() { return Ok(None); }
-    let mut cands = candidates(&r)?;
-    if cands.is_empty() {
-        cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"missing": true}));
-        return Ok(None);
-    }
-    let mut t = cands.remove(0);
-    cache_write(NAME_CACHE_KIND, release_name, &serde_json::json!({"id": t.id}));
-    if let Some(full) = cached_title(&t.id) { return Ok(Some(full)); }
-    enrich(&mut t);
-    store_title(&t);
-    Ok(Some(t))
-}
-
-pub fn enrich(t: &mut Title) {
-    if let Ok(Some((r, v))) = rating_for(&t.id) { t.rating = Some(r); t.votes = Some(v); }
-    if let Ok((blurb, url)) = wiki_blurb(t) { t.blurb = blurb; t.wiki_url = url; }
 }
 
 #[cfg(test)]
@@ -517,22 +382,6 @@ mod tests {
             }
         });
         (url, server)
-    }
-
-    #[test]
-    fn poster_download_and_existing_cache_hit_are_private() {
-        let scratch = Scratch::new("poster");
-        let root = scratch.cache();
-        let (url, server) = http_fixture(b"local poster bytes".to_vec(), 1);
-        let path = fetch_poster_in(&root, &url, 300).unwrap();
-        server.join().unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"local poster bytes");
-        private_tree(&root);
-        public_tree(&root);
-        // The HTTP listener has closed: this must repair the cache hit locally.
-        assert_eq!(fetch_poster_in(&root, &url, 300).unwrap(), path);
-        assert_eq!(std::fs::read(path).unwrap(), b"local poster bytes");
-        private_tree(&root);
     }
 
     #[test]

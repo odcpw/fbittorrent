@@ -1,7 +1,6 @@
 //! State words and glyphs come from the same frozen table as the shell plugin.
 use super::*;
 use crate::torrent_format::definitions;
-pub(in crate::tui) use crate::torrent_format::STATE_WIDTH;
 fn key(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
     if let Some(row) = row {
         return crate::torrent_format::key(row.state,row.reason.as_deref(),row.playable.as_ref().is_some_and(|p|p.ready));
@@ -61,7 +60,7 @@ mod tests {
         for row in definitions() {
             println!("state={} glyph={} display_width={} cell={:?}",row.definition.state,row.definition.text_glyph,dw(row.definition.text_glyph),row.padded);
             assert_eq!(dw(row.definition.text_glyph),1,"{}",row.definition.state);
-            assert_eq!(dw(&row.padded),STATE_WIDTH,"{}",row.definition.state);
+            assert_eq!(dw(&row.padded),crate::torrent_format::STATE_WIDTH,"{}",row.definition.state);
         }
     }
     #[test]

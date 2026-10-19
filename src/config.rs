@@ -152,19 +152,6 @@ impl Config {
         if result.is_err() { let _ = std::fs::remove_file(&staged); }
         result.with_context(|| format!("saving {}", path.display()))
     }
-
-    pub fn write_default_if_missing() -> Result<PathBuf> {
-        let path = config_path();
-        Self::write_default_to_if_missing(&path)?;
-        Ok(path)
-    }
-
-    fn write_default_to_if_missing(path: &std::path::Path) -> Result<()> {
-        if !path.exists() {
-            Self::default().save_to(path)?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -209,21 +196,20 @@ mod tests {
     }
 
     #[test]
-    fn config_save_and_default_creation_are_private() {
+    fn config_save_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("fbittorrent-config-private-{}", std::process::id()));
         let path = dir.join("config.toml");
-        Config::write_default_to_if_missing(&path).unwrap();
+        Config::default().save_to(&path).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let mut cfg = Config::default();
         cfg.max_active_downloads = 7;
         cfg.save_to(&path).unwrap();
-        Config::write_default_to_if_missing(&path).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved.max_active_downloads, 7, "default creation must preserve an existing config");
+        assert_eq!(saved.max_active_downloads, 7);
         println!("{}: {mode:o} after config save", path.display());
         std::fs::remove_dir_all(dir).unwrap();
     }

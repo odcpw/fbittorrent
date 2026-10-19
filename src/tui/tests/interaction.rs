@@ -62,7 +62,7 @@
             assert!(output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed;"), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
             return;
         }
-        assert!(shows::path().starts_with(std::env::temp_dir()), "unfollow fixture requires temporary XDG_DATA_HOME");
+        assert!(crate::shows::path().starts_with(std::env::temp_dir()), "unfollow fixture requires temporary XDG_DATA_HOME");
         destructive_keys(|app| { app.screen = Screen::Shows; app.select_show_parent(1); app.on_shows_key(KeyEvent::new(KeyCode::Char('x'))); }, true);
     }
 
@@ -78,7 +78,7 @@
         let lifecycle = Lifecycle::default();
         let mut app = app();
         lifecycle.request_restart(RestartReason::Settings);
-        assert!(matches!(app.update(Msg::Poll), Cmd::Task(..)));
+        assert!(matches!(app.poll(), Cmd::Task(..)));
         assert_eq!(lifecycle.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Settings)));
         // Detaching a client cannot cancel or replace the daemon owner's restart.
         assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char('q'))), Cmd::Quit));
@@ -184,8 +184,8 @@
     fn inbox_app() -> TuiApp {
         let mut shows = Shows::default();
         shows.shows = vec![
-            Show { imdb: "tt111".into(), title: "Alpha Show".into(), episodes: vec![episode("S01E01", 10), episode("S01", 5)], last_checked: shows::now(), catalogue_complete: true, ..Default::default() },
-            Show { imdb: "tt222".into(), title: "Beta Show".into(), episodes: vec![episode("S01E01", 20)], last_checked: shows::now(), catalogue_complete: true, ..Default::default() },
+            Show { imdb: "tt111".into(), title: "Alpha Show".into(), episodes: vec![episode("S01E01", 10), episode("S01", 5)], last_checked: crate::shows::now(), catalogue_complete: true, ..Default::default() },
+            Show { imdb: "tt222".into(), title: "Beta Show".into(), episodes: vec![episode("S01E01", 20)], last_checked: crate::shows::now(), catalogue_complete: true, ..Default::default() },
         ];
         let mut app = TuiApp::new(Config::default(), Screen::Shows, shows);
         app.kitty = None;
@@ -485,7 +485,7 @@
         let click = MouseEvent::new(MouseEventKind::Down(MouseButton::Left), area.x + 2, area.y);
         assert!(matches!(app.on_mouse(click), Cmd::None));
         let first_click = app.last_click.clone().unwrap();
-        app.update(Msg::Rss { revision: 0, result: Ok(vec![feed(vec![article("replacement", "Replacement item"), article("original", "Original item")])]) });
+        app.feeds = vec![feed(vec![article("replacement", "Replacement item"), article("original", "Original item")])];
         render(&app, 120, 30);
         // Force the first timestamp into the double-click window, independently of test scheduling.
         app.last_click = Some((first_click.0, first_click.1, std::time::Instant::now()));
@@ -584,44 +584,6 @@
         assert!(!app.torrents[1].is_active());
     }
 
-    #[test]
-    fn rss_refresh_preserves_article_and_rejects_stale_results() {
-        let mut app = app();
-        app.feeds = vec![feed(vec![article("old", "Old item"), article("selected", "Selected item")])];
-        app.feed_list.borrow_mut().select(Some(0));
-        app.item_list.borrow_mut().select(Some(1));
-        app.rss_revision = 7;
-        app.update(Msg::Rss { revision: 7, result: Ok(vec![feed(vec![article("new", "New item"), article("old", "Old item"), article("selected", "Selected item")])]) });
-        assert_eq!(app.item_list.borrow().selected(), Some(2));
-        app.update(Msg::Rss { revision: 6, result: Ok(vec![]) });
-        assert_eq!(app.feeds.len(), 1);
-        assert_eq!(app.item_list.borrow().selected(), Some(2));
-    }
-
-    #[test]
-    fn completed_search_keeps_partial_results_and_provider_warning() {
-        let mut app = app();
-        app.search_sub = Some((42, "fixture".into()));
-        app.search_running = true;
-        app.update(Msg::SearchBatch {
-            id: 42,
-            results: vec![SearchResult { file_name: "Partial result".into(), file_url: "magnet:?xt=urn:btih:abc".into(), ..Default::default() }],
-            done: true,
-            error: Some("one provider failed".into()),
-        });
-        assert_eq!(app.search_results.len(), 1);
-        assert!(!app.search_running);
-        assert!(app.status_is_error);
-        assert!(app.status.contains("1 results"));
-        assert!(app.status.contains("one provider failed"));
-    }
-
-    #[test]
-    fn rss_no_initial_refresh() {
-        let mut app=app();
-        assert!(matches!(app.update(Msg::Rss {revision:0,result:Ok(vec![feed(vec![article("item","FeedItemAlpha")])])}),Cmd::None));
-        assert!(!app.rss_busy,"loading cached rows cannot start a network refresh");
-    }
 
     #[test]
     fn rss_refresh_and_download_dispatch_only_once() {

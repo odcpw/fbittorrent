@@ -211,7 +211,7 @@ impl Client {
     pub fn envelope(&self, op: &str, args: Value, reference: Option<&str>) -> Result<Value> {
         self.execute(op,args,reference,true)
     }
-    pub fn hello_envelope(cfg: &Config, args: Value) -> Result<Value> {
+    pub fn hello_envelope(args: Value) -> Result<Value> {
         let deadline=Instant::now()+Duration::from_millis(200);
         let path=crate::config::runtime_dir().join("api.sock");
         let mut socket=connect_probe(&path,deadline)?;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::engine::tests::fixture::{Request, Route, LEGACY_ROUTES};
+use crate::engine::tests::fixture::{Route, LEGACY_ROUTES};
 use crate::engine::tests::{request, review_directory, test_app};
 
 #[test]

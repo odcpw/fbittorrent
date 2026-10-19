@@ -102,8 +102,6 @@
         s.mark_grabbed("S01E03", "magnet:x");
         assert!(s.toggle_seen("S01E02"));
         assert_eq!(s.new_count(), 1);
-        assert_eq!(s.state("S01E03"), EpState::Grabbed);
-        assert_eq!(s.state("S01E02"), EpState::Seen);
         assert_eq!(s.mark_all_seen(), 1);
         assert_eq!(s.new_count(), 0);
         assert!(!s.toggle_seen("S01E02"));
@@ -111,7 +109,7 @@
     }
 
     #[test]
-    fn roundtrip_and_find() {
+    fn roundtrip() {
         let dir = std::env::temp_dir().join(format!("fbt-shows-{}", std::process::id()));
         let p = dir.join("shows.json");
         let mut all = Shows::default();
@@ -131,8 +129,6 @@
         let back = Shows::load_from(&p).unwrap();
         assert_eq!(back.shows.len(), 1);
         assert!(back.get("tt0903747").unwrap().seen.contains("S01E01"));
-        assert_eq!(back.find("breaking").unwrap().imdb, "tt0903747");
-        assert!(back.find("nothing").is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,10 +1,6 @@
 //! Local render state only: never init/update the model or start subscriptions.
 use super::*;
 
-pub(super) const SURFACES: [&str; 12] = [
-    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done", "clipboard",
-];
-
 pub(super) fn app(surface: &str) -> TuiApp {
     let mut shows = Shows::default();
     shows.shows = [

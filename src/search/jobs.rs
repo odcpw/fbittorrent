@@ -41,6 +41,7 @@ pub fn start(query: &str) -> Result<i64> {
     start_selected(&ProviderStore::default(), query,None)
 }
 
+#[cfg(test)]
 pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
     start_with(store,query,None,Vec::new())
 }
@@ -220,7 +221,9 @@ pub(crate) fn normalized_snapshot(id:i64) -> Result<(Vec<crate::api::SearchItem>
     Ok((normalize::aggregate_with_hashes(&state.results,MAX_RESULTS,&state.hashes),complete,warnings))
 }
 
-pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
+/// Tests page through raw provider rows; clients read normalized snapshots.
+#[cfg(test)]
+pub fn results(id: i64, limit: i64, offset: i64) -> Result<crate::qbt::SearchResponse> {
     let job = job(id)?;
     let state = job
         .state
@@ -237,7 +240,7 @@ pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
     } else {
         limit as usize
     };
-    Ok(SearchResponse {
+    Ok(crate::qbt::SearchResponse {
         results: state
             .results
             .iter()
@@ -268,6 +271,7 @@ fn stop_job(job: &SearchJob) {
     job.done.store(true, Ordering::Release);
 }
 
+#[cfg(test)]
 pub fn stop(id: i64) -> Result<()> {
     let selected = job(id)?;
     stop_job(&selected);

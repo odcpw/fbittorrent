@@ -3,7 +3,7 @@ use super::*;
 pub(super) mod state;
 pub(super) mod columns;
 pub(super) use columns::Columns;
-pub(super) use state::{state_cell,state_word,STATE_WIDTH,reason};
+pub(super) use state::{state_cell,state_word,reason};
 use crate::api;
 fn signed(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)

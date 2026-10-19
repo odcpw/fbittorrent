@@ -234,7 +234,6 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             }
             if *wait {
                 return wait_for(
-                    cfg,
                     client,
                     vec![added["hash"].as_str().context("add omitted hash")?.into()],
                     *timeout,
@@ -409,7 +408,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 }
                 Cmd::Wait {
                     timeout, interval, until, ..
-                } => return wait_for(cfg, c, hashes, *timeout, *interval, *until, json_mode),
+                } => return wait_for(c, hashes, *timeout, *interval, *until, json_mode),
                 Cmd::Open { .. } => {
                     let target = c.call("torrents.open_target", json!({"hash":hashes[0]}))?;
                     cfg.open_target(target["path"].as_str().context("open target omitted path")?)?;
@@ -601,7 +600,6 @@ pub(super) fn counts(rows: &[api::Torrent]) -> Value {
     json!({"total":visible.len(),"active":visible.iter().filter(|r|matches!(r.state,api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
 }
 fn wait_for(
-    cfg: &Config,
     c: ApiClient,
     hashes: Vec<String>,
     timeout: u64,
@@ -713,9 +711,6 @@ pub(super) fn daemon_status(info: &Value) -> Value {
     value
 }
 
-fn summary(c: &ApiClient, cfg: &Config) -> Result<Option<Value>> {
-    summary_with(c,cfg,|op,args|c.call(op,args))
-}
 pub(super) fn summary_with(c:&ApiClient,cfg:&Config,read:impl Fn(&str,Value)->Result<Value>)->Result<Option<Value>> {
     if !c.hello.caps.iter().any(|cap| cap == "subscribe") {
         return Ok(None);

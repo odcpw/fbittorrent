@@ -266,8 +266,6 @@ pub(super) enum Cmd {
         #[arg(long)]
         yes: bool,
     },
-    /// Register fbittorrent as the magnet: / .torrent handler
-    RegisterMagnet,
     /// Open the terminal UI
     Tui {
         /// Start on the search screen

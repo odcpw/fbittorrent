@@ -1,6 +1,6 @@
 //! Queue order mutation through the engine's existing durable store.
 use super::*;
-use ops::{EngineOp, EngineResult};
+use ops::EngineResult;
 impl EngineDispatcher {
     pub(super) async fn move_queue(
         &self,

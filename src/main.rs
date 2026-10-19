@@ -3,7 +3,7 @@ mod cli;
 #[path = "cli/sources.rs"]
 mod cli_sources;
 use cli::{Cli, Cmd, RssCmd, ShowsCmd};
-use cli_sources::{short, local_torrent_source};
+use cli_sources::short;
 pub use cli_sources::{magnet_hash, magnet_name};
 mod api;
 mod backend;
@@ -29,9 +29,8 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use qbt::{human_bytes, AddOptions, Torrent};
+use qbt::{human_bytes, Torrent};
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 fn main() {
     if let Some(code)=search::torznab::run_worker(){std::process::exit(code);}
@@ -125,11 +124,6 @@ fn run(cli: Cli) -> Result<Code> {
             emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":"native","port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
             return Ok(Code::Ok);
         }
-        Cmd::RegisterMagnet => {
-            setup::register_magnet_handler()?;
-            emit(json, serde_json::json!({"ok": true, "action": "register-magnet"}), || {});
-            return Ok(Code::Ok);
-        }
         Cmd::Imdb { name, refresh } => {
             return cli::catalog_imdb::run(&cfg,name.join(" "),refresh,json);
         }
@@ -193,7 +187,7 @@ fn run(cli: Cli) -> Result<Code> {
             }
             cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json)
         }
-        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Rename {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } | Cmd::Rss(..) | Cmd::Shows(..) => unreachable!(),
+        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Rename {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } | Cmd::Rss(..) | Cmd::Shows(..) => unreachable!(),
     }
 }
 
@@ -217,7 +211,7 @@ impl Drop for SearchCleanup {
 #[cfg(test)]
 mod source_tests {
     use super::*;
-    use cli_sources::percent_decode;
+    use cli_sources::{local_torrent_source, percent_decode};
 
     #[test]
     fn native_start_policy_matches_command_roles() {

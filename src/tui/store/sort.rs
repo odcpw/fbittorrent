@@ -36,18 +36,6 @@ impl Store {
         });
         rows
     }
-    pub fn sorted_files(&self, hash: &api::Hash) -> Vec<&api::File> {
-        let Some(table) = self.files.get(hash) else {
-            return Vec::new();
-        };
-        let mut rows: Vec<_> = table.values().collect();
-        rows.sort_by(|left, right| {
-            left.sort_key
-                .cmp(&right.sort_key)
-                .then(left.index.cmp(&right.index))
-        });
-        rows
-    }
 }
 fn state_rank(state:api::TorrentState)->u8 {
     match state {api::TorrentState::Metadata=>0,api::TorrentState::Checking=>1,api::TorrentState::Downloading=>2,
@@ -126,37 +114,6 @@ mod tests {
         assert_eq!(
             descending.iter().map(|row| row.size).collect::<Vec<_>>(),
             [Some(1_181_116_006), Some(943_718_400), None]
-        );
-    }
-    #[test]
-    fn file_order_uses_the_daemons_natural_sort_key() {
-        let hash = api::Hash::new("a".repeat(40)).unwrap();
-        let mut store = Store::default();
-        let files = (0..3)
-            .map(|index| {
-                let episode = [10, 2, 1][index];
-                (
-                    index.to_string(),
-                    api::File {
-                        index: index as u64,
-                        path: format!("e{episode}.mkv"),
-                        size: 1,
-                        progress: 0.,
-                        included: true,
-                        sort_key: format!("e{episode:010}.mkv"),
-                        ready: None,
-                    },
-                )
-            })
-            .collect();
-        store.files.insert(hash.clone(), files);
-        assert_eq!(
-            store
-                .sorted_files(&hash)
-                .iter()
-                .map(|row| row.path.as_str())
-                .collect::<Vec<_>>(),
-            ["e1.mkv", "e2.mkv", "e10.mkv"]
         );
     }
 }

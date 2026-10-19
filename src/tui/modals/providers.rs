@@ -34,11 +34,6 @@ impl TuiApp {
         self.load_plugins()
     }
 
-    #[cfg(test)]
-    pub(super) fn on_providers_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
-        actions::dispatch_scope(self, actions::Scope::Modal(actions::ModalKind::Providers), key)
-    }
-
     pub(super) fn on_providers_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let Some(m) = self.providers.as_ref() else { return Cmd::none() };
         let n = m.plugins.len();

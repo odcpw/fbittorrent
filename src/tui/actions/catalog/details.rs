@@ -10,7 +10,7 @@ macro_rules! detail {
             30,
             |a| a.selected_torrent().is_some_and(|t| !matches!(
                 Intent::$intent,
-                Intent::Pause | Intent::Seed | Intent::Remove | Intent::DeleteFiles
+                Intent::Pause | Intent::Remove | Intent::DeleteFiles
             ) || a
                 .store
                 .pending_for_key(&t.hash)

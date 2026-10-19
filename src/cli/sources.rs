@@ -30,16 +30,6 @@ pub(super) fn resolve_in(ts: &[Torrent], selectors: &[String]) -> Result<Vec<Str
     Ok(out)
 }
 
-/// Collapse duplicate torrents from several providers (same info hash), keeping the best-seeded copy.
-pub(super) fn tui_free_dedupe(rs: Vec<qbt::SearchResult>) -> Vec<qbt::SearchResult> {
-    let mut best: std::collections::HashMap<String, qbt::SearchResult> = std::collections::HashMap::new();
-    for r in rs {
-        let k = magnet_hash(&r.file_url).unwrap_or_else(|| r.file_url.to_lowercase());
-        match best.get(&k) { Some(b) if b.seeders >= r.seeders => {}, _ => { best.insert(k, r); } }
-    }
-    best.into_values().collect()
-}
-
 pub(super) fn short(s: &str, max: usize) -> String {
     if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>()) }
 }

@@ -21,7 +21,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
-use crate::qbt::{SearchPlugin, SearchResponse, SearchResult};
+use crate::qbt::{SearchPlugin, SearchResult};
 
 const MAX_RESULTS: usize = 5000;
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -230,22 +230,6 @@ fn validate_name(name: &str) -> Result<()> {
         bail!("invalid search provider name: {name}");
     }
     Ok(())
-}
-
-/// Enabled states from qBittorrent can be imported alongside its torrent/RSS
-/// migration. Existing app preferences take priority on subsequent imports.
-pub fn import_plugins(plugins: &[SearchPlugin]) -> Result<()> {
-    let store = ProviderStore::default();
-    store.ensure_runtime()?;
-    let _lock = store.lock()?;
-    let mut preferences = store.load()?;
-    for plugin in plugins {
-        preferences
-            .enabled
-            .entry(plugin.name.clone())
-            .or_insert(plugin.enabled);
-    }
-    store.save(&preferences)
 }
 
 type ProviderStamp = Vec<(String, u64, u128)>;
@@ -497,9 +481,11 @@ mod tests;
 pub(crate) use download::{resolve_download, ResolvedDownload};
 #[cfg(test)]
 use download::resolve_download_in;
-pub use jobs::{begin_session, delete, results, shutdown_all, start, stop};
+pub use jobs::{begin_session, delete, shutdown_all, start};
 pub(crate) use jobs::normalized_snapshot;
-use jobs::{jobs, parse_result, start_in};
+use jobs::jobs;
+#[cfg(test)]
+use jobs::{parse_result, results, start_in, stop};
 #[cfg(test)]
 use jobs::job;
 use process::*;

@@ -15,7 +15,7 @@ impl TuiApp {
 
     pub(super) fn on_torrents_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let n = self.torrents.len();
-        if matches!(intent,actions::Intent::Pause|actions::Intent::Seed|actions::Intent::Remove|actions::Intent::DeleteFiles)
+        if matches!(intent,actions::Intent::Pause|actions::Intent::Remove|actions::Intent::DeleteFiles)
             &&self.selected_torrent().is_some_and(|torrent|self.store.pending_for_key(&torrent.hash).is_some()) {
             self.set_status("Waiting for confirmation",false);return Cmd::none();
         }
@@ -30,11 +30,6 @@ impl TuiApp {
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }
-            actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
-                let allow = !self.store.torrents.get(&t.hash).map_or_else(||self.seed_allowed(&t), |row|row.upload_enabled);
-                return self.action(if allow { "Upload: on" } else { "Upload: off" },
-                    move |c| if allow { c.allow_seeding(&[t.hash]) } else { c.deny_seeding(&[t.hash]) });
-            },
             actions::Intent::Remove => if let Some(t) = self.selected_torrent().cloned() {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: false },
                     &format!("Remove '{}' (keep files)? y/N", short(&t.name, 50)), true);

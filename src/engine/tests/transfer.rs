@@ -197,7 +197,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
         std::fs::create_dir_all(&client_files).unwrap();
         let payload: Vec<u8> = (0..256 * 1024).map(|index| (index % 251) as u8).collect();
         std::fs::write(seed_files.join("fixture.bin"), &payload).unwrap();
-        let mut seed = test_app(&seed_store, &seed_files, Ledger::default(), Some(0));
+        let seed = test_app(&seed_store, &seed_files, Ledger::default(), Some(0));
         let bytes = seed.dispatcher.runtime.block_on(async {
             create_torrent(
                 &test_cx(),
@@ -470,7 +470,6 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
 
     #[test]
     fn pending_metadata_keeps_reads_responsive_and_cancels_on_close() {
-        use std::io::Write;
         use std::net::TcpListener;
         use std::sync::mpsc;
         use std::time::Instant;
@@ -483,7 +482,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
                 .unwrap()
                 .as_nanos()
         ));
-        let mut app = test_app(
+        let app = test_app(
             &directory,
             &directory.join("downloads"),
             Ledger::default(),

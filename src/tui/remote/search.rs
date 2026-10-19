@@ -1,7 +1,7 @@
 //! Native search is a view of daemon sessions on the existing UI connection.
 use super::*;
 
-pub(in crate::tui) struct Session {
+pub(crate) struct Session {
     pub id: u64,
     pub instance: api::Instance,
     pub subscriptions: Vec<u64>,

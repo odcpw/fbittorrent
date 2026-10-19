@@ -32,12 +32,7 @@ fn low_chroma_status_markers_never_turn_pending_information_into_success() {
                 "torrent paused"
             }
         );
-        app.update(Msg::RssAction {
-            revision: app.rss_revision,
-            label: "feed removed".into(),
-            result: Ok(vec![]),
-            error: None,
-        });
+        app.set_success("feed removed");
         let text = super::golden::render(&app, 80, 24);
         assert_eq!(
             text.lines().last().unwrap(),

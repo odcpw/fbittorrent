@@ -17,7 +17,8 @@ mod screens_torrents;
 mod screens_search;
 #[path = "screens/search_view.rs"]
 mod screens_search_view;
-use screens_search_view::*;
+#[cfg(test)]
+use screens_search_view::result_line;
 use screens_search::*;
 #[path = "screens/rss.rs"]
 mod screens_rss;
@@ -191,9 +192,6 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Raw(_) => Cmd::none(),
-            Msg::Poll => {
-                self.poll()
-            }
             Msg::Hover => {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 self.tick=self.tick.wrapping_add(1);
@@ -204,7 +202,6 @@ impl Model for TuiApp {
                 let recovery=self.recovery_tick();
                 Cmd::batch(vec![recovery,self.on_hover()])
             }
-            Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
             Msg::ApiBatch {connection,updates,ack}=>{
                 let commands=updates.into_iter().map(|update|self.api_update(connection,update)).collect();
                 let _=ack.try_send(());
@@ -217,7 +214,7 @@ impl Model for TuiApp {
             Msg::Torrents(r) => {
                 self.poll_inflight = false;
                 match r {
-                    Ok((mut ts, ti)) => {
+                    Ok((ts, ti)) => {
                         self.online = true;
                         self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
@@ -283,42 +280,10 @@ impl Model for TuiApp {
                     Err(error)=>{self.set_status(error,true);Cmd::none()}
                 }
             },
-            Msg::SearchBatch { id, results, done, error } => {
-                if self.search_sub.as_ref().map(|(i, _)| *i) != Some(id) { return Cmd::none(); }
-                if let Some(e) = error.as_ref() { self.set_status(format!("search failed: {e}"), true); }
-                if !results.is_empty() || done {
-                    let sel_url = self.selected_result().map(|r| r.file_url.clone());
-                    let mut rs = dedupe_results(results);
-                    rs.sort_by(|a,b|store::display_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
-                    // Best 100 by seeders is all anyone reads; dedupe first so the cap
-                    // is not spent on the same torrent from five providers.
-                    rs.truncate(MAX_RESULTS);
-                    if !rs.is_empty() { self.search_results = rs; }
-                    let mut st = self.search_list.borrow_mut();
-                    match sel_url.and_then(|u| self.search_results.iter().position(|r| r.file_url == u)) {
-                        Some(i) => st.select(Some(i)),
-                        None if !self.search_results.is_empty() && !self.search_focus_input => st.select(Some(0)),
-                        _ => {}
-                    }
-                    drop(st);
-                    if !done { return Cmd::none(); }
-                }
-                if done {
-                    self.search_running = false;
-                    self.search_sub = None;
-                    let n = self.search_results.len();
-                    match error {
-                        Some(error) => self.set_status(format!("{n} results · some providers failed: {error}"), true),
-                        None => self.set_status(format!("{n} result{}", if n == 1 { "" } else { "s" }), false),
-                    }
-                    return Cmd::none();
-                }
-                Cmd::none()
-            }
             Msg::Browse(label, r) => {
                 self.browse_loading = None;
                 match r {
-                    Ok(mut rs) => {
+                    Ok(rs) => {
                         self.search_sub = None; self.search_running = false;
                         let n = rs.len();
                         self.search_results = rs;
@@ -381,44 +346,6 @@ impl Model for TuiApp {
             Msg::TopicsSelected {connection,active,result}=>self.topics_selected(connection,active,result),
             Msg::Trackers {connection,hash,request,forced,result}=>self.trackers_loaded(connection,hash,request,forced,result),
             Msg::ServiceDone {connection,op,args,label,result}=>self.service_done(connection,op,args,label,result),
-            Msg::RssAction { revision, label, result, error } => {
-                if revision != self.rss_revision { return Cmd::none(); }
-                self.rss_busy = false;
-                let succeeded = result.is_ok() && error.is_none();
-                let reload = self.update(Msg::Rss { revision, result });
-                if succeeded { self.set_success(label); }
-                if let Some(error) = error { self.set_status(error, true); }
-                Cmd::batch(vec![reload, self.poll()])
-            }
-            Msg::Rss { revision, result } => {
-                if revision != self.rss_revision { return Cmd::none(); }
-                self.rss_loading = false;
-                match result {
-                    Ok(mut feeds) => {
-                        for feed in &mut feeds {
-                            if let Some(row)=self.store.rss_feeds.values().find(|row|row.id==feed.uid||row.url==feed.url) {
-                                feed.is_loading=row.loading;feed.has_error=row.error.is_some();
-                            }
-                        }
-                        let sel = self.selected_feed().map(|f| f.name.clone());
-                        let article = self.item_list.borrow().selected().and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i))).map(|a| a.id.clone());
-                        self.feeds = feeds;
-                        let mut st = self.feed_list.borrow_mut();
-                        match sel.and_then(|n| self.feeds.iter().position(|f| f.name == n)) {
-                            Some(i) => st.select(Some(i)),
-                            None => st.select(if self.feeds.is_empty() { None } else { Some(0) }),
-                        }
-                        drop(st);
-                        let new_index = article.and_then(|id| self.selected_feed().and_then(|f| f.articles.iter().position(|a| a.id == id)));
-                        self.item_list.borrow_mut().select(new_index.or_else(|| self.selected_feed().filter(|f| !f.articles.is_empty()).map(|_| 0)));
-                        if self.feeds.iter().any(|f| f.is_loading) {
-                            if self.rss_retry_until.is_none() { self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45)); }
-                        } else { self.rss_retry_until = None; }
-                    }
-                    Err(e) => self.set_status(e, true),
-                }
-                Cmd::none()
-            }
         }
     }
 

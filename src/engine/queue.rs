@@ -1,6 +1,6 @@
 //! FIFO queue admission, live limits and network suspension policy.
 use super::*;
-pub(super) use super::queue_policy::{admit, Direction, Stats};
+pub(super) use super::queue_policy::admit;
 static INJECTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 impl Inner {
@@ -143,16 +143,6 @@ impl Inner {
 }
 
 impl EngineDispatcher {
-    /// Persist and apply a live download queue limit through the app runtime.
-    #[cfg(test)]
-    pub fn set_download_limit(&self, limit: usize) -> Result<()> {
-        if self.inner.stopping.load(Ordering::Acquire) {
-            bail!("native engine is closing");
-        }
-        self.runtime
-            .block_on(self.inner.set_download_limit(self.runtime.cx(), limit))
-    }
-
     /// Suspend or admit network work without changing durable torrent intent.
     #[cfg(test)]
     pub fn set_network_blocked(&self, blocked: bool) -> Result<()> {

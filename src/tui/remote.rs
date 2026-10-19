@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 pub(super) use subscription::{verb as mutation_verb, ApiSub};
 
-pub(super) struct ReadSnapshot {
+pub(crate) struct ReadSnapshot {
     pub torrents: api::ListResult,
     pub transfer: api::TransferInfo,
     pub network: api::NetworkResult,

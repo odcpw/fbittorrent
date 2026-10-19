@@ -149,6 +149,7 @@ pub struct TorrentFile {
     pub priority: i64,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchResponse {
@@ -261,13 +262,6 @@ pub struct AddOptions {
     pub category: Option<String>,
 }
 
-pub fn encode_query(q: &[(&str, &str)]) -> String {
-    q.iter()
-        .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
 pub fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -277,14 +271,6 @@ pub fn urlencode(s: &str) -> String {
         }
     }
     out
-}
-
-/// What `open` should launch for a torrent: the file itself for single-file
-/// torrents, the folder otherwise. Falls back to the save path.
-pub fn open_target(t: &Torrent) -> String {
-    let p = std::path::Path::new(&t.content_path);
-    if !t.content_path.is_empty() && p.exists() { return t.content_path.clone(); }
-    t.save_path.clone()
 }
 
 pub fn human_bytes(n: i64) -> String {

@@ -24,16 +24,6 @@ impl ScreenClient {
         for hashes in hashes.chunks(api::MAX_HASHES) { self.mutate("torrents.stop", json!({"hashes":hashes}))?; }
         Ok(())
     }
-    pub fn delete(&self, hashes: &[String], delete_files: bool) -> Result<()> {
-        for hashes in hashes.chunks(api::MAX_HASHES) { self.mutate("torrents.remove", json!({"hashes":hashes,"delete_files":delete_files}))?; }
-        Ok(())
-    }
-    fn seed(&self, hashes: &[String], on: bool) -> Result<()> {
-        for hashes in hashes.chunks(api::MAX_HASHES) { self.mutate("torrents.set_seed", json!({"hashes":hashes,"on":on}))?; }
-        Ok(())
-    }
-    pub fn allow_seeding(&self, hashes: &[String]) -> Result<()> { self.seed(hashes, true) }
-    pub fn deny_seeding(&self, hashes: &[String]) -> Result<()> { self.seed(hashes, false) }
     pub fn open(&self, torrent: &Torrent) -> Result<()> {
         let result: api::OpenTargetResult = request(self.connection()?, "torrents.open_target", json!({"hash":torrent.hash}))?;
         std::process::Command::new("xdg-open").arg(result.path).spawn()?;

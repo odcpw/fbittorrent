@@ -5,7 +5,7 @@
 //! grabbed or marked seen. The TUI refreshes stale shows on launch; the CLI does it
 //! on `shows check`.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -75,13 +75,6 @@ pub struct Show {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EpState {
-    New,
-    Grabbed,
-    Seen,
-}
-
 impl Show {
     pub fn from_title(t: &Title, now: i64) -> Self {
         Show {
@@ -98,15 +91,6 @@ impl Show {
             None => self.title.clone(),
         }
     }
-    pub fn state(&self, key: &str) -> EpState {
-        if self.grabbed.contains_key(key) {
-            EpState::Grabbed
-        } else if self.seen.contains(key) {
-            EpState::Seen
-        } else {
-            EpState::New
-        }
-    }
     pub fn is_new(&self, key: &str) -> bool {
         !self.seen.contains(key)
     }
@@ -121,6 +105,7 @@ impl Show {
         self.episodes.iter().find(|e| e.key == k)
     }
     /// Toggle feed read state; returns true when read. Download history is kept.
+    #[cfg(test)]
     pub fn toggle_seen(&mut self, key: &str) -> bool {
         if self.seen.remove(key) {
             false
@@ -172,29 +157,6 @@ impl Show {
         self.last_checked = now();
         self.error = check.warning;
         fresh
-    }
-    pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "imdb": self.imdb, "title": self.title, "year": self.year, "quality": self.quality,
-            "added": self.added, "last_checked": self.last_checked, "error": self.error,
-            "catalogue_complete": self.catalogue_complete,
-            "episodes": self.episodes.len(), "new": self.new_count(),
-            "seen": self.seen.len(), "grabbed": self.grabbed.len(),
-        })
-    }
-    pub fn episode_json(&self, e: &Episode) -> serde_json::Value {
-        let state = match self.state(&e.key) {
-            EpState::New => "new",
-            EpState::Grabbed => "grabbed",
-            EpState::Seen => "seen",
-        };
-        serde_json::json!({
-            "key": e.key, "season": e.season, "episode": e.episode, "state": state,
-            "read": self.seen.contains(&e.key), "new": self.is_new(&e.key),
-            "grabbed": self.grabbed.contains_key(&e.key), "season_pack": e.is_season_pack(),
-            "title": e.title, "magnet": e.magnet, "seeds": e.seeds, "size": e.size,
-            "released": e.released, "quality": e.quality, "candidates": e.candidates,
-        })
     }
 }
 
@@ -383,45 +345,6 @@ impl Shows {
         self.shows.iter().map(|s| s.new_count()).sum()
     }
 
-    /// Find a show by IMDb id, exact title, or a unique part of the title.
-    pub fn find(&self, sel: &str) -> Result<&Show> {
-        let s = sel.trim();
-        if let Some(sh) = self
-            .shows
-            .iter()
-            .find(|x| x.imdb.eq_ignore_ascii_case(s) || x.title.eq_ignore_ascii_case(s))
-        {
-            return Ok(sh);
-        }
-        let low = s.to_lowercase();
-        let hits: Vec<&Show> = self
-            .shows
-            .iter()
-            .filter(|x| x.title.to_lowercase().contains(&low))
-            .collect();
-        match hits.len() {
-            1 => Ok(hits[0]),
-            0 => Err(crate::agent::AppError::new(
-                crate::agent::Code::NotFound,
-                format!("no followed show matches '{sel}'"),
-            )
-            .hint("fbittorrent shows list --json")
-            .into()),
-            _ => Err(crate::agent::AppError::new(
-                crate::agent::Code::Ambiguous,
-                format!(
-                    "'{sel}' matches {} shows: {}",
-                    hits.len(),
-                    hits.iter()
-                        .map(|h| h.title.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            )
-            .hint("use the IMDb id")
-            .into()),
-        }
-    }
 }
 
 fn store_lock(p: &std::path::Path) -> Result<std::fs::File> {
@@ -447,36 +370,6 @@ fn store_lock(p: &std::path::Path) -> Result<std::fs::File> {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-}
-
-// ---------------------------------------------------------------- lookup
-
-/// Resolve what the user typed into a title: an IMDb id, or a name (TV results first).
-pub fn resolve_title(query: &str) -> Result<Title> {
-    let q = query.trim();
-    if q.is_empty() {
-        return Err(anyhow!("empty show name"));
-    }
-    if q.starts_with("tt") && q[2..].chars().all(|c| c.is_ascii_digit()) {
-        return crate::imdb::lookup_id(q)?.ok_or_else(|| anyhow!("IMDb knows no title {q}"));
-    }
-    let mut rel = crate::release::parse(q);
-    if rel.title.is_empty() {
-        rel.title = q.to_string();
-    }
-    let mut cands = crate::imdb::matching_candidates(
-        &rel, true, crate::imdb::search(&rel.title, rel.year)?,
-    );
-    if cands.is_empty() && rel.title != q {
-        cands = crate::imdb::matching_candidates(&rel, true, crate::imdb::search(q, None)?);
-    }
-    // The shared matcher prefers series and year only among matching titles.
-    let mut t = cands
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow!("IMDb has no title matching '{q}'"))?;
-    crate::imdb::enrich(&mut t);
-    Ok(t)
 }
 
 // ---------------------------------------------------------------- EZTV
@@ -528,27 +421,6 @@ pub struct EpisodeCheck {
     pub warning: Option<String>,
 }
 
-/// Check on app launch or an explicit refresh. An established catalogue usually
-/// needs one newest page and one overlap page; no work continues after app exit.
-pub fn fetch_updates(show: &Show, default_quality: &str) -> Result<EpisodeCheck> {
-    let quality = show.quality.as_deref().unwrap_or(default_quality);
-    let boundary = show
-        .episodes
-        .iter()
-        .map(|e| e.released)
-        .filter(|&t| t > 0)
-        .max();
-    fetch_eztv(&show.imdb, quality, boundary, show.catalogue_complete)
-}
-
-fn fetch_eztv(
-    imdb: &str,
-    quality: &str,
-    boundary: Option<i64>,
-    complete_before: bool,
-) -> Result<EpisodeCheck> {
-    fetch_eztv_inner(imdb,quality,boundary,complete_before,None)
-}
 pub(crate) fn fetch_updates_cancelled(show:&Show, quality:&str, cancelled:&std::sync::atomic::AtomicBool)->Result<EpisodeCheck> {
     let boundary=show.episodes.iter().map(|e|e.released).filter(|&v|v>0).max();
     fetch_eztv_inner(&show.imdb,show.quality.as_deref().unwrap_or(quality),boundary,show.catalogue_complete,Some(cancelled))
@@ -770,17 +642,6 @@ fn season_of(name: &str) -> Option<u16> {
         }
     }
     None
-}
-
-/// Refresh one show in place. Keeps the old episode list on failure and records the error.
-pub fn refresh(show: &mut Show, default_quality: &str) -> Result<usize> {
-    match fetch_updates(show, default_quality) {
-        Ok(check) => Ok(show.apply_check(check)),
-        Err(e) => {
-            show.error = Some(format!("{e:#}"));
-            Err(e)
-        }
-    }
 }
 
 #[cfg(test)]

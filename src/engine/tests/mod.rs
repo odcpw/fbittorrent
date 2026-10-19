@@ -143,7 +143,7 @@ use fixture::*;
         AppEngine {
             dispatcher,
             runtime: Some(runtime),
-            instance: Arc::new(instance),
+            _instance: Arc::new(instance),
         }
     }
 
