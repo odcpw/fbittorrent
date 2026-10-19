@@ -307,6 +307,34 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "trackers.add",
+      "keys": {
+        "dashboard": [
+          "+"
+        ],
+        "popup": null,
+        "tui": [
+          "+"
+        ]
+      },
+      "label": "Add",
+      "scope": "modal:details"
+    },
+    {
+      "id": "trackers.remove",
+      "keys": {
+        "dashboard": [
+          "x"
+        ],
+        "popup": null,
+        "tui": [
+          "x"
+        ]
+      },
+      "label": "Remove",
+      "scope": "modal:details"
+    },
+    {
       "id": "trackers.reannounce",
       "keys": {
         "dashboard": [

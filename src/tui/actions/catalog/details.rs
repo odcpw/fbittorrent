@@ -24,6 +24,10 @@ macro_rules! detail {
     };
 }
 pub(super) const ACTIONS: &[Action] = &[
+    action!("trackers.add",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('+'))],"Add",15,
+        TuiApp::can_edit_trackers,Some(TuiApp::prompt_add_tracker),TD,None,None,None),
+    action!("trackers.remove",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('x'))],"Remove",16,
+        |a|a.can_edit_trackers() && a.details.as_ref().is_some_and(|d|!d.trackers.urls.is_empty()),Some(TuiApp::prompt_remove_tracker),TD,None,None,None),
     action!("trackers.reannounce",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('e'))],"Reannounce",20,
         |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Trackers&&!d.trackers.busy)&&a.online,Some(|a|a.load_trackers(true)),TD,None,None,None),
     action!("trackers.refresh",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('r'))],"Refresh",40,

@@ -22,11 +22,17 @@ impl EngineDispatcher {
             .iter()
             .position(|r| r.hash == hash)
             .context("torrent record not found")?;
-        let handle = self.inner.handle(hash).map_err(|_| InvalidTorrentState {
-            hash: hash.into(),
-            reason: "tracker editing requires an admitted torrent",
-        })?;
-        let urls = handle.tracker_urls();
+        // Configuration edits do not need payload admission. A completed
+        // dormant record keeps its zero-handle/zero-check restore guarantee.
+        let handle = match self.inner.handle(hash) {
+            Ok(handle)=>Some(handle),
+            Err(_) if self.inner.dormant(hash)=>None,
+            Err(_)=>return Err(InvalidTorrentState{hash:hash.into(),reason:"tracker editing requires an admitted torrent"}.into()),
+        };
+        let urls = match &handle {
+            Some(handle)=>handle.tracker_urls(),
+            None=>trackers::saved(&ledger.records[index],&self.inner.directory)?.into_iter().map(|row|row.url).collect(),
+        };
         if urls.contains(&url) == add {
             return Ok(());
         }
@@ -53,10 +59,8 @@ impl EngineDispatcher {
             ledger.records[index] = before;
             return Err(error);
         }
-        if add {
-            handle.add_tracker(url)?;
-        } else {
-            handle.remove_tracker(&url);
+        if let Some(handle)=handle {
+            if add {handle.add_tracker(url)?;}else{handle.remove_tracker(&url);}
         }
         Ok(())
     }

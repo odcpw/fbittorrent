@@ -95,3 +95,51 @@ fn live_tracker_snapshot_is_atomic_and_a_late_read_cannot_replace_a_push() {
     for secret in ["credential-user","credential-pass","private-token","passkey="] {assert!(!pane.contains(secret));}
     app.details_tab(true);assert!(app.tracker_topic().is_none());assert!(app.store.trackers.is_empty());
 }
+
+#[test]
+fn tracker_edit_prompts_mask_input_and_cancel_removal_by_default() {
+    let mut app=fixture::app("torrents");prepare(&mut app);
+    app.store.hello.as_mut().unwrap().caps.push("tracker_edit".into());
+    let key=|code|KeyEvent::new(code);
+    app.on_key(key(KeyCode::Char('+')));
+    assert!(matches!(app.prompt.as_ref().unwrap().kind,PromptKind::AddTracker{..}));
+    app.prompt.as_mut().unwrap().input.set_value("http://private-user:private-password@tracker.invalid/a?key=private-token");
+    let text=golden::render(&app,80,24);
+    for secret in ["private-user","private-password","private-token","key="] {assert!(!text.contains(secret),"{text}");}
+    assert!(text.contains("input hidden"));
+    app.on_key(key(KeyCode::Escape));assert!(!app.service_busy);
+    for cancel in [KeyCode::Enter,KeyCode::Escape,KeyCode::Char('n')] {
+        app.on_key(key(KeyCode::Char('x')));
+        assert!(matches!(app.prompt.as_ref().unwrap().kind,PromptKind::ConfirmRemoveTracker{..}));
+        let text=golden::render(&app,80,24);assert!(text.contains("[Cancel]"));assert!(!text.contains("private-token"));
+        assert!(matches!(app.on_key(key(cancel)),Cmd::None));assert!(!app.service_busy);
+    }
+    app.on_key(key(KeyCode::Char('x')));
+    assert!(matches!(app.on_key(key(KeyCode::Char('y'))),Cmd::Task(..)));
+    assert!(app.service_busy);assert!(app.prompt.is_none());
+}
+
+#[test]
+fn unsupported_tracker_input_never_dispatches_or_echoes_credentials() {
+    let mut app=fixture::app("torrents");prepare(&mut app);
+    app.store.hello.as_mut().unwrap().caps.push("tracker_edit".into());
+    for value in ["file:///tmp/secret-passkey","ftp://user:secret-password@host/a","udp://host/a"] {
+        app.prompt_add_tracker();app.prompt.as_mut().unwrap().input.set_value(value);
+        assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Enter)),Cmd::None));assert!(!app.service_busy);
+        let text=golden::render(&app,80,24);assert!(!text.contains(value));assert!(!text.contains("secret-password"));
+    }
+}
+
+#[test]
+fn tracker_push_keeps_the_selected_private_url_for_removal() {
+    let mut app=fixture::app("torrents");prepare(&mut app);
+    app.store.hello.as_mut().unwrap().caps.push("tracker_edit".into());
+    let details=app.details.as_mut().unwrap();details.trackers.offset=1;
+    let selected=details.trackers.urls[1].clone();let hash=details.hash.clone();
+    let mut row=details.trackers.rows[1].clone();row.url="http://before.invalid/a".into();
+    let mut rows=details.trackers.rows.clone();rows.push(row);
+    for row in &mut rows {if row.url==details.trackers.rows[1].url {row.url=selected.clone();}}
+    app.store.trackers.insert(api::Hash::new(&hash).unwrap(),rows.into_iter().map(|r|(r.url.clone(),r)).collect());
+    app.sync_tracker_panel();app.prompt_remove_tracker();
+    assert!(matches!(&app.prompt.as_ref().unwrap().kind,PromptKind::ConfirmRemoveTracker{url,..} if url==&selected));
+}

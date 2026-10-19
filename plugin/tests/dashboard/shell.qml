@@ -102,6 +102,16 @@ ShellRoot {
       var button=root.find(dashboard.item.torrents,"trackers-reannounce");if(!button || !button.enabled)return false
       preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
     }
+    function trackerButton(kind:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || ["add","remove","add-cancel","add-submit"].indexOf(kind)<0)return false
+      var button=root.find(dashboard.item.torrents,kind.indexOf("add-")===0 ? "tracker-"+kind : "trackers-"+kind)
+      if(!button || !button.enabled)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function trackerEditorState():string {
+      var editor=dashboard.item ? root.find(dashboard.item.torrents,"tracker-editor") : null,input=editor ? root.find(editor,"tracker-url-input") : null
+      return JSON.stringify(editor ? {mode:editor.mode,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
+    }
     function clickDetailTab(tab:string):bool {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
       var button=root.find(dashboard.item.torrents,"details-tab-"+tab);if(!button)return false

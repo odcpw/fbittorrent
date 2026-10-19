@@ -18,6 +18,8 @@ pub(super) enum PromptKind {
     SettingDestination,
     SettingIdleExit,
     AddFeed,
+    AddTracker { hash:String },
+    ConfirmRemoveTracker { hash:String,url:String },
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
@@ -32,6 +34,7 @@ impl TuiApp {
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
         if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
+        if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (true, true, self.cfg.seed_by_default);
@@ -57,6 +60,7 @@ impl TuiApp {
                     self.close_prompt();
                     return match kind {
                         PromptKind::Shutdown => self.shutdown_daemon(),
+                        PromptKind::ConfirmRemoveTracker{hash,url}=>self.edit_tracker(&hash,&url,false),
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
                             self.service_action("torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":files}),if files {"deleted with files"}else{"removed · U to undo"}),
                         PromptKind::ConfirmRemoveFeed { name } => {
@@ -95,6 +99,7 @@ impl TuiApp {
                         self.service_action("rss.add",serde_json::json!({"url":value,"name":name}),"feed added")
                     }
                     PromptKind::FollowShow => self.follow(value, None),
+                    PromptKind::AddTracker{hash}=>self.edit_tracker(&hash,&value,true),
                     _ => Cmd::none(),
                 }
             }

@@ -62,7 +62,9 @@ impl TuiApp {
             Ok(rows)=>{
                 if panel.revision==panel.request_revision {
                 let mut rows=rows;rows.sort_by(|a,b|a.url.cmp(&b.url));
+                let selected=panel.urls.get(panel.offset).cloned();
                 panel.urls=rows.iter().map(|row|row.url.clone()).collect();
+                panel.offset=selected.and_then(|url|panel.urls.iter().position(|v|v==&url)).unwrap_or(panel.offset).min(rows.len().saturating_sub(1));
                 panel.rows=rows.into_iter().map(public_tracker).collect();
                 panel.revision=panel.revision.wrapping_add(1);
                 }
@@ -83,6 +85,8 @@ impl TuiApp {
         let urls=rows.keys().cloned().collect::<Vec<_>>();
         let rows=rows.values().cloned().map(public_tracker).collect::<Vec<_>>();
         if details.trackers.rows!=rows || details.trackers.urls!=urls {
+            let selected=details.trackers.urls.get(details.trackers.offset).cloned();
+            details.trackers.offset=selected.and_then(|url|urls.iter().position(|v|v==&url)).unwrap_or(details.trackers.offset).min(rows.len().saturating_sub(1));
             details.trackers.rows=rows;details.trackers.urls=urls;
             details.trackers.revision=details.trackers.revision.wrapping_add(1);
             details.trackers.offset=details.trackers.offset.min(details.trackers.rows.len().saturating_sub(1));
@@ -125,7 +129,7 @@ impl TuiApp {
         Paragraph::new(cache.header.as_str()).style(self.theme.dimmed().bold()).render(Rect::new(area.x,area.y,area.width,1),frame);
         let offset=panel.rows.iter().take(panel.offset).map(|r|1+usize::from(r.status==api::TrackerStatus::Error&&r.message.is_some())).sum::<usize>();
         for (index,(row,dim)) in cache.rows.iter().skip(offset).take(area.height.saturating_sub(2) as usize).enumerate() {
-            Paragraph::new(row.as_str()).style(if *dim||self.store.stale {self.theme.dimmed()}else{self.theme.text()}).render(Rect::new(area.x,area.y+1+index as u16,area.width,1),frame);
+            Paragraph::new(row.as_str()).style(if *dim||self.store.stale {self.theme.dimmed()}else if index==0 {self.theme.accented().bold()}else{self.theme.text()}).render(Rect::new(area.x,area.y+1+index as u16,area.width,1),frame);
         }
     }
 }

@@ -68,6 +68,15 @@ function create(service, changed) {
     if(!sent){d.trackerBusy=false;changed()}
     return !!sent
   }
+  d.editTracker=function(url,add,done){
+    if(!d.hash || d.tab!=="trackers" || d.trackerBusy)return false
+    var hash=d.hash,request=++d.trackerRequest;d.trackerBusy=true;changed()
+    var sent=service.mutate(add ? "torrents.add_tracker" : "torrents.remove_tracker",{hash:hash,url:url},"tracker_edit",function(result,failure){
+      if(d.hash===hash && d.trackerRequest===request){d.trackerBusy=false;changed();if(done)done(result,failure)}
+    })
+    if(!sent){d.trackerBusy=false;changed()}
+    return !!sent
+  }
   d.selectTab=function(tab){if(d.tabs().indexOf(tab)<0)return;d.tab=tab;d.query="";d.cursor=0;if(d.hash)d.topics();changed()}
   d.cycle=function(delta){var tabs=d.tabs();d.selectTab(tabs[(tabs.indexOf(d.tab)+delta+tabs.length)%tabs.length])}
   d.fetchFiles=function(){var hash=d.hash;if(!hash)return;d.loading=true;service.client.request("torrents.files",{hash:hash},{callback:function(){if(d.hash===hash){d.loading=false;changed()}}})}

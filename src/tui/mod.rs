@@ -33,6 +33,8 @@ use modals_details::*;
 mod modals_peers;
 #[path = "modals/trackers.rs"]
 mod modals_trackers;
+#[path = "modals/tracker_edit.rs"]
+mod tracker_edit;
 #[cfg(test)]
 #[path = "tests/trackers.rs"]
 mod tracker_tests;
@@ -427,7 +429,7 @@ impl Model for TuiApp {
             let inner = block.inner(root[2]);
             block.render(root[2], frame);
             if p.yes_no {
-                Paragraph::new("y / N (default: No)").style(th.accented()).render(inner, frame);
+                Paragraph::new(if matches!(p.kind,PromptKind::ConfirmRemoveTracker{..}) {"[Cancel] · (y) Remove tracker"}else{"y / N (default: No)"}).style(th.accented()).render(inner, frame);
             } else {
                 p.input.render(inner, frame);
             }

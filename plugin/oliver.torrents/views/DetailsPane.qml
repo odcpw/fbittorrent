@@ -12,7 +12,8 @@ ColumnLayout {
   readonly property var torrent:service.detailRevision>=0 && flow ? flow.row() : null
   readonly property string tab:service.detailRevision>=0 && flow ? flow.tab : "overview"
   readonly property bool posterLoaded:overview.item ? overview.item.posterLoaded : false
-  readonly property bool editing:files.item ? files.item.editing : false
+  readonly property bool editing:(files.item && files.item.editing) || (trackers.item && trackers.item.editing)
+  readonly property bool trackerEditing:trackers.item && trackers.item.editing
   signal recheckRequested(string hash)
   function key(event){if(trackers.item && trackers.item.key(event))return true;if(files.item && files.item.key(event))return true;return false}
   spacing:Commons.Style.spacing.sm
