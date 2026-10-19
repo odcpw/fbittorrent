@@ -16,7 +16,6 @@ function describe(s) {
     r.banner="Waiting for ProtonVPN ("+(network.interface || network.selection || "proton0")+"). Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
-  else if(info.installed_version && (hello.server || {}).version && info.installed_version!==(hello.server || {}).version)r.banner="fbittorrent "+(hello.server || {}).version+" runs; "+info.installed_version+" is installed. Restart to update."
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
   if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
   if(daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"

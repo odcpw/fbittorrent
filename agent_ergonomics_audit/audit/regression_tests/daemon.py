@@ -4941,6 +4941,8 @@ from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
 CASES.update((function.__name__, function) for function in RESPONSIVE_CASES)
+from daemon_tui_everyday import CASES as EVERYDAY_CASES
+CASES.update((function.__name__,function) for function in EVERYDAY_CASES)
 from daemon_tui_services import CASES as TUI_SERVICE_CASES
 CASES.update((function.__name__,function) for function in TUI_SERVICE_CASES)
 from daemon_shows_notify import CASES as SHOWS_NOTIFY_CASES

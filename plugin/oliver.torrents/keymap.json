@@ -662,6 +662,18 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.undo_remove",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "U"
+        ]
+      },
+      "label": "Undo removal",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.sort",
       "keys": {
         "dashboard": [
@@ -993,7 +1005,9 @@
           "s"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "s"
+        ]
       },
       "label": "Sort results",
       "scope": "screen:search"
@@ -1005,7 +1019,9 @@
           "S"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "S"
+        ]
       },
       "label": "Reverse results sort",
       "scope": "screen:search"
@@ -1017,7 +1033,9 @@
           "y"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "y"
+        ]
       },
       "label": "Copy magnet",
       "scope": "pane:search.results"
@@ -1527,6 +1545,42 @@
       },
       "label": "Follow show",
       "scope": "pane:rss.items"
+    },
+    {
+      "id": "shows.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort releases",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse releases sort",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.copy_magnet",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Copy magnet",
+      "scope": "pane:shows.releases"
     },
     {
       "id": "shows.next",

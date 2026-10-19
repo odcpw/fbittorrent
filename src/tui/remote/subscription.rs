@@ -143,6 +143,7 @@ impl TuiApp {
                         _=>{}
                     }
                 }
+                if committed {self.sync_activity_label();}
                 if rows_changed {
                     let rows = self
                         .store

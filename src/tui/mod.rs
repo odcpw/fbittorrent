@@ -61,6 +61,10 @@ mod layout;
 use layout::*;
 mod footer;
 mod clipboard;
+mod everyday;
+#[cfg(test)]
+#[path="tests/everyday.rs"] mod everyday_tests;
+mod release_sort;
 #[cfg(test)]
 #[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;

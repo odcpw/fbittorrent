@@ -64,6 +64,11 @@ impl TuiApp {
         self.show_grabbing.clear();
         match result {
             Ok(value) => {
+                if op=="torrents.remove" {
+                    self.removal_undo=if args["delete_files"]==false {
+                        args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(hash,until)|(hash.into(),until))
+                    }else{None};
+                }
                 if op == "shows.set_read" && args["read"] == true {
                     if let (Some(imdb), Some(key)) = (args["imdb"].as_str(), args["key"].as_str()) {
                         self.inbox_last_read = Some(ShowReleaseTarget {
@@ -323,6 +328,7 @@ impl TuiApp {
             self.follow_target = None;
             self.shows_focus_eps = false;
         }
+        self.order_release_rows();
         self.rebuild_inbox();
         if let Some(target) = selected {
             if !self.shows_inbox() {

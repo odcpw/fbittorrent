@@ -20,9 +20,11 @@ impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let cols = Flex::horizontal().constraints([Constraint::Fill, Constraint::FitContent]).split(area);
-        let new = self.shows_unread();
-        let shows_tab = format!(" 3 Shows ({new}) ");
-        let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab.clone(), " 4 RSS ".to_string()];
+        let shows_tab=if self.shows.shows.is_empty()&&self.store.shows.is_empty() {" 3 Shows ".to_string()}else{format!(" 3 Shows ({}) ",self.shows_unread())};
+        let rss_tab=if self.store.rss_feeds.is_empty() {
+            if self.feeds.is_empty() {" 4 RSS ".to_string()}else{format!(" 4 RSS ({}) ",self.feeds.iter().flat_map(|f|&f.articles).filter(|a|!a.is_read).count())}
+        }else{format!(" 4 RSS ({}) ",self.store.rss_feeds.values().map(|f|f.unread).sum::<u64>())};
+        let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab.clone(), rss_tab.clone()];
         let mut x = area.x;
         let regions = labels.map(|label| {
             // Tabs wraps each title with two visible bracket/space cells.
@@ -33,17 +35,22 @@ impl TuiApp {
         });
         self.tab_rects.set(regions);
         self.rects.borrow_mut().tabs=regions;
-        let tabs = Tabs::new([Tab::new(" 1 Torrents "), Tab::new(" 2 Search "), Tab::new(shows_tab.as_str()), Tab::new(" 4 RSS ")])
+        let tabs = Tabs::new([Tab::new(" 1 Torrents "), Tab::new(" 2 Search "), Tab::new(shows_tab.as_str()), Tab::new(rss_tab.as_str())])
             .style(th.dimmed())
             .active_style(th.selected())
             .separator("");
         StatefulWidget::render(&tabs, cols[0], frame, &mut self.tabs.borrow_mut());
 
-        let right = if self.online {
+        let activity=self.activity_label();
+        let right = if self.online && activity.is_some() {
+            Line::from_spans([
+                Span::styled(if self.turtle_on()==Some(true) {"󰢃 Turtle "}else{""},th.text()),
+                Span::styled(activity.unwrap(),th.text()),
+            ])
+        } else if self.online {
             let mut spans = vec![
-                Span::styled("↓ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.dl_info_speed),|info|format::rate(info.dl_bps)), th.text()),
-                Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.up_info_speed),|info|format::rate(info.ul_bps)), th.text()),
-                Span::styled(if Tier::at(area.width)==Tier::Wide {format!("  {} ", th.name)} else {String::new()}, th.dimmed()),
+                Span::styled("↓ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||if self.presence.is_some() {"—".into()}else{human_rate(self.transfer.dl_info_speed)},|info|format::rate(info.dl_bps)), th.text()),
+                Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||if self.presence.is_some() {"—".into()}else{human_rate(self.transfer.up_info_speed)},|info|format::rate(info.ul_bps)), th.text()),
             ];
             if self.turtle_on()==Some(true){spans.insert(0,Span::styled("󰢃 Turtle ",th.text()));}
             if self.poll_inflight { spans.insert(0, Span::styled(format!("{} ", SPINNER[self.tick % 4]), th.dimmed())); }
@@ -92,7 +99,7 @@ pub(super) fn providers_area(b: Rect, count: usize) -> Rect {
 
 pub(super) fn settings_area(b: Rect) -> Rect {
     let width = b.width.min(78);
-    let height = b.height.min(18);
+    let height = b.height.min(22);
     Rect::new(b.x + b.width.saturating_sub(width) / 2, b.y + b.height.saturating_sub(height) / 2, width, height)
 }
 

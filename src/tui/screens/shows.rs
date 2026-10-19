@@ -45,7 +45,7 @@ impl TuiApp {
         let mut releases: Vec<_> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
             .filter(move |episode| show.is_new(&episode.key))
             .map(move |episode| (show, episode))).collect();
-        releases.sort_by(|(a_show, a), (b_show, b)| b.released.cmp(&a.released)
+        releases.sort_by(|(a_show, a), (b_show, b)| release_sort::episode_order(a,b,self.release_sort,self.release_descending)
             .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
         self.inbox_rows = releases.into_iter().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() }).collect();
         self.ep_list.borrow_mut().hovered = None;
@@ -344,7 +344,7 @@ impl TuiApp {
         }
         let inbox = self.shows_inbox();
         let title = if inbox {
-            format!(" Shows › All unread · {unread} releases · newest first ")
+            format!(" Shows › All unread · {unread} releases · {} {} ",self.release_sort.label(),if self.release_descending {"↓"}else{"↑"})
         } else if let Some(show) = self.selected_show() {
             format!(
                 " Shows › {} · {} releases ",

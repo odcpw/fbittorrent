@@ -552,6 +552,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Undo removal | `U` | — | — |  |
 | `screen:torrents` | Sort | `s` | `s` | — |  |
 | `screen:torrents` | Reverse sort | `S` | `S` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
@@ -573,9 +574,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Wikipedia | `w` | `w` | — |  |
 | `screen:torrents` | Follow show | `f`, `F` | `f` | — |  |
 | `screen:search` | Browse grid/rows | — | `v` | — | Browse lists only. |
-| `screen:search` | Sort results | — | `s` | — |  |
-| `screen:search` | Reverse results sort | — | `S` | — |  |
-| `pane:search.results` | Copy magnet | — | `y` | — |  |
+| `screen:search` | Sort results | `s` | `s` | — |  |
+| `screen:search` | Reverse results sort | `S` | `S` | — |  |
+| `pane:search.results` | Copy magnet | `y` | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -610,6 +611,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:rss` | All read | `M` | `M` | — |  |
 | `screen:rss` | IMDb | `i` | `i` | — |  |
 | `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `screen:shows` | Sort releases | `s` | — | — |  |
+| `screen:shows` | Reverse releases sort | `S` | — | — |  |
+| `pane:shows.releases` | Copy magnet | `y` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |

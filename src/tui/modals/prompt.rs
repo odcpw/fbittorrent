@@ -15,6 +15,8 @@ pub(super) enum PromptKind {
     AddMagnet,
     SettingLimit(usize),
     SettingPeerPort,
+    SettingDestination,
+    SettingIdleExit,
     AddFeed,
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
@@ -56,7 +58,7 @@ impl TuiApp {
                     return match kind {
                         PromptKind::Shutdown => self.shutdown_daemon(),
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
-                            self.action(if files { "deleted with files" } else { "removed" }, move |c| c.delete(&[hash], files)),
+                            self.service_action("torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":files}),if files {"deleted with files"}else{"removed · U to undo"}),
                         PromptKind::ConfirmRemoveFeed { name } => {
                             self.native_feed_action("rss.remove",&name,None,None,format!("removed feed {name}"))
                         }
@@ -77,6 +79,8 @@ impl TuiApp {
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
+                if kind==PromptKind::SettingDestination {return self.apply_destination(&value);}
+                if kind==PromptKind::SettingIdleExit {return self.apply_idle_exit(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

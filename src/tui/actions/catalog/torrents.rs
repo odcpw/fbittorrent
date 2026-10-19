@@ -1,5 +1,7 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("torrents.undo_remove",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",20,
+        TuiApp::can_undo_removal,Some(TuiApp::undo_removal),T,None,None,None),
     action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort",90,
         |_|true,Some(|a|a.cycle_torrent_sort(false)),TD,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
     action!("torrents.reverse_sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse sort",90,
@@ -216,7 +218,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::Char('f')), KeyChord::plain(KeyCode::Char('F'))],
         "Follow show",
         90,
-        |a| a.selected_torrent().is_some(),
+        |a| a.selected_torrent().is_some_and(|row|a.followable_title(&row.name)),
         Some(|a| a.on_torrents_action(Intent::Follow)),
         TD,
         Some(&[KeyChord::plain(KeyCode::Char('f'))]),
