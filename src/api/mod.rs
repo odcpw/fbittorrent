@@ -5,6 +5,7 @@
 
 pub mod client;
 pub mod events;
+pub mod mutations;
 pub mod objects;
 pub mod ops;
 pub mod request;

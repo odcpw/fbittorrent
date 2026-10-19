@@ -15,6 +15,27 @@ impl EngineDispatcher {
             .map(|(hash, restore)| (hash.clone(), restore.outcome.clone()))
             .collect()
     }
+    /// The API confirmation observer does not wait on a busy runtime owner.
+    pub(crate) fn restore_outcome(&self, hash: &str) -> Option<RestoreOutcome> {
+        self.inner.restores.try_lock().ok()?.get(hash).map(|restore| restore.outcome.clone())
+    }
+    /// API URL metadata fetch borrows this slot's runtime and cancellation.
+    /// Validate before admitting the bytes as a torrent; no ledger side effects.
+    pub(crate) fn fetch_api_torrent(&self, url: &str, interface: Option<&str>) -> Result<Vec<u8>> {
+        let binding = interface.map(rqbit_runtime::net::InterfaceBinding::new).transpose()?;
+        let client = rqbit_runtime::http::Client::new_bound("fbittorrent API metadata", binding);
+        let cx = self.runtime.cx();
+        self.runtime.block_on(async {
+            let bytes = rqbit_runtime::select! {
+                result = client.get(cx, url) => result?,
+                _ = self.inner.session.cancellation_token().cancelled() => bail!("native engine is closing"),
+            };
+            anyhow::ensure!(bytes.len() <= 16 * 1024 * 1024 && bytes.first() == Some(&b'd'),
+                "URL torrent must be bencoded metainfo at most 16 MiB");
+            librqbit::torrent_from_bytes(&bytes)?;
+            Ok(bytes)
+        })
+    }
     /// Legacy compatibility entry point. All execution below takes typed data.
     pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
         match EngineOp::parse(&request.path, request) {
