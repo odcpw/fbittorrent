@@ -24,7 +24,6 @@ impl TuiApp {
         self.footer_context().hash(&mut hash);
         if let Some(details)=&self.details {std::mem::discriminant(&details.tab).hash(&mut hash);details.trackers.busy.hash(&mut hash);}
         self.store.hello.as_ref().map(|h|&h.caps).hash(&mut hash);
-        self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.can_undo_removal().hash(&mut hash);

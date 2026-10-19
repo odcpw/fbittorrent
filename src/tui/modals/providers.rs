@@ -85,7 +85,7 @@ impl TuiApp {
         let iw = inner.width.saturating_sub(2) as usize;
         let elapsed = self.marquee_elapsed();
         self.view_rows(MouseList::Providers,rows[0],m.plugins.len(),
-            |i|layout::fingerprint(&(&m.plugins[i],self.cfg.native())),
+            |i|layout::fingerprint(&m.plugins[i]),
             |i|{let p=&m.plugins[i];
             let mark = if p.enabled { "[x] " } else { "[ ] " };
             let st = if p.enabled { bg.fg(th.fg) } else { bg.fg(th.dim) };

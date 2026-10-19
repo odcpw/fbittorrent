@@ -46,9 +46,6 @@ pub fn run(
     alt_down: Option<String>,
     alt_up: Option<String>,
 ) -> Result<Code> {
-    if !cfg.native() {
-        return Err(AppError::new(Code::Usage, "global limits require the native daemon").into());
-    }
     let args = api::SetLimitsArgs {
         download_bps: rate(down)?,
         upload_bps: rate(up)?,

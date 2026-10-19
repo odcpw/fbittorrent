@@ -116,7 +116,7 @@ impl TuiApp {
                     PromptKind::AddMagnet => {
                         let label = crate::magnet_name(&value).unwrap_or_else(|| value.chars().take(40).collect());
                         let mut opts = self.add_opts();
-                        opts.sequential = seq; opts.first_last = fl; opts.seed = seed;
+                        opts.seed = seed;
                         let flags = format!("{}{}{}", if seq { "S" } else { "" }, if fl { "F" } else { "" }, if seed { "U" } else { "" });
                         self.action(format!("added {label} [{flags}]"), move |c| c.add_url(&value, &opts))
                     }

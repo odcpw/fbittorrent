@@ -235,9 +235,9 @@ impl Model for TuiApp {
                     }
                     Err(e) => {
                         self.online = false; self.backend_error = e;
-                        if self.cfg.native() {self.store.disconnected();}
+                        self.store.disconnected();
                         self.failed_polls = self.failed_polls.saturating_add(1);
-                        self.daemon_stopped = self.cfg.native() && !self.recovery.active && self.failed_polls >= 2;
+                        self.daemon_stopped = !self.recovery.active && self.failed_polls >= 2;
                     }
                 }
                 self.refresh_details()
@@ -395,11 +395,9 @@ impl Model for TuiApp {
                 self.rss_loading = false;
                 match result {
                     Ok(mut feeds) => {
-                        if self.cfg.native() {
-                            for feed in &mut feeds {
-                                if let Some(row)=self.store.rss_feeds.values().find(|row|row.id==feed.uid||row.url==feed.url) {
-                                    feed.is_loading=row.loading;feed.has_error=row.error.is_some();
-                                }
+                        for feed in &mut feeds {
+                            if let Some(row)=self.store.rss_feeds.values().find(|row|row.id==feed.uid||row.url==feed.url) {
+                                feed.is_loading=row.loading;feed.has_error=row.error.is_some();
                             }
                         }
                         let sel = self.selected_feed().map(|f| f.name.clone());

@@ -100,7 +100,7 @@ impl TuiApp {
         if let Some(network) = &self.store.network {
             return (network.ready, network.message.as_str().into());
         }
-        if self.cfg.native() && self.presence.is_some() {
+        if self.presence.is_some() {
             return (false, "Connecting…".into());
         }
         let network = crate::network_app::state(&self.cfg);
@@ -179,7 +179,7 @@ mod tests {
             api: Some(row),
         };
         assert_eq!(metrics.speed(), "↓ —   ↑ —");
-        assert_eq!(metrics.peers(true), "unknown");
+        assert_eq!(metrics.peers(), "unknown");
         assert_eq!(metrics.ratio(), "—");
         assert!(!legacy.progress_known);
         assert_eq!(

@@ -71,7 +71,7 @@ impl TuiApp {
         let cols = torrent_columns(area);
         let queued = self.torrents.iter().filter(|t| t.state == "queuedDL").count();
         let (network_ready,network_message) = self.network_banner();
-        let title = if self.cfg.native() && !network_ready { format!(" {} ", network_message) }
+        let title = if !network_ready { format!(" {} ", network_message) }
             else if queued > 0 { format!(" Torrents ({}) · {queued} queued ", self.torrents.len()) }
             else { format!(" Torrents ({}) ", self.torrents.len()) };
         let block = Block::bordered().padding(Sides::all(0)).border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title);
@@ -110,7 +110,7 @@ impl TuiApp {
             kv("progress", metrics.progress()),
             kv("speed", metrics.speed()),
             kv("eta", metrics.eta()),
-            kv("peers", metrics.peers(self.cfg.native())),
+            kv("peers", metrics.peers()),
             kv("ratio", metrics.ratio()),
             kv("flags", flags),
             kv("upload", metrics.upload()),

@@ -47,7 +47,7 @@ pub(super) fn after_detach(show_notice: bool) {
 
 impl TuiApp {
     pub(super) fn close_ui(&mut self) -> Cmd<Msg> {
-        self.quit_notice = self.cfg.native();
+        self.quit_notice = true;
         Cmd::quit()
     }
     pub(super) fn request_shutdown(&mut self) -> Cmd<Msg> {
@@ -68,18 +68,13 @@ impl TuiApp {
     }
     pub(super) fn shutdown_daemon(&mut self) -> Cmd<Msg> {
         let presence = self.presence.clone();
-        let cfg = self.cfg.clone();
         Cmd::task(move || {
-            let result = if cfg.native() {
-                presence
-                    .ok_or_else(|| anyhow::anyhow!("fbittorrent stopped"))
-                    .and_then(|connection| {
-                        connection.request("app.shutdown", serde_json::json!({"reason":"user"}))
-                    })
-                    .map(|_| ())
-            } else {
-                crate::backend::stop(&cfg)
-            };
+            let result = presence
+                .ok_or_else(|| anyhow::anyhow!("fbittorrent stopped"))
+                .and_then(|connection| {
+                    connection.request("app.shutdown", serde_json::json!({"reason":"user"}))
+                })
+                .map(|_| ());
             Msg::OwnerShutdown(result.map_err(|error| error.to_string()))
         })
     }
@@ -103,7 +98,6 @@ impl TuiApp {
         if pending {self.set_status("Result unknown; the list will tell.",true);}
     }
     pub(in crate::tui) fn recovery_tick(&mut self) -> Cmd<Msg> {
-        if !self.cfg.native() {return Cmd::none();}
         if self.presence.as_ref().is_some_and(|connection|!connection.alive()) {
             self.connection_lost(false);
         }

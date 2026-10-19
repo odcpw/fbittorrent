@@ -46,9 +46,9 @@ fn overview_and_table_show_known_seeds_over_total_and_keep_unknowns_absent() {
     let mut row:api::Torrent=serde_json::from_value(frame["frame"]["result"]["torrents"][0].clone()).unwrap();
     row.peers=Some(41);row.seeds=Some(1);let t=format::torrent(&row);
     assert_eq!(format::Columns::of(&t,Some(&row)).peers,"1/41");
-    assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(true),"1 seeds / 41 peers connected");
+    assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(),"1 seeds / 41 peers connected");
     row.seeds=None;assert_eq!(format::Columns::of(&t,Some(&row)).peers,"41");
-    row.peers=None;assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(true),"unknown");
+    row.peers=None;assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(),"unknown");
     app.store.torrents.insert(row.hash.to_string(),row);
 }
 

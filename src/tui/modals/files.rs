@@ -111,7 +111,7 @@ impl TuiApp {
         Paragraph::new(Text::from_line(header)).wrap(WrapMode::None).render(rows[0], frame);
         let elapsed = self.marquee_elapsed();
         self.view_rows(MouseList::Files,rows[1],m.files.len(),
-            |i|layout::fingerprint(&(&m.files[i],self.cfg.native())),
+            |i|layout::fingerprint(&m.files[i]),
             |i|{let f=&m.files[i];
             let (mark, prio, pst) = match f.priority {
                 0 => ("[ ]", "skip", bg.fg(th.dim)),

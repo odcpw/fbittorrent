@@ -108,7 +108,7 @@ fn run(cli: Cli) -> Result<Code> {
     };
     // Read/offline-intent commands never cause an owner to be launched. Offline
     // ledger mutations themselves are supplied by P1-11.
-    if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
+    if !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if cli::native_handles(&cmd) { return cli::run_native(&cfg, &cmd, json, no_start); }
@@ -122,7 +122,7 @@ fn run(cli: Cli) -> Result<Code> {
             if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
             let _ = port;
             let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,quick,dry_run,uninstall,purge})?;
-            emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
+            emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":"native","port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
             return Ok(Code::Ok);
         }
         Cmd::RegisterMagnet => {
@@ -157,7 +157,7 @@ fn run(cli: Cli) -> Result<Code> {
             explicit.autostart = !no_start;
             let started = api::client::ensure_daemon(&explicit, no_start)?;
             if ui { backend::dashboard(None, None)?; }
-            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": cfg.engine,
+            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": "native",
                 "unit": api::client::unit_name()?}),
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
@@ -173,7 +173,7 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Down => {
             backend::stop(&cfg)?;
-            emit(json,serde_json::json!({"ok":true,"action":"down","engine":cfg.engine,"unit":null}), || println!("fbittorrent closed; its engine is stopped"));
+            emit(json,serde_json::json!({"ok":true,"action":"down","engine":"native","unit":null}), || println!("fbittorrent closed; its engine is stopped"));
             Ok(Code::Ok)
         }
         Cmd::Tui { search, rss, shows } => {

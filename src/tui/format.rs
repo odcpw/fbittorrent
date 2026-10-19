@@ -150,7 +150,7 @@ impl Metrics<'_> {
             },
         )
     }
-    pub fn peers(&self, _native: bool) -> String {
+    pub fn peers(&self) -> String {
         self.api.map_or_else(
             || {
                 format!(

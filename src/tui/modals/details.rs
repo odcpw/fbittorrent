@@ -236,7 +236,7 @@ impl TuiApp {
                     "speed",
                     format!("{} · ETA {}", metrics.speed(), metrics.eta()),
                 ),
-                kv("peers", metrics.peers(self.cfg.native())),
+                kv("peers", metrics.peers()),
                 kv("policy", metrics.upload()),
                 kv("path", t.save_path.clone()),
                 kv("added", ago(t.added_on)),

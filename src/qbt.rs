@@ -254,9 +254,6 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
 ];
 
 pub struct AddOptions {
-    pub origin: Option<String>,
-    pub sequential: bool,
-    pub first_last: bool,
     /// Explicitly permit upload, including after completion; false inherits the global download-time policy and stops when complete.
     pub seed: bool,
     pub stopped: bool,

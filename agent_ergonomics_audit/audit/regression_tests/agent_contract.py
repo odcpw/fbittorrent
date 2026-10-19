@@ -156,13 +156,6 @@ def obsolete_commands_removed(binary,systemd):
                        'obsolete command is absent rather than retained as a compatibility stub',json.dumps(dict(verb=verb,exit=r.returncode,envelope=value)))
         case.check(not (Path(sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock').exists(),'rejected obsolete commands never start a daemon')
 
-def removed_backend_refused(binary,systemd):
-    with Case('agent_contract','removed_backend_refused') as case,Sandbox() as sandbox:
-        config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
-        config.write_text(config.read_text().replace('engine = "native"','engine = "qbittorrent"')+'\nurl="http://127.0.0.1:1"\n')
-        value,r=cli(case,sandbox,binary,'status','--json',code=2)
-        case.check('engine must be native' in value.get('error','') and not r.stderr,'removed backend is rejected at configuration validation',json.dumps(value))
-
 def exit_code_dictionary_total(binary,systemd):
     with Case('agent_contract','exit_code_dictionary_total') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
         cli(case,sandbox,binary,'--bad-flag','--json',code=2)
@@ -335,7 +328,7 @@ from daemon_download_limit import limit_verb
 from agent_rename import rename_verb
 from agent_tui_format import list_human_matches_tui_format
 
-CASES={f.__name__:f for f in [list_human_matches_tui_format,rename_verb,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [list_human_matches_tui_format,rename_verb,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

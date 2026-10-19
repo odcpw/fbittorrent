@@ -4,12 +4,11 @@ use super::*;
 pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     // Attach-only invocations must fail before entering fullscreen when closed.
     // Normal opening stays asynchronous so startup can display its status.
-    let existing=if cfg.native()&&crate::backend::start_prevented() {
+    let existing=if crate::backend::start_prevented() {
         Some(attach::connect(&cfg)?)
     } else {None};
     // This guard owns only UI cleanup, never an engine or the instance lock.
     let _terminal=signals::AppGuard::new(());
-    let native=cfg.native();
     let mut model = TuiApp::new(cfg, screen, Shows::default());
     if let Some(connection)=existing {
         model.recovery.connected(&connection.hello.server.version,env!("CARGO_PKG_VERSION"));
@@ -24,7 +23,7 @@ pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     if let Some(connection)=program.model().presence.as_ref() {connection.close();}
     signals::event("shutdown_once end (Program::run returned)");
     let signal = program.model().termination_signal;
-    let notice = native && program.model().quit_notice;
+    let notice = program.model().quit_notice;
     drop(program);
     if let Some(signal) = signal { return Err(SignalTermination(signal).into()); }
     result?;
@@ -73,9 +72,6 @@ impl TuiApp {
 
     pub(super) fn add_opts(&self) -> AddOptions {
         AddOptions {
-                origin: None,
-            sequential: self.cfg.native() || self.cfg.sequential,
-            first_last: self.cfg.native() || self.cfg.first_last,
             seed: false,
             stopped: false,
             save_path: self.cfg.save_path.clone(),

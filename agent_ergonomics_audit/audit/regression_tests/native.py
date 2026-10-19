@@ -96,8 +96,7 @@ CASES = (
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
     with Case("native", "launcher_never_called") as case, \
-            private_directory(prefix="fbt-no-start-") as temporary, \
-            socket.socket() as legacy_endpoint:
+            private_directory(prefix="fbt-no-start-") as temporary:
         root = Path(temporary)
         env = dict(os.environ)
         env.pop("FBITTORRENT_NO_START", None)
@@ -230,24 +229,6 @@ def launcher_never_called(binary):
                    "Invocation flags leave the stored autostart setting enabled.")
         case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock").exists(),
                    "No probe has started a native engine socket.")
-        legacy_endpoint.bind(("127.0.0.1", 0))
-        legacy_endpoint.listen(4)
-        legacy_endpoint.setblocking(False)
-        legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
-                         f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
-        config.write_text(legacy_config)
-        for args in [("--no-start","setup"),("setup",),("status",)]:
-            argv=[binary,*args,"--json"]
-            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 for a non-native engine, with no launch, network or settings writes")
-            child=case.popen(argv,env=env,stdout=subprocess.PIPE,text=True)
-            stdout,_=child.communicate(timeout=5);value=json.loads(stdout)
-            try:
-                connection,_=legacy_endpoint.accept();connection.close();contacted=True
-            except BlockingIOError:contacted=False
-            step.close(child.returncode==2 and value.get("code_name")=="usage" and "engine must be native" in value.get("error","")
-                       and not contacted and not calls.read_text() and config.read_text()==legacy_config
-                       and not (Path(env["XDG_RUNTIME_DIR"])/"fbittorrent/api.sock").exists(),
-                       f"exit={child.returncode}; envelope={value}; contacted={contacted}; calls={calls.read_text()!r}",[calls])
 
 
 def terminal_close_is_graceful(binary):

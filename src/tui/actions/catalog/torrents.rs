@@ -3,7 +3,7 @@ pub(super) const ACTIONS: &[Action] = &[
     action!("torrents.copy_magnet",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
         |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),T,None,None,None),
     action!("torrents.rename",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
-        |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
+        |a|a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
     action!("torrents.undo_remove",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",20,
         |a|a.online&&!a.service_busy&&a.removal_undo.is_some(),Some(TuiApp::undo_removal),T,None,None,None),
     action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort",90,

@@ -10,9 +10,6 @@ use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 pub(crate) fn running(cfg: &Config, cap: &str) -> Option<Client> {
-    if !cfg.native() {
-        return None;
-    }
     let client = Client::connect(cfg, false).ok()?;
     if client.hello.state != api::DaemonState::Running
         || !client.hello.caps.iter().any(|v| v == cap)

@@ -28,16 +28,16 @@ fn read(client:&Client,op:&str,args:Value)->Result<Value> {
     }
     Err(api::errors::app_error(failure))
 }
-fn draining(cfg:&Config)->Value {
+fn draining()->Value {
     // Do not fabricate engine counts, rates or a torrent list after quiesce.
-    json!({"ok":true,"running":true,"backend":"native","engine":cfg.engine,
+    json!({"ok":true,"running":true,"backend":"native","engine":"native",
         "connection":"api","daemon":{"state":"stopping"}})
 }
-fn stopped(cfg:&Config)->Result<Value> {
+fn stopped()->Result<Value> {
     // The listener closes before the final ledger/statistics save. Observe
     // that save under the owner lock, within the daemon's shutdown budget.
     let rows=offline::list_after(Duration::from_secs(10))?;
-    Ok(json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,
+    Ok(json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":"native",
         "total":rows.len(),"all_time":crate::daemon::stats::read(&crate::daemon::stats::path())?}))
 }
 fn collect(client:&Client,cfg:&Config)->Result<Value> {
@@ -49,7 +49,7 @@ fn collect(client:&Client,cfg:&Config)->Result<Value> {
     let mut value=native::counts(&rows);
     value["ok"]=json!(true);value["running"]=json!(true);value["all_time"]=stats["all_time"].clone();
     value["session"]=stats["session"].clone();
-    value["connection"]=json!("api");value["backend"]=json!("native");value["engine"]=json!(cfg.engine);
+    value["connection"]=json!("api");value["backend"]=json!("native");value["engine"]=json!("native");
     if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
     value["app_open"]=json!(summary.as_ref().is_some_and(|v|v["daemon"]["busy_reasons"].as_array()
         .is_some_and(|reasons|reasons.iter().any(|reason|reason=="interactive"))));
@@ -63,9 +63,9 @@ fn live(client:&Client,cfg:&Config)->Result<Value> {
     // Status never retries a read through ensure_daemon. A lost connection is
     // probed explicitly below, and only a confirmed closed owner is read offline.
     client.limit_reconnects(0);
-    if client.hello.state==api::DaemonState::Stopping {return Ok(draining(cfg));}
+    if client.hello.state==api::DaemonState::Stopping {return Ok(draining());}
     match collect(client,cfg) {
-        Err(error) if error.is::<Stopping>()=>Ok(draining(cfg)),
+        Err(error) if error.is::<Stopping>()=>Ok(draining()),
         result=>result,
     }
 }
@@ -79,15 +79,15 @@ pub(super) fn run(cfg:&Config,json_mode:bool,quiet:bool)->Result<Code> {
                 // One read-only probe covers bye/EOF between any two status
                 // requests. Permission/protocol failures stay failures.
                 match Client::connect(cfg,json_mode) {
-                    Ok(client) if client.hello.state==api::DaemonState::Stopping=>draining(cfg),
-                    Err(probe) if gone(&probe)=>stopped(cfg)?,
+                    Ok(client) if client.hello.state==api::DaemonState::Stopping=>draining(),
+                    Err(probe) if gone(&probe)=>stopped()?,
                     _=>return Err(error),
                 }
             }
             Err(error)=>return Err(error),
         },
         Err(error) if gone(&error)&&quiet=>return Ok(Code::Backend),
-        Err(error) if gone(&error)=>stopped(cfg)?,
+        Err(error) if gone(&error)=>stopped()?,
         Err(error)=>return Err(error),
     };
     if quiet {return Ok(if value["running"]==true {Code::Ok}else{Code::Backend});}
