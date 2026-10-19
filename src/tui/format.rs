@@ -1,5 +1,9 @@
 //! Adapter to the current screen rows. The confirmed mirror retains optional values.
 use super::*;
+mod state;
+mod columns;
+pub(super) use columns::Columns;
+pub(super) use state::{state_cell,state_word,STATE_WIDTH,reason};
 use crate::api;
 fn signed(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)

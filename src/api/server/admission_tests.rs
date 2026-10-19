@@ -35,6 +35,7 @@ fn dispatch_queue_is_64_and_closed_pool_refuses_work() {
         request: decode(br#"{"id":1,"op":"app.info"}"#).unwrap(),
         generation: 1,
         mutation: None,
+        _activity: None,
     };
     for _ in 0..64 {
         assert!(pool.submit(job()).is_ok());
@@ -98,4 +99,19 @@ fn file_removal_has_no_operation_timeout() {
         connection.out.lock().unwrap().frames.back().unwrap()["result"]["state"],
         "done"
     );
+}
+
+#[test]
+fn recheck_pending_has_no_operation_deadline_and_is_not_idempotent() {
+    let (connection, _) = super::tests::connection();
+    let request = decode(br#"{"id":1,"op":"torrents.recheck","args":{"hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}}"#).unwrap();
+    let generation = connection.reserve(&request).unwrap();
+    connection.pending.lock().unwrap().get_mut(&1).unwrap().deadline = Instant::now()-Duration::from_secs(60);
+    assert!(connection.pending.lock().unwrap()[&1].no_timeout);
+    assert!(connection.complete(1,generation,Ok(Reply::TorrentsRecheck(RecheckReply::Pending(PendingResult {
+        state:PendingState::Pending,reference:MutationRef::new("recheck-no-timeout").unwrap(),
+    })))));
+    let out=connection.out.lock().unwrap();
+    assert_eq!(out.frames[0]["result"]["state"],"pending");
+    assert!(ops::TABLE.iter().any(|row|row.name=="torrents.recheck" && row.mutating && !row.idempotent));
 }

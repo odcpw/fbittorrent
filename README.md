@@ -137,15 +137,16 @@ or reload your shell.
 ## Lifecycle
 
 `fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
-`down` drains it, and `restart` replaces the engine slot while its sockets stay
+`down` drains it, and `restart` replaces the daemon and waits for a new hello.
+The API can also replace just the engine slot while its sockets stay
 available. `dashboard` summons the desktop view. The static user unit starts on
 writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
 never start an owner. When it is down, saved reads report `running:false`; `stop`
 and keep-files `delete` update the saved ledger under the same instance lock.
 `--no-start` and `autostart=false` prevent automatic startup. Without a user
-manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
-replacement are delivered by their lifecycle work; this checkout reports the
-available daemon state without inventing missing idle counters.
+manager, run `serve` in a terminal or tmux. Automatic idle exit uses the busy
+table; binary replacement requests exit 75 when idle, and systemd starts the
+installed replacement.
 
 The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
 wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
@@ -229,7 +230,7 @@ fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
 fbittorrent up [--ui] | down          start daemon / drain and stop owner
 fbittorrent dashboard [--view v] [--query q]   summon panel, or fall back to TUI
-fbittorrent restart                  restart engine slot (upgrade handling follows)
+fbittorrent restart                  restart daemon now; wait up to 30 s for new hello
 fbittorrent serve                   run the native engine headlessly in the foreground
 fbittorrent status                   rates and counts; never opens the app
 fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
@@ -248,15 +249,43 @@ interface starts it parked, with saved history and start/stop/remove-keeping-fil
 available; the engine reopens when that exact interface returns.
 
 `serve --no-notify` disables desktop notifications while retaining systemd
-readiness datagrams. `--idle-exit-secs N` defaults to 300 (0 means disabled) and
-is exposed in daemon policy metadata; the automatic idle policy follows in P1-12. The current core runs until stopped.
+readiness datagrams. `idle_exit_secs` defaults to 300 in the config (minimum 30,
+or 0 to disable); `serve --idle-exit-secs N` overrides it. The daemon stops when
+its idle countdown reaches zero. Downloads, explicit seeding, waiting downloads
+behind an unavailable interface, interactive clients, search sessions and pending
+mutations cancel that countdown. The bar alone never keeps it running; opening
+the popup pauses the remaining time and closing it resumes that time. The
+`summary` subscription reports the countdown and busy reasons. Owner shutdown
+always drains, even while busy, and preserves download intent for the next start.
 `setup --magnet` writes the on-demand static `fbittorrent.service` using the
 current executable path, reloads the user manager and registers desktop handlers.
 It never enables or starts the unit. `setup --uninstall` removes the unit while
 keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
 harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. The CLI uses API v1; TUI attachment follows in P1-15.
+unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
+`api.sock`: clients can subscribe to summary, torrents, files, network, settings
+and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
+
+The daemon posts completion notifications with Open File / Open Folder actions.
+Browser handlers use `add --origin handler`: the daemon posts Added with Undo
+(keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
+or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
+Notification bodies escape markup, duplicate pending notices collapse, and four
+workers drain a bounded queue. VPN notices name the selected interface and limit
+rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
+`setup` installs the monochrome download SVG under
+`$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
+desktop entries and notifications use fbittorrent.
+
+Daemon diagnostics are available with `fbittorrent log --json`, filtered with
+`--level error|warn|info|debug` and `--source engine` (or another source).
+`fbittorrent log --follow` streams NDJSON entries. These commands never start the
+daemon; when it is down they point to `fbittorrent up` and the journal's longer
+history (`journalctl --user -u fbittorrent`). The in-memory ring holds 2,000
+entries. `app.info.clients` counts successful connections since this daemon
+started; `app.stats.active_clients` reports current connections. Nothing is sent
+outside the machine.
 
 ### For agents
 
@@ -400,6 +429,15 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
   --output target/test-logs/resources/measurement.json
 ```
 
+The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
+It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
+three 60-second windows per configuration, plus matched CLI polling references
+(about 24 minutes total). The daemon entries share `baselines/resources.json`
+with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
+--seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
+against the same median and spread rule; `--write-baseline` records a complete
+matrix deliberately. Use the reference host and the release-lock/memory scope.
+
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.
 
@@ -408,7 +446,7 @@ agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; 
 cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
-…/regression_tests/tui_smoke.sh                        # drives the TUI in tmux: list, files modal, prompt toggles, screens, help, quit
+python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
 …/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
 ```
 
@@ -459,6 +497,18 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Back | `Esc`, `h` | — | — |  |
+| `modal:details` | Next tab | `]` | — | — |  |
+| `modal:details` | Previous tab | `[` | — | — |  |
+| `modal:files` | Next tab | `]` | — | — |  |
+| `modal:files` | Overview | `[` | — | — |  |
+| `modal:details` | Open | `o` | — | — |  |
+| `modal:details` | Pause/resume | `p` | — | — |  |
+| `modal:details` | Seed | `u` | — | — |  |
+| `modal:details` | Remove | `d` | — | — |  |
+| `modal:details` | Delete files | `D` | — | — |  |
+| `modal:details` | IMDb | `i` | — | — |  |
+| `modal:details` | Wikipedia | `w` | — | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
 | `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
@@ -468,7 +518,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Last | `G`, `End` | `G`, `End` | — |  |
 | `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
 | `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
-| `screen:torrents` | Files | `Enter` | `Enter` | — |  |
+| `screen:torrents` | Details | `Enter` | `Enter` | — |  |
 | `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
 | `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
 | `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
@@ -483,6 +533,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:search` | Sort results | — | `s` | — |  |
 | `screen:search` | Reverse results sort | — | `S` | — |  |
 | `pane:search.results` | Copy magnet | — | `y` | — |  |
+| `screen:search` | Card | `v` | — | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -536,7 +587,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | Wikipedia | `w` | `w` | — |  |
 | `screen:shows` | EZTV | `O` | `O` | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
-| `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
 | `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `modal:files` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `modal:files` | Include/skip | `Space` | `Space` | — |  |
@@ -576,3 +627,35 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
 <!-- keys:end -->
+
+The daemon checks its executable inode and modification time every 30 seconds.
+An atomically installed replacement switches automatically when the busy table
+is empty, through exit 75 and the systemd unit's forced restart. While work is
+active, summary/app.info expose `upgrade_pending`; `restart` switches immediately.
+Foreground `serve` exits 75 too, but requires its supervisor to launch a new owner;
+CLI restart waits 30 seconds and exits 8 if no replacement hello arrives. Reads
+and restart never start a closed daemon. Hello reports the compiled git build id.
+
+Agents can use `fbittorrent events --follow --kinds torrent.completed --json`
+instead of polling. Save `(instance, seq)` and pass `--since-seq` to replay; an
+expired cursor emits an explicit resync marker. Ctrl+C detaches only the reader.
+`fbittorrent api torrents.list --json` prints the unchanged API envelope. Raw
+arguments accept repeated `--arg key=value` or one `--json-args` object; `--ref`
+keeps an explicit mutation identity across invocations. `api --list --json` and
+`robot-docs api` expose the operation catalogue. Reads never start a daemon.
+
+Local integration consumers can run `python3
+agent_ergonomics_audit/audit/regression_tests/daemon.py target/debug/fbittorrent
+--serve-fixture downloading --throttle 32768` (also idle/seeding/paused; empty is
+an idle alias). The FBTFIXTURE JSON line names its private socket, summary and
+owned resources. The fixture stays alive until stopped; an initially closed
+stdin does not stop it. Closing a pipe that was open at launch supports UI
+teardown. A guardian removes both private peer daemons even after launcher
+SIGKILL. --systemd uses only disposable transient units. Global throttle API
+wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
+
+Completed stop-on-complete records restore as `done, checked:false` without
+opening their payloads for hashing. `seed` and nonempty file-selection actions
+verify them before use; `open` only stats the saved target and stays dormant.
+Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
+`delete --files --yes` can remove a dormant record without creating a live handle.

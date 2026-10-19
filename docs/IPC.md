@@ -37,7 +37,7 @@ regular file at most 16 MiB whose first byte is d (bencoded).
 - Idempotent operations (safe to resend with the same `ref` after a mid-request loss, or
   against a new instance after a crash): `torrents.start`, `torrents.stop`,
   `torrents.set_seed`, `torrents.set_files`, `torrents.set_upload_limit`, `torrents.add`,
-  `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
+  `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
   `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
@@ -77,7 +77,7 @@ when a required cap is missing.
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
-| `log` | Reserved for P1-14 | P1-14 |
+| `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
 | `settings` | `app.settings.get/set`, topic `settings` | P3-05 |
 | `staging` | `stage: true`, `torrents.commit/discard` | P3-06 |
 | `search` | `search.*`, topic `search:<id>` | P3-01 |
@@ -150,18 +150,28 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 
 | Op | Args | Result | Mutating | Since |
 |---|---|---|---|---|
+| `torrents.trackers` | `hash: hash` | `{trackers: [Tracker]}` | no | P6-01 |
+| `torrents.reannounce` | `hashes: [hash]` (1..256) | `{state: "done"}` | yes | P6-01 |
 | `hello` | See handshake | HelloResult | no | P1-06 |
+| `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
+| `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
+| `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
+| `transfer.set_limits` | `download_bps?: u32\|null`, `upload_bps?: u32\|null`, `alt_download_bps?: u32\|null`, `alt_upload_bps?: u32\|null` | `{limits: Limits}` | yes | P5-04 |
+| `transfer.set_alt` | `on: bool` | `{alt: bool}` | yes | P5-04 |
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
-| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
@@ -360,7 +370,7 @@ fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
 
 
-**Live replay (P1-06, orchestrator ruling 3).** The hello/errors/torrents runner
+**Live replay (P1-06, orchestrator ruling 3).** Under the standing owner authority of 2026-10-19, computed `*_at`/`*_until` timestamps compare by type and validity; an undo deadline must be future and within ten seconds of the keep-files removal that created it. Contradictory fixture sequences are repaired minimally with exact before/after byte evidence; operation semantics and types remain unchanged. The hello/errors/torrents runner
 generates real payloads and metainfo from transcript names, sizes, files and
 selection, adds them through the API, and drives the available state/error
 preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
@@ -400,8 +410,11 @@ capabilities and canonical round trips, and retains revision checks. Its
 cross-reply agreement still checks static sizes and file totals. For any hash
 observed checking, its measurements are excluded from that history's agreement,
 including earlier samples and later cancellation; their raw values remain
-validated and non-checking fixture comparisons remain exact. Fixture transcripts
-continue to use the unchanged strict whole-group agreement hook. Deferrals record
+validated and non-checking fixture comparisons remain exact. A confirmed completed
+removal clears only that hash's completion history: a later re-add is a new torrent
+instance. Pending or failed removals do not clear it, and static size/file totals
+remain checked across re-adds. Fixture transcripts continue to use the unchanged
+strict whole-group agreement hook. Deferrals record
 file:line, pointer, class, target bead and reason. Capability/protocol deferrals
 apply only while that feature is unavailable; advertised features stay under
 active comparison. The receipt distinguishes undrivable catalogue frames from
@@ -417,6 +430,8 @@ validation failures are recorded without a new mask or deferral.
 | `/**/hash; /result/started/*; /result/stopped/*` | identity:hash | 40 lowercase hex; API-generated hashes bound to fixture identities |
 | `/ref; /result/ref` | identity:ref | at most 64 ASCII characters, consistent first-occurrence bijection |
 | `/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at` | timestamp | positive u64; presence preserved |
+| `/**/undo_until` | undo deadline | positive u64; future time at observation, at most 10 seconds after the originating keep-files remove reply; originating remove required |
+| `/**/*_at; /**/*_until` | timestamp | server-computed Unix seconds: positive u64; presence preserved |
 | `/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps` | u64 | nonnegative u64; presence preserved |
 | `/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds` | u64 | nonnegative u64; presence preserved |
 | `/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*` | u64 | nonnegative u64; presence preserved |
@@ -429,7 +444,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -577,13 +592,233 @@ Adds capability `settings`, the two operation-table rows, and the independent
 `settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
 `applied`, `restart` and `running`; existing CLI settings keys remain available.
 
-## P6-11 additive destination inspection (contract 1.2.5)
+### P5-03: asynchronous verification
+
+Capability `recheck` adds `torrents.recheck`. Admission refuses staged or
+metadata-less torrents with `invalid_state`, unknown hashes with `not_found`,
+and parked engines with `engine_unavailable`. It immediately acknowledges the
+ref as pending; one terminal `mutation.result` carries measured verified bytes,
+successes and per-hash failures. Work is engine-owned, serial by hash and outside
+the dispatch pool/ledger lock during hashing, and has no operation timeout.
+Concurrent requests for a hash already in flight share its check and outcome.
+Checks preserve durable paused/run intent and take no queue slot. Completion is
+cleared durably before payload I/O and remains absent when data is missing, so a
+restart during repair cannot restore a corrupt record as dormant done. Restoring
+a dormant record performs the check once. Engine restart/shutdown cancels and
+joins this work before releasing its owner; clients receive the terminal receipt
+before shutdown bye. The independent `recheck.ndjson` transcript and contract
+patch 1.2.3 document the new operation without modifying earlier transcripts.
+Dashboard/TUI/CLI surfaces are integrated by their owner tracks; completion
+notifications and the pending busy reason consume P1-08/P1-12/P1-13's channels.
+
+### P6-05: force start and queue order
+
+Capability `queue` adds idempotent `torrents.force_start` and non-idempotent
+`torrents.queue_move`, and implements `torrents.start {force:true}` (already-running
+hashes remain in `started`). Force-on clears user pause and bypasses the ordinary
+queue limit; force-off rejoins the ordinary queue. Stop and completion clear force.
+Staged torrents are refused; completed stop-on-complete records give the explicit
+`fbittorrent seed <hash>` hint. Failed records retry through the existing start
+path. Parked force/order changes persist without opening a session.
+
+Ledger order remains queue order. `queue_pos` is one-based among unforced,
+unstaged records with running intent and no positive completion timestamp,
+including metadata/error/waiting rows. Unknown negative legacy completion dates
+remain incomplete. Up/down skip paused, completed and forced rows; top/bottom
+move within positioned rows. A reorder protects transfers already occupying
+ordinary slots until pause, stop, completion, error or an explicit limit decrease
+releases them, while ordinary FIFO resume behavior is preserved. The independent
+`queue.ndjson` transcript and contract patch 1.2.4 add these operations and row
+fields without changing previous transcripts. Dashboard/TUI controls and CLI
+verbs are separate surface integration work.
+
+### P6-08: origin and keep-files undo
+
+The `origin` capability enables the durable open string `Torrent.origin` and
+`torrents.list {origin: [str]}`. New adds default to `manual`; historical origin
+tags migrate without changing legacy tags. `search`, `rss` and `shows` have
+separate buckets. The `manual` bucket includes manual, clipboard, handler,
+agent and unknown future values; an explicit other string matches exactly.
+
+`torrents.remove {hashes, delete_files:false}` accepts up to 256 hashes and
+returns `{state:"done", undo_until:<Unix seconds>}`. Every record and cached
+metainfo is retained under private `engine/undo/` for a single ten-second batch
+window. Payload files are never removed by this path. The daemon owns the
+monotonic authorization deadline: engine-slot restarts retain it, full daemon
+restarts end it. Expired cache entries are collected by daemon maintenance.
+
+`torrents.add {source:{restore:<hash>}}` appends the saved intent at the end of
+the ledger, preserving origin, selection, path, paused intent and seed policy.
+It invalidates saved completion and performs a fresh hash check before normal
+queue admission. Restoring a completed intact payload needs no network bytes;
+an incomplete payload resumes under its saved intent. An expired/missing undo
+entry returns nonretryable `invalid_state` with `details.reason:"undo_expired"`
+(exit 1). Restoring an already-present hash is a duplicate add and changes no
+policy. File-deleting removes retain their existing pending-mutation protocol
+and never carry `undo_until`. `origin.ndjson` characterizes these additive
+fields and the existing restore source; contract patch 1.2.5 records them.
+
+The filtered count/known-byte sum/unknown-size count, confirmation and undo
+toast are presented by the UI tracks. CLI undo and origin/filter argument
+wiring are tracked separately from this daemon/API increment.
+### P1-14: daemon log history and usage
+
+`log` is a keyed, append-only collection of `LogEntry`, keyed by `seq`. Subscribe
+uses the normal snapshot/delta revision rules. The server retains the latest
+2,000 entries; retention eviction never means deleting client history. Entries
+are fed from daemon stderr, preserving the original journald byte stream. Stored
+messages are capped at 8,192 characters; source names at 64. Unstructured stderr
+is represented as debug/daemon without rewriting its journald copy.
+
+`app.log` returns the latest matching 200 entries by default. With `since_seq`,
+it returns the first matching entries strictly after that sequence, up to limit.
+`next_seq` is the last returned sequence (or current sequence if none matched),
+an exclusive cursor for the next call. Levels are minimum severity: warn includes
+error and warn, debug includes all levels. Source and hash filters match exactly.
+`app.info.clients` and `app.stats.connections` are cumulative successful hello
+counts, reset per daemon instance. `app.stats.active_clients` tracks currently
+connected clients; reconnects increment cumulative counts again. Both are local
+memory only. CLI `log --follow` emits one LogEntry JSON object per line; `log`
+never starts a daemon and exits 4 when closed, with up/journalctl hints.
+
+Changelog: P1-14 (CLI contract 1.2.6) adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
+existing fixture files remain byte-for-byte unchanged.
+
+### P1-17: executable upgrades
+
+`hello.server.build` is the short git id (with -dirty for modified sources), or
+unknown when git metadata is unavailable. Build-time FBT_BUILD_ID_OVERRIDE is a
+fixture override. The owner records executable device/inode/mtime at startup and
+checks every 30 seconds. A replacement sets app.info/summary.daemon.upgrade_pending
+while the existing busy table is nonempty, then drains with bye reason upgrade
+and unit exit 75. The systemd unit starts the replacement binary. Explicit
+app.restart with scope daemon drains immediately, including while busy. CLI
+restart never starts an absent owner, and waits at most 30 seconds for a different
+hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
+keeps the process and API connections. No capability or frozen fixture changes;
+P1-17 implements the existing fields and operation. CLI contract 1.2.7 adds the
+replacement instance/server to restart output.
+
+### P1-18: agent event stream and raw operation catalogue
+
+`fbittorrent events [--follow] [--since-seq N] [--kinds a,b] --json` prints only
+retained/live event items, each with the daemon's `instance` and original `seq`.
+Store the pair; sequences reset per instance. Without follow, snapshot.end ends
+the replay. EOF or SIGINT exits 0 and never stops the daemon. A cursor older than
+the ring prints an explicit `{ev:"resync", reason:"resync", oldest_seq, seq,
+instance}` control line before replay; its seq is oldest_seq-1. Kind filters do
+not hide this data-loss marker. Unknown kinds exit 2; a closed read exits 4.
+
+`fbittorrent api <op> [--arg key=value] [--json-args '{...}'] [--ref r]` prints
+the response envelope verbatim, including id/ok/result or the full typed error.
+JSON values in --arg stay typed; other strings remain strings. Duplicate keys
+are rejected. Hello sends the supplied initial hello (or the standard agent
+hello); other operations use the shared API client, with stable raw-api client
+identity so explicit refs survive separate CLI invocations. Startup and retry
+policy use the compiled operation table. Reads and unknown operations never
+start an owner; writes respect autostart and --no-start. The envelope's A.3 code
+determines the CLI exit. Unknown names suggest at most three table entries with
+Levenshtein distance <=2; unrelated names have an empty nearest list and the
+api --list hint. api --list and robot-docs api show the same args/results,
+mutating/idempotent/since metadata; a unit test compares every documented row.
+
+Changelog P1-18: CLI contract 1.2.8 adds events, and 1.2.9 adds the raw API
+catalogue and capabilities.api_operations. Both patches follow the integrated
+merge order; earlier fields and frozen fixture bytes remain intact. No new API operation.
+### P3-01: daemon search sessions
+
+The `search` capability implements `search.start`, `search.stop`, `search.providers`,
+`search.set_provider`, `search.install`, `search.browse_sources`, `search.browse` and
+`search.grab`. `search.start` takes `query` (1..256 characters), optional provider
+names and `limit` (1..5000), returning `{search_id}`. Four sessions may coexist;
+a fifth returns retryable `busy` with `details.limit: "sessions"`. Sessions belong
+to the starting connection. Disconnect retains results and provider processes for
+30 seconds; subscribing to `search:<id>` within that lease reclaims it. Expiry,
+`search.stop` and daemon drain kill the entire provider process group. A session
+(including its grace) is the `search` idle-policy busy reason.
+
+`search:<id>` is keyed by `key`, defaults to 500 ms, and uses the usual snapshot
+and delta framing. Results carry `key`, `name`, `providers` and optional `size`,
+`seeds`, `leechers`, `uploaded_at`, `magnet`, `url`, `page_url`, `imdb_id`, `rating`,
+`provider_url` and `added` (the daemon ledger's hash). Unknown measurements are
+omitted. Keys use a v1 info hash from a magnet or bounded metainfo inspection,
+otherwise normalized title and size. The best-seeded copy retains all providers;
+ordering is seeds descending, name, first provider. Valid UTF-8 inverse Latin-1
+(or Windows-1252 punctuation) repairs mojibake; raw provider bytes remain in the
+session. Provider stdout is capped at 2 MiB and results at 5000.
+
+`search.done` carries `search_id`, `total` and `warnings: [{provider,message}]`.
+`search.providers` returns `{providers:[{name,kind,enabled,full_name?,url?,version?}]}`
+with kind `nova` or `torznab`. `search.set_provider {name,enabled}` persists the
+preference. `search.install` accepts exactly one of `curated:true` or `sources`
+(HTTPS URLs); its pending ref is confirmed by `mutation.result` containing
+`{installed,failed:[{source,message}]}`. `search.browse_sources` returns
+`{sources:[{id,label,provider,in_app,url?}]}`; `search.browse {source}` returns
+`{items:[SearchResult]}` using the existing 16 MiB JSON limit. `search.grab` takes
+either `{search_id,key}` or `{result}`, plus the usual add options, and uses
+`torrents.add` semantics with origin `search`. Parked grabs fail with
+`engine_unavailable` and a VPN hint; provider download hooks remain forbidden
+with VPN binding enabled.
+
+Contract 1.2.10 adds this namespace and keyed topic; existing transcripts stay
+unchanged. Example from `contracts/ipc/v1/search.ndjson`:
+
+```json
+{"dir":"c2s","frame":{"id":4,"op":"search.start","args":{"query":"Sintel","providers":["alpha","beta"],"limit":5000}}}
+```
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `search.start` | `query`, `providers?`, `limit?` | `{search_id}` | yes | P3-01 |
+| `search.stop` | `search_id` | `{state: "done"}` | yes | P3-01 |
+| `search.providers` | none | `{providers: [Provider]}` | no | P3-01 |
+| `search.set_provider` | `name`, `enabled` | `{state: "done"}` | yes | P3-01 |
+| `search.install` | `curated?` or `sources?` | pending ref, then `{installed, failed}` | yes | P3-01 |
+| `search.browse_sources` | none | `{sources: [BrowseSource]}` | no | P3-01 |
+| `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
+| `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
+
+### Tracker observations (P6-01, contract 1.2.12)
+
+The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
+`Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
+optional `last_announce_at`, `next_announce_at`, `peers`, `message` (200 characters),
+and `tier` (currently absent because the fork flattens tiers). Full URLs travel only
+to the owner's clients; every diagnostic message redacts query strings as `?…`.
+A paused torrent retains observations. Dormant, metadata and parked records with no
+observations return saved URLs as `not_contacted`. `tracker_count` counts every
+metainfo URL, including private secondary and unsupported URLs. Forced announces
+wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
+Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription awaits P1-08 integration: keyed by
+URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
+topic/item registration and pushed-delivery qualification remain pending that
+integration, alongside the TUI/dashboard rendering owned by their tracks.
+
+### P5-04: live global and alternative limits
+
+`limits` is now advertised. `transfer.set_limits` applies and persists only supplied
+fields; null and numeric zero clear a global limit (unlimited), omission leaves it
+unchanged. Nonzero values must be at least 16384 and fit u32. `transfer.set_alt`
+persists the turtle switch. Both use the settings transaction and live session
+limiters, independently of per-torrent upload caps. Summary.alt and Summary.limits
+publish the effective saved policy as structural state. CLI contract 1.2.14 adds
+`limits --down/--up/--alt/--alt-down/--alt-up`; stopped edits never start a daemon.
+
+### 2026-10-19 orchestrator ruling: exact hello capability bookkeeping
+
+Contract 1.2.15 introduced exact hello/error fixture capability arrays matching
+the integrated live capabilities; later additions keep those arrays current. Every added capability has a capabilities.changes[] entry with
+its `cap` name. Replay compares these arrays exactly; no normalization mask is
+added. The documented hello example is updated to the same fixture bytes.
+
+## P6-11 additive destination inspection (contract 1.2.16)
 
 Capability `free_space` adds read-only `app.free_space` (since P6-11):
 
-| Operation | Arguments | Result |
-|---|---|---|
-| `app.free_space` | `path: str` (absolute local directory, ≤4096 bytes, no controls) | `{free_bytes: bytes?, writable: bool}` |
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `app.free_space` | `path: str` (absolute local directory, ≤4096 bytes, no controls) | `{free_bytes: bytes?, writable: bool}` | no | P6-11 |
 
 `free_bytes` uses the filesystem's available blocks and fragment size from
 `statvfs`; it is absent on lookup failure, a negative/unrepresentable block
@@ -595,3 +830,93 @@ filesystem without creating a probe file. An absent/non-directory path returns
 can still fail. Native `add --save` uses the same check and exits 2 before
 submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
 covers known, absent and zero space.
+
+### Integrated CLI contract patch history
+
+The current CLI contract is **1.2.18**. Each additive change after the 1.2.0
+baseline has its own patch, assigned in first-parent integration merge order.
+Changes arriving together retain their feature order; the P1-18 event and raw
+API entries receive successive patches. Future merges allocate after the latest
+integrated patch and update this table, capabilities, and contract assertions.
+API hello still negotiates wire version 1; these CLI patches do not change
+NDJSON framing or the capability arrays in the wire fixtures.
+
+| CLI contract patch | capabilities.changes field |
+|---|---|
+| `1.2.1` | `add.deferred` |
+| `1.2.2` | `settings` |
+| `1.2.3` | `api.torrents.recheck` |
+| `1.2.4` | `api.queue` |
+| `1.2.5` | `api.origin` |
+| `1.2.6` | `log` |
+| `1.2.7` | `restart.server` |
+| `1.2.8` | `events` |
+| `1.2.9` | `api` |
+| `1.2.10` | `api.search` |
+| `1.2.11` | `setup.actions` |
+| `1.2.12` | `trackers` |
+| `1.2.13` | `add.confirmation_required` |
+| `1.2.14` | `limits` |
+| `1.2.15` | `caps.imdb` |
+| `1.2.16` | `app.free_space` |
+| `1.2.17` | `add.disk` |
+| `1.2.18` | `clipboard` |
+
+### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
+
+Summary.disk is sampled every five seconds, once per distinct save path; free
+space is absent when statvfs fails. Needed bytes cover run-intent incomplete
+records, including disk-full errors; completed/paused/seeding/parked records are
+excluded. Filesystems shared by paths are counted once. Low means any destination
+has free < its needed + 512 MiB. A new ENOSPC records the affected destination's
+free space and piece length, and reports error/disk_full with “Disk full”. One
+normal “Disk almost full” notification offers the window action per daemon life.
+
+Per the 2026-10-19 orchestrator ruling, automatic retry requires a five-second
+sample with free >= the ENOSPC baseline + max(16 MiB, one piece). Retry consumes
+that rise; repeated ENOSPC records a new baseline. It logs disk_full_recovered.
+Explicit start retries immediately; paused intent is checked atomically before
+an automatic retry. `torrents.add` optionally adds `disk: {free_bytes: u64,
+needed_bytes: u64}` when known selected metadata exceeds free space; the CLI keeps
+exit 0 and adds warnings[].code=disk_low with a binary-unit message. The new
+disk.ndjson transcript covers add capacity, summary low and disk_full state.
+
+### P6-09: peer port and sleep inhibition
+
+The existing restart-class `peer_port` setting is applied by
+`app.settings.set {peer_port}` or `settings --port N`. The daemon instance,
+API socket and connected clients survive; event subscribers receive both
+starting/running `engine.changed` frames (peer-port.ndjson). This adds no
+operation, capability or field to contract 1.2.17. While any run-intent torrent
+is downloading, stalled, metadata or checking, one owned
+`systemd-inhibit --what=sleep --who=fbittorrent --why=Downloading --mode=block sleep infinity`
+child holds the inhibitor. Queued, paused, seeding-only, done, parked and error
+states do not inhibit. The last eligible torrent stopping or daemon drain kills
+the child's process group within five seconds. A failed launcher is cleaned
+and retried at most every five seconds while work remains; no child or polling
+worker runs while there is no eligible work. The session bus address is
+preserved independently of the child's XDG runtime directory.
+
+### P6-13: opt-in clipboard offers (contract 1.2.18)
+
+The `clipboard` capability adds `app.clipboard.dismiss {hash}` (idempotent),
+`clipboard.magnet {hash, name?, already_added}` and origin `clipboard` for adds.
+`settings --clipboard-watch on|off` accepts true/false too; default false starts
+no reader. Watcher activity never extends the idle deadline. The owner-approved
+2026-10-19 command is `wl-paste --watch sh -c 'cat; printf "\0"'`: one NUL-framed
+record per selection. Records over 64 KiB are discarded through the next NUL;
+incomplete records are never parsed. Turning off or draining kills the whole
+owned group, including shell/cat descendants. A failed reader retries at most
+once per five seconds while enabled.
+
+Only the last offered hash is retained by the watcher; existing ledger hashes
+and consecutive identical offers are suppressed. Clipboard text, selection names,
+and child stderr never enter daemon logs. The bounded event history and pending
+notification hold the offered name for display, as normal API/notification data.
+A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
+`torrents.add {source:{magnet:"magnet:?xt=urn:btih:<hash>"},origin:"clipboard"}` or
+`app.clipboard.dismiss {hash}` over api.sock. Add reconstructs the hash-only magnet
+(no clipboard history or tracker URLs retained); metadata uses ordinary DHT/peer
+discovery. No transfer starts before an explicit Add action. Hello/error fixtures
+now advertise the exact live caps including clipboard; changes[].cap records it.
+The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.

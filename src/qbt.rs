@@ -253,6 +253,7 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
 ];
 
 pub struct AddOptions {
+    pub origin: Option<String>,
     pub sequential: bool,
     pub first_last: bool,
     /// Allow upload. When false the torrent is capped and stops once complete.
@@ -423,9 +424,9 @@ impl Client {
             form.push(("upLimit", &no_up));
             form.push(("ratioLimit", "0"));
             form.push(("shareLimitAction", "Stop"));
-        } else {
-            form.push(("tags", SEED_TAG));
         }
+        let tags = [o.seed.then_some(SEED_TAG.to_owned()), o.origin.as_ref().map(|origin| format!("fbt-origin:{origin}"))].into_iter().flatten().collect::<Vec<_>>().join(",");
+        if !tags.is_empty() { form.push(("tags", &tags)); }
         let body = self.post("torrents/add", &form)?;
         add_response_ok(&body)
     }
@@ -464,9 +465,9 @@ impl Client {
             fields.push(("upLimit", &no_up));
             fields.push(("ratioLimit", "0"));
             fields.push(("shareLimitAction", "Stop"));
-        } else {
-            fields.push(("tags", SEED_TAG));
         }
+        let tags = [o.seed.then_some(SEED_TAG.to_owned()), o.origin.as_ref().map(|origin| format!("fbt-origin:{origin}"))].into_iter().flatten().collect::<Vec<_>>().join(",");
+        if !tags.is_empty() { fields.push(("tags", &tags)); }
         let body = self.post_multipart("torrents/add", &fields, "torrents", filename, bytes)?;
         add_response_ok(&body)
     }

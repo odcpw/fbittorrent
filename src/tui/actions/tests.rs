@@ -87,6 +87,14 @@ fn no_handler_outside_table() {
 }
 
 #[test]
+fn action_ids_are_unique_across_surfaces() {
+    let mut seen = std::collections::HashSet::new();
+    for action in all() {
+        assert!(seen.insert(action.id), "duplicate action id: {}", action.id);
+    }
+}
+
+#[test]
 fn no_duplicate_key_per_scope() {
     for native in [true, false] {
         let mut app = fixture::app("torrents");
@@ -300,4 +308,27 @@ fn footer_cache_tracks_label_and_selection_changes() {
         app.footer_signature(80),
         "Mark read/unread must invalidate the cached label"
     );
+}
+
+#[test]
+fn pending_row_mutations_are_disabled_in_both_keys_and_footer() {
+    let mut app = fixture::app("torrents");
+    let hash = crate::api::Hash::new(app.selected_torrent().unwrap().hash.clone()).unwrap();
+    let before = app.footer_signature(120);
+    app.store.begin_mutation(
+        crate::api::MutationRef::new("selecting-files").unwrap(),
+        "torrents.set_files".into(),
+        vec![hash],
+    ).unwrap();
+    assert_ne!(before, app.footer_signature(120));
+    for id in ["torrents.pause", "torrents.seed", "torrents.remove", "torrents.delete"] {
+        let action = all().find(|action| action.id == id).unwrap();
+        assert!(!(action.enabled)(&app), "{id} must not advertise an unavailable action");
+        for key in action.keys {
+            assert!(matches!(dispatch(&mut app, KeyEvent::new(key.code).with_modifiers(key.mods)), Cmd::None), "{id}: {key:?}");
+        }
+    }
+    let labels = app.footer_labels();
+    assert!(!labels.iter().any(|(_, label)| label.contains("(p)") || label.contains("(u)") || label.contains("(d)") || label.contains("(D)")));
+    assert!(app.prompt.is_none());
 }

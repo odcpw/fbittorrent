@@ -209,11 +209,11 @@
             upload_limit: NO_UPLOAD_LIMIT,
             ratio_limit: 0.0,
             category: String::new(),
-            tags: String::new(),
+            tags: String::new(), origin: "manual".into(),
             added_on: 1,
             completion_on: 0,
             paused: false,
-            resume_after_migration: false, deferred: false,
+            resume_after_migration: false, deferred: false, staged: false, force: false,
         };
         let stored = serde_json::to_vec(&record).unwrap();
         let restored: Record = serde_json::from_slice(&stored).unwrap();

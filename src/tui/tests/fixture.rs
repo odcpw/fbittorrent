@@ -75,6 +75,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
         "done" => app.tor_list.borrow_mut().select(Some(1)),
         "search" => { let _ = app.set_screen(Screen::Search); },
         "shows" => { let _ = app.set_screen(Screen::Shows); },

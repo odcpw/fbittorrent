@@ -143,7 +143,7 @@
         // Check only the seed column: names, dates and sizes may contain digits.
         for width in [50, 80, 120] {
             let line = result_line(&app.search_results[0], None, width, &app.theme, None);
-            assert_eq!(line.spans()[if width >= 60 { 4 } else { 2 }].content.as_ref(), "      ");
+            assert_eq!(line.spans()[4].content.as_ref(), "      ");
         }
         app.search_results[0].seeders = 0;
         app.search_results[0].leechers = 4;
@@ -159,6 +159,24 @@
         app.tor_list.borrow_mut().select(Some(0));
         let text = render(&app, 160, 40);
         assert!(text.contains("could not restore: corrupt cache"), "{text}");
+    }
+
+    #[test]
+    fn reconnect_keeps_confirmed_rows_visible_without_retrying_mutations() {
+        let mut app=app();
+        app.torrents=vec![Torrent {hash:"a".repeat(40),name:"confirmed before disconnect".into(),state:"downloading".into(),..Default::default()}];
+        app.tor_list.borrow_mut().select(Some(0));
+        let reference=crate::api::MutationRef::new("remove-before-disconnect").unwrap();
+        app.store.begin_mutation(reference.clone(),"torrents.remove".into(),vec![crate::api::Hash::new("a".repeat(40)).unwrap()]).unwrap();
+        app.recovery.connected("0.1.0","0.1.0");
+        app.connection_lost(false);
+        let text=render(&app,120,30);
+        assert!(text.contains("Connecting")&&text.contains("confirmed before disconnect"),"{text}");
+        assert!(app.store.stale);
+        assert!(app.store.pending_for_key(&"a".repeat(40)).is_none());
+        assert!(matches!(app.recovery_tick(),Cmd::None),"the initial backoff does not dispatch a request");
+        assert_eq!(app.store.pending.len(),1,"the unknown ref is retained for reconciliation");
+        assert!(app.status.contains("Result unknown"));
     }
 
     fn episode(key: &str, released: i64) -> Episode {
@@ -395,7 +413,7 @@
                 .map(|(i, name)| Torrent { hash: format!("fixture-{i}"), name: name.into(), state: "stoppedDL".into(), progress_known: true, up_limit: 32768, ..Default::default() }).collect();
             app.tor_list.borrow_mut().select(Some(0));
             let text = render(&app, width, 24);
-            assert_eq!(text.contains(" Details "), width >= 140, "width {width}: {text}");
+            assert_eq!(text.contains("╭ Details "), width >= 140, "width {width}: {text}");
             assert!(text.contains("Short.txt"), "width {width}: {text}");
             let (y, row) = text.lines().enumerate().find(|(_, row)| row.contains("Episode.S01E02.1080p.mkv"))
                 .unwrap_or_else(|| panic!("filename truncated at width {width}: {text}"));
@@ -409,7 +427,7 @@
         let mut app = app();
         app.screen = Screen::Search;
         for width in [99, 100, 120, 139, 140, 160] {
-            assert_eq!(render(&app, width, 24).contains(" Details "), width >= 100);
+            assert_eq!(render(&app, width, 24).contains("╭ Details "), width >= 140);
         }
     }
 
@@ -562,8 +580,8 @@
         let mut app = app();
         app.torrents = vec![Torrent { name: "Next episode".into(), state: "queuedDL".into(), progress_known: true, ..Default::default() }, Torrent { name: "Saved episode".into(), state: "waitingVPN".into(), progress_known: false, ..Default::default() }];
         let text = render(&app, 120, 30);
-        assert!(text.contains("Queued"));
-        assert!(text.contains("Wait VPN"));
+        assert!(text.contains("… Queue  "), "queued state must occupy its contract state cell: {text}");
+        assert!(text.contains("⏚ VPN    "), "VPN state must occupy its contract state cell: {text}");
         assert!(!app.torrents[0].is_active());
         assert!(!app.torrents[1].is_active());
     }
@@ -650,6 +668,7 @@
         for (width, height) in [(80, 24), (120, 30), (160, 44)] {
             for (screen, expected) in [(Screen::Torrents, "TorrentAlpha"), (Screen::Search, "SearchAlpha"), (Screen::Rss, "FeedItemAlpha"), (Screen::Shows, "ReleaseAlpha")] {
                 app.screen = screen;
+                if screen==Screen::Rss {app.rss_focus_items=true;}
                 let text = render(&app, width, height);
                 assert!(text.contains(expected), "{screen:?} {width}x{height}: {text}");
             }

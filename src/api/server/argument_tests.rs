@@ -1,17 +1,11 @@
 use super::*;
 #[test]
-fn subscription_operations_are_unknown_until_p1_08() {
+fn subscription_operations_are_routed_in_p1_08() {
     for (op, args) in [
         ("subscribe", json!({"topics":["torrents"]})),
         ("unsubscribe", json!({"sub":1})),
     ] {
-        let failure =
-            decode(&serde_json::to_vec(&json!({"id":1,"op":op,"args":args})).unwrap()).unwrap_err();
-        assert_eq!(failure.error.code, ErrorCode::UnknownOp);
-        assert!(failure.error.hint.is_some());
-        assert_eq!(failure.error.details.unwrap()["nearest"], json!([]));
-        assert!(!failure.close);
-        println!("{op}: unknown_op, nearest=[], hint present, connection kept");
+        assert!(decode(&serde_json::to_vec(&json!({"id":1,"op":op,"args":args})).unwrap()).is_ok());
     }
     let failure = decode(br#"{"id":1,"op":"torrents.lis"}"#).unwrap_err();
     assert_eq!(
@@ -91,6 +85,7 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
     let mut hello = Vec::<Value>::new();
     let mut geometry = TorrentFileSizes::default();
     let mut revisions = Revisions::default();
+    let mut subscription_history = BTreeMap::<u64, Vec<Value>>::new();
     for (index, line) in lines.iter().enumerate() {
         let location = format!("live capture line {}", index + 1);
         let validate = |context: &[Value]| {
@@ -114,6 +109,11 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                 let mut context = hello.clone();
                 if let Some((request, _)) = call {
                     context.push(request.clone());
+                }
+                if let Some(sub) = frame["sub"].as_u64() {
+                    if let Some(history) = subscription_history.get(&sub) {
+                        context.extend(history.iter().cloned());
+                    }
                 }
                 context.push(line.clone());
                 // The original frame, including every volatile member,
@@ -153,6 +153,14 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                     }
                     if let Call::Unsubscribe { args } = call {
                         revisions.unsubscribe(args.sub);
+                        subscription_history.remove(&args.sub);
+                    }
+                    if let (Call::TorrentsRemove { args }, Reply::TorrentsRemove(result)) = (call, &reply) {
+                        if matches!(result.status, MutationResult::Done) {
+                            for hash in args.hashes.as_slice() {
+                                geometry.removed(hash);
+                            }
+                        }
                     }
                     let strip_measurement = |row: &mut Torrent| {
                         if checking.contains(row.hash.as_str()) {
@@ -180,6 +188,7 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                         revisions
                             .observe(sub, rev)
                             .map_err(|error| format!("{location}: {error}"))?;
+                        subscription_history.entry(sub).or_default().push(line.clone());
                     }
                 }
             }
@@ -444,4 +453,63 @@ fn strict_type_errors_name_the_argument() {
     }
     let clear = json!({"id":1,"op":"torrents.set_upload_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
     assert!(decode(&serde_json::to_vec(&clear).unwrap()).is_ok());
+}
+
+#[test]
+fn live_subscription_validation_retains_revision_history_and_rejects_gaps() {
+    let mut lines: Vec<Value> = include_str!("../../../contracts/ipc/v1/subscribe.ndjson")
+        .lines().map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| matches!(line["dir"].as_str(), Some("c2s" | "s2c"))).collect();
+    let text = |lines: &[Value]| lines.iter().map(|line| format!("{line}\n")).collect::<String>();
+    validate_live_capture(&text(&lines)).unwrap();
+    let frame = lines.iter_mut().find(|line| line["frame"]["rev"] == 2).unwrap();
+    frame["frame"]["rev"] = json!(3);
+    let failure = validate_live_capture(&text(&lines)).unwrap_err();
+    assert!(failure.contains("must increase by exactly one"), "{failure}");
+}
+
+#[test]
+fn live_readded_completion_starts_after_confirmed_removal() {
+    let hash = "ab".repeat(20);
+    let initial = checking_capture();
+    let mut readded = initial[1]["frame"]["result"]["torrents"][0].clone();
+    readded["completed_bytes"] = json!(100);
+    readded["progress"] = json!(1.0);
+    readded["private"] = json!(false);
+    let rows = vec![
+        initial[0].clone(), initial[1].clone(),
+        json!({"dir":"c2s","frame":{"id":2,"op":"torrents.remove","args":{"hashes":[hash],"delete_files":false}}}),
+        json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":{"state":"done"}}}),
+        json!({"dir":"c2s","frame":{"id":3,"op":"torrents.add","args":{"source":{"magnet":format!("magnet:?xt=urn:btih:{hash}")},"stopped":true}}}),
+        json!({"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done","hash":hash,"duplicate":false}}}),
+        json!({"dir":"c2s","frame":{"id":4,"op":"torrents.get","args":{"hash":hash}}}),
+        json!({"dir":"s2c","frame":{"id":4,"ok":true,"result":{"torrent":readded}}}),
+    ];
+    validate_live_capture(&capture_text(&rows)).unwrap();
+    assert!(crate::api::fixtures::check_group("fixture-P1-06", &capture_text(&rows))
+        .unwrap_err().contains("/completed_bytes"));
+    for response in [
+        json!({"id":2,"ok":false,"error":{"code":"internal","message":"remove failed","retryable":false}}),
+        json!({"id":2,"ok":true,"result":{"state":"pending","ref":"remove-pending"}}),
+    ] {
+        let mut unconfirmed = rows.clone();
+        unconfirmed[3]["frame"] = response;
+        assert!(validate_live_capture(&capture_text(&unconfirmed)).unwrap_err().contains("/completed_bytes"));
+    }
+    let mut geometry = rows.clone();
+    geometry[7]["frame"]["result"]["torrent"]["size"] = json!(200);
+    geometry[7]["frame"]["result"]["torrent"]["progress"] = json!(0.5);
+    assert!(validate_live_capture(&capture_text(&geometry)).unwrap_err().contains("/size"));
+    let mut unchanged_instance = rows.clone();
+    unchanged_instance[2]["frame"]["args"]["hashes"] = json!(["cd".repeat(20)]);
+    assert!(validate_live_capture(&capture_text(&unchanged_instance)).unwrap_err().contains("/completed_bytes"));
+    let mut later = rows;
+    later.push(json!({"dir":"c2s","frame":{"id":5,"op":"torrents.get","args":{"hash":hash}}}));
+    let mut changed = later[7]["frame"].clone();
+    changed["id"] = json!(5);
+    changed["result"]["torrent"]["completed_bytes"] = json!(50);
+    changed["result"]["torrent"]["progress"] = json!(0.5);
+    later.push(json!({"dir":"s2c","frame":changed}));
+    assert!(validate_live_capture(&capture_text(&later)).unwrap_err().contains("/completed_bytes"));
+    println!("confirmed removal resets only completion; pending/failed/unrelated removal, later drift and changed geometry still fail");
 }

@@ -1,26 +1,26 @@
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
     },
     time::Instant,
 };
 
 use anyhow::Context;
 
-use rqbit_runtime::{Cx, sync::Notify};
+use rqbit_runtime::{sync::Notify, Cx};
 use size_format::SizeFormatterBinary as SF;
 use tracing::{info, trace, warn};
 
 use crate::{
     api::TorrentIdOrHash,
     bitv::BitV,
-    chunk_tracker::{ChunkTracker, compute_selected_pieces},
+    chunk_tracker::{compute_selected_pieces, ChunkTracker},
     file_ops::FileOps,
     type_aliases::FileStorage,
 };
 
-use super::{ManagedTorrentShared, TorrentMetadata, paused::TorrentStatePaused};
+use super::{paused::TorrentStatePaused, ManagedTorrentShared, TorrentMetadata};
 
 pub struct TorrentStateInitializing {
     pub(crate) files: FileStorage,
@@ -110,8 +110,8 @@ impl TorrentStateInitializing {
         Ok(())
     }
 
-    /// The native embedded client verifies every piece from disk at startup.
-    /// The client owns persistence and never trusts an upstream fastresume bitfield.
+    /// The embedding app may supply a validated, single-use have snapshot.
+    /// Otherwise every piece is checked; upstream persistence stays disabled.
     pub async fn check(self: Arc<Self>, cx: &Cx) -> anyhow::Result<TorrentStatePaused> {
         cx.checkpoint()?;
         anyhow::ensure!(!self.is_pause_requested(), "initial check paused");
@@ -129,30 +129,37 @@ impl TorrentStateInitializing {
             }
         }
 
-        info!("Doing initial checksum validation, this might take a while...");
-        self.checked_bytes.store(0, Ordering::Relaxed);
-        let operation = self.clone();
-        let operation_cx = cx.clone();
-        self.blocking_operation_running
-            .store(true, Ordering::Release);
-        let work_guard = BlockingCheckGuard(self.clone());
-        let have_pieces = self
-            .shared
-            .spawner
-            .run(cx, move || {
-                let _guard = work_guard;
-                FileOps::new(
-                    &operation.metadata.info,
-                    &operation.files,
-                    &operation.metadata.file_infos,
-                )
-                .initial_check(
-                    &operation_cx,
-                    &operation.checked_bytes,
-                    &operation.pause_requested,
-                )
-            })
-            .await??;
+        let trusted = self.shared.options.trusted_have_pieces.lock().take();
+        let have_pieces = if let Some(bytes) = trusted.filter(|_| !self.previously_errored) {
+            info!("Restoring app-validated have snapshot without checksum reads");
+            trusted_bitfield(bytes, self.metadata.lengths().total_pieces() as usize)?
+        } else {
+            info!("Doing initial checksum validation, this might take a while...");
+            self.checked_bytes.store(0, Ordering::Relaxed);
+            let operation = self.clone();
+            let operation_cx = cx.clone();
+            self.blocking_operation_running
+                .store(true, Ordering::Release);
+            let work_guard = BlockingCheckGuard(self.clone());
+            let have_pieces = self
+                .shared
+                .spawner
+                .run(cx, move || {
+                    let _guard = work_guard;
+                    FileOps::new(
+                        &operation.metadata.info,
+                        &operation.files,
+                        &operation.metadata.file_infos,
+                    )
+                    .initial_check(
+                        &operation_cx,
+                        &operation.checked_bytes,
+                        &operation.pause_requested,
+                    )
+                })
+                .await??;
+            have_pieces
+        };
         cx.checkpoint()?;
         anyhow::ensure!(!self.is_pause_requested(), "initial check paused");
         let have_pieces = bitv_factory
@@ -242,5 +249,39 @@ impl TorrentStateInitializing {
             streams: Arc::new(Default::default()),
         };
         Ok(paused)
+    }
+}
+
+fn trusted_bitfield(
+    bytes: Vec<u8>,
+    pieces: usize,
+) -> anyhow::Result<bitvec::boxed::BitBox<u8, bitvec::order::Msb0>> {
+    use bitvec::{order::Msb0, vec::BitVec};
+    anyhow::ensure!(
+        bytes.len() == pieces.div_ceil(8),
+        "trusted bitfield length does not match torrent"
+    );
+    let bits = BitVec::<u8, Msb0>::from_vec(bytes);
+    anyhow::ensure!(
+        bits[pieces..].not_any(),
+        "trusted bitfield has nonzero padding"
+    );
+    // ChunkTracker uses byte-rounded have/selection vectors; padding stays
+    // present and zero, just as in a full initial check.
+    Ok(bits.into_boxed_bitslice())
+}
+#[cfg(test)]
+mod trusted_tests {
+    use super::*;
+    #[test]
+    fn trusted_bitfield_accepted() {
+        let bits = trusted_bitfield(vec![0x80, 0x80], 9).unwrap();
+        assert_eq!(bits.len(), 16);
+        assert!(bits[9..].not_any());
+        assert!(bits[0] && bits[8]);
+        assert_eq!(bits.count_ones(), 2);
+        assert!(trusted_bitfield(vec![0xff], 9).is_err());
+        assert!(trusted_bitfield(vec![0x80, 0x81], 9).is_err());
+        assert_eq!(trusted_bitfield(vec![], 0).unwrap().len(), 0);
     }
 }

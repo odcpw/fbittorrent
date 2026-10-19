@@ -232,6 +232,9 @@ pub struct TopTorrent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiskSpace { pub free_bytes: u64, pub needed_bytes: u64 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Disk {
     pub needed_bytes: u64,
     pub low: bool,
@@ -359,4 +362,24 @@ impl Settings {
 /// An absent optional boolean is allowed; a present null is not a boolean.
 fn optional_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
     bool::deserialize(deserializer).map(Some)
+}
+
+/// Full URLs stay on the private socket; clients redact queries when rendering.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum TrackerStatus { Ok, Error, Updating, NotContacted }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tracker {
+    pub url:String,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub tier:Option<u64>,
+    pub status:TrackerStatus,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub last_announce_at:Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub next_announce_at:Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub peers:Option<u32>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub message:Option<String>,
 }

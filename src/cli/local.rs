@@ -49,11 +49,12 @@ pub(super) fn rss(c: &Client, sub: RssCmd, json: bool, cfg: &Config) -> Result<C
             };
             let url = if a.torrent_url.is_empty() { &a.link } else { &a.torrent_url };
             c.add_url(url, &AddOptions {
+                origin: None,
                 sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,
                 save_path: cfg.save_path.clone(), category: cfg.category.clone(),
             })?;
             c.rss_mark_read(&f.name, Some(&a.id))?;
-            if cfg.notify { notify("Torrent added", &a.title, false); }
+            if cfg.notify && !json && agent::stdout_is_tty() { notify("Torrent added", &a.title, false); }
             emit(json, serde_json::json!({"ok": true, "action": "rss-grab", "hash": magnet_hash(url), "name": a.title, "feed": f.name}), || println!("added: {}", a.title));
         }
     }
@@ -152,13 +153,14 @@ pub(super) fn shows_cmd(cfg: &Config, c: &Client, sub: ShowsCmd, json: bool) -> 
             };
             connect(cfg, c)?;
             c.add_url(&e.magnet, &AddOptions {
+                origin: None,
                 sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,
                 save_path: cfg.save_path.clone(), category: cfg.category.clone(),
             })?;
             s.mark_grabbed(&e.key, &e.magnet);
             let title = s.title.clone();
             all.save()?;
-            if cfg.notify { notify("Torrent added", &e.title, false); }
+            if cfg.notify && !json && agent::stdout_is_tty() { notify("Torrent added", &e.title, false); }
             emit(json, serde_json::json!({"ok": true, "action": "shows-grab", "imdb": id, "show": title, "episode": e.key, "hash": magnet_hash(&e.magnet), "name": e.title}),
                 || println!("added: {}", e.title));
         }

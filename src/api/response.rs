@@ -1,6 +1,6 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
-use super::{objects::*, scalar::*};
+use super::{objects::*, scalar::*, search::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -151,6 +151,8 @@ pub struct AddResult {
     pub duplicate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk: Option<DiskSpace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,11 +199,33 @@ pub struct SubscribeResult {
     pub topics: Vec<Topic>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitsResult { pub limits: Limits }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AltResult { pub alt: bool }
+
 /// Each variant has the exact result type for an operation, even when two
 /// operations share the same wire shape. The request ID supplies the context.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsTrackers(TrackersResult),
+    TorrentsReannounce(DoneResult),
+    TorrentsForceStart(DoneResult),
+    TorrentsQueueMove(QueueMoveResult),
+    SearchStart(SearchStarted),
+    SearchStop(DoneResult),
+    SearchProviders(ProvidersResult),
+    SearchSetProvider(DoneResult),
+    SearchInstall(InstallReply),
+    SearchBrowseSources(BrowseSourcesResult),
+    SearchBrowse(SearchItemsResult),
+    SearchGrab(AddResult),
+
+    TorrentsRecheck(RecheckReply),
+    AppClipboardDismiss(EmptyResult),
+    AppLog(LogResult),
+    AppStats(StatsResult),
     AppFreeSpace(super::FreeSpaceResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
@@ -212,6 +236,8 @@ pub enum Reply {
     AppShutdown(PendingResult),
     AppRestart(PendingResult),
     AppNetwork(NetworkResult),
+    TransferSetLimits(LimitsResult),
+    TransferSetAlt(AltResult),
     TransferInfo(TransferInfo),
     TorrentsList(ListResult),
     TorrentsGet(GetResult),
@@ -230,6 +256,23 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.trackers" => serde_json::from_value(result).map(Self::TorrentsTrackers),
+            "torrents.reannounce" => serde_json::from_value(result).map(Self::TorrentsReannounce),
+            "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
+            "torrents.queue_move" => serde_json::from_value(result).map(Self::TorrentsQueueMove),
+            "search.start" => serde_json::from_value(result).map(Self::SearchStart),
+            "search.stop" => serde_json::from_value(result).map(Self::SearchStop),
+            "search.providers" => serde_json::from_value(result).map(Self::SearchProviders),
+            "search.set_provider" => serde_json::from_value(result).map(Self::SearchSetProvider),
+            "search.install" => serde_json::from_value(result).map(Self::SearchInstall),
+            "search.browse_sources" => serde_json::from_value(result).map(Self::SearchBrowseSources),
+            "search.browse" => serde_json::from_value(result).map(Self::SearchBrowse),
+            "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
+
+            "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
+            "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
+            "app.log" => serde_json::from_value(result).map(Self::AppLog),
+            "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "app.free_space" => serde_json::from_value(result).map(Self::AppFreeSpace),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
@@ -240,6 +283,8 @@ impl Reply {
             "app.shutdown" => serde_json::from_value(result).map(Self::AppShutdown),
             "app.restart" => serde_json::from_value(result).map(Self::AppRestart),
             "app.network" => serde_json::from_value(result).map(Self::AppNetwork),
+            "transfer.set_limits" => serde_json::from_value(result).map(Self::TransferSetLimits),
+            "transfer.set_alt" => serde_json::from_value(result).map(Self::TransferSetAlt),
             "transfer.info" => serde_json::from_value(result).map(Self::TransferInfo),
             "torrents.list" => serde_json::from_value(result).map(Self::TorrentsList),
             "torrents.get" => serde_json::from_value(result).map(Self::TorrentsGet),
@@ -281,3 +326,29 @@ pub struct SettingsSetResult {
     pub applied: Vec<String>,
     pub restart: bool,
 }
+
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RecheckReply {
+    Pending(PendingResult),
+    Complete(RecheckResult),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckResult {
+    pub rechecked: Vec<Hash>,
+    pub failed: Vec<RecheckFailure>,
+    pub have_bytes: std::collections::BTreeMap<Hash, u64>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckFailure { pub hash: Hash, pub message: String }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatsResult { pub active_clients: ClientCounts, pub connections: ClientCounts }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackersResult { pub trackers:Vec<Tracker> }

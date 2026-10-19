@@ -1,0 +1,6 @@
+{"dir":"c2s","frame":{"args":{"hashes":["0123456789abcdef0123456789abcdef01234567"]},"id":1,"op":"torrents.recheck","ref":"recheck-fixture"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"ref":"recheck-fixture","state":"pending"}}}
+{"dir":"s2c","frame":{"ev":"mutation.result","op":"torrents.recheck","outcome":"done","ref":"recheck-fixture","result":{"failed":[],"have_bytes":{"0123456789abcdef0123456789abcdef01234567":245760},"rechecked":["0123456789abcdef0123456789abcdef01234567"]},"seq":1,"ts":1792368000}}
+{"dir":"c2s","frame":{"args":{"hashes":["0123456789abcdef0123456789abcdef01234567"]},"id":2,"op":"torrents.recheck","ref":"failed-check"}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"ref":"failed-check","state":"pending"}}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_state","message":"one or more rechecks failed","retryable":false},"ev":"mutation.result","op":"torrents.recheck","outcome":"failed","ref":"failed-check","result":{"failed":[{"hash":"0123456789abcdef0123456789abcdef01234567","message":"recheck failed"}],"have_bytes":{},"rechecked":[]},"seq":2,"ts":1792368001}}

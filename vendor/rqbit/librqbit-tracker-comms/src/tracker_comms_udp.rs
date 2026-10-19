@@ -324,7 +324,8 @@ impl UdpTrackerClient {
                 }
             };
 
-            trace!(?tid, ?response, ?addr, "received");
+            // Error payloads are remote-controlled; the owning monitor sanitizes them.
+            trace!(?tid, ?addr, "received tracker response");
 
             let t = self.state.locked.write().transactions.remove(&tid);
             match t {
@@ -361,6 +362,7 @@ impl UdpTrackerClient {
                 );
                 Ok(connection_id)
             }
+            Response::Error(message) => anyhow::bail!("{message}"),
             _ => anyhow::bail!("expected connect response"),
         }
     }
@@ -432,6 +434,7 @@ impl UdpTrackerClient {
         let response = self.request(cx, tracker, request).await?;
         match response {
             Response::Announce(r) => Ok(r),
+            Response::Error(message) => bail!("{message}"),
             other => bail!("unexpected response {other:?}, expected announce"),
         }
     }

@@ -7,14 +7,17 @@ use std::collections::{BTreeMap, VecDeque};
 mod pending;
 mod snapshot;
 mod sort;
+mod search_sort;
+pub(super) use search_sort::{SearchSort,search_order,legacy_search_order};
 use snapshot::Snapshot;
-pub(super) use sort::TorrentSort;
+pub(super) use sort::{TorrentSort,legacy_order};
 #[cfg(test)]
 mod tests;
 
 const MAX_ITEMS: usize = 100_000;
 const MAX_SNAPSHOT_BYTES: usize = 32 * api::LINE_OUT;
-const MAX_EVENTS: usize = 512;
+const MAX_EVENTS: usize = 1000; // Match the daemon event ring, including reconnect snapshots.
+const MAX_LOGS: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct Subscription {
@@ -38,28 +41,25 @@ pub(super) struct Store {
     pub torrents: BTreeMap<String, api::Torrent>,
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
+    pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
     pub network: Option<api::NetworkState>,
     pub settings: Option<api::Settings>,
     pub subscriptions: BTreeMap<u64, Subscription>,
     pub events: VecDeque<api::Event>,
+    pub logs: VecDeque<api::LogEntry>,
     snapshots: BTreeMap<(u64, api::Topic), Snapshot>,
     caps: api::validation::NegotiatedCaps,
 }
 impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
-        let changed = self
-            .hello
-            .as_ref()
-            .is_none_or(|old| old.instance != hello.instance);
-        if changed {
-            self.stale = true;
-            self.lose_pending();
-            self.subscriptions.clear();
-            self.snapshots.clear();
-            // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
-        }
+        self.stale = true;
+        self.lose_pending();
+        self.subscriptions.clear();
+        self.snapshots.clear();
+        // Subscriptions belong to the connection, even if the instance did not change.
+        // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
         self.connected = hello.proto == api::PROTO;
         self.caps = api::validation::NegotiatedCaps::from_hello(&hello);
         self.hello = Some(hello);
@@ -256,6 +256,10 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Search(id) => patch(
+                    self.searches.entry(*id).or_default(), changed, added, removed,
+                    |item| match item { api::Item::Search(row) => Some((row.key.clone(),row.clone())), _ => None },
+                )?,
                 api::Topic::Events => {
                     for item in added.iter().flatten() {
                         let api::Item::Event(event) = item else {
@@ -264,11 +268,25 @@ impl Store {
                         self.push_event(*event.clone());
                     }
                 }
+                api::Topic::Log => {
+                    for item in added.iter().flatten() {
+                        let api::Item::Log(entry) = item else {
+                            bail!("non-log in log delta")
+                        };
+                        self.push_log(entry.clone());
+                    }
+                }
                 _ => bail!("delta on a singleton topic"),
             },
             _ => return Ok(Effect::None),
         }
         Ok(Effect::Changed)
+    }
+    fn push_log(&mut self, entry: api::LogEntry) {
+        if self.logs.back().is_none_or(|last| last.seq < entry.seq) {
+            if self.logs.len() == MAX_LOGS { self.logs.pop_front(); }
+            self.logs.push_back(entry);
+        }
     }
     fn push_event(&mut self, event: api::Event) {
         self.settle(&event);
@@ -289,10 +307,17 @@ impl Store {
                 self.files.clear();
                 self.files.insert(hash.clone(), snapshot.files);
             }
+            api::Topic::Search(id) => {
+                self.searches.clear(); // The TUI retains only its current search.
+                self.searches.insert(*id, snapshot.searches);
+            }
             api::Topic::Events => {
                 for event in snapshot.events {
                     self.push_event(event);
                 }
+            }
+            api::Topic::Log => {
+                self.logs = snapshot.logs.into_values().collect();
             }
             _ => bail!("snapshot on a singleton topic"),
         }

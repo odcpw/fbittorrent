@@ -1,0 +1,24 @@
+╭ The Diplomat S04E01 1080p WEB-DL H264-GROUP ─────────────────────────────────╮
+│ [Overview]  Files    [ / ] tabs                                              │
+│                                                                              │
+│ state     ↓ Down · downloading                                               │
+│ progress  42.0%  430.1 MiB of 1.0 GiB                                        │
+│ speed     ↓ 2.0 MiB/s   ↑ 1.0 KiB/s · ETA 4m57s                              │
+│ peers     3 peers connected                                                  │
+│ upload    32 KiB/s cap · stops when complete  (u to seed)                    │
+│ path      /fixture/downloads                                                 │
+│ added     just now                                                           │
+│                                                                              │
+│ IMDb card appears when the cursor rests here                                 │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Details] (Esc) Back  (o) Open  (p) Pause  (u) Seed on  (d) Remove …    (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

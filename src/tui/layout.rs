@@ -1,5 +1,20 @@
 //! Existing layout behavior.
 use super::*;
+mod table;
+mod sort;
+mod notice;
+mod list;
+pub(super) use list::{ListTable,fingerprint};
+pub(super) use table::{Column,Rects,TorrentTable,visible_range};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Tier { Narrow, Medium, Wide }
+impl Tier {
+    pub fn at(width: u16) -> Self {
+        if width < 100 { Self::Narrow } else if width < 140 { Self::Medium } else { Self::Wide }
+    }
+    pub fn extended(self) -> bool { self != Self::Narrow }
+}
 
 impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
@@ -17,6 +32,7 @@ impl TuiApp {
             region
         });
         self.tab_rects.set(regions);
+        self.rects.borrow_mut().tabs=regions;
         let tabs = Tabs::new([Tab::new(" 1 Torrents "), Tab::new(" 2 Search "), Tab::new(shows_tab.as_str()), Tab::new(" 4 RSS ")])
             .style(th.dimmed())
             .active_style(th.selected())
@@ -27,7 +43,7 @@ impl TuiApp {
             let mut spans = vec![
                 Span::styled("↓ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.dl_info_speed),|info|format::rate(info.dl_bps)), th.text()),
                 Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.up_info_speed),|info|format::rate(info.ul_bps)), th.text()),
-                Span::styled(format!("  {} ", th.name), th.dimmed()),
+                Span::styled(if Tier::at(area.width)==Tier::Wide {format!("  {} ", th.name)} else {String::new()}, th.dimmed()),
             ];
             if self.poll_inflight { spans.insert(0, Span::styled(format!("{} ", SPINNER[self.tick % 4]), th.dimmed())); }
             Line::from_spans(spans)
@@ -46,7 +62,7 @@ impl TuiApp {
 pub(super) fn pad(r: Rect) -> Rect { r.inner(Sides::horizontal(1)) }
 
 pub(super) fn detail_columns(area: Rect) -> [Rect; 2] {
-    columns_with_details(area, 100)
+    columns_with_details(area, 140)
 }
 
 pub(super) fn torrent_columns(area: Rect) -> [Rect; 2] {

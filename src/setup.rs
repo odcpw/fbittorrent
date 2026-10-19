@@ -25,6 +25,7 @@ WantedBy=default.target
 
 pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     let mut cfg = crate::config::Config::load()?;
+    install_icon()?;
     if cfg.native() {
         let save = save_path.or(cfg.save_path.clone()).unwrap_or_else(|| {
             dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads"))
@@ -223,6 +224,7 @@ pub fn uninstall() -> Result<()> {
 
 /// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
 pub fn register_magnet_handler() -> Result<()> {
+    install_icon()?;
     let exe = std::env::current_exe()?;
     let command = desktop_executable(&exe.to_string_lossy())?;
     let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
@@ -336,4 +338,11 @@ NoNewPrivileges=yes
         assert_eq!(super::desktop_executable("/tmp/percent%/fbittorrent").unwrap(),
             "\"/tmp/percent%%/fbittorrent\"");
     }
+}
+
+fn install_icon() -> Result<()> {
+    let directory = dirs::data_local_dir().context("no data directory")?.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::write(directory.join("fbittorrent.svg"), include_str!("../assets/fbittorrent.svg"))?;
+    Ok(())
 }

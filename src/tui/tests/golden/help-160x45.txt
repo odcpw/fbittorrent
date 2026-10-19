@@ -1,10 +1,10 @@
 [ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
 ╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
-│                                                                                           ││                                                                 │
-│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
-│ ▌ The Diplomat S04E01 1080p WEB-DL H264-GROUP ████░░░░░░   42.0%   2.0 MiB/s   4m57s SF·  ││                                                                 │
-│   Sintel.2010.1080p                 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮                                     │
-│   Other.Movie.2026.1080p            │                                                                                  │ of 1.0 GiB                          │
+│  STATE     NAME                                             SIZE     %      ↓    ETA PEERS││                                                                 │
+│▌ ↓ Down    The Diplomat S04E01 1080p WEB-DL H264-GROUP   1.0 GiB   42%   2.1M     4m     3││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
+│  ✓ Done    Sintel.2010.1080p                             1.0 GiB  100%                    ││                                                                 │
+│  ◌ Meta    Other.Movie.2026.1080p   ╭ Keys ────────────────────────────────────────────────────────────────────────────╮ding                                 │
+│                                     │                                                                                  │ of 1.0 GiB                          │
 │                                     │ GLOBAL                                                                           │1.0 KiB/s                            │
 │                                     │   (1) Torrents                                                                   │                                     │
 │                                     │   (2) Search                                                                     │d                                    │
@@ -27,7 +27,7 @@
 │                                     │   (G/End) Last                                                                   │                                     │
 │                                     │   (PgDn) Page down                                                               │                                     │
 │                                     │   (PgUp) Page up                                                                 │                                     │
-│                                     │   (Enter) Files                                                                  │                                     │
+│                                     │   (Enter) Details                                                                │                                     │
 │                                     │   (o) Open                                                                       │                                     │
 │                                     │   (p/Space) Pause/resume                                                         │                                     │
 │                                     │   (u) Seed on/off                                                                │                                     │

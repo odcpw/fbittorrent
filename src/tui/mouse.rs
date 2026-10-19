@@ -2,11 +2,12 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MouseList { Torrents, Results, Browse, Feeds, Items, Shows, Episodes, Files, Providers }
+pub(super) enum MouseList { Torrents, Results, Browse, Feeds, Items, Shows, Episodes, Files, Providers, Settings }
 
 impl TuiApp {
     pub(super) fn mouse_list_at(&self, x: u16, y: u16) -> Option<(MouseList, Rect)> {
         let b = self.last_bounds.get();
+        if self.screen==Screen::Search && self.search_card {return None;}
         if b.width == 0 || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
         if let Some(m) = &self.providers {
             let area = providers_area(b, m.plugins.len());
@@ -14,15 +15,26 @@ impl TuiApp {
             let rows = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(1)]).split(inner);
             return rows[0].contains(x, y).then_some((MouseList::Providers, rows[0]));
         }
+        if self.details.is_some() {
+            return self.rects.borrow().files.filter(|area|area.contains(x,y)).map(|area|(MouseList::Files,area));
+        }
         if self.files.is_some() {
             let area = files_area(b);
             let inner = Block::bordered().padding(Sides::horizontal(1)).inner(area);
             let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(1)]).split(inner);
             return rows[1].contains(x, y).then_some((MouseList::Files, rows[1]));
         }
+        {
+            let geometry=self.rects.borrow();
+            if geometry.lists.iter().any(Option::is_some) {
+                return [MouseList::Results,MouseList::Browse,MouseList::Feeds,MouseList::Items,MouseList::Shows,MouseList::Episodes].into_iter()
+                    .find_map(|list|geometry.lists[list as usize].filter(|a|a.contains(x,y)).map(|a|(list,a)));
+            }
+        }
         let root = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(0), Constraint::Fixed(2)]).split(b);
         match self.screen {
             Screen::Torrents => {
+                if let Some(area)=self.rects.borrow().table {return area.contains(x,y).then_some((MouseList::Torrents,area));}
                 let cols = torrent_columns(root[1]);
                 let inner = Block::bordered().inner(cols[0]);
                 let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill]).split(inner);
@@ -64,6 +76,7 @@ impl TuiApp {
             MouseList::Episodes => &self.ep_list,
             MouseList::Files => &self.files.as_ref().expect("files modal").list,
             MouseList::Providers => &self.providers.as_ref().expect("providers modal").list,
+            MouseList::Settings => &self.settings.as_ref().expect("settings modal").list,
         }
     }
 
@@ -93,6 +106,7 @@ impl TuiApp {
             MouseList::Episodes => self.episode_count(),
             MouseList::Files => self.files.as_ref().map_or(0, |m| m.files.len()),
             MouseList::Providers => self.providers.as_ref().map_or(0, |m| m.plugins.len()),
+            MouseList::Settings => self.settings.as_ref().map_or(0, |_|4),
         }
     }
 
@@ -109,6 +123,7 @@ impl TuiApp {
             MouseList::Episodes => self.episode_at(index).map(|(show, episode)| format!("{:?}", (&show.imdb, &episode.key))),
             MouseList::Files => self.files.as_ref().and_then(|modal| modal.files.get(index).map(|file| format!("{:?}", (&modal.hash, file.index)))),
             MouseList::Providers => self.providers.as_ref().and_then(|modal| modal.plugins.get(index).map(|provider| provider.name.clone())),
+            MouseList::Settings => Some(index.to_string()),
         }
     }
 
@@ -158,24 +173,30 @@ impl TuiApp {
                 self.providers = None;
                 return Cmd::none();
             }
-            if self.files.is_some() && !files_area(b).contains(m.x, m.y) {
+            if self.details.is_none() && self.files.is_some() && !files_area(b).contains(m.x, m.y) {
                 self.files = None;
                 return Cmd::none();
             }
         }
+        if self.details.is_some() && self.files.is_none() {return Cmd::none();}
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && m.y == 0
-            && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() && !self.show_help {
+            && self.details.is_none() && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() && !self.show_help {
             let Some(index) = self.tab_rects.get().iter().position(|area| area.contains(m.x, m.y)) else { return Cmd::none() };
             let s = Screen::from_index(index);
             self.last_click = None;
             return self.set_screen(s);
         }
-        if self.screen == Screen::Search && self.files.is_none() && self.providers.is_none()
+        if self.screen == Screen::Search && self.details.is_none() && self.files.is_none() && self.providers.is_none()
             && self.prompt.is_none() && !self.show_help
             && matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && (1..4).contains(&m.y) {
             self.search_focus_input = true;
             self.search_input.set_focused(true);
             return Cmd::none();
+        }
+        if matches!(self.screen,Screen::Torrents|Screen::Search)&&self.files.is_none()&&self.providers.is_none()&&self.prompt.is_none()
+            &&matches!(m.kind,MouseEventKind::Down(MouseButton::Left)) {
+            let column=self.rects.borrow().headers.iter().find(|(_,area)|area.contains(m.x,m.y)).map(|(column,_)|*column);
+            if let Some(column)=column {self.last_click=None;return if self.screen==Screen::Torrents {self.sort_torrent_column(column)} else {self.sort_search_column(column)};}
         }
         let Some((list, area)) = self.mouse_list_at(m.x, m.y) else { return Cmd::none() };
         if matches!(m.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
@@ -184,7 +205,11 @@ impl TuiApp {
         }
         if !matches!(m.kind, MouseEventKind::Moved | MouseEventKind::Down(MouseButton::Left)) { return Cmd::none(); }
         let state = self.mouse_list_state(list);
-        let Some(index) = mouse_row_index(area, m.x, m.y, state.borrow().offset, self.mouse_list_len(list)) else { return Cmd::none() };
+        let index=if list==MouseList::Torrents&&self.rects.borrow().table.is_some(){
+            self.rects.borrow().rows.iter().find(|(_,rect)|rect.contains(m.x,m.y))
+                .and_then(|(hash,_)|self.torrents.iter().position(|t|&t.hash==hash))
+        }else{mouse_row_index(area,m.x,m.y,state.borrow().offset,self.mouse_list_len(list))};
+        let Some(index)=index else{return Cmd::none()};
         if m.kind == MouseEventKind::Moved {
             state.borrow_mut().hovered = Some(index);
             return Cmd::none();

@@ -72,7 +72,7 @@ pub(in crate::tui) fn help_text(native: bool) -> &'static str {
             Scope::Global=>0, Scope::Screen(Screen::Torrents)=>1,
             Scope::Screen(Screen::Search)=>2, Scope::Pane(Screen::Search,Pane::Query)=>3,
             Scope::Pane(Screen::Search,Pane::Results)=>4,Scope::Pane(Screen::Search,Pane::Browse)=>5,
-            Scope::Modal(ModalKind::Providers)=>6,Scope::Modal(ModalKind::Files)=>7,
+            Scope::Modal(ModalKind::Details)=>6,Scope::Modal(ModalKind::Providers)=>6,Scope::Modal(ModalKind::Files)=>7,
             Scope::Screen(Screen::Rss)=>8,Scope::Pane(Screen::Rss,Pane::Feeds)=>9,
             Scope::Pane(Screen::Rss,Pane::Items)=>10,Scope::Screen(Screen::Shows)=>11,
             Scope::Pane(Screen::Shows,Pane::Shows)=>12,Scope::Pane(Screen::Shows,Pane::Releases)=>13,

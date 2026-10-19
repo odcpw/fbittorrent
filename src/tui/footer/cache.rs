@@ -17,19 +17,23 @@ impl TuiApp {
     pub(in crate::tui) fn footer_signature(&self, width: u16) -> u64 {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         width.hash(&mut hash);
+        self.recovery.notice(std::time::Instant::now()).hash(&mut hash);
         self.screen.index().hash(&mut hash);
         self.footer_context().hash(&mut hash);
         self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
+        self.search_card.hash(&mut hash);
         self.search_input.value().trim().is_empty().hash(&mut hash);
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
         if let Some(torrent) = self.selected_torrent() {
+            self.store.pending_for_key(&torrent.hash).hash(&mut hash);
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
+            self.torrent_paused(torrent).hash(&mut hash);
             self.seed_allowed(torrent).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
@@ -96,7 +100,7 @@ impl TuiApp {
         let context_width = dw(&context).min(available);
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
-        let feedback = if self.daemon_stopped || self.status.is_empty() {
+        let feedback = if self.recovery.notice(std::time::Instant::now()).is_some() || self.daemon_stopped || self.status.is_empty() {
             self.footer_selection().unwrap_or_default()
         } else {
             self.status.clone()

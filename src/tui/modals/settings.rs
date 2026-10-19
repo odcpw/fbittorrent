@@ -47,7 +47,7 @@ impl TuiApp {
                         presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?
                             .request("app.restart",serde_json::json!({"scope":"engine"}))?;
                     } else {
-                        if queue_changed {Client::from_config(&previous).set_queue_limit(latest.max_active_downloads)?;}
+                        if queue_changed {Client::from_config(&previous,presence.clone()).set_queue_limit(latest.max_active_downloads)?;}
                         latest.save()?;
                     }
                     Ok(latest)
@@ -85,6 +85,7 @@ impl TuiApp {
 
     pub(super) fn view_settings(&self, frame: &mut Frame) {
         let Some(modal) = &self.settings else { return };
+        self.rects.borrow_mut().overlay();
         let area = settings_area(frame.bounds());
         let th = &self.theme;
         let bg = Style::new().bg(th.selection).fg(th.fg);
@@ -92,11 +93,15 @@ impl TuiApp {
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).padding(Sides::horizontal(1)).title(" Download settings ");
         let inner = block.inner(area);
         block.render(area, frame);
-        let encryption = match modal.cfg.peer_encryption.as_str() { "require" => "Require encryption", "off" => "Off", _ => "Prefer encryption" };
-        let vpn = match modal.cfg.network_interface.as_deref() { None => "Off · ordinary connection".into(), Some("proton") => "ProtonVPN · required".into(), Some(name) => format!("{name} · required") };
-        let items = vec![li(Line::raw(format!("Simultaneous downloads   {}", modal.cfg.max_active_downloads))), li(Line::raw(format!("Peer encryption          {encryption}"))), li(Line::raw(format!("VPN connection           {vpn}"))), li(Line::raw(format!("Reduce motion            {}",if modal.cfg.reduce_motion { "On" } else { "Off" })))];
-        let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(4));
-        StatefulWidget::render(&List::new(items).style(bg).highlight_style(th.selected()).highlight_symbol("▌"), rows, frame, &mut modal.list.borrow_mut());
+        let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(4));
+        self.view_rows(MouseList::Settings,rows,4,
+            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion)),
+            |i|Line::raw(match i {
+                0=>format!("Simultaneous downloads   {}",modal.cfg.max_active_downloads),
+                1=>format!("Peer encryption          {}",match modal.cfg.peer_encryption.as_str(){"require"=>"Require encryption","off"=>"Off",_=>"Prefer encryption"}),
+                2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
+                _=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
+            }),frame);
         let description = if !modal.error.is_empty() { modal.error.clone() } else {
             format!("↑/↓ choose · ←/→ change · Enter save · Esc cancel\n\nExtra downloads wait their turn. Encryption protects peer traffic; your IP remains visible.\n\nA required VPN blocks torrent transfers when disconnected. Feed and search websites use your usual connection.\n\n{}\nChanging encryption or VPN reopens the app's engine.", crate::network_app::state(&modal.cfg).message)
         };

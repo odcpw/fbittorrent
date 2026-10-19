@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb","settings","free_space"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -26,18 +26,29 @@ pub fn dispatch(
     call: &Call,
     reference: &str,
     counts: Value,
+    active_counts: Value,
     uptime: u64,
+    subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
     Ok(match call {
+        Call::AppClipboardDismiss { args } => {
+            daemon.clipboard.dismiss(args.hash.as_str());
+            Reply::AppClipboardDismiss(EmptyResult {})
+        }
+        Call::AppLog { args } => Reply::AppLog(daemon.logs.query(&args.clone().unwrap_or_default())),
+        Call::AppStats { .. } => Reply::AppStats(StatsResult {
+            connections: serde_json::from_value(counts).unwrap(),
+            active_clients: serde_json::from_value(active_counts).unwrap(),
+        }),
         Call::AppFreeSpace { args } => Reply::AppFreeSpace(crate::free_space::inspect(std::path::Path::new(&args.path))),
         Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),
         Call::AppSettingsSet { args } => Reply::AppSettingsSet(super::settings::set(daemon, args)?),
         Call::AppInfo { .. } => {
             let mut value = serde_json::to_value(hello(daemon)).unwrap();
             value["uptime_s"] = json!(uptime);
-            value["upgrade_pending"] = json!(false);
+            value["upgrade_pending"] = json!(daemon.upgrade_pending.load(std::sync::atomic::Ordering::Acquire));
             value["clients"] = counts;
-            value["subscriptions"] = json!({"total":0,"by_topic":{}});
+            value["subscriptions"] = serde_json::to_value(subscriptions).unwrap();
             Reply::AppInfo(serde_json::from_value(value).unwrap())
         }
         Call::AppNetwork { .. } => {

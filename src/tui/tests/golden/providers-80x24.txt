@@ -1,11 +1,11 @@
-  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS  ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS       ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Search ──────────────────────────────────────────────────────────────────────╮
 │ Sintel                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Results (10) · 2/3 providers ────────────────────────────────────────────────╮
-│                                                                              │
-│   NAME                                                 IMDB  SEEDS      SIZE │
-│ ▌ Sintel                                                       124 512.0 MiB │
+│  NAME                                                       SIZE SEEDS↓     ★│
+│▌ Sintel                                                512.0 MiB    124     —│
+│  Sintel - 2010 - Multisubs mkv                         512.0 MiB    123     —│
 ╭ Search providers ────────────────────────────────────────────────────────────╮
 │ ▌ [x] EZTV                  provider-0.invalid                               │
 │   [ ] YTS                   provider-1.invalid                               │
@@ -14,7 +14,7 @@
 │                                                                              │
 │ 2 of 3 enabled · Space toggle · a all · n none · o open site · Esc close     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-│   [philosophy-raws][è¾›ç‰¹å°”][sint…0bitåŽ‹åˆ¶][2Kç..          115 512.0 MiB │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

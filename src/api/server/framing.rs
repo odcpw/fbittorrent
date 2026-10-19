@@ -121,7 +121,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
     let op = raw["op"].as_str().unwrap_or("");
     // Settings validate the entire patch against Config before any side effects,
     // retaining the exact offending key for both types and semantic bounds.
-    if op == "app.settings.set" { return None; }
+    if op == "app.settings.set" || op.starts_with("search.") { return None; }
     for (key, value) in args {
         let valid = match key.as_str() {
             "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
@@ -140,7 +140,11 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
                 .is_some_and(|values| values.iter().all(Value::is_string)),
             "path" if op == "app.free_space" => value.as_str().is_some_and(|path| crate::free_space::valid_path(path).is_ok()),
             "reason" | "save_path" | "category" | "origin" => value.is_string(),
+            "to" if op=="torrents.queue_move" => serde_json::from_value::<QueueTo>(value.clone()).is_ok(),
             "scope" => serde_json::from_value::<RestartScope>(value.clone()).is_ok(),
+            "source" if op == "app.log" => value.is_string(),
+            "level" => serde_json::from_value::<LogLevel>(value.clone()).is_ok(),
+            "limit" => value.is_u64(),
             "source" => serde_json::from_value::<AddSource>(value.clone()).is_ok(),
             "client" => {
                 let Some(client) = value.as_object() else {
@@ -288,7 +292,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
             .split('`')
             .nth(1)
             .or_else(|| {
-                ["topics", "hashes", "bps", "since_seq"]
+                ["topics", "hashes", "bps", "since_seq", "limit", "source"]
                     .into_iter()
                     .find(|key| text.starts_with(&format!("{key}:")))
             })
@@ -304,10 +308,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
         }
     })
 }
-// TABLE remains the frozen full contract. Availability follows the phase's
-// negotiated capabilities; P1-08 installs subscription routing.
+// TABLE remains the frozen full contract. Subscription routing uses the bus.
 pub(super) fn implemented(op: &str) -> bool {
-    !matches!(op, "subscribe" | "unsubscribe") && ops::TABLE.iter().any(|row| row.name == op)
+    ops::TABLE.iter().any(|row| row.name == op)
 }
 pub(super) fn distance(a: &str, b: &str) -> usize {
     if a.len() > 128 {

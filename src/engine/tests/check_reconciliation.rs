@@ -381,3 +381,109 @@ fn explicit_recheck_reconciliation_checks_once() {
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn async_recheck_shares_outcome_without_blocking_ledger_or_queue() {
+    let (app, directory, hash, counts, gate) = gated_fixture();
+    let _release = ReleaseOnDrop(gate.clone());
+    let dispatcher = app.dispatcher();
+    gate.wait_blocked();
+    gate.release();
+    wait_for_check(&dispatcher, &hash);
+    let before = counts.snapshot();
+    gate.arm();
+    let begin = || match dispatcher.execute(EngineOp::RecheckBatch { hashes: vec![hash.clone()] }).unwrap() {
+        EngineResult::Recheck(batch) => batch,
+        _ => panic!("expected verification receipt"),
+    };
+    let first = begin();
+    {
+        let state = gate.state.lock().unwrap();
+        let (state, _) = gate.changed.wait_timeout_while(state, Duration::from_secs(5), |s| !s.blocked).unwrap();
+        assert!(state.blocked, "second check must reach the read gate: report={:?}, counts={:?}, handle={:?}",
+            first.result(), counts.snapshot(), dispatcher.inner.handle(&hash).map(|h|h.stats()));
+    }
+    let second = begin();
+    assert!(first.result().is_none() && second.result().is_none());
+    let row = dispatcher.runtime.block_on(dispatcher.info(dispatcher.runtime.cx())).unwrap().pop().unwrap();
+    assert_eq!(row.state, TorrentState::Checking);
+    assert!(!row.checked);
+    let expected = counts.snapshot();
+    for _ in 0..8 {
+        dispatcher.runtime.block_on(dispatcher.inner.maintain(dispatcher.runtime.cx())).unwrap();
+        assert_eq!(counts.snapshot(),expected);
+    }
+    let EngineResult::Queue(queue) = dispatcher.execute(EngineOp::Queue).unwrap() else { panic!("queue"); };
+    assert_eq!(queue.active_downloads,0);
+    assert_eq!(queue.queued_downloads,0);
+    gate.release();
+    let began = std::time::Instant::now();
+    while first.result().is_none() || second.result().is_none() {
+        assert!(began.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(first.result().unwrap().have_bytes,second.result().unwrap().have_bytes);
+    assert_eq!(first.result().unwrap().have_bytes[&hash],PIECE as u64);
+    let after=counts.snapshot();
+    assert_eq!((after.0-before.0,after.1-before.1,after.2-before.2),(1,2,2*PIECE));
+    println!("two pending requests share one real check; ledger reads/reconciliation stay responsive; check uses no queue slot");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn undo_restored_incomplete_record_checks_before_admission() {
+    let (app,directory,hash,counts,gate)=gated_fixture();
+    let _release=ReleaseOnDrop(gate.clone());let dispatcher=app.dispatcher();
+    gate.wait_blocked();gate.release();wait_for_check(&dispatcher,&hash);
+    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}).unwrap();
+    gate.arm();
+    dispatcher.execute(EngineOp::RestoreUndo {hash:hash.clone()}).unwrap();
+    gate.wait_blocked();
+    let checking=row(&dispatcher);
+    assert_eq!(checking.state,TorrentState::Checking);assert!(!checking.checked);
+    assert_eq!(checking.intent,view::Intent::Run);
+    gate.release();
+    let deadline=std::time::Instant::now()+Duration::from_secs(5);
+    loop {
+        let row=row(&dispatcher);
+        if row.checked && row.state==TorrentState::Stalled {break;}
+        assert!(std::time::Instant::now()<deadline,"undo check: {row:?}");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(counts.snapshot(),(2,4,4*PIECE));
+    println!("undo incomplete: real gated hash read exposes checking/checked=false, then run intent admits checked incomplete data; one new two-piece scan");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn remove_during_recheck_does_not_poison_undo_restore() {
+    let (app,directory,hash,_counts,gate)=gated_fixture();
+    let _release=ReleaseOnDrop(gate.clone());let dispatcher=app.dispatcher();
+    gate.wait_blocked();gate.release();wait_for_check(&dispatcher,&hash);gate.arm();
+    let EngineResult::Recheck(batch)=dispatcher.execute(EngineOp::RecheckBatch {hashes:vec![hash.clone()]}).unwrap() else {panic!("recheck")};
+    gate.wait_blocked();
+    std::thread::scope(|scope| {
+        let worker=scope.spawn(||dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}));
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        while !dispatcher.inner.rechecks.removal_cancelled(&hash) {
+            assert!(std::time::Instant::now()<deadline);std::thread::sleep(Duration::from_millis(2));
+        }
+        gate.release();worker.join().unwrap().unwrap();
+    });
+    let deadline=std::time::Instant::now()+Duration::from_secs(5);
+    while batch.result().is_none() {
+        assert!(std::time::Instant::now()<deadline,"cancelled batch must publish its terminal report");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(batch.result().unwrap().failed.len(),1,"cancelled worker reports removal failure");
+    dispatcher.execute(EngineOp::RestoreUndo {hash:hash.clone()}).unwrap();
+    let deadline=std::time::Instant::now()+Duration::from_secs(5);
+    loop {
+        let row=row(&dispatcher);
+        assert_ne!(row.state,TorrentState::Error,"stale recheck must not poison restored intent");
+        if row.checked {break;}
+        assert!(std::time::Instant::now()<deadline);std::thread::sleep(Duration::from_millis(2));
+    }
+    println!("remove cancels/settles old recheck before undo can append a fresh generation");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}

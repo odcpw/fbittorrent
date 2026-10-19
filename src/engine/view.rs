@@ -147,12 +147,31 @@ pub struct TorrentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
     pub force: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_pos: Option<u64>,
+    #[serde(skip)]
+    pub piece_length: Option<u64>,
     #[serde(skip)]
     legacy: Legacy,
 }
 
 impl TorrentView {
+    fn rechecking(&mut self) {
+        self.state = TorrentState::Checking;
+        self.checked = false;
+        self.reason = None;
+        self.completed_at = None;
+    }
+
     fn retain_restore_reason(&mut self) {
+        if self.error.as_deref().is_some_and(super::disk::is_full) {
+            self.state = TorrentState::Error;
+            self.reason = Some("disk_full".into());
+            if let Some(message) = &mut self.error { if !message.starts_with("Disk full") { *message = format!("Disk full: {message}"); } }
+            return;
+        }
         if self
             .error
             .as_deref()
@@ -177,7 +196,7 @@ impl TorrentView {
             } else {
                 Intent::Run
             },
-            staged: false,
+            staged: record.staged,
             checked: false,
             progress: None,
             size: None,
@@ -201,7 +220,10 @@ impl TorrentView {
             content_path: None,
             added_at: record.added_on,
             completed_at: (record.completion_on > 0).then_some(record.completion_on),
-            force: false,
+            origin: None, // projected once this row is attached to its owned ledger
+            force: record.force,
+            queue_pos: None,
+            piece_length: None,
             legacy: Legacy {
                 source,
                 facts,
@@ -214,6 +236,17 @@ impl TorrentView {
                 content_path: record.output_folder.clone(),
             },
         }
+    }
+
+    fn trusted_pending(record:&Record, value:resume::Measurement)->Self {
+        let facts=StateFacts {activity:Activity::Paused,paused:true,finished:value.have==value.size,
+            stop_on_complete:record.stop_on_complete(),record_paused:record.paused,
+            check_cancelled:false,receiving:false,parked:false};
+        let mut view=Self::record(record,facts,Source::Handle);
+        view.checked=true;view.size=Some(value.size);view.completed_bytes=Some(value.have);
+        view.progress=Some(if value.size==0 {1.0} else {value.have as f64/value.size as f64});
+        view.legacy.progress_known=true;
+        view
     }
 
     fn handle(record: &Record, handle: &Arc<ManagedTorrent>, check_cancelled: bool) -> Self {
@@ -241,6 +274,7 @@ impl TorrentView {
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
         if let Some(metadata) = metadata {
+            view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));
             let content = if metadata.file_infos.len() == 1 {
                 handle
                     .output_folder()
@@ -491,7 +525,11 @@ impl Inner {
 impl EngineDispatcher {
     pub(super) async fn info(&self, cx: &Cx) -> Result<Vec<TorrentView>> {
         let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+        Ok(self.info_locked(&ledger))
+    }
+    pub(super) fn info_locked(&self, ledger: &Ledger) -> Vec<TorrentView> {
         let mut torrents = Vec::new();
+        let mut queue_position=0;
         for record in &ledger.records {
             let mut view = match self.inner.handle(&record.hash) {
                 Ok(handle) => TorrentView::handle(
@@ -501,6 +539,11 @@ impl EngineDispatcher {
                 ),
                 Err(_) => self.inner.unrestored_view(record),
             };
+            if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
+                if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
+                    view=TorrentView::trusted_pending(record,value);
+                } else {self.inner.resume_prepared.finish(&record.hash);}
+            }
             if view.error.is_none() {
                 view.error = self
                     .inner
@@ -510,11 +553,23 @@ impl EngineDispatcher {
                     .get(&record.hash)
                     .and_then(|restore| restore.last_error.clone());
             }
+            if self.inner.rechecks.active(&record.hash) {
+                view.rechecking();
+            } else if self.inner.recheck_failed(&record.hash) {
+                view.state = TorrentState::Error;
+                view.checked = false;
+                view.reason = Some("restore_failed".into());
+                view.completed_at = None;
+                view.completed_bytes = None;
+                view.progress = None;
+            }
+            view.origin=Some(record.origin.clone());
+            view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
             view.retain_restore_reason();
             torrents.push(view);
         }
         torrents.sort_by(|a, b| b.added_at.cmp(&a.added_at));
-        Ok(torrents)
+        torrents
     }
 }
 

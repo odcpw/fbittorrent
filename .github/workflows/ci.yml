@@ -115,7 +115,7 @@ jobs:
         with:
           shared-key: native
       - name: Clear scheduled case logs after cache restore
-        run: python3 scripts/testlog-summary.py --reset --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native
+        run: python3 scripts/testlog-summary.py --reset --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native --suite tui_smoke --suite tui_smoke_setup --suite tui_smoke_control
       - name: Install terminal fixture tools
         run: |
           python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_native_apt -- sudo apt-get update
@@ -134,10 +134,14 @@ jobs:
       - name: Isolated native CLI and TUI cases
         run: python3 agent_ergonomics_audit/audit/regression_tests/native.py target/release/fbittorrent
       # P1-07 adds daemon.py --no-systemd; P1-11 adds agent_contract.py and
-      # verify-determinism.sh; P4-10 adds the native tmux smoke.
+      # verify-determinism.sh.
+      - name: Native terminal smoke at 80/120/160 columns
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/tui_smoke.py target/release/fbittorrent
+          python3 agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py target/release/fbittorrent
       - name: Summarize cases
         if: always()
-        run: python3 scripts/testlog-summary.py --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native
+        run: python3 scripts/testlog-summary.py --suite ci_native_apt --suite ci_native_tools --suite ci_native_memory --suite ci_native_build --suite native --suite tui_smoke --suite tui_smoke_setup --suite tui_smoke_control
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:

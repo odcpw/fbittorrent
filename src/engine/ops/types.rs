@@ -1,3 +1,4 @@
+pub use super::super::queue_policy::Direction as QueueDirection;
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +36,7 @@ pub struct AddRequest {
     pub stopped: bool,
     pub category: String,
     pub tags: String,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,9 +64,14 @@ pub enum EngineOp {
     OpenTarget {
         hash: String,
     },
+    Trackers { hash: String },
+    Reannounce { hashes: Vec<String> },
     Recheck {
         hash: String,
     },
+    RecheckBatch { hashes: Vec<String> },
+    ForceStart { hashes: HashSelection, on: bool },
+    QueueMove { hash: String, to: super::super::queue_policy::Direction },
     SetFiles {
         hash: String,
         include: Vec<usize>,
@@ -91,6 +98,8 @@ pub enum EngineOp {
         hashes: HashSelection,
         files: bool,
     },
+    RemoveKeep { hashes: HashSelection },
+    RestoreUndo { hash: String },
     FilePriority {
         hash: String,
         ids: Vec<usize>,
@@ -147,7 +156,8 @@ impl EngineOp {
     }
     pub(super) fn selection(&self) -> Option<&HashSelection> {
         match self {
-            Self::Start { hashes, .. }
+            Self::ForceStart { hashes, .. }
+            | Self::Start { hashes, .. }
             | Self::Stop { hashes }
             | Self::Delete { hashes, .. }
             | Self::SetUploadLimit { hashes, .. }
@@ -257,6 +267,10 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    Trackers(Vec<librqbit::TrackerStat>),
+    RemovedUndo { undo_until: u64 },
+    QueuePosition(u64),
+    Recheck(Arc<super::super::recheck::Batch>),
     Acknowledged,
     Version(String),
     Torrents(Vec<super::super::view::TorrentView>),
@@ -273,6 +287,10 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::Trackers(_) => bail!("tracker observations have no legacy route"),
+            Self::RemovedUndo { .. } => bail!("undo removal has no legacy route"),
+            Self::QueuePosition(_) => bail!("queue movement has no legacy route"),
+            Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
             Self::Detail(_) => bail!("torrent detail has no legacy route"),
             Self::Version(version) => Ok(version.clone()),

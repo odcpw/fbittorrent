@@ -12,13 +12,13 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.5";
+pub const CONTRACT_VERSION: &str = "1.2.18";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
-const SERVE_LIMITATIONS: &str = "serve has no idle exit yet; systemd starts it on demand for writes or a TUI. API v1 serves torrents, files, mutations and IMDb and provides interactive presence and owner commands; subscriptions and automatic idle/upgrade policy follow their owner beads. CLI and TUI data still use the framed legacy socket (engine.sock). Settings use app.settings.get/set while running and the private config while stopped.";
+const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; replaced binaries restart the daemon when idle; restart switches immediately.";
 
-const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
-const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
+const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors. events and log --follow stream NDJSON; api preserves the server response/error envelope and maps its API exit code.";
+const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade. These are outside the CLI 0..8 dictionary.";
 
 /// Exit codes. Stable; documented by `capabilities --json` and `robot-docs`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,8 +160,13 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "status", aliases: &[], summary: "Rates and counts; never starts the backend", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "show", aliases: &["info"], summary: "One torrent in full, including its files and the path to open", json: true, mutating: false, needs_backend: true },
+        CommandDoc { name:"reannounce", aliases:&[], summary:"Force a live torrent tracker announce, rate limited to once per minute", json:true, mutating:true, needs_backend:true },
         CommandDoc { name: "search", aliases: &["find"], summary: "Search local providers; results carry magnet links; native mode does not open the app", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; returns the hash; --wait blocks until complete", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "events", aliases: &[], summary: "Replay/follow NDJSON events with instance and seq; never starts", json: true, mutating: false, needs_backend: true },
+        CommandDoc { name: "api", aliases: &[], summary: "Raw API envelope; --list catalogue; mutating and startup policy depend on the operation", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "limits", aliases: &[], summary: "Persist global and alternative limits; never starts a stopped daemon", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "log", aliases: &[], summary: "Read daemon history; --follow streams NDJSON without starting the daemon", json: true, mutating: false, needs_backend: true },
+        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; --wait blocks until complete; --notify requests a plain toast; --origin handler delegates actions to the daemon", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "wait", aliases: &[], summary: "Block until torrents complete (or --timeout); progress on stderr", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "start", aliases: &["resume"], summary: "Start torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "stop", aliases: &["pause"], summary: "Stop torrents", json: true, mutating: true, needs_backend: true },
@@ -177,7 +182,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "up", aliases: &[], summary: "Start the daemon; --ui also opens the dashboard or TUI", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "dashboard", aliases: &[], summary: "Start the daemon and summon the dashboard, falling back to the TUI", json: true, mutating: true, needs_backend: false },
-        CommandDoc { name: "restart", aliases: &[], summary: "Restart the running engine; daemon upgrade handling follows", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "restart", aliases: &[], summary: "Restart the daemon now; wait up to 30 seconds for its replacement hello", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "down", aliases: &[], summary: "Close the app and wait for its engine to stop; legacy mode stops its service", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
@@ -205,7 +210,8 @@ pub fn capabilities_json() -> serde_json::Value {
             "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
         },
         "caps": crate::api::ops::app::CAPS,
-        "changes": [{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"app.free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
+        "api_operations": crate::api::ops::TABLE,
+        "changes": [{"since":"1.2.18","version":"1.2.18","breaking":false,"field":"clipboard","cap":"clipboard","note":"P6-13 opt-in bounded NUL-framed clipboard magnet offers, dismiss operation, notification actions and settings on/off"},{"since":"1.2.17","version":"1.2.17","breaking":false,"field":"add.disk","note":"P5-07 known disk capacity/warnings; summary disk monitoring and disk_full recovery on a 16 MiB/piece free-space rise"},{"since":"1.2.16","version":"1.2.16","breaking":false,"field":"app.free_space","cap":"free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"},{"since":"1.2.15","version":"1.2.15","breaking":false,"field":"caps.imdb","cap":"imdb","note":"P3-04 implemented IMDb capability recorded in exact hello/error fixtures"},{"since":"1.2.14","version":"1.2.14","breaking":false,"field":"limits","cap":"limits","note":"live global/turtle limits, persisted alt switch, structural summary fields and offline CLI edits"},{"since":"1.2.13","version":"1.2.13","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"},{"since":"1.2.12","version":"1.2.12","breaking":false,"field":"trackers","cap":"trackers","note":"tracker diagnostics and rate-limited reannounce; show adds trackers and tracker_count"},{"since":"1.2.11","version":"1.2.11","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.10","version":"1.2.10","breaking":false,"field":"api.search","cap":"search","note":"daemon search sessions, keyed deduplicated results, providers, browse and grab"},{"since":"1.2.9","version":"1.2.9","breaking":false,"field":"api","note":"unchanged raw response envelope; compiled operation catalogue and per-operation startup/retry policy"},{"since":"1.2.8","version":"1.2.8","breaking":false,"field":"events","note":"NDJSON history/follow with instance and seq, replay cursors and resync metadata"},{"since":"1.2.7","version":"1.2.7","breaking":false,"field":"restart.server","note":"restart drains the daemon and waits for its replacement instance; binary replacement is deferred while busy"},{"since":"1.2.6","version":"1.2.6","breaking":false,"field":"log","cap":"log","note":"app.log, log topic and CLI history/follow; app.stats distinguishes active clients and cumulative connections"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api.origin","cap":"origin","note":"durable open origin, manual-bucket filters, keep-files batch undo_until and restore source"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.queue","cap":"queue","note":"queue capability, force-start, queue movement and positioned torrent rows"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"api.torrents.recheck","cap":"recheck","note":"recheck capability, pending ref acknowledgement and measured verification result"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","cap":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","cap":"deferred_add","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
             "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
@@ -294,7 +300,7 @@ RULES
   - `up` starts only the daemon; `up --ui` also opens the dashboard or TUI.
     `dashboard --view <view> --query <query>` starts then summons the panel, with
     a TUI fallback. `down` shuts down the owner and waits for engine cleanup.
-    `restart` currently requests an engine-slot restart; P1-17 adds upgrades.
+    `restart` requests daemon replacement and waits up to 30 s for a new hello.
     Without a systemd user manager, run `fbittorrent serve` in a terminal/tmux.
     `setup --magnet` writes the static unit and handlers; nothing starts at login.
     `setup --uninstall` removes the unit and keeps saved data.
@@ -335,6 +341,9 @@ DOWNLOAD SOMETHING (the canonical flow)
   Shortcut: `fbittorrent add "<magnet>" --wait --json` does add + wait.
 
 OTHER USEFUL CALLS
+  fbittorrent events --follow --kinds torrent.completed --json # NDJSON; store instance/seq
+  fbittorrent api torrents.list --json            # unchanged API response envelope
+  fbittorrent api --list --json / robot-docs api   # operation args/results and retry policy
   fbittorrent serve                              # foreground daemon; stop with SIGTERM
   fbittorrent list --json                         # every torrent
   fbittorrent stop|start|delete <sel> --json      # {"ok":true,"action":"stop","hashes":[...]}
@@ -368,6 +377,53 @@ JSON SHAPES (stable within contract 1.x)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_hello_caps_have_additive_change_entries() {
+        let value = capabilities_json();
+        let base = ["torrents", "files", "subscribe", "mutations"];
+        for cap in crate::api::ops::app::CAPS.iter().filter(|cap| !base.contains(cap)) {
+            assert!(value["changes"].as_array().unwrap().iter().any(|row| row["cap"] == *cap), "missing changes entry for {cap}");
+        }
+        for fixture in [include_str!("../contracts/ipc/v1/hello.ndjson"), include_str!("../contracts/ipc/v1/errors.ndjson")] {
+            for line in fixture.lines() {
+                let row: serde_json::Value = serde_json::from_str(line).unwrap();
+                if let Some(caps) = row["frame"]["result"].get("caps") {
+                    assert_eq!(*caps, value["caps"]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn additive_contract_versions_are_unique_and_documented() {
+        let value = capabilities_json();
+        let docs = include_str!("../docs/IPC.md");
+        let mut patches = std::collections::BTreeMap::new();
+        let changes = value["changes"].as_array().unwrap();
+        let mut previous = u32::MAX;
+        for row in changes.iter().filter(|row| row["since"] != "1.2.0") {
+            let version = row["since"].as_str().unwrap();
+            let patch: u32 = version.strip_prefix("1.2.").unwrap().parse().unwrap();
+            let field = row["field"].as_str().unwrap();
+            assert_eq!(row["version"], version, "since/version mismatch for {field}");
+            assert_eq!(row["breaking"], false, "patch must be additive: {field}");
+            assert!(patch > 0 && patch < previous, "changes must be newest first: {field}");
+            previous = patch;
+            assert!(patches.insert(patch, field).is_none(), "duplicate contract patch {version}");
+            assert!(docs.lines().any(|line| line == format!("| `{version}` | `{field}` |")),
+                "undocumented contract patch {version}: {field}");
+        }
+        let latest = *patches.keys().next_back().unwrap();
+        assert_eq!(patches.keys().copied().collect::<Vec<_>>(), (1..=latest).collect::<Vec<_>>());
+        assert_eq!(CONTRACT_VERSION, format!("1.2.{latest}"));
+        let documented = docs.lines().filter(|line| line.starts_with("| `1.2.")).count();
+        assert_eq!(documented, patches.len(), "stale or duplicate documented contract patches");
+        let limits = value["commands"].as_array().unwrap().iter()
+            .find(|row| row["name"] == "limits").unwrap();
+        let limits_change = changes.iter().find(|row| row["field"] == "limits").unwrap();
+        assert_eq!(limits["since"], limits_change["since"]);
+    }
 
     #[test]
     fn native_seed_sentinel_is_documented_as_unknown() {
@@ -410,7 +466,7 @@ mod tests {
             assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
         }
         assert!(guide.contains("fbittorrent serve"));
-        for limitation in ["no idle exit yet", "on demand", "API v1"] {
+        for limitation in ["idle_exit_secs", "on demand", "API v1", "api.sock", "glance pauses"] {
             assert!(guide.contains(limitation));
         }
         for (code, name) in [(70, "panic"), (75, "upgrade")] {
@@ -544,7 +600,7 @@ fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
             let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
             let old=metadata.iter().find(|m|m.name==name);
             let starts=matches!(name.as_str(),"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
-            out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":"1.2.0"}));
+            out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":if name=="limits" {"1.2.14"} else {"1.2.0"}}));
             walk(child,&name,metadata,out);
         }
     }

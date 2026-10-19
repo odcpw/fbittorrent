@@ -242,6 +242,11 @@ def measure_active(args, case):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--daemon", action="store_true", help="measure the isolated daemon subscription bus")
+    parser.add_argument("--matrix", action="store_true", help="daemon: 10/100 torrents x 0/1/8 subscribers")
+    parser.add_argument("--torrents", type=int, default=10)
+    parser.add_argument("--subscribers", type=int, default=1)
+    parser.add_argument("--seconds", type=float, default=60)
     parser.add_argument("--runs", type=int, help="default 3 for a gate/baseline, 20 for latency measurement")
     parser.add_argument("--idle-seconds", type=float, default=10)
     parser.add_argument("--vpn", help="require this interface in a non-gate measurement")
@@ -251,7 +256,10 @@ def main():
     group.add_argument("--write-baseline", type=Path, help="write a first baseline from exactly three measured runs")
     args = parser.parse_args()
     args.binary = args.binary.resolve()
-    args.runs = args.runs if args.runs is not None else 3 if args.baseline or args.write_baseline else 20
+    args.runs = args.runs if args.runs is not None else 3 if args.daemon or args.baseline or args.write_baseline else 20
+    if args.daemon:
+        from resources_daemon import main as daemon_main
+        return daemon_main(args)
     if args.runs < 1 or args.idle_seconds <= 0 or (args.write_baseline and args.runs != 3):
         parser.error("positive runs/idle window required; a baseline requires exactly three runs")
     if args.vpn and (args.baseline or args.write_baseline):

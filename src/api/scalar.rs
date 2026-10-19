@@ -144,9 +144,11 @@ closed_enum!(ByeReason {
 /// should ignore unsupported topics rather than inventing a store shape.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Topic {
+    Log,
     Summary,
     Torrents,
     Files(Hash),
+    Search(u64),
     Network,
     Settings,
     Events,
@@ -154,12 +156,14 @@ pub enum Topic {
 impl Topic {
     pub fn as_str(&self) -> String {
         match self {
+            Self::Log => "log".into(),
             Self::Summary => "summary".into(),
             Self::Torrents => "torrents".into(),
             Self::Network => "network".into(),
             Self::Settings => "settings".into(),
             Self::Events => "events".into(),
             Self::Files(h) => format!("torrent:{h}.files"),
+            Self::Search(id) => format!("search:{id}"),
         }
     }
 }
@@ -172,11 +176,15 @@ impl<'de> Deserialize<'de> for Topic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         match s.as_str() {
+            "log" => Ok(Self::Log),
             "summary" => Ok(Self::Summary),
             "torrents" => Ok(Self::Torrents),
             "network" => Ok(Self::Network),
             "settings" => Ok(Self::Settings),
             "events" => Ok(Self::Events),
+            _ if s.starts_with("search:") => s[7..].parse::<u64>()
+                .ok().filter(|id| *id > 0).map(Self::Search)
+                .ok_or_else(|| serde::de::Error::custom("invalid search topic")),
             _ => s
                 .strip_prefix("torrent:")
                 .and_then(|s| s.strip_suffix(".files"))

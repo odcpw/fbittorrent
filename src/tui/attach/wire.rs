@@ -1,4 +1,4 @@
-//! Small bounded API connection for presence; the compatibility data path stays separate.
+//! Bounded API framing for the TUI's single multiplexed connection.
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -47,7 +47,7 @@ impl Wire {
         if credentials.uid != unsafe { libc::geteuid() } {
             bail!("API peer belongs to another user");
         }
-        stream.set_read_timeout(Some(Duration::from_millis(250)))?;
+        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
         stream.set_write_timeout(Some(Duration::from_secs(1)))?;
         let mut wire = Self {
             reader: BufReader::new(stream),
@@ -81,20 +81,69 @@ impl Wire {
     pub(super) fn interrupt(&self) -> Result<UnixStream> {
         Ok(self.reader.get_ref().try_clone()?)
     }
-    pub(super) fn call(&mut self, op: &str, args: Value) -> Result<Value> {
+    pub(super) fn encode(value: &Value) -> Result<Vec<u8>> {
+        struct Capped(Vec<u8>);
+        impl Write for Capped {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.0.len().saturating_add(bytes.len()) >= crate::api::LINE_IN {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "API request exceeds line limit",
+                    ));
+                }
+                self.0.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut encoded = Capped(Vec::new());
+        serde_json::to_writer(&mut encoded, value)?;
+        encoded.0.push(b'\n');
+        Ok(encoded.0)
+    }
+    pub(super) fn start(
+        &mut self,
+        op: &str,
+        args: Value,
+        reference: Option<&crate::api::MutationRef>,
+    ) -> Result<u64> {
         self.id = self.id.checked_add(1).context("API request id exhausted")?;
         let mut request = json!({"id":self.id,"op":op,"args":args});
         if let Some(instance) = &self.instance {
             request["instance"] = json!(instance);
         }
-        let _: crate::api::Request = serde_json::from_value(request.clone())?;
-        let mut bytes = serde_json::to_vec(&request)?;
-        bytes.push(b'\n');
-        anyhow::ensure!(
-            bytes.len() <= crate::api::LINE_IN,
-            "API request exceeds line limit"
-        );
+        if let Some(reference) = reference {
+            request["ref"] = json!(reference);
+        }
+        let bytes = Self::encode(&request)?;
+        let typed: crate::api::Request = serde_json::from_value(request.clone())?;
+        crate::api::validation::Validate::validate(&typed)?;
         self.reader.get_mut().write_all(&bytes)?;
+        Ok(self.id)
+    }
+    pub(super) fn result(op: &str, frame: &Value) -> Result<Value> {
+        use crate::api::validation::Validate;
+        if frame["ok"] != true {
+            let error: crate::api::Error = serde_json::from_value(frame["error"].clone())?;
+            return Err(RemoteError(error).into());
+        }
+        if op == "hello" {
+            if let Some(protocol) = frame["result"]["proto"].as_u64().filter(|protocol|*protocol!=crate::api::PROTO) {
+                return Err(RemoteError(crate::api::Error {
+                    code:crate::api::ErrorCode::ProtoUnsupported,
+                    message:"proto unsupported".into(),retryable:false,hint:None,
+                    details:Some(serde_json::Map::from_iter([("server_proto".into(),json!(protocol))])),
+                }).into());
+            }
+        }
+        let reply = crate::api::Reply::decode(op, frame["result"].clone())?;
+        reply.validate()?;
+        Ok(frame["result"].clone())
+    }
+    pub(super) fn call(&mut self, op: &str, args: Value) -> Result<Value> {
+        let id = self.start(op, args, None)?;
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
             let Some(frame) = self.receive()? else {
@@ -103,15 +152,10 @@ impl Wire {
             if frame["ev"] == "bye" {
                 bail!("fbittorrent stopped");
             }
-            if frame.get("id").and_then(Value::as_u64) != Some(self.id) {
+            if frame.get("id").and_then(Value::as_u64) != Some(id) {
                 continue;
             }
-            if frame["ok"] != true {
-                let error: crate::api::Error = serde_json::from_value(frame["error"].clone())?;
-                return Err(RemoteError(error).into());
-            }
-            crate::api::Reply::decode(op, frame["result"].clone())?;
-            return Ok(frame["result"].clone());
+            return Self::result(op, &frame);
         }
         bail!("API {op} timed out; outcome is unconfirmed")
     }
@@ -154,5 +198,11 @@ impl Wire {
                 return result.map(Some).context("invalid API frame");
             }
         }
+    }
+}
+
+impl Drop for Wire {
+    fn drop(&mut self) {
+        let _ = self.reader.get_mut().shutdown(std::net::Shutdown::Both);
     }
 }

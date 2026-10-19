@@ -7,6 +7,16 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("trackers",include_str!("../../contracts/ipc/v1/trackers.ndjson")),
+    ("origin",include_str!("../../contracts/ipc/v1/origin.ndjson")),
+    ("queue",include_str!("../../contracts/ipc/v1/queue.ndjson")),
+    ("search", include_str!("../../contracts/ipc/v1/search.ndjson")),
+    ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
+    ("clipboard", include_str!("../../contracts/ipc/v1/clipboard.ndjson")),
+    ("peer-port", include_str!("../../contracts/ipc/v1/peer-port.ndjson")),
+    ("disk", include_str!("../../contracts/ipc/v1/disk.ndjson")),
+    ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
+    ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("free-space", include_str!("../../contracts/ipc/v1/free-space.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
@@ -270,7 +280,7 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
             if child.is_null() {
                 if path.contains("/changed/")
                     || key == "id" && map.get("ok") == Some(&Value::Bool(false))
-                    || key == "bps" && path.ends_with("/args")
+                    || matches!(key.as_str(), "bps" | "download_bps" | "upload_bps" | "alt_download_bps" | "alt_upload_bps") && path.ends_with("/args")
                 {
                     continue;
                 }
@@ -437,6 +447,16 @@ fn operation_event_error_and_document_coverage() {
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "torrents.trackers",
+        "torrents.reannounce",
+        "torrents.force_start",
+        "torrents.queue_move",
+        "search.start", "search.stop", "search.providers", "search.set_provider",
+        "search.install", "search.browse_sources", "search.browse", "search.grab",
+        "torrents.recheck",
+        "app.clipboard.dismiss",
+        "app.log",
+        "app.stats",
         "app.free_space", // P6-11: planned additive operation.
         "app.settings.get",
         "app.settings.set",
@@ -448,6 +468,8 @@ fn operation_event_error_and_document_coverage() {
         "app.restart",
         "app.network",
         "transfer.info",
+        "transfer.set_limits",
+        "transfer.set_alt",
         "torrents.list",
         "torrents.get",
         "torrents.add",

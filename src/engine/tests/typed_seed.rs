@@ -319,3 +319,90 @@ fn typed_seed_dormant_checks_once_then_retains_handle() {
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn recheck_dormant_exactly_one_check() {
+    let (app, directory, hash, counts) = fixture(true);
+    assert_eq!(counts.snapshot(), (0,0,0));
+    let dispatcher = app.dispatcher();
+    let EngineResult::Recheck(batch) = dispatcher.execute(EngineOp::RecheckBatch { hashes: vec![hash.clone()] }).unwrap() else { panic!("recheck receipt"); };
+    let began = std::time::Instant::now();
+    let report = loop {
+        if let Some(report) = batch.result() { break report; }
+        assert!(began.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(report.rechecked, vec![hash.clone()]);
+    assert_eq!(report.have_bytes[&hash],5);
+    assert!(report.failed.is_empty());
+    assert_eq!(counts.snapshot(), (1,1,5), "one storage create and one 5-byte hash read");
+    println!("dormant recheck storage creates/reads/bytes={:?}",counts.snapshot());
+    drop(dispatcher); drop(app); std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn failed_recheck_cannot_restore_the_old_completion_claim() {
+    let (app,directory,hash,_counts) = fixture(false);
+    let dispatcher=app.dispatcher();
+    let path=directory.join(format!("{hash}.torrent"));
+    let bytes=std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();std::fs::create_dir(&path).unwrap();
+    let EngineResult::Recheck(batch)=dispatcher.execute(EngineOp::RecheckBatch {hashes:vec![hash.clone()]}).unwrap() else {panic!("receipt");};
+    let began=std::time::Instant::now();
+    while batch.result().is_none() {
+        assert!(began.elapsed()<Duration::from_secs(5));std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(batch.result().unwrap().failed.len(),1);
+    dispatcher.runtime.block_on(dispatcher.inner.maintain(dispatcher.runtime.cx())).unwrap();
+    let row=dispatcher.runtime.block_on(dispatcher.info(dispatcher.runtime.cx())).unwrap().pop().unwrap();
+    assert_eq!(row.state,TorrentState::Error);
+    assert!(row.completed_at.is_none());
+    assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].completion_on,0);
+    std::fs::remove_dir(&path).unwrap();std::fs::write(path,bytes).unwrap();
+    println!("failed metainfo cache write: failed receipt, error row, completion stays invalidated under reconciliation");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn force_on_finished_without_saved_timestamp_is_refused() {
+    let (app,directory,hash,_counts)=fixture(false);
+    let dispatcher=app.dispatcher();
+    dispatcher.runtime.block_on(async {
+        let mut ledger=OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(),dispatcher.runtime.cx()).await.unwrap();
+        ledger.records[0].completion_on=0;
+    });
+    let failure=dispatcher.execute(EngineOp::ForceStart{hashes:HashSelection::Hashes(vec![hash.clone()]),on:true}).unwrap_err();
+    assert_eq!(failure.downcast_ref::<InvalidTorrentState>().unwrap().reason,"complete_no_seed");
+    let mut ledger=dispatcher.runtime.block_on(OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(),dispatcher.runtime.cx())).unwrap();
+    ledger.records[0].force=true;
+    drop(ledger);
+    dispatcher.runtime.block_on(dispatcher.inner.maintain(dispatcher.runtime.cx())).unwrap();
+    let ledger=read_ledger(&directory.join("torrents.json")).unwrap();
+    assert!(!ledger.records[0].force,"completion clears force durably");
+    println!("verified-complete handle refuses force before its completion timestamp is saved; completion also clears a prior force intent");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn undo_rechecks_real_data_once_without_redownload() {
+    let (app,directory,hash,counts)=fixture(true);
+    let dispatcher=app.dispatcher();
+    assert_eq!(counts.snapshot(),(0,0,0));
+    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}).unwrap();
+    assert!(dormant_rows(&dispatcher).is_empty());
+    dispatcher.execute(EngineOp::RestoreUndo {hash:hash.clone()}).unwrap();
+    let deadline=std::time::Instant::now()+Duration::from_secs(10);
+    loop {
+        let row=row(&dispatcher);
+        if row.state==TorrentState::Done && row.checked {break;}
+        assert!(std::time::Instant::now()<deadline,"undo row: {row:?}");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(counts.snapshot(),(1,1,5),"restore must perform one real hash check");
+    assert_eq!(std::fs::read(directory.join("downloads/hello.txt")).unwrap(),b"hello");
+    println!("undo: dormant removed, appended and checked; physical storage creates=1 reads=1 bytes=5, original payload untouched, no peers");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[path = "fast_resume.rs"]
+mod fast_resume;
