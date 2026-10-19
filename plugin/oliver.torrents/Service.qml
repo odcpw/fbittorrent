@@ -25,6 +25,7 @@ Item {
   readonly property string runtimeDir: runtimeOverride || Quickshell.env("XDG_RUNTIME_DIR")
   readonly property string bin: String(settings.binary || "fbittorrent")
   readonly property bool online: status.ok === true && status.running !== false
+  property bool resultUnknown:false
   property bool reconnecting: false
   property bool stoppedRecently: false
   property string byeReason: ""
@@ -55,6 +56,12 @@ Item {
   function sortBy(key) {if(sortKey===key)sortReverse=!sortReverse;else{sortKey=key;sortReverse=false}}
   function rowPending(hash) {var revision=actionRevision;return !!store.pendingByHash[hash]}
   function rowFailed(hash) {var revision=actionRevision;return !!store.failedByHash[hash]}
+  function pendingAction(hash) {
+    if(!client)return null
+    var actions=client.actions,refs=Object.keys(actions)
+    for(var i=0;i<refs.length;i++){var action=actions[refs[i]],args=action.args || {};if(action.status==="pending" && ((args.hashes || []).indexOf(hash)>=0 || args.hash===hash))return action}
+    return null
+  }
   function pendingGlyph(hash) {var revision=actionRevision;return store.pendingByHash[hash] ? (Commons.Style.reduceMotion ? "…" : "⠋⠙⠹⠸⠼⠴⠦⠧"[pendingFrame]) : ""}
   function clearFailures(){if(client){store.clearFailures(client.actions);actionRevision++}}
   function notify(text){lastMessageText=text;lastMessageAt=Date.now();toast={text:text,until:Date.now()+5000};toastTimer.restart()}
@@ -114,6 +121,7 @@ Item {
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     pending = c.state().pending
+    resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     store.syncActions(c.actions);actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
@@ -136,6 +144,7 @@ Item {
     if (!client) return false
     if (cap && client.caps.indexOf(cap) < 0) {
       lastError = "This daemon does not support " + cap
+      actionStatus=lastError;noticeTimer.restart()
       return false
     }
     return client.request(op, args, {mutating:true, callback:callback})
@@ -205,6 +214,7 @@ Item {
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
     Quickshell.execDetached([bin,"up"])
   }
+  function openDashboardFilter(filter) { if(shell)shell.summon("oliver.torrents",JSON.stringify({view:"torrents",filter:filter})) }
   function openDashboard(view) {
     if (!shell || !shell.summon("oliver.torrents",JSON.stringify({view:view || "torrents"}))) {
       actionStatus="Dashboard is not available; update the plugin"; noticeTimer.restart()
@@ -263,7 +273,7 @@ Item {
   }
   Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify({key:root.sortKey,reverse:root.sortReverse})+"\n")}
   Timer {id:toastTimer;interval:5000;onTriggered:root.toast=null}
-  Timer {interval:125;repeat:true;running:root.dashboardVisible && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
+  Timer {interval:125;repeat:true;running:(root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
   Socket {
     id: socket
     path: root.runtimeDir + "/fbittorrent/api.sock"
