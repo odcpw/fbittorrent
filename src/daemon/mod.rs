@@ -7,6 +7,7 @@ mod runtime_dir;
 mod sdnotify;
 mod signals;
 mod upgrade;
+mod test_ready;
 pub mod slot;
 
 use crate::{
@@ -387,6 +388,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     // P1-13 owns desktop notifications. sd_notify remains active when
     // NOTIFY_SOCKET is set, independently of the notification preference.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        test_ready::wait(&daemon, &directory)?;
         notify.send("READY=1")?;
         eprintln!("INFO daemon ready state=starting");
         std::thread::scope(|scope| {

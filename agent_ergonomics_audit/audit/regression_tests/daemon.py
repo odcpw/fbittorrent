@@ -5,7 +5,8 @@ Run locally or in CI with --no-systemd (default), or use --systemd for disposabl
 transient units and disposable static-unit links. Static-unit fixtures verify
 all private XDG paths and working directory before launch and in the child.
 P1-06 adds ApiConn. --serve-fixture provides owned real-engine UI preconditions
-through visual_fixture; EOF tears down every child. There is no --self-test mode.
+through managed recipes; stopping the launcher or closing an initially open
+stdin tears down every child. There is no --self-test mode.
 """
 import argparse
 import base64
@@ -142,7 +143,9 @@ class NotifySocket:
 
     def receive(self, timeout=5):
         self.socket.settimeout(timeout)
-        return self.socket.recv(65536).decode()
+        value=self.socket.recv(65536).decode()
+        self.received_at=time.monotonic()
+        return value
 
     def close(self):
         self.socket.close()
@@ -3241,6 +3244,7 @@ from daemon_notify import (notify_completed, notify_action_open, notify_action_d
     notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
 
 from daemon_log import log_injected_error, log_follow, hello_counters, log_down_never_starts
+from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check
 from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
 from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
@@ -4549,6 +4553,7 @@ def recheck_drops_resume_file(binary,systemd):
 
 CASES = {function.__name__: function for function in
          (resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
+          lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,
@@ -4598,8 +4603,8 @@ def main():
     parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
     parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
-    parser.add_argument("--case", choices=CASES,
-                        help="run one named case; systemd_without_bus_address requires --systemd")
+    parser.add_argument("--case", action="append", choices=CASES,
+                        help="run named cases (repeatable); systemd_without_bus_address requires --systemd")
     parser.add_argument("--contract-validator", type=Path,
                         help="fbittorrent Rust unit-test executable for live P1-05 frame validation")
     mode = parser.add_mutually_exclusive_group()
@@ -4623,17 +4628,17 @@ def main():
         parser.error("fixture worker/throttle requires --serve-fixture")
     if args.contract_validator:
         os.environ["FBT_API_CONTRACT_VALIDATOR"] = str(args.contract_validator.resolve())
-    if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":
+    if "install_atomic" in (args.case or []) and os.environ.get("FBT_TEST_INSTALL") != "1":
         parser.error("install_atomic requires FBT_TEST_INSTALL=1 and the outer release-lock/memory-scope wrapper")
-    if args.case == "deferred_add" and os.environ.get("FBT_TEST_VPN") != "1":
+    if "deferred_add" in (args.case or []) and os.environ.get("FBT_TEST_VPN") != "1":
         parser.error("deferred_add requires FBT_TEST_VPN=1 (owned VPN namespace fixture)")
-    if args.case in SYSTEMD_CASES and not args.systemd:
+    if set(args.case or []) & SYSTEMD_CASES and not args.systemd:
         parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in (args.case if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")

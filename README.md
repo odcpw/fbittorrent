@@ -604,3 +604,9 @@ stdin does not stop it. Closing a pipe that was open at launch supports UI
 teardown. A guardian removes both private peer daemons even after launcher
 SIGKILL. --systemd uses only disposable transient units. Global throttle API
 wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
+
+Completed stop-on-complete records restore as `done, checked:false` without
+opening their payloads for hashing. `seed` and nonempty file-selection actions
+verify them before use; `open` only stats the saved target and stays dormant.
+Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
+`delete --files --yes` can remove a dormant record without creating a live handle.

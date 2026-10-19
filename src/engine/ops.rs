@@ -335,10 +335,20 @@ impl EngineDispatcher {
             EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
         ) {
             for hash in &hashes {
-                self.inner.handle(hash)?;
+                if !matches!(op, EngineOp::Delete { .. }) || !self.inner.dormant(hash) {
+                    self.inner.handle(hash)?;
+                }
             }
         }
         if let EngineOp::Delete { files, .. } = &op {
+            let mut dormant_files=HashMap::new();
+            if *files {
+                for record in ledger.records.iter().filter(|record|hashes.contains(&record.hash)) {
+                    if self.inner.handle(&record.hash).is_err() {
+                        dormant_files.insert(record.hash.clone(),self.inner.dormant_delete_plan(record)?);
+                    }
+                }
+            }
             let replacement = Ledger {
                 generation: ledger.generation.clone(),
                 migrated_legacy: ledger.migrated_legacy,
@@ -358,6 +368,8 @@ impl EngineDispatcher {
                         .session
                         .delete(cx, TorrentIdOrHash::Id(handle.id()), *files)
                         .await?;
+                } else if let Some(plan)=dormant_files.remove(&hash) {
+                    plan.execute(cx).await?;
                 }
                 let _ = rqbit_runtime::fs::remove_file(self.inner.torrent_path(&hash)?).await;
             }

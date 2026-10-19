@@ -139,6 +139,7 @@ impl Inner {
             .await?
             .into_handle()
             .context("torrent admission did not return a handle")?;
+        eprintln!("DEBUG engine initial validation admitted source=engine hash={}", record.hash);
         // The bus may currently have no waiter for this newly resolved hash.
         // Wake its engine-wide observer so it arms the new handle before sampling.
         self.bus_changed.notify_waiters();

@@ -119,7 +119,7 @@ def umbrella_flags():
                     f"with Case({suite!r}, 'fixture') as case:\n"
                     " case.step('dispatch fixture', 'fixture selected').ok('fixture ran')\n")
         for name, suite in (("fbtlog_test.py", "fbtlog_test"), ("native.py", "native"),
-                            ("ci_test.py", "ci_gates"), ("resources.py", "resources")):
+                            ("ci_test.py", "ci_gates"), ("daemon.py", "daemon"), ("resources.py", "resources")):
             (regression / name).write_text(write_suite(suite))
         (regression / "resources.py").write_text(write_suite("resources").replace(
             "with Case('resources',", "with Case('daemon_budget' if '--daemon' in sys.argv else 'resources',"))
