@@ -6,10 +6,10 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 pub(crate) fn read(daemon:&Daemon, hash:&Hash)->ApiResult<Pieces> {
     // Establish ledger identity first, including parked/dormant records.
     let EngineResult::Detail(detail)=daemon.execute(EngineOp::Get {hash:hash.to_string()}).map_err(|e|{let mut failure=engine_error(e);if failure.code==ErrorCode::NotFound {failure.details=Some(serde_json::Map::from_iter([("hash".into(),serde_json::json!(hash))]));}failure})? else {unreachable!("detail result")};
+    let mut torrent=super::torrents::torrent(detail.torrent)?;
     let slot=daemon.slot.read().unwrap_or_else(|e|e.into_inner());
     let Slot::Running(app)=&slot.slot else {return Err(error(ErrorCode::InvalidState,"verified pieces unavailable without a live engine",None));};
-    let snapshot=app.dispatcher().pieces_snapshot(hash.as_str()).map_err(|_|error(ErrorCode::InvalidState,"verified pieces unavailable until a live torrent finishes checking",None))?;
-    let mut torrent=super::torrents::torrent(detail.torrent)?;
+    let snapshot=app.dispatcher().pieces_snapshot(hash.as_str()).map_err(|_|error(ErrorCode::InvalidState,Pieces::unavailable_reason(torrent.state,torrent.checked),None))?;
     daemon.watch.lock().unwrap().decorate(std::slice::from_mut(&mut torrent));
     encode(snapshot,torrent.playable.as_ref())
 }
