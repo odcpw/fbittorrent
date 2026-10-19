@@ -2,6 +2,7 @@
 use super::*;
 use std::sync::Mutex as StdMutex;
 mod files;
+mod admission;
 #[derive(Debug)]
 pub(crate) struct Busy;
 impl std::fmt::Display for Busy {
@@ -119,7 +120,7 @@ impl Inner {
                 .handle(hash)
                 .ok()
                 .filter(|handle| handle.have_pieces_snapshot().is_some());
-            if handle.is_none() || self.rechecks.active(hash) {
+            if (handle.is_none() && !self.dormant(hash)) || self.rechecks.active(hash) {
                 return Err(InvalidTorrentState {
                     hash: hash.clone(),
                     reason: "not_initialized",
@@ -268,7 +269,9 @@ impl Inner {
     }
     async fn perform_move(self: &Arc<Self>, cx: &Cx, record: &Record, target: &Path) -> Result<()> {
         let hash = &record.hash;
-        let handle = self.handle(hash)?;
+        // Initialization is part of the owned background move, after claiming
+        // the record and the mutation lock. The request still returns promptly.
+        let handle = self.move_handle(cx, record).await?;
         if !handle.is_paused() {
             self.session.pause(cx, &handle).await?;
         }
