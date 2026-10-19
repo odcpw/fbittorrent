@@ -619,3 +619,26 @@ logs **13/13**, including visible-connect, hide and old-server declarations
 Evidence: `target/test-logs/fbt-m1a-kug/`, mirrored under
 `/tmp/fbt-track-a-evidence/fbt-m1a-kug/`. No live shell or owner state was used;
 no all.sh between track commits. All requested criteria met; no follow-up.
+
+P5-01 acceptance after the priority repair: `FBT_BEAD=fbt-p5-01-c1a python3
+/tmp/fbt-track-a-run.py cli_cases peers_local_swarm peer_rates_move contract_hello
+contract_errors` passes **4/4 foreground and 4/4 systemd** (`foreground/`,
+`systemd/`). The observer reports exactly two connected peers, seed flags
+false/true and seeds=1; CLI show agrees; a paused torrent omits seeds. Real peer
+counters and positive rates move in RPC and one-second addr-keyed deltas (one
+observed sample 6,998 B/s foreground, 31,634 B/s systemd). `peers.ndjson` now
+contains both seed and leecher; a minimal neighbour change keys the Quickshell
+store by addr and handles the peer read result, with no Peers UI renderer added.
+`qs store` passes **26/26** shared-corpus/store cases (`qs-store/`); `full` once
+passes **384/0/3 ignored** (`full-final/`), including typed fixture round trips.
+The required full fork command (`fork` without a filter) exits **0**, with
+**139 passed/0 failed/3 ignored** across the two crates (`fork-full/`). Its
+unchanged generic wrapper scan is retained **failed** because eight deliberate
+existing panic-injection diagnostics from spawn_utils/{owner_tests,
+owned_frame_tests}.rs match the blanket worker-panic expression; the focused
+peer_stats_seed_flag test passes without a panic. No scan was weakened or
+excluded. Follow-up for the orchestrator: classify deliberate fork fault
+injection diagnostics without suppressing unexpected worker panics. All three
+P5-01 acceptance criteria are met; a globally green wrapper scan is not claimed.
+Evidence is under `target/test-logs/fbt-p5-01-c1a/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p5-01-c1a/`. UI rendering remains P5-02/C/D.

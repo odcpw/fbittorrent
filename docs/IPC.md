@@ -74,7 +74,6 @@ when a required cap is missing.
 | Cap | Operations and topics it covers | Since |
 |---|---|---|
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
-| `peers` | `torrents.peers`, topic `torrent:<h>.peers`, connected `Torrent.seeds` | P5-01 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |

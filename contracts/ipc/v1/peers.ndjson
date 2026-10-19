@@ -1,9 +1,9 @@
 {"dir":"c2s","frame":{"id":1,"op":"torrents.peers","args":{"hash":"1212121212121212121212121212121212121212"}}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"peers":[{"addr":"127.0.0.1:49152","conn":"tcp_mse","incoming":false,"state":"live","downloaded":16384,"uploaded":0,"seed":true}]}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"peers":[{"addr":"127.0.0.1:49152","conn":"tcp_mse","incoming":false,"state":"live","downloaded":16384,"uploaded":0,"seed":true},{"addr":"127.0.0.1:49153","conn":"tcp","incoming":true,"state":"live","downloaded":0,"uploaded":16384,"seed":false}]}}}
 {"dir":"c2s","frame":{"id":2,"op":"subscribe","args":{"topics":["torrent:1212121212121212121212121212121212121212.peers"]}}}
 {"dir":"s2c","frame":{"id":2,"ok":true,"result":{"sub":1,"topics":["torrent:1212121212121212121212121212121212121212.peers"]}}}
-{"dir":"s2c","frame":{"ev":"snapshot.begin","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":1,"count":1,"reason":"subscribe"}}
-{"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":2,"items":[{"addr":"127.0.0.1:49152","conn":"tcp_mse","incoming":false,"state":"live","downloaded":16384,"uploaded":0,"seed":true}]}}
+{"dir":"s2c","frame":{"ev":"snapshot.begin","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":1,"count":2,"reason":"subscribe"}}
+{"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":2,"items":[{"addr":"127.0.0.1:49152","conn":"tcp_mse","incoming":false,"state":"live","downloaded":16384,"uploaded":0,"seed":true},{"addr":"127.0.0.1:49153","conn":"tcp","incoming":true,"state":"live","downloaded":0,"uploaded":16384,"seed":false}]}}
 {"dir":"s2c","frame":{"ev":"snapshot.end","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":3}}
 {"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"torrent:1212121212121212121212121212121212121212.peers","rev":4,"changed":{"127.0.0.1:49152":{"downloaded":32768,"dl_bps":16384,"ul_bps":0}}}}
 {"dir":"c2s","frame":{"id":3,"op":"unsubscribe","args":{"sub":1}}}
