@@ -297,7 +297,7 @@ creates no second ledger record.
 | `Summary` | `dl_bps?`, `ul_bps?`, `counts: {total, downloading, stalled, metadata, checking, queued, paused, done, seeding, waiting_vpn, error, staged, ready}` (all `u64`), `alt: bool`, `limits: Limits`, `network: {state: enum(ready\|waiting\|off), message: str, interface: str?}`, `daemon: {state: enum(starting\|running\|parked\|stopping), idle_exit_in_s: u64?, busy_reasons: [open(downloading\|seeding\|parked_waiting\|interactive\|search\|mutation)], upgrade_pending: bool}`, `top: [{hash, name, state, progress?, dl_bps?, eta_s?, playable?}]` (≤ 5), `disk: {free_bytes: bytes?, needed_bytes: bytes, low: bool}` (P5-07; the one place free space lives), `history: [u64]?` (last 60 download samples, P6-03) |
 | `Limits` | `download_bps?`, `upload_bps?`, `alt_download_bps?`, `alt_upload_bps?` |
 | `NetworkState` | `selection: str?`, `interface: str?`, `ready: bool`, `message: str` |
-| `Settings` | `max_active_downloads: u64`, `peer_encryption: enum(off\|prefer\|require)`, `network_interface: str?`, `save_path: str`, `seed_by_default: bool`, `autostart: bool`, `idle_exit_secs: u64` (0 disables the idle net), `notify: bool`, `timeout_secs: u64`, `handler: enum(add\|confirm)`, `open_command: str` (default `xdg-open`), `clipboard_watch: bool`, `peer_port: u64`, `show_quality: str`, `download_limit_bps?`, `upload_limit_bps?`, `alt_download_limit_bps?`, `alt_upload_limit_bps?`, `alt_limits_on: bool` (the persisted turtle switch; `transfer.set_alt` writes it), `restart_class: [str]` (the keys whose change restarts the engine). Every key is also the `config.toml` key: one vocabulary for the file, the API and `fbittorrent settings` |
+| `Settings` | `max_active_downloads: u64`, `peer_encryption: enum(off\|prefer\|require)`, `network_interface: str?`, `save_path: str`, `seed_by_default: bool`, `autostart: bool`, `idle_exit_secs: u64` (0 disables the idle net), `notify: bool`, `timeout_secs: u64`, `handler: enum(add\|confirm)`, `open_command: str` (default `xdg-open`), `clipboard_watch: bool`, `reduce_motion?: bool` (absent = false), `peer_port: u64`, `show_quality: str`, `download_limit_bps?`, `upload_limit_bps?`, `alt_download_limit_bps?`, `alt_upload_limit_bps?`, `alt_limits_on: bool` (the persisted turtle switch; `transfer.set_alt` writes it), `restart_class: [str]` (the keys whose change restarts the engine). Every key is also the `config.toml` key: one vocabulary for the file, the API and `fbittorrent settings` |
 | `LogEntry` | `seq: u64`, `ts: ts`, `level: enum(error\|warn\|info\|debug)`, `source: open(daemon\|engine\|queue\|api\|search\|rss\|shows\|imdb\|notify\|network\|watch\|clipboard)`, `hash?`, `message: str` |
 
 ## Unknown values
@@ -431,7 +431,7 @@ validation failures are recorded without a new mask or deferral.
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
-`cargo test --locked api::fixtures` loads all six files. roundtrip deserializes
+`cargo test --locked api::fixtures` loads all seven files. roundtrip deserializes
 and reserializes every typed line and checks successful results using their
 request operation. no_sentinels enforces omission/sentinel rules. Coverage checks
 pin the bead's 20 operations literally, require every A.8 event and all 16 error
@@ -440,6 +440,22 @@ all ten torrent states. Documentation examples are parsed and compared to fixtur
 records, strict input, pointer errors and explicit null versus omission.
 This is contract proof. P1-06 adds real daemon replay; P2-02 adds Store reducer
 replay. A green typed fixture test alone is not live daemon or UI acceptance.
+
+
+P4-06 adds the optional boolean `Settings.reduce_motion` to the `settings` state
+object. Omission means `false`; `true` disables hover-name scrolling in the TUI,
+and `false` enables its single pass. A present value must be a JSON boolean
+(`null`, numbers and strings are invalid). This is the same `reduce_motion` key
+as `config.toml` and the TUI Settings toggle. It is a UI preference and never
+restarts the engine. No new capability is introduced: the field belongs to the
+existing `settings` capability, advertised when that service is implemented.
+Old clients can ignore it, and old daemons can omit it. Whole-state replacement
+with the field absent resets the preference to `false`, including after a true
+value. `settings-motion.ndjson` covers absent, true, false and absent again.
+
+```ndjson
+{"dir":"s2c","frame":{"data":{"alt_limits_on":false,"autostart":false,"clipboard_watch":false,"handler":"confirm","idle_exit_secs":300,"max_active_downloads":3,"notify":true,"open_command":"xdg-open","peer_encryption":"prefer","peer_port":6881,"reduce_motion":true,"restart_class":["network_interface","peer_port"],"save_path":"/tmp/fbt-fixture/downloads","seed_by_default":false,"show_quality":"1080p","timeout_secs":20},"ev":"state","rev":2,"sub":1,"topic":"settings"}}
+```
 
 ## Value validation
 
@@ -500,3 +516,13 @@ the saved queue intent; the deferred marker clears after admission. Duplicate
 adds preserve the existing record. URL sources are refused while parked before
 fetching or returning a pending receipt. Characterization: `deferred-add.ndjson`;
 live cases: `deferred_add_saved_record` and opt-in `deferred_add`.
+
+### P4-06 — optional reduced motion
+
+Adds `Settings.reduce_motion?: bool` (absent = false), preserving all earlier
+fixture records and documentation examples. The new `settings-motion.ndjson`
+conversation covers both presence and omission. Strict boolean decoding rejects
+null and non-boolean values; explicit false remains present on a typed roundtrip.
+This extends the v1 object contract without adding an operation or advertising
+a not-yet-implemented service. The standalone TUI persists and applies the same
+preference from `config.toml`; API-client attachment consumes it in P4-03.

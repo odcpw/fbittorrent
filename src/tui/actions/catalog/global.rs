@@ -1,0 +1,227 @@
+use super::*;
+pub(super) const ACTIONS: &[Action] = &[
+    action!(
+        "screen.torrents",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('1'))],
+        "Torrents",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::Torrents)),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "screen.search",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('2'))],
+        "Search",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::Search)),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "screen.shows",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('3'))],
+        "Shows",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::Shows)),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "screen.rss",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('4'))],
+        "RSS",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::Rss)),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "screen.next",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Tab)],
+        "Next screen",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::from_index(a.screen.index() + 1))),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "screen.previous",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::BackTab)],
+        "Previous screen",
+        90,
+        |_| true,
+        Some(|a| a.set_screen(Screen::from_index(a.screen.index() + 3))),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "help",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('?'))],
+        "Help",
+        90,
+        |_| true,
+        Some(|a| {
+            a.show_help = !a.show_help;
+            a.help_scroll = 0;
+            Cmd::none()
+        }),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "settings",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::F(6)), KeyChord::plain(KeyCode::Char(','))],
+        "Settings",
+        90,
+        |a| a.cfg.native(),
+        Some(|a| {
+            a.open_settings();
+            Cmd::none()
+        }),
+        TD,
+        Some(&[KeyChord::plain(KeyCode::Char(','))]),
+        None,
+        None
+    ),
+    action!(
+        "ui.close",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('q')), KeyChord::ctrl(KeyCode::Char('c'))],
+        "Close this UI",
+        90,
+        |_| true,
+        Some(|a| {
+            a.lifecycle.request_stop(StopReason::Quit);
+            Cmd::quit()
+        }),
+        TDP,
+        None,
+        Some(&[KeyChord::plain(KeyCode::Char('q')), KeyChord::plain(KeyCode::Escape)]),
+        None
+    ),
+    action!(
+        "app.shutdown",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('Q'))],
+        "Stop fbittorrent",
+        90,
+        |_| true,
+        Some(|a| {
+            a.lifecycle.request_stop(StopReason::Quit);
+            if !a.cfg.native() {
+                let _ = crate::backend::stop(&a.cfg);
+            }
+            Cmd::quit()
+        }),
+        TDP,
+        Some(&[KeyChord::plain(KeyCode::Char('Q')), KeyChord::ctrl(KeyCode::Char('q'))]),
+        None,
+        None
+    ),
+    action!(
+        "clipboard.add",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('c'))],
+        "Clipboard",
+        90,
+        |_| true,
+        Some(clipboard),
+        T,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "refresh",
+        Scope::Global,
+        &[KeyChord::plain(KeyCode::Char('r'))],
+        "Refresh",
+        90,
+        |a| !matches!(a.screen, Screen::Rss | Screen::Shows),
+        Some(refresh),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "browse.open",
+        Scope::Pane(Screen::Search, Pane::Browse),
+        &[KeyChord::plain(KeyCode::Enter)],
+        "Load list",
+        10,
+        |_| true,
+        Some(|a| a.on_search_action(Intent::Primary)),
+        TD,
+        None,
+        None,
+        None
+    ),
+    action!(
+        "popup.dashboard",
+        Scope::Global,
+        &[],
+        "Open dashboard",
+        90,
+        |_| true,
+        None,
+        P,
+        None,
+        Some(&[KeyChord::plain(KeyCode::Char('w'))]),
+        Some("Popup: w opens the dashboard (exception 2).")
+    ),
+    action!(
+        "popup.tui",
+        Scope::Global,
+        &[],
+        "Open TUI",
+        90,
+        |_| true,
+        None,
+        P,
+        None,
+        Some(&[KeyChord::plain(KeyCode::Char('t'))]),
+        None
+    ),
+    action!(
+        "dashboard.paste",
+        Scope::Global,
+        &[],
+        "Add from clipboard",
+        40,
+        |_| true,
+        None,
+        D,
+        Some(&[KeyChord::ctrl(KeyCode::Char('v'))]),
+        None,
+        None
+    ),
+];

@@ -989,9 +989,9 @@ def stop_during_hashing(binary):
             stopped = harness.cli("show", hash_)
             case.check(stopped["state"] == "stoppedDL" and json.loads(ledger.read_text())["records"][0]["paused"] is True,
                        "Stop during hashing lists a paused row and durably saves paused intent.", json.dumps(stopped))
-            harness.wait_for(lambda: "(P) Resume" in capture(), "the paused hash-check row offers Resume in the TUI")
+            harness.wait_for(lambda: "(p) Resume" in capture(), "the paused hash-check row offers Resume in the TUI")
             pane = capture()
-            case.check("(P) Resume" in pane, "The actual TUI footer offers Resume.", pane)
+            case.check("(p) Resume" in pane, "The actual TUI footer offers Resume.", pane)
             tmux("send-keys", "-t", session, "-l", "p")
             harness.wait_for(lambda: json.loads(ledger.read_text())["records"][0]["paused"] is False,
                              "TUI Resume starts the saved torrent")
@@ -1129,8 +1129,8 @@ def main():
         def show_episodes(imdb):
             return {episode["key"]: episode for episode in cli("shows", "episodes", imdb)["episodes"]}
 
-        tmux_socket = f"fbt-fbt-p0-14-rsx-{os.getpid()}"
-        session = "fbt-fbt-p0-14-rsx"
+        session = "fbt-fbt-p4-02-6bx" if options.case == "file_modal_shows_help_80x24" else "fbt-fbt-p0-14-rsx"
+        tmux_socket = f"{session}-{os.getpid()}"
 
         def tmux(*args, check=True, timeout=None):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
@@ -1220,10 +1220,10 @@ def main():
                 click_text("Fixture episode 3")
                 keys("m")
                 wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["isRead"], "single item marked read")
-                wait_for(lambda: "(M)ark unread" in capture(), "read change reaches the visible TUI")
+                wait_for(lambda: "(m) Mark unread" in capture(), "read change reaches the visible TUI")
                 keys("m")
                 wait_for(lambda: not cli("rss", "items", "Local feed")["items"][0]["isRead"], "same item marked unread")
-                wait_for(lambda: "(M)ark read" in capture(), "unread change reaches the visible TUI")
+                wait_for(lambda: "(m) Mark read" in capture(), "unread change reaches the visible TUI")
                 keys("Left", "m")
                 time.sleep(.2)
                 case.check(not cli("rss", "items", "Local feed")["items"][0]["isRead"], 'Lowercase m in the parent pane leaves the feed unread.')
@@ -1250,7 +1250,7 @@ def main():
                 wait_for(lambda: next(item for item in cli("rss", "items", "Local feed")["items"]
                                       if item["id"] == "episode-6")["isRead"],
                          "mouse uses the scrolled row's item")
-                wait_for(lambda: "(M)ark unread" in capture(), "scrolled read change reaches the visible TUI")
+                wait_for(lambda: "(m) Mark unread" in capture(), "scrolled read change reaches the visible TUI")
                 mouse_text("Fixture episode 5", 35)
                 keys("m")
                 wait_for(lambda: not next(item for item in cli("rss", "items", "Local feed")["items"]
@@ -1296,7 +1296,7 @@ def main():
                 keys("3")
                 wait_for(lambda: "All unread" in capture() and "S01E02" in capture() and "S01E01" in capture(), "combined Shows inbox")
                 case.check("Alpha Show" in capture() and "Beta Show" in capture(), 'The combined inbox displays releases from both followed shows.')
-                case.check("(M)ark read" in capture(), 'The selected unread release offers the mark-read action.')
+                case.check("(m) Mark read" in capture(), 'The selected unread release offers the mark-read action.')
                 case.check(not show_episodes("tt1234002")["S01E02"]["read"], 'The other Beta Show release remains unread.')
                 keys("M")
                 wait_for(lambda: "Shift+M applies to one show" in capture(), "inbox batch scope is explicit")
@@ -1346,7 +1346,10 @@ def main():
                 wait_for(lambda: "GLOBAL" not in capture(), "help closes")
                 tmux("resize-window", "-t", session, "-x", "80", "-y", "24")
                 keys("1")
-                wait_for(lambda: "Torrents" in capture(), "small terminal")
+                wait_for(lambda: "[Torrents]" in capture() and "…" in capture().splitlines()[-2], "small terminal footer overflow")
+                pane = capture()
+                case.check("…" in pane.splitlines()[-2] and "(?) Help" in pane.splitlines()[-2],
+                           "At 80×24 the footer marks omitted actions with an ellipsis and retains Help.", pane)
             if options.case == "file_modal_shows_help_80x24":
                 return suite_status("native")
             with Case("native", "settings_queue_vpn_restart", enabled=options.case in (None, "settings_queue_vpn_restart")) as case:
@@ -1459,7 +1462,7 @@ def main():
                 keys("1")
                 wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
                 keys("Home")  # The -1 record has the newest added_on timestamp.
-                wait_for(lambda: "(P) Resume" in capture(),
+                wait_for(lambda: "(p) Resume" in capture(),
                          "unknown-date selection keeps the incomplete-row Resume control")
                 result = parked_cli("start", unknown)
                 case.check(result["hashes"] == [unknown] and result["skipped"] == [],

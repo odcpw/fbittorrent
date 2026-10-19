@@ -41,5 +41,5 @@
 │                                                    ││                                                                                                        │
 │                                                    ││                                                                                                        │
 ╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Items] (Enter) Download  (M)ark read  (Shift+M) All read  (←) Feeds  (R)efresh  (F)ollow show                                                          (?) Help
-(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
+[Items] (Enter) Download  (m) Mark read  (x) Remove feed  (n) New feed  (r) Refresh  (a) Add  (f) Follow show  (j) Next  (k) Previous  (g) First …      (?) Help
+Sintel.2010.1080p · Blender releases

@@ -29,6 +29,10 @@ const GROUPS: &[(&str, &str)] = &[
         "mutations",
         include_str!("../../contracts/ipc/v1/mutations.ndjson"),
     ),
+    (
+        "settings-motion",
+        include_str!("../../contracts/ipc/v1/settings-motion.ndjson"),
+    ),
 ];
 
 #[derive(Debug, Serialize, Deserialize)]

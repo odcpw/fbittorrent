@@ -240,3 +240,66 @@ fn revisions_reject_gaps_duplicates_backwards_and_overflow() {
     assert!(revisions.observe(1, 0).is_err());
     assert_eq!(revisions.last(1), u64::MAX);
 }
+
+#[test]
+fn settings_motion_is_optional_boolean_with_false_default() {
+    let transcript = include_str!("../../../contracts/ipc/v1/settings-motion.ndjson");
+    super::super::fixtures::check_group("settings-motion", transcript).unwrap();
+    let states: Vec<Value> = transcript
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|row| row["dir"] == "s2c" && row["frame"]["topic"] == "settings")
+        .map(|row| row["frame"].clone())
+        .collect();
+    assert_eq!(states.len(), 4);
+    for (frame, expected) in states.iter().zip([false, true, false, false]) {
+        let settings: Settings = serde_json::from_value(frame["data"].clone()).unwrap();
+        assert_eq!(settings.reduce_motion(), expected);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap(),
+            frame["data"],
+            "explicit false and absent must each preserve wire presence"
+        );
+        let event: Event = serde_json::from_value(frame.clone()).unwrap();
+        event.validate().unwrap();
+        println!(
+            "settings rev={} reduce_motion={:?} effective={expected}",
+            frame["rev"], settings.reduce_motion
+        );
+    }
+    for invalid in [
+        Value::Null,
+        json!(0),
+        json!(1),
+        json!("true"),
+        json!([]),
+        json!({}),
+    ] {
+        let mut frame = states[1].clone();
+        frame["data"]["reduce_motion"] = invalid.clone();
+        assert!(
+            serde_json::from_value::<Settings>(frame["data"].clone()).is_err(),
+            "Settings.reduce_motion accepted {invalid}"
+        );
+        assert!(
+            serde_json::from_value::<Event>(frame.clone()).is_err(),
+            "settings event accepted reduce_motion={invalid}"
+        );
+        let poisoned = transcript
+            .lines()
+            .map(|line| {
+                let mut row: Value = serde_json::from_str(line).unwrap();
+                if row["frame"]["topic"] == "settings" && row["frame"]["rev"] == 2 {
+                    row["frame"] = frame.clone();
+                }
+                serde_json::to_string(&row).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            super::super::fixtures::check_group("settings-motion", &poisoned).is_err(),
+            "fixture checker accepted reduce_motion={invalid}"
+        );
+        println!("rejected reduce_motion={invalid} via Settings, event and fixture decoder");
+    }
+}
