@@ -131,11 +131,12 @@ def peer_rates_move(binary,systemd):
 def tui_peers_tab(binary, systemd):
     """Real peers over the TUI's one connection, visible-only topic and rate updates."""
     import native
-    # Reserve real verified bytes and bound their supply rate so the observer
-    # cannot drain a tiny initial burst while the terminal opens and resizes.
+    # Reserve verified bytes and keep both consumers below the producer's
+    # shared cap, so neither request queue starves the other during resizing.
     with d.Case('daemon', 'tui_peers_tab') as case, Swarm(case, binary, systemd,
             payload_bytes=32*1024*1024, upload_bps=262144,
-            leecher_prefill_bytes=2*1024*1024,leecher_upload_bps=131072) as swarm:
+            leecher_prefill_bytes=2*1024*1024,leecher_upload_bps=131072,
+            leecher_download_bps=131072,observer_download_bps=65536) as swarm:
         if not swarm.h.wait_for(swarm.observe, 'actual seed and leecher arrive before opening the TUI', timeout=20):
             return
         topic='torrent:'+swarm.hash+'.peers'
