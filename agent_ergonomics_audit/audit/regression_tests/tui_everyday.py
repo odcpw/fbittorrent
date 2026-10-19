@@ -68,7 +68,7 @@ def main():
                     case.check(len(c.call('torrents.list',{})['result']['torrents'])==1,'Enter on destructive confirmation keeps the safe No default','one torrent still present')
                     ui.keys(target,'d');ui.keys(target,'y')
                     assert h.wait_for(lambda:((rows:=c.call('torrents.list',{})['result']['torrents'])==[],json.dumps(rows)),'confirmed removal disappears from daemon')
-                    assert ui.assert_pane(target,'U undo')
+                    assert ui.assert_pane(target,'(U) Undo removal')
                     ui.keys(target,'U')
                     assert h.wait_for(lambda:(len(rows:=c.call('torrents.list',{})['result']['torrents'])==1 and rows[0]['hash']==item.info_hash,json.dumps(rows)),'U restores the exact removed hash')
                     case.check(fingerprint()==before,'remove and undo preserve actual payload inode length and SHA256',repr(dict(before=before,after=fingerprint())))
@@ -77,8 +77,11 @@ def main():
                     ui.keys(target,'Escape',literal=False);ui.keys(target,'g')
                     ui.keys(target,'y')
                     assert h.wait_for(lambda:('1'*40 in copied.read_text(),copied.read_text()),'Search y copies the selected provider magnet')
-                    # Seeds is initial: rating, uploaded, provider, peers, name, size.
-                    for _ in range(6):ui.keys(target,'s')
+                    # Find Size through the available fields; their cycle order
+                    # is not the behavior under test.
+                    for _ in range(7):
+                        ui.keys(target,'s')
+                        if 'Sorted by size ↓' in ui.capture(target):break
                     assert ui.assert_pane(target,'Sorted by size ↓')
                     ui.keys(target,'S');assert ui.assert_pane(target,'Sorted by size ↑')
                     ui.keys(target,'3');assert ui.assert_pane(target,'S01E01')
