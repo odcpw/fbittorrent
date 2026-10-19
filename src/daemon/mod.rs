@@ -278,22 +278,8 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
-        if let Ok(engine::ops::EngineResult::Torrents(rows)) = daemon.execute(engine::ops::EngineOp::Info) {
-            let (retries, notify) = daemon.disk.lock().unwrap().sample(&rows, Instant::now());
-            if notify { daemon.notifier.disk_low(); }
-            for (hash, free) in retries {
-                let result = match &daemon.slot.read().unwrap().slot {
-                    Slot::Running(app) => app.dispatcher().retry_disk_full(&hash),
-                    _ => Ok(false),
-                };
-                // Consume this rise even when the attempt fails; the next
-                // ENOSPC observation records a fresh baseline for another rise.
-                daemon.disk.lock().unwrap().restarted(&hash);
-                if result.as_ref().is_ok_and(|retry| *retry) {
-                    eprintln!("INFO engine disk_full_recovered hash={hash} free_bytes={free}");
-                } else if let Err(error) = result { eprintln!("ERROR engine disk_full retry failed hash={hash} message={:?}",format!("{error:#}")); }
-            }
-        }
+        // Disk sampling rides on the bus observation (api/bus/sample.rs),
+        // which already holds every row; see DiskMonitor::sample.
         let timeout = {
             let mut policy = daemon.policy.lock().unwrap();
             let now = Instant::now();

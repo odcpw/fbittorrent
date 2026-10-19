@@ -136,6 +136,29 @@ impl Bus {
             _ => Vec::new(),
         };
         self.daemon.disk.lock().unwrap().observe(&rows);
+        // Free space, the low-disk warning and ENOSPC retries use these same
+        // rows on the monitor's own five-second cadence; the supervisor no
+        // longer lists every torrent for them.
+        if matches!(&slot.slot, Slot::Running(_) | Slot::Parked(_)) {
+            let (retries, low) = self.daemon.disk.lock().unwrap().sample(&rows, Instant::now());
+            if low {
+                self.daemon.notifier.disk_low();
+            }
+            for (hash, free) in retries {
+                let result = match &slot.slot {
+                    Slot::Running(app) => app.dispatcher().retry_disk_full(&hash),
+                    _ => Ok(false),
+                };
+                // Consume this rise even when the attempt fails; the next
+                // ENOSPC observation records a fresh baseline for another rise.
+                self.daemon.disk.lock().unwrap().restarted(&hash);
+                if result.as_ref().is_ok_and(|retry| *retry) {
+                    eprintln!("INFO engine disk_full_recovered hash={hash} free_bytes={free}");
+                } else if let Err(error) = result {
+                    eprintln!("ERROR engine disk_full retry failed hash={hash} message={:?}", format!("{error:#}"));
+                }
+            }
+        }
         if !self.daemon.is_stopping() {
             self.daemon.inhibitor.observe(&rows);
         }
