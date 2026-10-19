@@ -8,6 +8,7 @@ pub(super) mod restart;
 mod native;
 mod offline;
 pub(super) mod settings;
+pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
 
 #[derive(Parser)]
@@ -91,6 +92,14 @@ pub(super) enum Cmd {
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
     Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
+    /// Read or persist primary and turtle limits; zero means unlimited
+    Limits {
+        #[arg(long)] down: Option<String>,
+        #[arg(long)] up: Option<String>,
+        #[arg(long, value_parser = ["on", "off"])] alt: Option<String>,
+        #[arg(long)] alt_down: Option<String>,
+        #[arg(long)] alt_up: Option<String>,
+    },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)

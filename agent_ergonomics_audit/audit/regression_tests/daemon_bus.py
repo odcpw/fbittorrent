@@ -225,6 +225,8 @@ def slow_client_closed_others_live(binary, systemd):
 
 def rev_soak_10min(binary, systemd):
     if os.environ.get("FBT_TEST_SOAK") != "1":
+        with d.Case("daemon", "rev_soak_10min") as case:
+            case.step("SKIP opt-in ten-minute soak", "CI mode records the skip explicitly").ok("SKIP: FBT_TEST_SOAK=1 is required; no soak was run")
         return
     with d.api_owned("rev_soak_10min", binary, systemd) as (case, sandbox, harness, process), d.ApiConn(harness, timeout=20) as client, d.ApiConn(harness) as writer:
         client.hello(); writer.hello()

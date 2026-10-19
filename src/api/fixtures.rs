@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
@@ -268,7 +269,7 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
             if child.is_null() {
                 if path.contains("/changed/")
                     || key == "id" && map.get("ok") == Some(&Value::Bool(false))
-                    || key == "bps" && path.ends_with("/args")
+                    || matches!(key.as_str(), "bps" | "download_bps" | "upload_bps" | "alt_download_bps" | "alt_upload_bps") && path.ends_with("/args")
                 {
                     continue;
                 }
@@ -446,6 +447,8 @@ fn operation_event_error_and_document_coverage() {
         "app.restart",
         "app.network",
         "transfer.info",
+        "transfer.set_limits",
+        "transfer.set_alt",
         "torrents.list",
         "torrents.get",
         "torrents.add",

@@ -107,6 +107,8 @@ impl Shared {
                 ),
                 Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
                 Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
+                Call::TransferSetLimits { args } => ops::transfer::set_limits(&self.daemon, args),
+                Call::TransferSetAlt { args } => ops::transfer::set_alt(&self.daemon, args.on),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }

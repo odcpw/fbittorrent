@@ -113,8 +113,7 @@ def process_alive(pid):
 class DaemonContract:
     """Process/fixture compatibility contract. Future API assumptions stay here.
 
-    P5-04 supplies global transfer.set_limits; until it lands, a single seed's
-    fixture throttle uses the existing typed per-torrent upload cap.
+    P5-04 global transfer.set_limits controls the managed fixture seed.
     """
     unit_variable = "FBITTORRENT_UNIT"
 
@@ -124,7 +123,7 @@ class DaemonContract:
 
     @staticmethod
     def throttle(client, hash_, bps):
-        frame=client.call("torrents.set_upload_limit", dict(hashes=[hash_], bps=bps))
+        frame=client.call("transfer.set_limits", dict(upload_bps=bps))
         if frame.get("ok") is not True:raise ValueError("fixture throttle failed: "+json.dumps(frame))
         return frame
 
@@ -1516,6 +1515,15 @@ def offline_ledger_case(binary, systemd, name, remove=False, draining=False):
     with Case("daemon", name) as case, Sandbox() as sandbox, Harness(case,binary,sandbox,systemd) as h:
         select_replay_interface(Path(sandbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml","fbmissing0")
         if not systemd: allow_manager_reads(h)
+        elif draining:
+            controller = shutil.which("systemctl",path=os.defpath)
+            if controller is None: raise RuntimeError("systemd fixture controller missing")
+            # This concurrent-down case must permit exactly its owned unit's
+            # manager shutdown; the default refusal shim remains for every
+            # unrelated unit/action. Retain the calls in the case evidence.
+            allowed = "--user:--no-ask-password:show:"+sandbox.unit+"|--user:--no-ask-password:stop:"+sandbox.unit
+            fixtures.path_shim("systemctl", 'case "$1:$2:$3:$4" in '+allowed+') exec '+shlex.quote(controller)+' "$@";; *) exit 99;; esac',sandbox.root)
+            h.resources.callback(lambda:shutil.copyfile(sandbox.root/"shims/systemctl.log",case.path.with_suffix(".systemctl.log")))
         process=h.start_serve()
         try:
             h.receive_ready();h.wait_engine()
@@ -1709,7 +1717,7 @@ def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     if not validator or not Path(validator).is_file():
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
     output = case.path.with_suffix("." + kind + ".validation.log")
-    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND=kind)
+    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND="fixture" if kind == "fixture" else "live")
     if optional:
         optional_path = case.path.with_suffix(".extra-optional.json")
         optional_path.write_text(json.dumps(optional, indent=2, sort_keys=True) + "\n")
@@ -2801,9 +2809,10 @@ def status_never_starts(binary, systemd):
         unit.autostart()
         value = h.cli("status", start=True)
         case.check(value.get("app_open") is False and unit.state() == "inactive", "status leaves the disposable unit inactive", str(value))
-        for args in (("list",), ("show", "abcd"), ("stop", "all"), ("delete", "all")):
-            value = h.cli(*args, start=True, code=4)
-            case.check(value.get("hint") == "fbittorrent up" and unit.state() == "inactive", "read/offline-intent command does not start the daemon", str(value))
+        for args, code in ((("list",),0), (("show", "abcd"),6), (("stop", "all"),0), (("delete", "all"),0)):
+            value = h.cli(*args, start=True, code=code)
+            shape = (value.get("ok") is True and value.get("running") is False) if code == 0 else (value.get("code_name") == "not_found" and "fbittorrent list" in value.get("hint", ""))
+            case.check(shape and unit.state() == "inactive", "P1-11 offline reads/intents retain canonical exits and never start the daemon", str(value))
         unit.no_launcher()
 
 
@@ -3512,6 +3521,9 @@ def imdb_owned(name, binary, systemd, oversized=False):
         (cache / "title.ratings.tsv").write_bytes((directory / "ratings.tsv").read_bytes())
         with fixtures.imdb_server(directory) as source:
             sandbox.env["FBT_IMDB_BASE_URL"] = source.base
+            sandbox.keys.append("FBT_IMDB_BASE_URL")
+            case.check(urllib.parse.urlparse(source.base).hostname == "127.0.0.1" and "FBT_IMDB_BASE_URL" in sandbox.keys,
+                       "local IMDb endpoint is explicitly forwarded before either launch mode", source.base)
             with Harness(case, binary, sandbox, systemd) as harness:
                 process = harness.start_serve()
                 if not (harness.receive_ready() and harness.wait_engine()):
@@ -3771,8 +3783,10 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
+
 CASES = {function.__name__: function for function in
-         (lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
+         (alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,
@@ -3816,6 +3830,8 @@ def main():
     parser.add_argument("--fixture-worker",action="store_true",help=argparse.SUPPRESS)
     parser.add_argument("--throttle",type=int,help="fixture seed upload bytes/s (0 unlimited, else at least 16384)")
     parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
+    parser.add_argument("--prepare-upgrade-fixtures",action="store_true",help="build/cache both real upgrade binaries before the timed CI matrix")
+    parser.add_argument("--jobs",type=int,default=4,help="bounded isolated case workers (1..4; default 4)")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
     parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
     parser.add_argument("--case", action="append", choices=CASES,
@@ -3847,8 +3863,20 @@ def main():
     if args.list:
         print("\n".join(CASES))
         return 0
+    if args.prepare_upgrade_fixtures:
+        from daemon_upgrade import binaries
+        with Case('daemon','upgrade_fixture_builds') as case,Sandbox() as box:
+            old,new=binaries(case,box)
+            print(json.dumps(dict(old=str(old),new=str(new))))
+        return suite_status('daemon')
+    if not 1<=args.jobs<=4:parser.error("--jobs must be 1..4")
+    selected=(args.case if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)])
+    if args.jobs>1 and len(selected)>1:
+        from daemon_runner import run
+        return run(args.binary.resolve(),selected,args.systemd,args.jobs,args.contract_validator,
+                   budget=180 if not args.case and not args.mutations and os.environ.get("FBT_TEST_SOAK")!="1" else None)
     started = time.monotonic()
-    for name in (args.case if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in selected:
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")

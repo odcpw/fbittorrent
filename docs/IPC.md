@@ -160,6 +160,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
+| `transfer.set_limits` | `download_bps?: u32\|null`, `upload_bps?: u32\|null`, `alt_download_bps?: u32\|null`, `alt_upload_bps?: u32\|null` | `{limits: Limits}` | yes | P5-04 |
+| `transfer.set_alt` | `on: bool` | `{alt: bool}` | yes | P5-04 |
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
@@ -643,3 +645,13 @@ mutating/idempotent/since metadata; a unit test compares every documented row.
 Changelog P1-18: CLI contract 1.2.5 adds events/api and capabilities.api_operations.
 The original planned 1.2.1 number predates already-integrated additive changes;
 all earlier fields and frozen fixture bytes remain intact. No new API operation.
+
+### P5-04: live global and alternative limits
+
+`limits` is now advertised. `transfer.set_limits` applies and persists only supplied
+fields; null and numeric zero clear a global limit (unlimited), omission leaves it
+unchanged. Nonzero values must be at least 16384 and fit u32. `transfer.set_alt`
+persists the turtle switch. Both use the settings transaction and live session
+limiters, independently of per-torrent upload caps. Summary.alt and Summary.limits
+publish the effective saved policy as structural state. CLI contract 1.2.6 adds
+`limits --down/--up/--alt/--alt-down/--alt-up`; stopped edits never start a daemon.

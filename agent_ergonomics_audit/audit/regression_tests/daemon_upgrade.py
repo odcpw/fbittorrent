@@ -1,6 +1,7 @@
 """P1-17: two real builds, atomic replacement, busy deferral and explicit restart."""
 from contextlib import contextmanager
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,21 @@ from daemon_policy import fresh
 _pair = None
 
 
+def fingerprint():
+    digest=hashlib.sha256()
+    for path in sorted([*d.REPO.joinpath('src').rglob('*.rs'),*[d.REPO/name for name in ('Cargo.toml','Cargo.lock','build.rs','rust-toolchain.toml')]]):
+        digest.update(str(path.relative_to(d.REPO)).encode());digest.update(path.read_bytes())
+    # Vendor changes are rare; their git tree plus a local patch identifies the
+    # runtime input without hashing hundreds of MB for every isolated worker.
+    for command in (['git','rev-parse','HEAD:vendor'],['git','diff','HEAD','--','vendor']):
+        digest.update(subprocess.check_output(command,cwd=d.REPO))
+    return digest.hexdigest()
+
+
+def binary_digest(path):
+    with path.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
+
+
 def binaries(case, box):
     global _pair
     if _pair is not None:
@@ -27,11 +43,22 @@ def binaries(case, box):
     if all(supplied):
         _pair = tuple(Path(value).resolve() for value in supplied)
         return _pair
+    source=fingerprint()
+    cache=d.REPO/'target/test-logs/upgrade-fixtures'/source
+    manifest=cache/'manifest.json'
+    if manifest.exists():
+        saved=json.loads(manifest.read_text())
+        paths=[cache/(tag+'.binary') for tag in ('old','new')]
+        if all(path.is_file() and binary_digest(path)==saved[tag] for path,tag in zip(paths,('old','new'))):
+            _pair=tuple(paths)
+            case.step('reuse real compiled upgrade fixtures','source fingerprint and both binary SHA256 values match').ok(source,[manifest])
+            return _pair
+    cache.mkdir(parents=True,exist_ok=True)
     d.private_environment(box)
     home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
     paths = []
     for tag in ('old', 'new'):
-        path = case.path.with_suffix('.' + tag + '-binary')
+        path = cache/(tag+'.binary')
         output = case.path.with_suffix('.build-' + tag + '.log')
         env = dict(box.env, CARGO_BUILD_JOBS='4', FBT_BUILD_ID_OVERRIDE='p1-17-' + tag,
                    RUSTUP_HOME=os.environ.get('RUSTUP_HOME', str(home / '.rustup')),
@@ -45,6 +72,8 @@ def binaries(case, box):
             raise RuntimeError('upgrade fixture build failed')
         shutil.copy2(d.REPO / 'target/debug/fbittorrent', path)
         paths.append(path)
+    if source!=fingerprint():raise RuntimeError('source changed while building upgrade fixtures')
+    manifest.write_text(json.dumps({tag:binary_digest(path) for tag,path in zip(('old','new'),paths)},indent=2)+'\n')
     _pair = tuple(paths)
     return _pair
 

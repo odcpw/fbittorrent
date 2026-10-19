@@ -95,6 +95,22 @@ pub enum AddSource {
     Restore(Hash),
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetLimitsArgs {
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub download_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub upload_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub alt_download_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub alt_upload_bps: Update<u32>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetAltArgs { pub on: bool }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmptyArgs {}
@@ -310,6 +326,10 @@ pub enum Call {
         #[serde(skip_serializing_if = "Option::is_none")]
         args: Option<EmptyArgs>,
     },
+    #[serde(rename = "transfer.set_limits")]
+    TransferSetLimits { args: SetLimitsArgs },
+    #[serde(rename = "transfer.set_alt")]
+    TransferSetAlt { args: SetAltArgs },
     #[serde(rename = "transfer.info")]
     TransferInfo {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -356,6 +376,8 @@ impl Call {
             Self::AppShutdown { .. } => "app.shutdown",
             Self::AppRestart { .. } => "app.restart",
             Self::AppNetwork { .. } => "app.network",
+            Self::TransferSetLimits { .. } => "transfer.set_limits",
+            Self::TransferSetAlt { .. } => "transfer.set_alt",
             Self::TransferInfo { .. } => "transfer.info",
             Self::TorrentsList { .. } => "torrents.list",
             Self::TorrentsGet { .. } => "torrents.get",

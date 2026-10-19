@@ -197,6 +197,11 @@ pub struct SubscribeResult {
     pub topics: Vec<Topic>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitsResult { pub limits: Limits }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AltResult { pub alt: bool }
+
 /// Each variant has the exact result type for an operation, even when two
 /// operations share the same wire shape. The request ID supplies the context.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -213,6 +218,8 @@ pub enum Reply {
     AppShutdown(PendingResult),
     AppRestart(PendingResult),
     AppNetwork(NetworkResult),
+    TransferSetLimits(LimitsResult),
+    TransferSetAlt(AltResult),
     TransferInfo(TransferInfo),
     TorrentsList(ListResult),
     TorrentsGet(GetResult),
@@ -242,6 +249,8 @@ impl Reply {
             "app.shutdown" => serde_json::from_value(result).map(Self::AppShutdown),
             "app.restart" => serde_json::from_value(result).map(Self::AppRestart),
             "app.network" => serde_json::from_value(result).map(Self::AppNetwork),
+            "transfer.set_limits" => serde_json::from_value(result).map(Self::TransferSetLimits),
+            "transfer.set_alt" => serde_json::from_value(result).map(Self::TransferSetAlt),
             "transfer.info" => serde_json::from_value(result).map(Self::TransferInfo),
             "torrents.list" => serde_json::from_value(result).map(Self::TorrentsList),
             "torrents.get" => serde_json::from_value(result).map(Self::TorrentsGet),
