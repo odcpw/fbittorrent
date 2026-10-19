@@ -194,3 +194,23 @@ that false-closed CLI probe through P1-11's API client. The six bead criteria ar
 met; automatic idle exit is still P1-12, as disclosed in README/robot-docs.
 No release build or all.sh between track beads. Continue with P4-03's available
 API screens; Track B namespaces and the bus integration still need merging.
+
+## P4-03 — fbt-p4-03-r5p (in progress)
+
+The confirmed mirror is implemented in `src/tui/store.rs` and its snapshot,
+sort and pending modules. It commits chunked snapshots atomically, rejects
+revision gaps without changing confirmed rows, removes null optional fields,
+compares numeric sort values, uses daemon file sort keys and retains rows as
+stale across instance/engine changes. Pending/confirmed mutation messages do
+not fabricate row state; disconnects mark results unknown and never retry.
+Staging is bounded to 32 MiB, 100,000 items and 16 subscriptions; events to 512
+and pending mutations to 64. `cargo test --locked -p fbittorrent tui::store::
+-- --nocapture` passes **11 tests**, replaying all **9 frozen expect models**
+with file/frame/first-JSON-pointer diagnostics and poisoned-expect controls
+(`target/test-logs/fbt-p4-03-r5p/mirror_final.{jsonl,log}`). Size self-tests pass
+(`sizes.*`); every new source file is below 900 lines. This is an intermediate
+component, not completion: UI connection/data-path wiring remains. Current
+branch lacks the bus and settings request operations, and Track B feature
+namespaces; those integrations remain pending. No full suite or all.sh run for
+this intermediate checkpoint; the bead's one full suite is reserved for its
+completed integration.
