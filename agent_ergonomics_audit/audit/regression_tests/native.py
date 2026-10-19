@@ -1306,7 +1306,6 @@ def main():
     parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
     options = parser.parse_args()
     if options.log_root:
-        import fbtlog
         fbtlog.LOG_ROOT=options.log_root.resolve()
     if options.list:
         print("\n".join(CASES + ATTACH_CASES))
@@ -1847,15 +1846,16 @@ def main():
                 print(error_file.read_text(), file=sys.stderr)
             raise
         finally:
+            # Stop every process first, so a failing artifact copy can never leak them.
+            tmux("kill-server", check=False)
+            harness.close_serve()
+            if 'parked_harness' in locals(): parked_harness.close_serve()
+            server.shutdown()
             if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
                 terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
                 terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
                 terminal_artifact.write_bytes(terminal_bytes.read_bytes())
                 print(f"Terminal stream retained: {terminal_artifact}")
-            tmux("kill-server", check=False)
-            harness.close_serve()
-            if 'parked_harness' in locals(): parked_harness.close_serve()
-            server.shutdown()
     if options.case is None:
         terminal_close_is_graceful(binary)
     # This case deliberately captures the widget's human error on stderr.
