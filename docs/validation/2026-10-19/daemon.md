@@ -848,23 +848,3 @@ mount namespace even in the outer `--systemd` matrix; the subscription-only
 case uses a real transient unit there. No product/contract thresholds or wall
 budget changed. Python compilation and diff checks pass; test-only delta,
 so no new Cargo or umbrella run. No acceptance checks removed or relaxed.
-
-### P6-10 fbt-p6-10-2mq — Shows release notifications
-
-Shows checks now notify once for newly discovered unread releases, never for
-unchanged results and never while a TUI or dashboard is interactive (including
-the dashboard's shared bar connection). Bodies name at most three releases,
-escape markup and append the remaining count; `window` opens `dashboard --view
-shows`. Each check has distinct bounded notifier ownership; checking still
-never downloads and adds no API surface. Minimal neighbours: bus notification
-hook, policy presence predicate, daemon case registration and IPC prose.
-Private-XDG `cargo check --locked --tests` passed (`check/`), notifier unit tests
-3/3 including `new_episodes_body` (`notify-unit/`), debug build passed (`build/`).
-`daemon.py target/debug/fbittorrent --case shows_notify --case
-shows_notify_none_when_unchanged --case shows_notify_suppressed_interactive`
-passed 3/3 in each launch mode (`foreground/processes/daemon/` and
-`systemd/processes/daemon/`, exact notify argv retained). `cargo test --locked
--- --nocapture` passed 548/0 with three existing opt-in ignores (`full/`). All
-paths are below `target/test-logs/fbt-p6-10-2mq/`. Python compile, diff and changed
-source size checks passed. Both acceptance criteria met, no UI work or unmet
-items; no umbrella rerun under the track policy.

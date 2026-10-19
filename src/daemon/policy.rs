@@ -55,7 +55,6 @@ impl Policy {
             clients: BTreeMap::new(), searches: 0, mutations: 0 }
     }
     pub fn seconds(&self) -> u64 { self.seconds }
-    pub fn interactive(&self) -> bool { self.clients.values().any(|p| p.interactive) }
     pub fn replace_delay(&mut self, seconds: u64, now: Instant) {
         self.override_seconds = None;
         self.configure(seconds, now);

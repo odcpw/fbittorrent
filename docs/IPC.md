@@ -1037,13 +1037,6 @@ Hello/error fixture caps now exactly include rss; rss.ndjson covers every op.
 
 ### P3-03: daemon Shows (contract 1.2.20)
 
-P6-10: a check that discovers unread releases sends one desktop notification
-while no dashboard or TUI is interactive. It names at most three releases and
-reports the remaining count; the window action opens `dashboard --view shows`.
-An unchanged check sends none. Checks and notifications never add torrents;
-stale checks still run only on interactive connect or explicit request. This
-uses the existing `shows.checked` event and adds no API fields or operations.
-
 Capability shows adds the shows.* operations above, `shows` snapshots keyed by
 imdb and `shows.releases:<imdb|inbox>` keyed by release key (imdb/key in inbox
 changes/removals). Release.key itself stays S02E03/S02; show_imdb disambiguates.
