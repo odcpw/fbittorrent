@@ -37,6 +37,7 @@ mod queue;
 mod queue_policy;
 mod queue_ops;
 mod trackers;
+mod moving;
 pub mod recheck;
 pub mod undo;
 pub(crate) mod resume;
