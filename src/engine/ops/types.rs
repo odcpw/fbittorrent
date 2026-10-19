@@ -58,6 +58,7 @@ pub enum EngineOp {
         hash: String,
     },
     Peers { hash: String },
+    EditTracker { hash: String, url: String, add: bool },
     // Typed engine entry points for the daemon adapter. These do not add routes
     // to the legacy transport or advertise v1 operations before that API lands.
     OpenTarget {

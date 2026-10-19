@@ -1,5 +1,5 @@
 use rqbit_runtime::Cx;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::SocketAddrV6;
@@ -89,8 +89,8 @@ enum SupportedTracker {
 impl std::fmt::Debug for SupportedTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SupportedTracker::Udp(u) => std::fmt::Display::fmt(u, f),
-            SupportedTracker::Http(u) => std::fmt::Display::fmt(u, f),
+            SupportedTracker::Udp(u) => f.write_str(&crate::tracker_set::redact_url(u)),
+            SupportedTracker::Http(u) => f.write_str(&crate::tracker_set::redact_url(u)),
         }
     }
 }
@@ -147,31 +147,15 @@ impl TrackerComms {
         cx: &Cx,
         info_hash: Id20,
         peer_id: Id20,
-        trackers: HashSet<Url>,
+        trackers: Arc<crate::TrackerSet>,
+        first_only: bool,
+        extra: Vec<Url>,
         stats: Box<dyn TorrentStatsProvider>,
         force_interval: Option<Duration>,
         announce_port: u16,
         http_client: rqbit_runtime::http::Client,
         udp_client: UdpTrackerClient,
     ) -> Option<BoxStream<'static, SocketAddr>> {
-        let trackers = trackers
-            .into_iter()
-            .filter_map(|t| match t.scheme() {
-                "http" | "https" => Some(SupportedTracker::Http(t)),
-                "udp" => Some(SupportedTracker::Udp(t)),
-                _ => {
-                    debug!("unsupported tracker URL: {}", t);
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if trackers.is_empty() {
-            debug!(?info_hash, "trackers list is empty");
-            return None;
-        }
-
-        tracing::trace!(?trackers);
-
         let (tx, mut rx) = rqbit_runtime::sync::mpsc::channel::<SocketAddr>(16);
 
         let cx = cx.clone();
@@ -187,27 +171,54 @@ impl TrackerComms {
                 http_client,
                 key: rand::random(),
             });
+            let mut changes = trackers.subscribe();
             let mut futures = FuturesUnordered::new();
-            for tracker in trackers {
-                futures.push(comms.add_tracker(&cx, tracker, &udp_client))
-            }
-            while !(futures.is_empty()) {
+            let mut active = HashMap::new();
+            let mut dirty = true;
+            loop {
                 if cx.checkpoint().is_err() { break; }
-                enum Next<T> { Addr(Result<SocketAddr, rqbit_runtime::sync::mpsc::RecvError>), Done(Option<T>) }
+                if dirty {
+                    dirty = false;
+                    // Mark the observed watch generation before reading the set, so
+                    // an edit concurrent with the snapshot cannot be lost.
+                    drop(changes.borrow_and_update());
+                    let mut urls = trackers.snapshot();
+                    if first_only { urls.truncate(1); } else { urls.extend(extra.iter().cloned()); }
+                    urls.retain(|u| matches!(u.scheme(), "http" | "https" | "udp"));
+                    active.retain(|url, abort: &mut futures::future::AbortHandle| {
+                        if urls.contains(url) { true } else { abort.abort(); false }
+                    });
+                    // Reap aborted requests before admitting replacements: memory is
+                    // bounded by the configured tracker set, even under rapid edits.
+                    while futures.next().now_or_never().flatten().is_some() {}
+                    for url in urls {
+                        if active.contains_key(&url) { continue; }
+                        let (abort, registration) = futures::future::AbortHandle::new_pair();
+                        let tracker = if url.scheme() == "udp" { SupportedTracker::Udp(url.clone()) }
+                            else { SupportedTracker::Http(url.clone()) };
+                        active.insert(url, abort);
+                        futures.push(futures::future::Abortable::new(
+                            comms.add_tracker(&cx, tracker, &udp_client), registration));
+                    }
+                }
+                enum Next { Addr(Result<SocketAddr, rqbit_runtime::sync::mpsc::RecvError>), Changed, Done }
                 let next = {
                     let addr = rx.recv(&cx).fuse();
-                    let finished = futures.next().fuse();
-                    futures::pin_mut!(addr, finished);
-                    futures::select! { value = addr => Next::Addr(value), value = finished => Next::Done(value) }
+                    let changed = changes.changed(&cx).fuse();
+                    let finished = async { if futures.is_empty() { futures::future::pending().await }
+                        else { futures.next().await } }.fuse();
+                    futures::pin_mut!(addr, changed, finished);
+                    futures::select! { value = addr => Next::Addr(value), _ = changed => Next::Changed,
+                        _ = finished => Next::Done }
                 };
                 match next {
                     Next::Addr(Ok(addr)) => yield addr,
                     Next::Addr(Err(_)) => break,
-                    Next::Done(Some(Err(e))) => debug!("error: {e}"),
-                    _ => {},
+                    Next::Changed => dirty = true,
+                    Next::Done => {},
                 }
-
             }
+
         };
 
         Some(s.boxed())
@@ -225,7 +236,7 @@ impl TrackerComms {
         let info_hash = self.info_hash;
         match url {
             SupportedTracker::Udp(url) => {
-                let span = debug_span!(parent: None, "udp_tracker", tracker = %url, info_hash = ?info_hash);
+                let span = debug_span!(parent: None, "udp_tracker", tracker = %crate::tracker_set::redact_url(&url), info_hash = ?info_hash);
                 self.task_single_tracker_monitor_udp(cx, url, client.clone())
                     .instrument(span)
                     .right_future()
@@ -234,7 +245,7 @@ impl TrackerComms {
                 let span = debug_span!(
                     parent: None,
                     "http_tracker",
-                    tracker = %url,
+                    tracker = %crate::tracker_set::redact_url(&url),
                     info_hash = ?info_hash
                 );
                 self.task_single_tracker_monitor_http(cx, url)
@@ -249,7 +260,7 @@ impl TrackerComms {
         cx: &Cx,
         tracker_url: Url,
     ) -> anyhow::Result<()> {
-        trace!(url=%tracker_url, "starting monitor");
+        trace!(url=%crate::tracker_set::redact_url(&tracker_url), "starting monitor");
         let mut event = Some(tracker_comms_http::TrackerRequestEvent::Started);
 
         loop {
@@ -259,7 +270,7 @@ impl TrackerComms {
                 match self.tracker_one_request_http(cx, &tracker_url, event).await {
                     Ok(interval) => break interval,
                     Err(err) => {
-                        debug!(?retry, "error calling tracker: {err:#}");
+                        debug!(?retry, "error calling tracker: {}", crate::tracker_set::sanitize(&tracker_url, &format!("{err:#}")));
                         rqbit_runtime::time::sleep(cx, retry).await;
                         cx.checkpoint()?;
                         retry = (retry * 2).min(Duration::from_secs(600));
@@ -363,7 +374,7 @@ impl TrackerComms {
                 {
                     Ok(addrs) => break addrs,
                     Err(err) => {
-                        debug!(?retry, "error resolving tracker: {err:#}");
+                        debug!(?retry, "error resolving tracker: {}", crate::tracker_set::sanitize(&url, &format!("{err:#}")));
                         rqbit_runtime::time::sleep(cx, retry).await;
                         cx.checkpoint()?;
                         retry = (retry * 2).min(Duration::from_secs(60));

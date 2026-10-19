@@ -11,6 +11,10 @@ pub(super) struct Record {
     pub(super) output_folder: String,
     pub(super) only_files: Option<Vec<usize>>,
     pub(super) upload_limit: i64,
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub(super) trackers: Vec<String>,
+    #[serde(default, skip_serializing_if="Vec::is_empty")]
+    pub(super) removed_trackers: Vec<String>,
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub(super) download_limit: Option<u64>,
     pub(super) ratio_limit: f64,
@@ -58,7 +62,7 @@ impl Record {
         let record = Self {
             hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
-            download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
             category: options.category.clone(), tags: options.tags.clone(),
             added_on: now(), completion_on: 0, paused: options.stopped,
             resume_after_migration: false, deferred: true,
@@ -96,6 +100,8 @@ impl Record {
             overwrite: true,
             output_folder: Some(self.output_folder.clone()),
             only_files: self.only_files.clone(),
+            tracker_additions: self.trackers.clone(),
+            tracker_removals: self.removed_trackers.clone(),
             ratelimits: LimitsConfig {
                 upload_bps,
                 download_bps,
@@ -103,6 +109,15 @@ impl Record {
             peer_limit: Some(96),
             ..Default::default()
         })
+    }
+    pub(super) fn tracker_count(&self, bytes: &[u8]) -> Result<u64> {
+        let metadata=librqbit::torrent_from_bytes(bytes)?;
+        let mut urls:HashSet<String>=metadata.iter_announce().filter_map(|v|{
+            std::str::from_utf8(v.as_ref()).ok().and_then(|v|url::Url::parse(v).ok()).map(|v|v.to_string())
+        }).collect();
+        urls.extend(self.trackers.iter().cloned());
+        for url in &self.removed_trackers {urls.remove(url);}
+        Ok(urls.len() as u64)
     }
     pub(super) fn stop_on_complete(&self) -> bool {
         self.ratio_limit == 0.0
@@ -300,5 +315,27 @@ mod tests;
         let restored:Record=serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
         assert_eq!(restored.options(true).unwrap().ratelimits.download_bps.unwrap().get(),65536);
         for value in [0,1,u32::MAX as u64+1]{record.download_limit=Some(value);assert!(record.options(true).is_err());}
+    }
+}
+
+#[cfg(test)]
+mod tracker_edit_tests {
+    use super::*;
+    #[test]
+    fn tracker_record_preserves_edits_and_loads_today_fields() {
+        let mut record=Record::deferred_intent(&ops::AddRequest{sources:Vec::new(),torrent:None,save_path:None,upload_limit:32768,ratio_limit:0.0,stopped:true,category:String::new(),tags:String::new()},Path::new("/tmp"),"56".repeat(20),"fixture".into(),String::new(),None).unwrap();
+        let today=serde_json::to_value(&record).unwrap();
+        assert!(today.get("trackers").is_none());assert!(today.get("removed_trackers").is_none());
+        assert!(serde_json::from_value::<Record>(today).unwrap().trackers.is_empty());
+        record.trackers=vec!["http://127.0.0.1:1234/added".into()];
+        record.removed_trackers=vec!["udp://127.0.0.1:1235/removed".into()];
+        let bytes=b"d4:infod6:lengthi1e4:name11:offline.bin12:piece lengthi16384e6:pieces20:01234567890123456789ee";
+        assert_eq!(record.tracker_count(bytes).unwrap(),1);
+        record.removed_trackers.push(record.trackers[0].clone());
+        assert_eq!(record.tracker_count(bytes).unwrap(),0);
+        let restored:Record=serde_json::from_value(serde_json::to_value(&record).unwrap()).unwrap();
+        let options=restored.options(true).unwrap();
+        assert_eq!(options.tracker_additions,record.trackers);assert_eq!(options.tracker_removals,record.removed_trackers);
+        println!("tracker record: today's fields load; additions and metainfo-removal tombstones round-trip into admission options");
     }
 }

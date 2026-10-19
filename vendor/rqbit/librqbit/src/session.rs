@@ -279,6 +279,9 @@ pub struct AddTorrentOptions {
 
     /// Additional trackers for public torrents. Ignored for private metainfo.
     pub trackers: Option<Vec<String>>,
+    /// Explicit user edits; applied to metainfo/magnet URLs before any announce.
+    pub tracker_additions: Vec<String>,
+    pub tracker_removals: Vec<String>,
 }
 
 pub struct ListOnlyResponse {
@@ -1125,7 +1128,7 @@ impl Session {
                 let metadata_cx = region.cx().clone();
                 let result = async {
                     let peer_rx = self.make_peer_rx(&metadata_cx, info_hash, trackers.clone(), false,
-                        opts.force_tracker_interval, opts.initial_peers.clone().unwrap_or_default(), private)
+                        opts.force_tracker_interval, opts.initial_peers.clone().unwrap_or_default(), private, None)
                         .context("no known way to resolve metadata peers")?;
                     self.resolve_magnet(&metadata_cx, info_hash, peer_rx, &trackers, opts.peer_opts).await
                 }.await;
@@ -1212,12 +1215,19 @@ impl Session {
             let span = debug_span!(parent: self.rs(), "torrent", id);
             let peer_opts = self.merge_peer_opts(opts.peer_opts);
             let metadata = Arc::new(metadata);
+            let mut trackers = trackers;
+            for value in &opts.tracker_additions {
+                let url=url::Url::parse(value).context("invalid saved tracker URL")?;
+                tracker_comms::validate_tracker(&url)?;
+                if !trackers.contains(&url) {trackers.push(url);}
+            }
+            trackers.retain(|url| !opts.tracker_removals.iter().any(|v| v == url.as_str()));
             let minfo = Arc::new(ManagedTorrentShared {
                 cx: self.cx.clone(),
                 id,
                 span,
                 info_hash,
-                trackers,
+                trackers: tracker_comms::TrackerSet::new(trackers),
                 spawner: self.spawner.clone(),
                 peer_id: self.peer_id,
                 storage_factory,
@@ -1377,11 +1387,12 @@ impl Session {
         self.make_peer_rx(
             cx,
             t.info_hash(),
-            t.shared().trackers.clone(),
+            t.tracker_urls(),
             announce,
             t.shared().options.force_tracker_interval,
             t.shared().options.initial_peers.clone(),
             is_private,
+            Some(t.shared().trackers.clone()),
         )
     }
 
@@ -1395,6 +1406,7 @@ impl Session {
         force_tracker_interval: Option<Duration>,
         initial_peers: Vec<SocketAddr>,
         is_private: bool,
+        mutable_trackers: Option<Arc<tracker_comms::TrackerSet>>,
     ) -> Option<PeerStream> {
         let dht_rx = if is_private {
             None
@@ -1438,7 +1450,10 @@ impl Session {
             cx,
             info_hash,
             self.peer_id,
-            trackers.into_iter().collect(),
+            if self.disable_trackers { tracker_comms::TrackerSet::new(Vec::new()) }
+                else { mutable_trackers.unwrap_or_else(|| tracker_comms::TrackerSet::new(trackers)) },
+            is_private,
+            if !is_private && !self.disable_trackers { self.trackers.iter().cloned().collect() } else { Vec::new() },
             Box::new(tracker_rx_stats),
             force_tracker_interval,
             self.announce_port().unwrap_or(4240),

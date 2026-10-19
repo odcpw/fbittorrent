@@ -1,0 +1,8 @@
+{"dir":"c2s","frame":{"id":1,"op":"torrents.add_tracker","args":{"hash":"5656565656565656565656565656565656565656","url":"http://127.0.0.1:8080/announce"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":2,"op":"torrents.add_tracker","args":{"hash":"5656565656565656565656565656565656565656","url":"http://127.0.0.1:8080/announce"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":3,"op":"torrents.remove_tracker","args":{"hash":"5656565656565656565656565656565656565656","url":"http://127.0.0.1:8080/announce"}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":4,"op":"torrents.remove_tracker","args":{"hash":"5656565656565656565656565656565656565656","url":"http://127.0.0.1:8080/announce"}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"state":"done"}}}

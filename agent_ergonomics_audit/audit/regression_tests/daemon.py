@@ -3802,6 +3802,7 @@ def tui_single_connection(binary, systemd):
 
 from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_trackers import tracker_add_remove
 from daemon_download_limit import download_cap_holds
 from daemon_peers import peers_local_swarm, peer_rates_move
 from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
@@ -3810,7 +3811,7 @@ from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipbo
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 CASES = {function.__name__: function for function in
-         (download_cap_holds, peers_local_swarm, peer_rates_move, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
+         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,

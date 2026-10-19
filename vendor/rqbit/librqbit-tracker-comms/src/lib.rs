@@ -1,3 +1,5 @@
+mod tracker_set;
+pub use tracker_set::{TrackerSet, validate_tracker};
 mod tracker_comms;
 mod tracker_comms_http;
 mod tracker_comms_udp;
