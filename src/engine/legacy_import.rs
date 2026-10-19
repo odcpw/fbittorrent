@@ -93,7 +93,7 @@ impl EngineDispatcher {
                     added_on: torrent.added_on,
                     completion_on: torrent.completion_on,
                     paused: true,
-                    resume_after_migration: was_running,
+                    resume_after_migration: was_running, deferred: false,
                 };
                 record.options(true)?;
                 staged.push((record, bytes));

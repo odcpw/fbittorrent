@@ -47,6 +47,13 @@ impl Shared {
                         self.answer(&job, Err(failure));
                         return;
                     }
+                    let parked = matches!(&self.daemon.slot.read().unwrap().slot, crate::daemon::slot::Slot::Parked(_));
+                    if parked {
+                        self.answer(&job, Err(ops::engine_error(anyhow::anyhow!(
+                            "connect ProtonVPN before adding a URL; engine_unavailable state=parked"
+                        ))));
+                        return;
+                    }
                     let pending = Reply::TorrentsAdd(AddResult {
                         status: MutationResult::Pending {
                             reference: MutationRef::new(&reference).unwrap(),
@@ -99,6 +106,7 @@ impl Shared {
         if let Ok(Reply::TorrentsAdd(added)) = &result {
             if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)))
                 && added.duplicate != Some(true)
+                && added.deferred != Some(true)
             {
                 let mut pending = added.clone();
                 pending.status = MutationResult::Pending {

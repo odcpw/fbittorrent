@@ -229,6 +229,12 @@ impl Inner {
                     .map(|restore| restore.generation);
                 if current_generation != Some(generation) { return Ok(()); }
                 inner.admit_record(&cx, current, true, metadata).await?;
+                if let Some(saved) = ledger.records.iter_mut().find(|saved| saved.hash == record.hash) {
+                    if saved.deferred {
+                        saved.deferred = false;
+                        inner.save(&cx, &ledger).await?;
+                    }
+                }
                 inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await
             }.await;
             let mut restores = inner.restores.lock().unwrap();

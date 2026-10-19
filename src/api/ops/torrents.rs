@@ -329,7 +329,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     true
                 }
             };
-            if let (Some(indices), Some((_, bytes))) = (&args.files, &add.torrent) {
+            let selected = if let Some((_, bytes)) = &add.torrent {
                 let metadata = librqbit::torrent_from_bytes(bytes)
                     .map_err(|value| engine_error(value.into()))?;
                 let count = metadata
@@ -339,6 +339,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     .map_err(|value| engine_error(value.into()))?
                     .iter_file_details()
                     .count();
+                let indices = args.files.clone().unwrap_or_else(|| (0..count as u64).collect());
                 if indices.iter().any(|index| *index >= count as u64) {
                     return Err(error(
                         InvalidArgs,
@@ -346,15 +347,16 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                         Some("files"),
                     ));
                 }
-            }
+                Some(indices.into_iter().map(|index| index as usize).collect())
+            } else { None };
             let EngineResult::Added(mut added) = execute(
                 daemon,
                 if magnet {
                     EngineOp::AddMagnet(add)
-                } else if let Some(files) = &args.files {
+                } else if let Some(files) = selected {
                     EngineOp::AddSelected {
                         options: add,
-                        files: files.iter().map(|index| *index as usize).collect(),
+                        files,
                     }
                 } else {
                     EngineOp::Add(add)
@@ -371,7 +373,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 hash: Some(Hash::new(added.hash).unwrap()),
                 name: Some(added.name),
                 duplicate: Some(added.duplicate),
-                deferred: None,
+                deferred: added.deferred.then_some(true),
             })
         }
         Call::TorrentsStart { args } => {
@@ -647,4 +649,11 @@ pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn deferred_add_fixture_roundtrips() {
+    crate::api::fixtures::check_group("deferred-add", include_str!("../../../contracts/ipc/v1/deferred-add.ndjson")).unwrap();
+    println!("deferred-add fixture: parked hello, done/deferred add and waiting_vpn detail pass the frozen v1 types and bounds");
 }

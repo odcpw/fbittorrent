@@ -468,3 +468,15 @@ For the planned v1 adapter, `torrents.set_upload_limit {hashes, bps?}` can retur
 wire compatibility. `torrents.set_seed` must use the same live setter for
 existing handles. The v1 adapter is not present in this checkout, so this entry
 does not advertise a new operation, capability or active NDJSON endpoint.
+
+### P7-09 — deferred adds while waiting for the VPN
+
+The `deferred_add` capability enables parked `torrents.add` for magnets and local
+`.torrent` paths. It saves the record and local metadata privately, keeps the
+requested run/pause and upload policies, appends to queue order, and returns
+`state:done`, the hash, and `deferred:true`. Rows remain `waiting_vpn` with unknown
+progress until the interface returns. Activation resolves metadata and restores
+the saved queue intent; the deferred marker clears after admission. Duplicate
+adds preserve the existing record. URL sources are refused while parked before
+fetching or returning a pending receipt. Characterization: `deferred-add.ndjson`;
+live cases: `deferred_add_saved_record` and opt-in `deferred_add`.

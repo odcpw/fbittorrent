@@ -1518,7 +1518,7 @@ def api_collection_cap(binary, systemd):
 def api_subscriptions_deferred(binary, systemd):
     with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files", "mutations"], "P1-06 plus P1-09 advertise exactly their implemented capabilities", str(hello["caps"]))
+        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add"], "P1-06, P1-09 and P7-09 advertise exactly their implemented capabilities", str(hello["caps"]))
         for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
             frame = client.call(op, args, error="unknown_op")
             nearest = ["torrents.list"] if op == "torrents.lis" else []
@@ -1559,6 +1559,108 @@ def api_start_results(binary, systemd):
         bulk = client.call("torrents.start", dict(hashes=[complete.info_hash, partial.info_hash]))["result"]
         case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
                    "bulk start preserves completed and already-running skip reasons", str(bulk))
+
+
+def deferred_add_saved_record(binary, systemd):
+    with Case("daemon", "deferred_add_saved_record") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h:
+        config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        select_replay_interface(config, "fbmissing0")
+        process = h.start_serve()
+        try:
+            h.receive_ready(); h.wait_engine()
+            with ApiConn(h) as client:
+                hello = client.hello()["result"]
+                case.check(hello["state"] == "parked" and "deferred_add" in hello["caps"], "missing binding parks the daemon and advertises deferred_add", json.dumps(hello))
+                magnet = "magnet:?xt=urn:btih:" + "d1" * 20 + "&dn=Deferred%20fixture&tr=http%3A%2F%2F127.0.0.1%3A1%2Fannounce"
+                reply = client.call("torrents.add", dict(source=dict(magnet=magnet)), ref="deferred-magnet")["result"]
+                case.check(reply == dict(state="done", hash="d1" * 20, name="Deferred fixture", duplicate=False, deferred=True), "magnet add acknowledges its durable deferred intent", json.dumps(reply))
+                ledger = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
+                record = json.loads(ledger.read_text())["records"][-1]
+                case.check(record["deferred"] and not record["paused"] and record["source"] == magnet, "physical transfer remains parked while the saved record retains run intent and trackers", json.dumps(record))
+                row = client.call("torrents.get", dict(hash=reply["hash"]))["result"]["torrent"]
+                case.check(row["state"] == "waiting_vpn" and row["intent"] == "run" and not row["checked"] and "progress" not in row, "deferred row reports waiting_vpn with unknown progress", json.dumps(row))
+                fixture = fixtures.two_file_fixture(sandbox.root)
+                added = client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stopped=True, files=[1]))["result"]
+                records = json.loads(ledger.read_text())["records"]
+                cached = ledger.parent / (fixture.info_hash + ".torrent")
+                case.check(added["deferred"] and added["state"] == "done" and records[-1]["paused"] and records[-1]["only_files"] == [1] and cached.read_bytes() == fixture.torrent.read_bytes(), "local metadata and explicit pause/selection are saved at the end of the ledger", json.dumps(dict(reply=added, records=records)))
+                case.check(cached.stat().st_mode & 0o777 == 0o600 and ledger.parent.stat().st_mode & 0o777 == 0o700, "deferred store and metainfo stay private", str(cached))
+                before = ledger.read_bytes()
+                duplicate = client.call("torrents.add", dict(source=dict(magnet=magnet), stopped=True, seed=True))["result"]
+                case.check(duplicate["duplicate"] and duplicate["deferred"] and ledger.read_bytes() == before, "duplicate deferred add preserves the original policy and ledger bytes", json.dumps(duplicate))
+                with fixtures.HttpFixture(sandbox.root, {"/never.torrent": dict(file=fixture.torrent.name)}) as http:
+                    client.call("torrents.add", dict(source=dict(url=http.base + "/never.torrent")), error="engine_unavailable")
+                    case.check(not http.requests and ledger.read_bytes() == before, "parked URL add is refused without fetching or saving anything", json.dumps(http.requests))
+            h.stop_serve(process)
+            h.notify.close()
+            process = h.start_serve()
+            h.receive_ready(); h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello()
+                row = client.call("torrents.get", dict(hash="d1" * 20))["result"]["torrent"]
+                case.check(ledger.read_bytes() == before and row["state"] == "waiting_vpn" and row["intent"] == "run", "daemon restart preserves the deferred records, queue order and saved intent exactly", json.dumps(row))
+        finally:
+            if process.child.poll() is None: h.stop_serve(process)
+            h.lock_free()
+
+
+def deferred_add(binary, systemd):
+    if os.environ.get("FBT_TEST_VPN") != "1":
+        raise RuntimeError("deferred_add requires the opt-in VPN namespace fixture (FBT_TEST_VPN=1)")
+    with Case("daemon", "deferred_add") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h, Sandbox() as seedbox, Harness(case, binary, seedbox) as seedh:
+        select_replay_interface(Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml", "fixture0")
+        select_replay_interface(Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml", None)
+        activation, activated = sandbox.root / "activate", sandbox.root / "activated.json"
+        info = sandbox.root / "namespace.json"
+        manifest = sandbox.root / "deferred-namespace.json"
+        seed_port = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())["peer_port"]
+        manifest.write_text(json.dumps(dict(main=DaemonContract.command(str(binary), 300, True), seed=DaemonContract.command(str(binary), 300, True), seed_env=seedbox.env,
+            seed_port=seed_port, info=str(info), cleanup=str(sandbox.root / "cleanup.json"), host_netns=os.readlink("/proc/self/ns/net"), activation=str(activation), activated=str(activated))))
+        process = h.spawn(["unshare", "-Urn", "--", sys.executable, str(Path(__file__).resolve()), "--replay-namespace-child", str(manifest)])
+        try:
+            h.wait_engine(); seedh.wait_engine()
+            if not h.wait_for(lambda: (info.exists(), str(info)), "owned namespace publishes its tracker"): raise RuntimeError("namespace fixture unavailable")
+            network = json.loads(info.read_text())
+            payload = seedbox.downloads / "deferred.bin"; payload.write_bytes(os.urandom(8 * fixtures.MIB))
+            fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=network["tracker"], piece_length=fixtures.MIB)
+            # BEP 27 private seeds refuse BEP 9 metadata exchange. This public
+            # fixture remains confined to the owned, loopback-only namespace.
+            fixture.info["private"] = 0
+            fixture.info_hash = hashlib.sha1(fixtures.bencode(fixture.info)).hexdigest()
+            fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info, announce=network["tracker"])))
+            fixture.magnet = "magnet:?" + urllib.parse.urlencode(dict(xt="urn:btih:" + fixture.info_hash, dn=payload.name, tr=network["tracker"]))
+            with ApiConn(seedh) as seed:
+                seed.hello(); seed.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(seedbox.downloads), seed=True))
+                seedh.wait_for(lambda: ((row := seed.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"])["state"] == "seeding", json.dumps(row)), "real seed finishes checking")
+                seed.call("torrents.set_upload_limit", dict(hashes=[fixture.info_hash], bps=32768))
+            with ApiConn(h) as client:
+                client.hello()
+                added = client.call("torrents.add", dict(source=dict(magnet=fixture.magnet)))["result"]
+                case.check(added["state"] == "done" and added["deferred"] and added["hash"] == fixture.info_hash, "missing interface saves the real magnet before any engine exists", json.dumps(added))
+                before = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+                case.check(before["state"] == "waiting_vpn" and not before["checked"], "record waits without fabricated metadata/progress", json.dumps(before))
+                local = fixtures.two_file_fixture(sandbox.root)
+                saved = client.call("torrents.add", dict(source=dict(path=str(local.torrent)), stopped=True, files=[1]))["result"]
+                case.check(saved["deferred"] and saved["hash"] == local.info_hash, "local metainfo also waits with its explicit paused selection", json.dumps(saved))
+                activation.write_text(str(time.time_ns()))
+                h.wait_for(lambda: (activated.exists(), str(activated)), "fixture interface appears inside the owned namespace")
+                case.check(True, "interface up/down timestamps", activated.read_text())
+                def receiving():
+                    row = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+                    return row["state"] == "downloading" and row.get("dl_bps", 0) > 0, json.dumps(row)
+                h.wait_for(receiving, "deferred metadata resolves and the saved run intent starts receiving", timeout=30)
+                records = json.loads((Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json").read_text())["records"]
+                record = next(row for row in records if row["hash"] == fixture.info_hash)
+                case.check(not record.get("deferred", False) and not record["paused"], "successful activation clears the deferred marker and preserves run intent", json.dumps(record))
+                def local_paused():
+                    row = client.call("torrents.get", dict(hash=local.info_hash))["result"]["torrent"]
+                    return row["state"] == "paused" and row["checked"] and row["intent"] == "pause", json.dumps(row)
+                h.wait_for(local_paused, "deferred local metainfo is admitted and checked without starting a paused record")
+                files = client.call("torrents.files", dict(hash=local.info_hash))["result"]["files"]
+                case.check([row["included"] for row in files] == [False, True], "local selection survives activation", json.dumps(files))
+                client.call("app.shutdown", dict(reason="deferred fixture complete")); process.wait()
+        finally:
+            if process.child.poll() is None: h.stop_serve(process)
 
 
 def api_missing_completed_payload(binary, systemd):
@@ -1769,8 +1871,12 @@ def replay_namespace_child(manifest_path):
     manifest = json.loads(Path(manifest_path).read_text())
     if os.readlink("/proc/self/ns/net") == manifest["host_netns"]:
         raise RuntimeError("refusing replay interface mutations outside the owned network namespace")
-    subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
-    subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
+    activation = manifest.get("activation")
+    if activation:
+        subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
+    else:
+        subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
+        subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
     compact = socket.inet_aton("127.0.0.1") + struct.pack("!H", manifest["seed_port"])
     tracker = fixtures.HttpFixture(Path(manifest_path).parent, {
         "/announce": dict(base64=base64.b64encode(fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=compact))).decode())})
@@ -1781,6 +1887,16 @@ def replay_namespace_child(manifest_path):
                 child.terminate()
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, terminate)
+    control_stop, control = threading.Event(), None
+    def activate():
+        while not control_stop.wait(.05):
+            if Path(activation).exists():
+                down = time.time_ns()
+                subprocess.run(["ip", "link", "set", "lo", "down"], check=True)
+                subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
+                subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
+                Path(manifest["activated"]).write_text(json.dumps(dict(down_ns=down, up_ns=time.time_ns(), namespace=os.readlink("/proc/self/ns/net"))))
+                return
     try:
         seed = subprocess.Popen(manifest["seed"], env=manifest["seed_env"], stdin=subprocess.DEVNULL)
         children.append(seed)
@@ -1788,8 +1904,15 @@ def replay_namespace_child(manifest_path):
         children.append(main)
         Path(manifest["info"]).write_text(json.dumps(dict(namespace=os.readlink("/proc/self/ns/net"), tracker=tracker.base + "/announce",
             seed_port=manifest["seed_port"], seed_pid=seed.pid, main_pid=main.pid), sort_keys=True))
+        if activation:
+            control = threading.Thread(target=activate)
+            control.start()
         return main.wait()
     finally:
+        control_stop.set()
+        if control is not None:
+            control.join(timeout=2)
+            if control.is_alive(): raise RuntimeError("namespace activation thread did not stop")
         terminate()
         exits = []
         for child in children:
@@ -3359,7 +3482,7 @@ CASES = {function.__name__: function for function in
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
           api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
-          api_missing_completed_payload, api_loopback_seed_receives,
+          api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
@@ -3386,13 +3509,15 @@ def main():
         os.environ["FBT_API_CONTRACT_VALIDATOR"] = str(args.contract_validator.resolve())
     if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":
         parser.error("install_atomic requires FBT_TEST_INSTALL=1 and the outer release-lock/memory-scope wrapper")
+    if args.case == "deferred_add" and os.environ.get("FBT_TEST_VPN") != "1":
+        parser.error("deferred_add requires FBT_TEST_VPN=1 (owned VPN namespace fixture)")
     if args.case in SYSTEMD_CASES and not args.systemd:
         parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")
