@@ -248,7 +248,7 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
     def test_build_abort_never_uses_stale_success(self):
         with tempfile.TemporaryDirectory(prefix='fbt-gate-control-') as temporary:
             root = Path(temporary); scripts = root / 'scripts'; scripts.mkdir()
-            for name in ('gate.py', 'gate-fast.sh'): shutil.copy2(gate.ROOT / 'scripts' / name, scripts / name)
+            for name in ('gate.py', 'gate_safety.py', 'gate-fast.sh'): shutil.copy2(gate.ROOT / 'scripts' / name, scripts / name)
             harness = root / 'agent_ergonomics_audit/audit/regression_tests'; harness.mkdir(parents=True)
             for name in ('daemon', 'native', 'agent_contract', 'tui_smoke', 'tui_journey'):
                 (harness / (name + '.py')).write_text('SYSTEMD_CASES=set()\n')

@@ -19,9 +19,9 @@ import fixtures
 
 
 class Pair:
-    def __init__(self,case,binary,systemd=False,throttle=32768,state='downloading'):
+    def __init__(self,case,binary,systemd=False,throttle=32768,state='downloading',extra_peers=()):
         self.case,self.binary,self.systemd,self.throttle,self.state=case,Path(binary).resolve(),systemd,throttle,state
-        self.stack=ExitStack();self.owned=[];self.hash=None;self.row=None
+        self.stack=ExitStack();self.owned=[];self.hash=None;self.row=None;self.extra_peers=extra_peers
 
     def process(self):
         box=self.stack.enter_context(d.Sandbox())
@@ -43,7 +43,13 @@ class Pair:
                 body=fixtures.bencode(dict(interval=1,peers=peers))
                 http=self.stack.enter_context(fixtures.HttpFixture(seedbox.root,{'/announce':dict(base64=base64.b64encode(body).decode())}))
                 payload=seedbox.downloads/'fixture-download.bin';payload.write_bytes(os.urandom(recipe['payload_bytes']))
-                item=fixtures.torrent_fixture(seedbox.root,[payload],tracker=http.base+'/announce')
+                url=http.base+'/announce'
+                if self.extra_peers:
+                    target_cfg=tomllib.loads((Path(self.box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml').read_text())
+                    tracker=self.stack.enter_context(fixtures.tracker_server(fail_first=0,interval_s=1,
+                        peers=[('127.0.0.1',cfg['peer_port']),*self.extra_peers],only_port=target_cfg['peer_port'],directory=seedbox.root))
+                    url=tracker.url
+                item=fixtures.torrent_fixture(seedbox.root,[payload],tracker=url)
                 peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(seedbox.downloads),seed=True))
                 seed.wait_for(lambda:((row:=peer.call('torrents.get',dict(hash=item.info_hash))['result']['torrent'])['state']=='seeding',json.dumps(row)),'fixture seed verifies exact local payload')
                 d.DaemonContract.throttle(peer,item.info_hash,self.throttle or None)

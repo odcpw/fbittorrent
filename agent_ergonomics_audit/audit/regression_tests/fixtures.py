@@ -360,14 +360,14 @@ def corrupt_byte(path, offset):
     return old, old ^ 0xff
 
 
-def daemon_pair(case, binary, systemd=False, throttle=32768, state="downloading"):
+def daemon_pair(case, binary, systemd=False, throttle=32768, state="downloading", extra_peers=()):
     """Owned seed/leech fixture, imported lazily to keep payload helpers independent."""
     from fixture_serving import Pair
-    return Pair(case, binary, systemd, throttle, state)
+    return Pair(case, binary, systemd, throttle, state, extra_peers=extra_peers)
 
 class tracker_server:
     """A bounded local announce fixture; logs no URL or query-string secrets."""
-    def __init__(self, fail_first=2, interval_s=5, peers=(), directory=None, echo_failure=False):
+    def __init__(self, fail_first=2, interval_s=5, peers=(), directory=None, echo_failure=False, only_port=None):
         import time
         self.root = _directory(directory)
         self.log = self.root / "tracker.log"
@@ -399,7 +399,7 @@ class tracker_server:
                         reason += " " + fixture.url + "?passkey=fixture-private-token"
                     body = bencode({"failure reason": reason})
                 else:
-                    compact = b"".join(socket.inet_aton(host) + struct.pack(">H", port) for host, port in peers)
+                    compact = b"".join(socket.inet_aton(host) + struct.pack(">H", port) for host, port in (peers if only_port is None or row["port"] == only_port else ()))
                     body = bencode(dict(interval=interval_s, peers=compact))
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))

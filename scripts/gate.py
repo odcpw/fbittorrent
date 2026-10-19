@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from gate_safety import strict_check, strict_rust_test
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / 'agent_ergonomics_audit/audit/regression_tests'
@@ -29,7 +30,7 @@ WORKER_FAILURE = re.compile(r'thread .*panicked|obligation.*leak|closing native 
 # q_detaches includes a real loopback download that keeps moving after detach.
 FAST = {
     'native': ['q_detaches', 'q_confirms'],
-    'daemon': ['api_torrent_operations', 'mutation_magnets_and_file_removal', 'daemon_api_probe',
+    'daemon': ['zero_upload', 'api_torrent_operations', 'mutation_magnets_and_file_removal', 'daemon_api_probe',
                'add_starts_unit_no_launcher', 'down_stops',
                'idle_exit_bar_does_not', 'dashboard_bar_presence',
                'idle_exit_disabled_shutdown_drains', 'search_dedupe_and_repair',
@@ -237,7 +238,7 @@ def run_once(check, logs, env, attempt):
                 finals += [row for row in rows if row.get('final')]
         except (ValueError, OSError, AttributeError): ok = False
         ok &= bool(finals)
-    check.status = ('PASS' if attempt == 1 else 'FLAKY') if ok else 'FAIL'
+    check.status = ('PASS' if attempt == 1 else 'FAIL' if strict_check(check.name) else 'FLAKY') if ok else 'FAIL'
     return ok
 
 
@@ -312,7 +313,9 @@ def rust_tests(mode, logs, env):
             check.seconds += retry.seconds
         # A failing named test explains its own panic. Unattributed worker
         # panics on an otherwise-green suite must never be called a pass.
-        check.status = 'FLAKY' if all(retries) and ('test result: FAILED.' in body or unfinished) else 'FAIL'
+        safety_failed = any(strict_rust_test(name) for name in failures)
+        check.status = 'FLAKY' if not safety_failed and all(retries) and ('test result: FAILED.' in body or unfinished) else 'FAIL'
+        if safety_failed: check.detail += '; safety failure retained despite retry'
     elif not ok or worker_failure:
         # Compiler/transport failure or an un-attributed background panic has
         # no narrower case to replay. Retry this stage once, with serial tests.
@@ -320,7 +323,7 @@ def rust_tests(mode, logs, env):
         passed = run_once(check, logs, env, 2)
         retried = Path(check.log).read_text()
         passed &= bool(re.search(r'^test result: ok\. [1-9][0-9]* passed;', retried, re.M))
-        check.status = 'FLAKY' if passed and not WORKER_FAILURE.search(retried) else 'FAIL'
+        check.status = 'FLAKY' if passed and not worker_failure and not WORKER_FAILURE.search(retried) else 'FAIL'
     return check
 
 
@@ -337,6 +340,8 @@ def full_checks(env, binary):
             python_check('tui_controls', 'agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py', str(binary)),
             python_check('ci_gates', 'agent_ergonomics_audit/audit/regression_tests/ci_test.py'),
             python_check('gate_controls', 'scripts/gate_test.py'),
+            python_check('safety_controls', 'scripts/gate_safety_test.py'),
+            python_check('upload_probe_controls', 'agent_ergonomics_audit/audit/regression_tests/upload_wire_test.py'),
             *optional_checks(env, binary)]
 
 
@@ -357,6 +362,7 @@ def resource_checks(env):
 def summary(checks, elapsed, logs, mode):
     groups = {}
     for check in checks:
+        if check.status == 'FLAKY' and strict_check(check.name): check.status = 'FAIL'
         group = check.name.split('/')[0]
         if group in ('logging', 'qml_logging', 'ci_gates', 'gate_controls', 'widget_online'): group = 'gate_controls'
         if group in ('hygiene', 'licences', 'widget_model'): group = 'hygiene'
