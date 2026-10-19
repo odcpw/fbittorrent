@@ -15,6 +15,7 @@ fn key_field(topic:&Topic)->&'static str {
         Topic::Shows=>"imdb",Topic::ShowReleases(_)=>"key",
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
+        Topic::Peers(_) => "addr",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
     }
@@ -84,6 +85,8 @@ pub(super) fn diff(topic: &Topic, old: &Value, new: &Value) -> (Changed, Vec<Val
 const COALESCED: &[&str] = &[
     "progress",
     "completed_bytes",
+    "downloaded",
+    "uploaded",
     "uploaded_bytes",
     "dl_bps",
     "ul_bps",
@@ -114,7 +117,7 @@ pub(super) fn structural_projection(topic: &Topic, old: &Value, new: &Value) -> 
         }
         return v;
     }
-    if !matches!(topic, Topic::Torrents | Topic::Files(_)) {
+    if !matches!(topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_)) {
         return new.clone();
     }
     let before: BTreeMap<_, _> = old

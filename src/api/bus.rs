@@ -117,6 +117,7 @@ struct Sample {
     completions: Vec<Value>,
     logs: Value,
     files: BTreeMap<String, Value>,
+    peers: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
     disk: Disk,
@@ -133,6 +134,7 @@ impl Sample {
             Topic::RssFeeds=>self.rss_feeds.clone(),
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
+            Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
             Topic::Network => self.network.clone(),
             Topic::Settings => self.settings.clone(),
@@ -183,6 +185,7 @@ impl Sample {
 pub(crate) struct Bus {
     daemon: Arc<Daemon>,
     registry: Mutex<Registry>,
+    peers: peers::Sampler,
     wake: Arc<Wake>,
     stopping: AtomicBool,
     initial_hashes: BTreeSet<String>,
@@ -193,6 +196,7 @@ impl Bus {
         Arc::new(Self {
             daemon,
             registry: Mutex::default(),
+            peers: Default::default(),
             wake: Arc::default(),
             stopping: AtomicBool::new(false),
             initial_hashes: std::fs::read(crate::config::data_dir().join("engine/torrents.json"))
@@ -254,7 +258,7 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
             if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
-            if let Topic::Files(hash) = topic {
+            if let Topic::Files(hash) | Topic::Peers(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
@@ -435,7 +439,14 @@ impl Bus {
         for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
             show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
         }
+        drop(slot);
+        self.peers.retain(topics);
+        let mut peers = BTreeMap::new();
+        for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
+            if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
+        }
         Ok(Sample {
+            peers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
             show_releases,
 
@@ -534,6 +545,7 @@ impl Bus {
             if self.registry.lock().unwrap().subscriptions.values().any(|s|s.topics.iter().any(|t|matches!(t.topic,Topic::Shows|Topic::ShowReleases(_)))) {
                 let stamp=self.daemon.shows.stamp();if stamp!=shows_stamp{shows_stamp=stamp;dirty=true;}
             }
+            {let registry=self.registry.lock().unwrap();self.peers.retain_if(|hash|registry.subscriptions.values().any(|s|s.topics.iter().any(|t|matches!(&t.topic,Topic::Peers(h) if h.as_str()==hash))));}
             let due = self
                 .registry
                 .lock()
@@ -692,7 +704,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
+                Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
             )
         });
         for index in order {
@@ -705,9 +717,9 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
-                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Files(_));
+                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_));
             if t.sent.is_none() || reset {
                 if keyed {
                     let resync = t.topic == Topic::Events
@@ -797,7 +809,7 @@ impl Subscription {
         // sampling is then released while the owning connection remains open.
         if restart {
             self.topics.retain(
-                |t| !matches!(&t.topic,Topic::Files(h) if !sample.rows.iter().any(|r|&r.hash==h)),
+                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
             );
         }
         self.epoch = Some(engine);

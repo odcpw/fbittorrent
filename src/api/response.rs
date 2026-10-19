@@ -3,6 +3,7 @@
 use super::{objects::*, scalar::*};
 use super::rss::*;
 use super::shows::*;
+use super::peers::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -236,6 +237,7 @@ pub enum Reply {
     TorrentsStop(StopResult),
     TorrentsRemove(RemoveResult),
     TorrentsFiles(FilesResult),
+    TorrentsPeers(PeersResult),
     TorrentsSetFiles(DoneResult),
     TorrentsSetSeed(DoneResult),
     TorrentsSetUploadLimit(MutationResult),
@@ -274,6 +276,7 @@ impl Reply {
             "torrents.start" => serde_json::from_value(result).map(Self::TorrentsStart),
             "torrents.stop" => serde_json::from_value(result).map(Self::TorrentsStop),
             "torrents.remove" => serde_json::from_value(result).map(Self::TorrentsRemove),
+            "torrents.peers" => serde_json::from_value(result).map(Self::TorrentsPeers),
             "torrents.files" => serde_json::from_value(result).map(Self::TorrentsFiles),
             "torrents.set_files" => serde_json::from_value(result).map(Self::TorrentsSetFiles),
             "torrents.set_seed" => serde_json::from_value(result).map(Self::TorrentsSetSeed),

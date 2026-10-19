@@ -257,6 +257,9 @@ pub(crate) struct LivePeerState {
 
     // This is used to track the pieces the peer has.
     pub bitfield: BF,
+    pub total_pieces: usize,
+    pub encrypted: bool,
+    pub incoming: bool,
 
     // When the peer sends us data this is used to track if we asked for it.
     inflight_requests: HashSet<InflightRequest>,
@@ -286,6 +289,9 @@ impl LivePeerState {
             client_name: None,
             peer_interested: initial_interested,
             bitfield: BF::default(),
+            total_pieces: 0,
+            encrypted: false,
+            incoming: false,
             inflight_requests: Default::default(),
             late_cancelled_request_tolerance: 0,
             request_slots_changed: Default::default(),

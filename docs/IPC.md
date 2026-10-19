@@ -74,6 +74,7 @@ when a required cap is missing.
 | Cap | Operations and topics it covers | Since |
 |---|---|---|
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
+| `peers` | `torrents.peers`, topic `torrent:<h>.peers`, connected `Torrent.seeds` | P5-01 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
@@ -187,6 +188,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
+| `torrents.peers` | `{hash}` | `{peers: [Peer]}` | no | P5-01 |
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
@@ -451,7 +453,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss","shows"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss","shows","peers"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -787,3 +789,18 @@ the one-level undo target; undo_read restores the last individual read mark to
 unread, and the next undo is empty. Grab marks read/grabbed only after a successful
 ledger add with origin shows. The new transcript covers every operation and
 inbox identity; existing hello/error arrays exactly include the shows cap.
+
+### P5-01: connected seeds and peers (contract 1.2.12)
+
+Capability `peers` adds `torrents.peers {hash}` and `torrent:<hash>.peers`.
+The latter is keyed by `addr`, defaults to 1000 ms and releases sampling when
+its final subscriber disconnects or unsubscribes. `Peer` contains `addr`,
+optional `client`, `conn` (`tcp` or `tcp_mse`), `incoming`, open `state`,
+`downloaded`, `uploaded`, optional `dl_bps`, `ul_bps`, and `seed`. Counters and
+rates coalesce on the detail tick. Rates require two observations at least one
+second apart and are absent initially or after a counter reset. Reads of known
+inactive torrents return an empty peer table. Live torrent `seeds` counts
+connected peers whose entire piece bitfield is set (padding bits excluded);
+inactive/unknown counts remain absent. CLI `show --json` adds `peers[]` and
+`seeds`; contract-1.x `num_seeds` now uses that connected seed count, with its
+historical zero fallback when the optional count is absent. No tracker scrape.

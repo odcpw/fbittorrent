@@ -26,6 +26,7 @@ fn rev_monotonic() {
         completions: vec![],
         logs: json!([]),
         files: BTreeMap::new(),
+        peers: BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
@@ -98,4 +99,15 @@ fn events_ring_resync() {
     r.entries.front_mut().unwrap().0 = Instant::now() - Duration::from_secs(601);
     assert_eq!(r.oldest(), 4);
     assert_eq!(EventRing::default().append(json!({}))["seq"], 1);
+}
+
+#[test]
+fn peer_counters_coalesce_but_seed_and_direction_are_structural(){
+    let topic=Topic::Peers(Hash::new("12".repeat(20)).unwrap());
+    let old=json!([{"addr":"127.0.0.1:1","seed":false,"downloaded":1,"uploaded":2,"dl_bps":3,"ul_bps":4}]);
+    let new=json!([{"addr":"127.0.0.1:1","seed":true,"downloaded":9,"uploaded":10,"dl_bps":11,"ul_bps":12}]);
+    let projected=diff::structural_projection(&topic,&old,&new);
+    assert_eq!(projected[0]["downloaded"],1);assert_eq!(projected[0]["uploaded"],2);
+    assert_eq!(projected[0]["dl_bps"],3);assert_eq!(projected[0]["ul_bps"],4);assert_eq!(projected[0]["seed"],true);
+    let (changed,_,_)=diff::diff(&topic,&old,&new);assert!(changed.contains_key("127.0.0.1:1"));
 }

@@ -307,6 +307,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     value["open_target"] = json!(t.content_path.as_deref().unwrap_or(&t.save_path));
                     value["seed_allowed"] = json!(t.seed);
                     value["complete"] = json!(t.progress.map(|v| v >= 1.0));
+                    value["peers"] = if let Some(c)=&client {if c.hello.caps.iter().any(|cap|cap=="peers"){c.call("torrents.peers",json!({"hash":hashes[0]}))?["peers"].clone()}else{json!([])}}else{json!([])};
                     value["files"] = if let Some(c) = &client {
                         c.call("torrents.files", json!({"hash":hashes[0]}))
                             .map(|v| json!(v["files"].as_array().map(|files|files.iter().map(|f|json!({"index":f["index"],"name":f["path"],"size":f["size"],"progress":f["progress"],"progress_known":t.checked && t.state!=api::TorrentState::WaitingVpn,"priority":if f["included"]==true{1}else{0}})).collect::<Vec<_>>()).unwrap_or_default()))

@@ -88,6 +88,7 @@ where
 
 pub trait PeerConnectionHandler {
     fn on_connected(&self, _connection_time: Duration) {}
+    fn on_connection_flags(&self, _encrypted: bool, _incoming: bool) {}
     fn should_send_bitfield(&self) -> bool;
     fn serialize_bitfield_message_to_buf(&self, buf: &mut [u8]) -> anyhow::Result<usize>;
     fn on_handshake(&self, handshake: Handshake, ckind: ConnectionKind) -> anyhow::Result<()>;
@@ -277,6 +278,7 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
             .on_handshake(incoming.handshake, incoming.kind)
             .map_err(Error::Anyhow)?;
 
+        self.handler.on_connection_flags(incoming.encrypted, true);
         self.manage_peer(
             cx,
             ManagePeerArgs {
@@ -347,13 +349,13 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                     if h.peer_id == self.peer_id {
                         return Err(Error::ConnectingToOurselves);
                     }
-                    Ok((kind, read, write, read_buf, h))
+                    Ok((kind, read, write, read_buf, h, encrypted))
                 })
                 .await
             }
         };
         let first = attempt(encryption != PeerEncryption::Off).await;
-        let (ckind, read, write, read_buf, h) = match first {
+        let (ckind, read, write, read_buf, h, encrypted) = match first {
             Ok(connected) => connected,
             Err(error) if encryption == PeerEncryption::Prefer => {
                 // Ownership drops the failed socket before the fresh dial.
@@ -386,6 +388,7 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
             }
 
             self.handler.on_handshake(h, ckind).map_err(Error::Anyhow)?;
+            self.handler.on_connection_flags(encrypted, false);
 
             self.manage_peer(
                 cx,

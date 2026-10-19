@@ -15,6 +15,7 @@ pub enum Item {
     Log(LogEntry),
     Torrent(Torrent),
     File(File),
+    Peer(super::Peer),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

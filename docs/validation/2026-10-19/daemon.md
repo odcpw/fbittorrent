@@ -573,3 +573,18 @@ Evidence: `target/test-logs/fbt-p3-03-oyg/`, mirrored in
 `/tmp/fbt-track-a-evidence/fbt-p3-03-oyg/`. UI rendering stays with C/D; no all.sh
 between track beads. Follow-up: legacy EZTV episodes do not distinguish a missing
 source seed/size from zero; API omits nonpositive legacy values conservatively.
+
+## P5-01 checkpoint — seed/peer engine and API (fbt-p5-01-c1a)
+
+Connected seed flags ignore padding bits, expose actual encryption/direction,
+and count seeds without allocating detail tables. Added typed `torrents.peers`,
+addr-keyed detail snapshots/deltas with one-second counter baselines, bounded
+caches and release after unsubscribe; CLI show and contract 1.2.12 bookkeeping.
+`FBT_BEAD=fbt-p5-01-c1a python3 /tmp/fbt-track-a-run.py fork peer_stats_seed_flag`
+passes with a real local seed and incomplete leecher, including six padding bits.
+`build` passes. `api` was 90 pass/1 failure (stale documented caps); the example
+was corrected and `checkpoint/source/documented_fixture_lines.jsonl` verifies
+all examples against exact fixture lines. Logs under
+`target/test-logs/fbt-p5-01-c1a/`. Intermediate compiling checkpoint: daemon
+swarm cases, final fork suite and full app suite remain pending while the
+owner-priority M1a dashboard-presence fix is taken next. No P5-01 closure claimed.

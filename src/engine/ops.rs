@@ -53,6 +53,7 @@ impl EngineDispatcher {
         if self.inner.stopping.load(Ordering::Acquire) {
             bail!("native engine is closing");
         }
+        if let EngineOp::Peers {hash}=&op {return self.peer_snapshot(hash).map(EngineResult::Peers);}
         let cx = self.runtime.cx();
         self.runtime.block_on(async {
             rqbit_runtime::select! {

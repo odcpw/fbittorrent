@@ -198,6 +198,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsPeers { args } => Reply::TorrentsPeers(PeersResult { peers: daemon.peers.read(daemon, &args.hash)? }),
         Call::TorrentsFiles { args } => Reply::TorrentsFiles(FilesResult {
             files: files(daemon, &args.hash)?,
         }),

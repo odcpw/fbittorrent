@@ -57,6 +57,7 @@ pub enum EngineOp {
     Files {
         hash: String,
     },
+    Peers { hash: String },
     // Typed engine entry points for the daemon adapter. These do not add routes
     // to the legacy transport or advertise v1 operations before that API lands.
     OpenTarget {
@@ -263,6 +264,7 @@ pub enum EngineResult {
     Detail(TorrentDetails),
     Added(Vec<AddedTorrent>),
     Files(Vec<TorrentFile>),
+    Peers(Vec<super::super::peers::Peer>),
     OpenTarget(PathBuf),
     Transfer(TransferInfo),
     Queue(QueueInfo),
@@ -274,7 +276,7 @@ impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
-            Self::Detail(_) => bail!("torrent detail has no legacy route"),
+            Self::Peers(_) | Self::Detail(_) => bail!("torrent detail has no legacy route"),
             Self::Version(version) => Ok(version.clone()),
             Self::Torrents(rows) => Ok(format!(
                 "[{}]",

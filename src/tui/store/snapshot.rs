@@ -6,6 +6,7 @@ pub(super) struct Snapshot {
     pub bytes: usize,
     pub torrents: BTreeMap<String, api::Torrent>,
     pub files: BTreeMap<String, api::File>,
+    pub peers: BTreeMap<String, api::Peer>,
     pub events: Vec<api::Event>,
     pub logs: BTreeMap<u64, api::LogEntry>,
     pub feeds:BTreeMap<String,api::Feed>,
@@ -19,6 +20,7 @@ impl Snapshot {
             bytes: 0,
             torrents: BTreeMap::new(),
             files: BTreeMap::new(),
+            peers: BTreeMap::new(),
             events: Vec::new(),
             logs: BTreeMap::new(),
             feeds:BTreeMap::new(),feed_items:BTreeMap::new(),
@@ -26,7 +28,7 @@ impl Snapshot {
         }
     }
     pub fn len(&self) -> usize {
-        self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
+        self.peers.len() + self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
     }
     pub fn append(
         &mut self,
@@ -51,6 +53,7 @@ impl Snapshot {
                     keys.insert(row.hash.to_string())
                         && !self.torrents.contains_key(row.hash.as_str())
                 }
+                (api::Topic::Peers(_),api::Item::Peer(p))=>keys.insert(p.addr.clone())&&!self.peers.contains_key(&p.addr),
                 (api::Topic::Files(_), api::Item::File(row)) => {
                     keys.insert(row.index.to_string())
                         && !self.files.contains_key(&row.index.to_string())
@@ -76,6 +79,7 @@ impl Snapshot {
                 api::Item::Torrent(row) => {
                     self.torrents.insert(row.hash.to_string(), row.clone());
                 }
+                api::Item::Peer(p)=>{self.peers.insert(p.addr.clone(),p.clone());},
                 api::Item::File(row) => {
                     self.files.insert(row.index.to_string(), row.clone());
                 }
