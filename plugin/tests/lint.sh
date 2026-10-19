@@ -3,6 +3,7 @@
 set -euo pipefail
 root="${FBT_PLUGIN_SOURCE:-$(dirname "$0")/../oliver.torrents}"
 model="$root/Model.js"
+python3 "$(dirname "$0")/token-lint.py" "$root"
 python3 "$(dirname "$0")/check-structure.py" "$root"
 python3 "$(dirname "$0")/check-frame-handlers.py" "$root"
 python3 "$(dirname "$0")/../../scripts/check-widget-online.py" --self-test "$root/Service.qml"
