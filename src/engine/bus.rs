@@ -3,10 +3,43 @@
 use super::*;
 use std::{future::Future, pin::Pin, task::Poll};
 
+/// librqbit's Speed::as_bytes for an estimator's MiB/s value.
+fn speed_bytes(mbps: f64) -> u64 {
+    (mbps * 1024f64 * 1024f64) as u64
+}
+
+impl Inner {
+    /// Sum of the live handles' estimator rates: the same values Info reports
+    /// as each Live row's dl_bps/ul_bps, without building any row.
+    pub(super) fn record_rates(&self) {
+        let Some(sink) = self.rates.lock().unwrap().clone() else { return };
+        let (down, up) = self.session.with_torrents(|torrents| {
+            torrents.filter_map(|(_, handle)| handle.live()).fold((0u64, 0u64), |(down, up), live| {
+                (down.saturating_add(speed_bytes(live.down_speed_estimator().mbps())),
+                 up.saturating_add(speed_bytes(live.up_speed_estimator().mbps())))
+            })
+        });
+        sink(down, up);
+    }
+}
+
 impl EngineDispatcher {
     pub(crate) fn transfer_totals(&self)->(u64,u64,u64) {
         let counters=self.inner.session.stats_snapshot().counters;
         (counters.fetched_bytes,counters.uploaded_bytes,self.inner.completed_count.load(Ordering::Acquire))
+    }
+
+    /// The owner's rate history is fed from the engine tick, not a sample.
+    pub(crate) fn attach_rates(&self, sink: RateSink) {
+        *self.inner.rates.lock().unwrap() = Some(sink);
+    }
+
+    /// Ledger record hashes, exactly the rows Info would list.
+    pub(crate) fn record_hashes(&self) -> Result<std::collections::BTreeSet<String>> {
+        self.runtime.block_on(async {
+            let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+            Ok(ledger.records.iter().map(|record| record.hash.clone()).collect())
+        })
     }
 
     pub(crate) fn take_completions(&self) -> Vec<serde_json::Value> {

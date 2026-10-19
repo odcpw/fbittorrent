@@ -59,7 +59,7 @@ pub struct Daemon {
     pub(crate) shows: shows::Service,
     pub(crate) staged_sources: staged_sources::Registry,
     pub(crate) peers: crate::api::peers::Sampler,
-    pub(crate) history: Mutex<history::History>,
+    pub(crate) history: Arc<Mutex<history::History>>,
     pub(crate) stats: Mutex<stats::Stats>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
@@ -203,7 +203,8 @@ impl Daemon {
         let (epoch,state)=(slot.engine_epoch,slot.slot.state().name());
         drop(slot);
         // Record transitions at their source: a fast restart can finish between sampler ticks.
-        if initialized {if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){bus.engine_changed(epoch,state);}}
+        // The sampler waits up to a second; the first slot also wakes it.
+        if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){if initialized {bus.engine_changed(epoch,state);} else {bus.refresh();}}
         if let Slot::Running(app)=&mut old {
             app.drain(Duration::from_secs(4));
             self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
@@ -246,6 +247,10 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
                 Err(error) => return Err(error),
             };
         engine.dispatcher().attach_undo(daemon.undo.clone());
+        let history = daemon.history.clone();
+        engine.dispatcher().attach_rates(Arc::new(move |download, upload| {
+            history.lock().unwrap().record_tick(Instant::now(), download, upload);
+        }));
         eprintln!(
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()

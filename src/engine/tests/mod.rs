@@ -93,6 +93,7 @@ use fixture::*;
             resume: Arc::new(resume::Store::open(directory).unwrap()),
             resume_prepared: Default::default(),
             undo: Default::default(),
+            rates: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
             queue_pins: Default::default(),
