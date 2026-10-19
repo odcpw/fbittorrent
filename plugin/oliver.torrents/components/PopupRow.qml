@@ -15,6 +15,7 @@ CursorSurface {
   readonly property bool pending:{var revision=svc.actionRevision;return svc.rowPending(torrent.hash)}
   readonly property var action:{var revision=svc.actionRevision;return svc.pendingAction(torrent.hash)}
   readonly property bool parked:host.presentation.dim
+  readonly property var accentSpec:Model.accentText(Commons.Color.accent,Commons.Color.popups.background,host.foreground)
   readonly property bool actionsVisible:hover.hovered || hasCursor
   hasCursor:host.cursorActive && host.focusSection==="rows" && host.rowIndex===rowIdx
   foreground:host.foreground
@@ -49,10 +50,10 @@ CursorSurface {
       Rectangle {width:parent.width*Math.max(0,Math.min(1,root.torrent.progress || 0));height:parent.height;radius:height/2;color:Model.isActive(root.torrent) ? host.foreground : host.dim;Behavior on width {NumberAnimation {duration:Style.duration(400);easing.type:Easing.OutCubic}}}
     }
     Text {
-      id:meta;width:parent.width;textFormat:Text.PlainText
+      id:meta;objectName:"popup-row-meta";width:parent.width;textFormat:Text.PlainText
       text:root.pending && root.action ? svc.pendingGlyph(root.torrent.hash)+" "+PopupState.verb(root.action) : PopupState.meta(root.torrent,root.parked)
-      color:root.torrent.playable && root.torrent.playable.ready ? Model.accentText(Commons.Color.accent,Commons.Color.popups.background,host.foreground) : host.dim
-      font.family:Style.font.family;font.pixelSize:Style.font.caption;font.italic:root.pending;elide:Text.ElideRight
+      color:root.torrent.playable && root.torrent.playable.ready ? root.accentSpec.color : host.dim
+      font.family:Style.font.family;font.pixelSize:Style.font.caption;font.italic:root.pending;font.bold:!!root.torrent.playable && root.torrent.playable.ready && root.accentSpec.bold;elide:Text.ElideRight
     }
     ConfirmStrip {
       id:removeStrip
