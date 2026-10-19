@@ -58,7 +58,12 @@ Item {
   }
   function setFiles(hash,indexes,included,callback){var args={hash:hash};args[included ? "include" : "skip"]=indexes;return mutate("torrents.set_files",args,"files",callback)}
   function lookupImdb(args,callback){return hasCap("imdb") ? client.request("imdb.lookup",args,{callback:callback,quiet:true}) : false}
-  function copyText(text){if(text!==undefined){Commons.Util.execArgv(["wl-copy","--",String(text)]);notify("Copied")}}
+  function copyText(text){
+    if(text===undefined)return false
+    if(copyOut.running){notify("Clipboard busy");return false}
+    if(ApiClient.utf8Bytes(String(text))>65536){notify("Clipboard exceeds 65536 bytes");return false}
+    copyOut.value=String(text);copyOut.stdinEnabled=true;copyOut.running=true;return true
+  }
   function openUrl(url){if(url && /^https?:\/\//.test(url))Commons.Util.execArgv(["xdg-open",url])}
   function scheduleDetail(hash){detailChoice.hash=hash;detailChoice.restart();imdbChoice.restart()}
   function showDetail(hash){detailChoice.stop();if(detailFlow)detailFlow.begin(hash);imdbChoice.restart()}
@@ -146,7 +151,7 @@ Item {
     if(!row)return
     var card=detailFlow && detailFlow.hash===hash ? detailFlow.card : null
     var url=card && (wikipedia ? card.wiki_url : card.url) ? (wikipedia ? card.wiki_url : card.url) : wikipedia ? "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(row.name) : row.imdb_id ? "https://www.imdb.com/title/"+row.imdb_id+"/" : "https://www.imdb.com/find/?q="+encodeURIComponent(row.name)
-    Quickshell.execDetached(["xdg-open",url])
+    openUrl(url)
   }
   function follow(hash) {
     var row=store.torrents[hash]
@@ -416,6 +421,13 @@ Item {
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
   Timer { id: stoppedTimer; interval: 10000; onTriggered: root.stoppedRecently = false }
+  Process {
+    id:copyOut
+    property string value:""
+    command:["wl-copy","--"]
+    onStarted:{write(value);value="";stdinEnabled=false}
+    onExited:function(code){value="";root.notify(code===0 ? "Copied" : "Could not copy to clipboard")}
+  }
   Process {
     id: clipboard
     command: ["wl-paste", "--no-newline"]

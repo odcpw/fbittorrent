@@ -48,7 +48,8 @@ def click_row(q,index,button='button1',times=1):
 
 def functional(binary):
     with Case('qs_dashboard_table','table_actions') as case,running(binary,'paused',case) as (sandbox,harness,client,row):
-        for name in ('xdg-open','wl-copy'):fixtures.path_shim(name,'exit 0',sandbox.root)
+        fixtures.path_shim('xdg-open','exit 0',sandbox.root)
+        fixtures.path_shim('wl-copy','cat > "$XDG_RUNTIME_DIR/copied-text"',sandbox.root)
         cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent/imdb'
         for directory in ('by-id','by-name-v2'):(cache/directory).mkdir(parents=True,exist_ok=True)
         ident='tt1234001'
@@ -116,9 +117,10 @@ def functional(binary):
             shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
             case.check(client.call('torrents.open_target',dict(hash=row['hash']))['ok'],'a genuine local payload exists before the open action',row['content_path'])
             q.keys(['o'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
-            q.keys(['y'],lambda:(sandbox.root/'shims/wl-copy.log').exists())
+            copied_text=Path(sandbox.env['XDG_RUNTIME_DIR'])/'copied-text'
+            q.keys(['y'],lambda:copied_text.exists() and copied_text.read_text()=='magnet:?xt=urn:btih:'+row['hash'])
             copied=[json.loads(line) for line in (sandbox.root/'shims/wl-copy.log').read_text().splitlines()]
-            case.check(any('magnet:?xt=urn:btih:'+row['hash'] in call for call in copied),'y copies this hash as a magnet through argv',json.dumps(copied))
+            case.check(all(call==['--'] for call in copied) and copied_text.read_text()=='magnet:?xt=urn:btih:'+row['hash'],'y copies the exact magnet through stdin without exposing it in argv',json.dumps(copied))
             q.keys(['-k','Escape'],lambda:bool(view(q).get('window',{}).get('visible')))
             image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
             q.keys(['q'],lambda:q.state()['view'] is None)
