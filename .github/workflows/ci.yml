@@ -170,8 +170,6 @@ jobs:
       - name: Check source file sizes (900-line ceiling; legacy files may only shrink) and the size-lint boundary cases
         run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test --baseline scripts/size-baseline.txt src
 
-      - name: Check engine/TUI file sizes and the size-lint boundary cases
-        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test src/engine src/tui
       # Token and plugin-structure lints arrive in their named P2/P4 beads.
       - name: Summarize cases
         if: always()
