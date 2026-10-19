@@ -11,12 +11,16 @@ import tomllib
 import daemon
 import fixtures
 from fbtlog import Case, suite_status
+sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
+import private_net
 
 STATES=('empty','downloading','paused')
 
 
 @contextmanager
 def running(binary,state,case):
+    private_net.require()
+    case.check(True,'private network and DNS contain every fixture socket',private_net.describe())
     with ExitStack() as stack:
         sandbox=stack.enter_context(fixtures.Sandbox())
         harness=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),sandbox,False))
@@ -53,6 +57,7 @@ def running(binary,state,case):
 
 
 def serve(binary,state):
+    private_net.enter()
     with Case('qs_fixture',state) as case,running(binary,state,case) as (sandbox,harness,client,row):
         print('FBTFIXTURE '+json.dumps(dict(runtime=sandbox.env['XDG_RUNTIME_DIR'],root=str(sandbox.root),state=state,row=row)),flush=True)
         # EOF is the owner's teardown signal. No polling or retained children.

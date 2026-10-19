@@ -63,6 +63,8 @@ def main():
     owner_path=Path(os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'))/'fbittorrent/api.sock'
     before=owner_info(owner_path)
     with Case('qs_smoke','owner_guard') as guard:
+        import private_net
+        guard.check(True,'private network and local-only DNS are active',private_net.describe())
         guard.check(True,'record read-only owner bar count before isolated tests',json.dumps(before))
         with fixtures.Sandbox() as sandbox:
             config,env=prepare(sandbox,Path(__file__).with_name('smoke'))
@@ -110,4 +112,7 @@ def main():
             guard.check(before['bar']==after['bar'],'owner clients.bar is unchanged by private tests',json.dumps(dict(before=before,after=after)))
     return suite_status('qs_smoke')
 
-if __name__=='__main__':sys.exit(main())
+if __name__=='__main__':
+    import private_net
+    private_net.enter()
+    sys.exit(main())

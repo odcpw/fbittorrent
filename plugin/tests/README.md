@@ -50,3 +50,25 @@ The smoke runs offscreen and never uses an owner Wayland socket. It reads only
 daemon is started. The current pre-P1-11 binary lacks `status --quiet`, so readiness
 uses its equivalent read-only `status --json` until that flag appears. The owner
 probe likewise uses API 1 directly until the `api` CLI verb lands.
+
+## Dashboard and network boundary
+
+`plugin/tests/qs-dashboard.sh --binary <debug-binary>` runs the actual dashboard
+inside the private compositor, summons it with the installed `omarchy-shell`
+command pointed at the private config, types with `wtype`, and checks 50 native
+window create/destroy cycles. The installed registry verifies that only a bar
+layout reference enables the panel. The test host implements the panel-loader
+facade; this does not claim a run inside the owner's live host shell.
+
+Real-daemon service, smoke, dashboard and visual tests now enter private user,
+network and mount namespaces before creating cases. Only loopback exists; probes
+verify that IPv4/IPv6 have no external route. A private UDP DNS fixture answers
+A/AAAA with loopback and never forwards; its resolv.conf/hosts mounts affect only
+the private mount namespace. `private-net-test.py` covers the boundary, forged
+marker rejection, both DNS families and oversized-datagram rejection. Namespace
+creation failure is a test failure, with no owner-network fallback.
+
+This boundary is required: the P3-08 FD investigation found background DNS
+sockets in the older debug binary despite the engine's loopback configuration.
+Earlier captures/mutation tests exercised real local payloads, but their DNS was
+not fully contained. Requalified runs are retained with the Track C receipt.

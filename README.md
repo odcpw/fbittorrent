@@ -101,6 +101,31 @@ omarchy bar put oliver.torrents --before omarchy.tailscale
 Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 `torrents.*`.
 
+## Dashboard window
+
+The plugin exposes a separate window entry point while the bar keeps its popup:
+
+```sh
+omarchy-shell shell summon oliver.torrents '{"view":"search","query":"sintel"}'
+```
+
+The window shell routes Torrents, Search, Shows, RSS, Settings and Log. Their views
+land separately; this command currently proves window routing and query focus.
+The bar service owns its API connection across window closes. `q` closes the
+window; Esc clears one layer and leaves the window open at the top level.
+
+No window-manager rule is installed. The window tiles by default. To float it,
+an optional [Hyprland Lua window rule](https://wiki.hypr.land/configuring/core/rules/window-rules/)
+can match its initial title and Quickshell class:
+
+```lua
+hl.window_rule({
+  name = "fbittorrent-dashboard",
+  match = { initial_title = "^fbittorrent$", class = "^org[.]quickshell$" },
+  float = true,
+})
+```
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become

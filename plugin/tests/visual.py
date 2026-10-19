@@ -142,6 +142,9 @@ def main():
     parser.add_argument('--self-test',action='store_true')
     parser.add_argument('--dry-run',action='store_true')
     args=parser.parse_args()
+    if not args.dry_run and args.surface!='bar':
+        import private_net
+        private_net.enter()
     if args.self_test:return self_test(args.binary.resolve())
     if args.dry_run:
         with Case('qs_visual','dry_run') as case:
