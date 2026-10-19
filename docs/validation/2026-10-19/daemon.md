@@ -367,3 +367,21 @@ reduction probe exceeded the window while admitted requests drained
 (`live-foreground/daemon/alt_limit_holds.jsonl`); final bandwidth proof measures
 upload explicitly. P5-07 is not started: its 64 MiB recovery fixture cannot satisfy
 `free > remaining + 512 MiB`, and that frozen-rule ruling is also pending.
+
+## Orchestrator rulings, 2026-10-19
+
+Hello/error capability arrays follow the live list for merged additive features;
+update the fixture and changes[] bookkeeping, keeping replay comparison exact.
+P5-07's frozen 64 MiB/100 MiB recovery acceptance wins over Do 6's impossible
+margin: warning stays free < needed + 512 MiB; sample every 5 s, retry after free
+rises by max(16 MiB, one piece) from that torrent's ENOSPC baseline, once per
+rise; repeated ENOSPC resets its baseline. Log disk_full_recovered; explicit start
+retries immediately. UI criteria stay deferred to track C/D.
+
+P5-04 cap ruling applied: hello/error fixture capability arrays and the documented
+hello example now equal the live list, exactly. Contract 1.2.7 records each added
+cap via changes[].cap; agent unit test pins fixture equality and this coverage.
+`run.py api`, `run.py caps` pass (`caps-ruling/`); `cases contract_hello contract_errors`
+passes foreground and systemd (`caps-replay-{foreground,systemd}/`). No replay
+mask or deferral was added. Earlier full-suite failure is resolved for these rows;
+no additional full-suite run is claimed for this targeted bookkeeping delta.

@@ -440,7 +440,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -800,3 +800,10 @@ persists the turtle switch. Both use the settings transaction and live session
 limiters, independently of per-torrent upload caps. Summary.alt and Summary.limits
 publish the effective saved policy as structural state. CLI contract 1.2.6 adds
 `limits --down/--up/--alt/--alt-down/--alt-up`; stopped edits never start a daemon.
+
+### 2026-10-19 orchestrator ruling: exact hello capability bookkeeping
+
+Contract 1.2.7 updates hello/error fixture capability arrays to the fourteen integrated live
+capabilities. Every added capability has a capabilities.changes[] entry with
+its `cap` name. Replay compares these arrays exactly; no normalization mask is
+added. The documented hello example is updated to the same fixture bytes.
