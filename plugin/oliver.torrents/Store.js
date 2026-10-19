@@ -91,6 +91,7 @@ function create(options) {
   function topicKey(topic, row) {
     if (topic === "torrents") return row.hash
     if (/^search:/.test(topic)) return row.key
+    if (/^shows.releases:/.test(topic)) return (topic==="shows.releases:inbox" ? row.show_imdb+"/" : "")+row.key
     if (/^torrent:.*\.trackers$/.test(topic)) return row.url
     if (/^torrent:.*\.peers$/.test(topic)) return row.addr
     if (/^torrent:.*\.files$/.test(topic)) return String(row.index)
