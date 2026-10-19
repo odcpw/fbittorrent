@@ -12,7 +12,7 @@ Column {
   property string textFilter:""
   property string cursorHash:""
   property string hoverHash:""
-  property bool reordering:false
+  readonly property bool reordering:service.modelReordering===true
   property real savedScroll:0
   property var selection:({})
   property real windowLogicalWidth:width/Commons.Style.effectiveSpacingScale
@@ -30,6 +30,7 @@ Column {
     return service.torrentModel.get(source.row).hash
   }
   function indexOf(hash) {
+    if(reordering)return -1
     var source=service.store.modelIndex(hash)
     return source<0 ? -1 : proxy.mapFromSource(service.torrentModel.index(source,0)).row
   }
@@ -55,8 +56,8 @@ Column {
     target:root.service
     ignoreUnknownSignals:true
     function onStoreChanged(){root.service.store.setFilter(root.stateFilter,root.textFilter)}
-    function onRowOrderChanging(){root.savedScroll=list.contentY;root.reordering=true}
-    function onRowOrderChanged(){root.reordering=false;Qt.callLater(function(){list.contentY=Math.max(0,Math.min(root.savedScroll,Math.max(0,list.contentHeight-list.height)))})}
+    function onRowOrderChanging(){root.savedScroll=list.contentY}
+    function onRowOrderChanged(){Qt.callLater(function(){list.contentY=Math.max(0,Math.min(root.savedScroll,Math.max(0,list.contentHeight-list.height)))})}
   }
   SortFilterProxyModel {
     id:proxy

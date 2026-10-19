@@ -201,3 +201,35 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
 `resources.py --daemon --torrents N --subscribers K --seconds 60 --runs 3
 --baseline <path> --output <path>` measures one workload; add `--matrix` for the
 complete matrix.
+
+## Responsiveness
+
+```sh
+python3 plugin/tests/responsiveness.py --binary /path/to/current/fbittorrent \
+  --label after --runs 20 --seconds 30 --verify --output target/responsiveness/after.json
+```
+
+This uses the actual installed bar host, dashboard and popup in private
+Sway/XDG/network state, with 200 real records and a throttled loopback transfer.
+It measures first presented frames and the complete table separately, view and
+Details switches, native Qt input in filter/search, and the real magnet-handler
+CLI through the review sheet. Input samples start at Qt event injection;
+dashboard/handler samples include their command launch and shell handoff.
+`frameSwapped` closes each sample. No fabricated rows or frame-driving Timer is used.
+
+The output retains every sample, median/p95/max, shell CPU time, page faults,
+source hash and host pressure. Two uninterrupted windows measure the private
+shell's CPU with only the bar, downloading and idle; no IPC polls run during
+those windows. `--plugin-source` accepts a baseline source copy for matched
+before/after runs. `--verify` also checks that view switches reuse one table,
+hidden Details release subscriptions and focus settles on an active window.
+These software-rendered measurements include shared-host scheduling/I/O stalls;
+inspect the retained pressure and CPU samples before attributing a wall-time spike.
+Details data samples use the active loopback torrent and wait for actual file,
+peer, tracker and piece content. Pieces revisits may use the last verified sample
+for that selected torrent; the first sample still comes from the daemon. The
+`details_*_frame` samples mark the first tab response, while `details_*` waits for
+its data. The `--details-only`, `--settings-only` and `--handler-only` subsets
+repeat a focused measurement without the CPU windows; the handler subset also
+measures a magnet with the dashboard destroyed before every click. Fresh subscription data and a populated
+table are reported separately from the first visible response to an input.

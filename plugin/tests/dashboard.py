@@ -32,7 +32,7 @@ class Session:
             shutil.rmtree(self.config/'Plugin');(self.config/'Plugin').symlink_to(self.source_link,target_is_directory=True)
         host=self.config/'Host';host.mkdir()
         shutil.copyfile('/usr/share/omarchy/shell/services/PluginRegistry.qml',host/'PluginRegistry.qml')
-        if self.recipe=='bar-host':
+        if self.recipe in ('bar-host','responsiveness'):
             (self.config/'HostBar').symlink_to('/usr/share/omarchy/shell/plugins/bar',target_is_directory=True)
             for name in ('BarWidgetRegistry.qml','PluginShellApi.qml'):
                 shutil.copyfile('/usr/share/omarchy/shell/services/'+name,host/name)

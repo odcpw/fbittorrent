@@ -64,7 +64,7 @@ FocusScope {
     else selection=({})
     cursorHash=hash;focusPane="table";focusTable()
   }
-  function activate(hash){cursorHash=hash;detailsOpen=true;focusPane="details";focusTable()}
+  function activate(hash){cursorHash=hash;detailsOpen=true;focusPane="details";service.showDetail(hash);focusTable()}
   function move(delta,absolute,modifiers) {
     if(focusPane==="sidebar"){sidebar.move(delta);return}
     var previous=table.indexOf(cursorHash),index=absolute===undefined ? Math.max(0,Math.min(table.count-1,previous+delta)) : absolute

@@ -9,8 +9,8 @@ Item {
   required property var column
   property string pendingText:""
   property bool failed:false
-  readonly property real renderedProgress:progressRule.value
-  readonly property string renderedState:stateText.text
+  readonly property var renderedProgress:progressLoader.item ? progressLoader.item.value : undefined
+  readonly property string renderedState:stateLoader.item ? stateLoader.item.text : ""
   objectName:column.name==="peers" ? "connected-peer-count" : ""
   readonly property string renderedText:label.text
   readonly property bool unknown:value()==="—" || value()==="—/—"
@@ -46,23 +46,21 @@ Item {
     horizontalAlignment:root.column.name==="glyph" ? Text.AlignHCenter : root.column.name==="name" ? Text.AlignLeft : Text.AlignRight
     elide:Text.ElideRight
   }
-  StateText {
-    id:stateText
-    visible:root.column.name==="state"
+  Loader {
+    id:stateLoader
+    active:root.column.name==="state"
     anchors.fill:parent
     anchors.leftMargin:Commons.Style.spacing.controlPaddingX
     anchors.rightMargin:Commons.Style.spacing.controlPaddingX
-    verticalAlignment:Text.AlignVCenter
-    torrent:root.torrent
+    sourceComponent:StateText {verticalAlignment:Text.AlignVCenter;torrent:root.torrent}
   }
-  ProgressRule {
-    id:progressRule
-    visible:root.column.name==="progress"
+  Loader {
+    id:progressLoader
+    active:root.column.name==="progress"
     anchors.fill:parent
     anchors.leftMargin:Commons.Style.spacing.controlPaddingX
     anchors.rightMargin:Commons.Style.spacing.controlPaddingX
-    value:root.torrent.progress
-    complete:root.torrent.state==="done" || root.torrent.state==="seeding"
+    sourceComponent:ProgressRule {value:root.torrent.progress;complete:root.torrent.state==="done" || root.torrent.state==="seeding"}
   }
   HoverHandler {id:hover}
   Loader {

@@ -103,6 +103,32 @@ ShellRoot {
     var requested=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="subscribe"})
     check("detail_subscriptions",requested[requested.length-1].args.topics.join(",")==="torrent:"+"a".repeat(40)+".files","each selected detail topic has its own subscribe call",requested)
     console.log("FBTQS-PASS detail_subscriptions")
+    s=session();s.c.visibility(false,true,[]);s.hello()
+    var nextSub=1000
+    function settleSubscriptions(){
+      for(var attempt=0;attempt<64;attempt++){
+        var ids=Object.keys(s.c.pending),entry=ids.length ? s.c.pending[ids[0]] : null
+        if(!entry)return
+        if(entry.op==="subscribe")s.reply({sub:nextSub++,topics:entry.args.topics},entry.id)
+        else s.reply({state:"done"},entry.id)
+      }
+      throw Error("subscription reconciliation failed to settle")
+    }
+    settleSubscriptions()
+    var baseId=Number(Object.keys(s.c.subs)[0]);length=s.writes.length
+    s.c.receive(JSON.stringify({ev:"state",sub:baseId,topic:"summary",rev:1,data:{}}))
+    s.c.visibility(false,true,["torrent:"+"a".repeat(40)+".files"]);settleSubscriptions()
+    s.c.visibility(false,true,["torrent:"+"a".repeat(40)+".peers"]);settleSubscriptions()
+    var edits=s.writes.slice(length).map(function(w){return JSON.parse(w)})
+    check("subscription_reuse",s.c.subs[baseId] && s.c.subs[baseId].rev===1 && s.c.topicRevs.summary===1,"detail changes preserve the base subscription and revision",JSON.stringify(s.c.subs))
+    check("subscription_reuse",edits.filter(function(f){return f.op==="subscribe"}).every(function(f){return f.args.topics.length===1 && f.args.topics[0].indexOf("torrent:")===0}),"switching Files to Peers never requests another full torrents snapshot",JSON.stringify(edits))
+    check("subscription_reuse",!edits.some(function(f){return f.op==="app.client"}),"detail changes do not resend unchanged client presence",JSON.stringify(edits))
+    check("subscription_reuse",Object.keys(s.c.subs).length===2 && Object.values(s.c.subs).some(function(sub){return sub.topics[0].endsWith(".peers")}),"retired detail is released before its replacement; no subscription leak",JSON.stringify(s.c.subs))
+    s.c.subscribeAll(true);settleSubscriptions()
+    check("subscription_reuse",!s.c.subs[baseId],"explicit Refresh still replaces base snapshots",JSON.stringify(s.c.subs))
+    s.c.visibility(false,false,[]);settleSubscriptions()
+    check("subscription_reuse",Object.keys(s.c.subs).length===1 && Object.values(s.c.subs)[0].interval===5000 && Object.values(s.c.subs)[0].topics.join(",")==="summary","closing the UI retires detail groups and restores the bar's slower interval",JSON.stringify(s.c.subs))
+    console.log("FBTQS-PASS subscription_reuse")
     s=session(); s.hello()
     ref=s.c.request("torrents.add",{source:{url:"https://example.invalid/legal.torrent"}},{mutating:true})
     var request=JSON.parse(s.writes[s.writes.length-1]);s.reply({state:"pending",ref:ref},request.id)

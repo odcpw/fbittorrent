@@ -303,6 +303,7 @@ function create(options) {
   }
   // Qt's model owns stable delegates. Only changed roles emit row updates.
   var mirror = {model:null, indexes:dictionary(), order:[], generation:-1, sorted:null}
+  function modelRow(hash,row){return Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)})}
   s.syncModel = function(model, key, reverse, reorder) {
     var structural = false
     if (mirror.model !== model) {
@@ -311,6 +312,19 @@ function create(options) {
     }
     function reindex(from) {
       for (var index = from; index < mirror.order.length; ++index) mirror.indexes[mirror.order[index]] = index
+    }
+    if(!mirror.order.length && !model.count && s.hasTorrents){
+      var initial=s.sort(key,reverse)
+      if(initial.length){
+        // A snapshot must not build/move visible delegates once per insert.
+        // Admit its final sorted source in one proxy boundary, just as a sort.
+        if(reorder)reorder(true)
+        mirror.order=initial.slice();reindex(0)
+        initial.forEach(function(hash){model.append(modelRow(hash,s.torrents[hash]))})
+        mirror.generation=s.generation;mirror.sorted=initial
+        if(reorder)reorder(false)
+        return true
+      }
     }
     if (mirror.generation !== s.generation) {
       s.changes.forEach(function(change) {
@@ -322,7 +336,7 @@ function create(options) {
           }
         } else if (index === undefined) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
-          model.append(Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[change.hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText)})); structural = true
+          model.append(modelRow(change.hash,row)); structural = true
         } else {
           change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? null : row[field]) })
           if(change.fields.some(function(field){return ["playable","name","state","staged"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
