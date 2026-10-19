@@ -102,10 +102,10 @@ impl TuiApp {
                 2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
                 _=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
             }),frame);
-        let description = if !modal.error.is_empty() { modal.error.clone() } else {
+        let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
             format!("↑/↓ choose · ←/→ change · Enter save · Esc cancel\n\nExtra downloads wait their turn. Encryption protects peer traffic; your IP remains visible.\n\nA required VPN blocks torrent transfers when disconnected. Feed and search websites use your usual connection.\n\n{}\nChanging encryption or VPN reopens the app's engine.", crate::network_app::state(&modal.cfg).message)
         };
         let remaining = inner.height.saturating_sub(4);
-        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { bg.fg(th.red) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(4), inner.width, remaining), frame);
+        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(4), inner.width, remaining), frame);
     }
 }

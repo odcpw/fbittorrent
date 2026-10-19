@@ -106,6 +106,7 @@ pub struct TuiApp {
     pub(super) prompt: Option<Prompt>,
     pub(super) status: String,
     pub(super) status_is_error: bool,
+    pub(super) status_success: bool,
 }
 
 /// A row identity survives source reordering and the same episode key in another show.
@@ -250,15 +251,19 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
+            status_success:false,
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();
         app
     }
 
+    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;}
+
     pub(super) fn set_status(&mut self, s: impl Into<String>, err: bool) {
         self.status = s.into();
         self.status_is_error = err;
+        self.status_success=false;
         self.status_at = std::time::Instant::now();
     }
 }

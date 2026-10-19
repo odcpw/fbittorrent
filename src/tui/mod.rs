@@ -61,6 +61,9 @@ mod palette;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 #[cfg(test)]
+#[path = "tests/palette.rs"]
+mod palette_tests;
+#[cfg(test)]
 #[path = "tests/posters.rs"]
 mod poster_tests;
 #[cfg(test)]
@@ -139,7 +142,7 @@ impl Model for TuiApp {
             Msg::Hover => {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
-                if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); }
+                if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); self.status_is_error=false; self.status_success=false; }
                 let recovery=self.recovery_tick();
                 Cmd::batch(vec![recovery,self.on_hover()])
             }
@@ -195,11 +198,11 @@ impl Model for TuiApp {
                 Ok(()) => Cmd::quit(), Err(error) => { self.set_status(error,true); Cmd::none() }
             },
             Msg::SettingsSaved(result) => match result {
-                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_status("download settings saved",false); self.poll() }
+                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_success("download settings saved"); self.poll() }
                 Err(error) => { if let Some(modal)=self.settings.as_mut() { modal.saving=false; modal.error=error; } Cmd::none() }
             },
             Msg::ActionDone(r) => {
-                match r { Ok(s) => self.set_status(s, false), Err(e) => self.set_status(e, true) }
+                match r { Ok(s) => self.set_success(s), Err(e) => self.set_status(e, true) }
                 self.poll()
             }
             Msg::Imdb(key, r) => {
@@ -213,7 +216,7 @@ impl Model for TuiApp {
                 self.browse_loading=None;
                 match result {
                     Ok(Some(mut rows))=>{rows.sort_by(|a,b|store::search_order(a,b,self.search_sort,self.search_descending));self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
-                    Ok(None)=>{self.set_status(format!("opened {label} in browser"),false);Cmd::none()},
+                    Ok(None)=>{self.set_success(format!("opened {label} in browser"));Cmd::none()},
                     Err(error)=>{self.set_status(error,true);Cmd::none()}
                 }
             },
@@ -339,8 +342,7 @@ impl Model for TuiApp {
                         if let Some(i) = self.shows.shows.iter().position(|s| s.imdb == t.id) { self.select_show_parent(i + 1); }
                         self.ep_list.borrow_mut().select(None);
                         self.rebuild_inbox();
-                        self.save_shows();
-                        self.set_status(if added { format!("following {label}") } else { format!("already following {label}") }, false);
+                        if self.save_shows() { self.set_success(if added { format!("following {label}") } else { format!("already following {label}") }); }
                         if added { return self.refresh_show(t.id); }
                     }
                     Err(e) => self.set_status(format!("follow: {e}"), true),
@@ -353,9 +355,10 @@ impl Model for TuiApp {
                     Ok(()) => {
                         if let Some(show) = self.shows.get_mut(&imdb) { show.mark_grabbed(&episode.key, &episode.magnet); }
                         self.rebuild_inbox();
-                        self.save_shows();
-                        let title = self.shows.get(&imdb).map(|s| s.title.as_str()).unwrap_or(&imdb);
-                        self.set_status(format!("added {title} {}", episode.key), false);
+                        if self.save_shows() {
+                            let title = self.shows.get(&imdb).map(|s| s.title.as_str()).unwrap_or(&imdb);
+                            self.set_success(format!("added {title} {}", episode.key));
+                        }
                     }
                     Err(e) => self.set_status(format!("adding {}: {e}", episode.key), true),
                 }
@@ -367,7 +370,7 @@ impl Model for TuiApp {
                 self.rss_busy = false;
                 let succeeded = result.is_ok() && error.is_none();
                 let reload = self.update(Msg::Rss { revision, result });
-                if succeeded { self.set_status(label, false); }
+                if succeeded { self.set_success(label); }
                 if let Some(error) = error { self.set_status(error, true); }
                 Cmd::batch(vec![reload, self.poll()])
             }

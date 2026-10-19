@@ -205,6 +205,7 @@ impl TuiApp {
         )
             .hash(&mut signature);
         self.theme.name.hash(&mut signature);
+        (self.theme.low_chroma,self.theme.accent_text.0).hash(&mut signature);
         (self.torrent_sort, self.torrent_descending).hash(&mut signature);
         [
             self.theme.fg.0,
@@ -280,7 +281,7 @@ impl TuiApp {
                 let t = &self.torrents[index];
                 let row = self.store.torrents.get(&t.hash);
                 let pending = self.store.pending_for_key(&t.hash);
-                let style = if stale || pending.is_some() || t.is_stopped() {
+                let style = if self.theme.low_chroma && !stale && pending.is_none() && matches!(t.state.as_str(),"error"|"missingFiles"|"disk_full") {self.theme.err()} else if stale || pending.is_some() || t.is_stopped() {
                     self.theme.dimmed()
                 } else {
                     self.theme.text()

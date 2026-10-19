@@ -29,7 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
-CASES=(*SIZES,'poster_overlay_cleanup')
+CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers')
 
 
 class PaneUi(native.AttachedTui):
@@ -38,6 +38,7 @@ class PaneUi(native.AttachedTui):
         self.setup_case=self.case
         self.panes=0
         self.target=None
+        self.context=""
 
     def start_owned(self):
         self.case=self.setup_case
@@ -57,7 +58,7 @@ class PaneUi(native.AttachedTui):
         self.panes+=1
         artifact=self.case.path.with_suffix(f'.{self.panes:03}.pane.txt')
         artifact.write_text(pane)
-        return step.close(ok,pane+(f'\nCheck error: {error}' if error else ''),[artifact])
+        return step.close(ok,(self.context+'\n'if self.context else '')+pane+(f'\nCheck error: {error}' if error else ''),[artifact])
 
     def press(self,key,expect,predicate=lambda pane:True,*,literal=True):
         result=self.tmux('send-keys','-t',self.target,*(['-l',key]if literal else[key]))
@@ -221,6 +222,45 @@ def poster_overlay_cleanup(binary,setup,sandbox,h,ui,process,torrent):
     ui.case=setup
 
 
+def low_chroma_theme_markers(binary,setup,sandbox,h,ui,process,torrent):
+    """Actual failed recheck/open, never fabricated API state or UI text."""
+    import shutil
+    with d.ApiConn(h)as client:
+        client.hello()
+        rows=client.call('torrents.list',{})['result']['torrents']
+        selected=next(row for row in rows if row['name']==ACTIVE)
+        cached=Path(sandbox.env['XDG_DATA_HOME'])/'fbittorrent/engine'/(selected['hash']+'.torrent')
+        metainfo=cached.read_bytes();cached.unlink();cached.mkdir()
+        hidden=sandbox.root/'held-downloads'
+        try:
+            client.call('torrents.recheck',dict(hashes=[selected['hash']]),ref='theme-error')
+            h.wait_for(lambda:((rows:=client.call('torrents.list',{})['result']['torrents'])and any(row['hash']==selected['hash']and row['state']=='error'for row in rows),json.dumps(rows)),
+                       'real failed metainfo-cache write becomes an engine error')
+            sandbox.downloads.rename(hidden)
+            with Case('tui_smoke','low_chroma_theme_markers')as case:
+                for name,low in [('owner',True),('tokyo-night',False)]:
+                    source=REPO/'contracts/ui/themes'/(name+'.toml')
+                    destination=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
+                    destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,destination)
+                    target,done=ui.start_owned();ui.tmux('resize-window','-t',target,'-x','80','-y','24')
+                    ui.case=case;ui.context=f'theme={name}; colors={destination}; fixture={source}'
+                    ui.observe('load isolated theme','the real error row has its worded state cell',lambda pane:'! Error'in pane)
+                    current=client.call('torrents.list',{})['result']['torrents'];current.sort(key=lambda row:(-row['added_at'],row['hash']))
+                    ui.press('Home','first row selected',lambda pane:pane.splitlines()[-1].strip()==current[0]['name'],literal=False)
+                    for row in current[1:]:
+                        if ui.capture(target).splitlines()[-1].strip()==ACTIVE:break
+                        ui.press('Down','select '+row['name'],lambda pane,title=row['name']:pane.splitlines()[-1].strip()==title,literal=False)
+                    ui.observe('read keyboard target','the failed downloading fixture is selected',lambda pane:pane.splitlines()[-1].strip()==ACTIVE)
+                    ui.press('o','failed open reports an error with the correct monochrome marker',
+                             lambda pane:('! Error'in pane)and(pane.splitlines()[-1].lstrip().startswith('!')==low)and
+                             any(text in pane.splitlines()[-1].lower()for text in('missing','not found','directory','cannot','no such','could not','reading','internal','invalid_state')))
+                    ui.press('q','q detaches after the error',lambda pane:done.exists()and done.read_text()=='0')
+                    ui.case=setup;ui.context=''
+        finally:
+            if hidden.exists():hidden.rename(sandbox.downloads)
+            cached.rmdir();cached.write_bytes(metainfo);cached.chmod(0o600)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',nargs='?',type=Path,default=REPO/'target/debug/fbittorrent')
@@ -233,7 +273,7 @@ def main():
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
-            for index,(name,size)in enumerate(([]if args.case=='poster_overlay_cleanup'else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
+            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
                 if index:
                     h.notify.close()
                     process=h.start_serve()
@@ -248,6 +288,9 @@ def main():
                     h.notify.close();process=h.start_serve()
                     if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('poster fixture owner did not restart')
                 poster_overlay_cleanup(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'low_chroma_theme_markers'):
+                low_chroma_theme_markers(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+
 
     return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
 

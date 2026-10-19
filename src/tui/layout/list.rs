@@ -70,6 +70,7 @@ impl TuiApp {
         ]
         .hash(&mut signature);
         self.theme_mtime.hash(&mut signature);
+        (self.theme.low_chroma,self.theme.accent_text.0).hash(&mut signature);
         if hovered.is_some() {
             self.marquee_elapsed()
                 .map(|t| t.as_millis() / 125)

@@ -60,14 +60,14 @@ impl TuiApp {
                         PromptKind::ConfirmUnfollow { imdb, title } => {
                             self.shows.unfollow(&imdb);
                             if self.inbox_last_read.as_ref().is_some_and(|target| target.imdb == imdb) { self.inbox_last_read = None; }
-                            self.save_shows();
+                            let saved=self.save_shows();
                             let n = self.shows.shows.len() + 1;
                             let mut st = self.show_list.borrow_mut();
                             match st.selected() { Some(i) if i < n => {}, _ => st.select(n.checked_sub(1)) }
                             drop(st);
                             self.ep_list.borrow_mut().select(None);
                             self.rebuild_inbox();
-                            self.set_status(format!("unfollowed {title}"), false);
+                            if saved {self.set_success(format!("unfollowed {title}"));}
                             Cmd::none()
                         }
                         _ => Cmd::none(),

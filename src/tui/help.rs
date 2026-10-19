@@ -28,6 +28,6 @@ impl TuiApp {
         let scroll = self.help_scroll.min(self.help_max_scroll());
         Paragraph::new(text).style(Style::new().fg(th.fg).bg(th.selection)).scroll((scroll, 0)).wrap(WrapMode::None).render(rows[0], frame);
         Paragraph::from_static_str(actions::help_controls())
-            .style(Style::new().fg(th.accent).bg(th.selection)).wrap(WrapMode::None).render(rows[1], frame);
+            .style(th.accented().bg(th.selection)).wrap(WrapMode::None).render(rows[1], frame);
     }
 }
