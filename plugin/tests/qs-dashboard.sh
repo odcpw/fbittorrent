@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [[ "${1:-}" == --details ]]; then
+  shift
+  exec python3 plugin/tests/details.py "$@"
+fi
 if [[ "${1:-}" == --destination-picker ]]; then
   shift
   exec python3 plugin/tests/destination.py "$@"

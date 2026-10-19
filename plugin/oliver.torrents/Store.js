@@ -89,10 +89,17 @@ function create(options) {
   }
   function topicKey(topic, row) {
     if (topic === "torrents") return row.hash
+    if (/^torrent:.*\.trackers$/.test(topic)) return row.url
     if (/^torrent:.*\.files$/.test(topic)) return String(row.index)
-    if (topic === "events") return String(row.seq)
+    if (topic === "events" || topic === "log") return String(row.seq)
     return String(row.hash !== undefined ? row.hash : row.id !== undefined ? row.id : row.imdb)
   }
+  function trimLog(){
+    var target=s.topics.log || dictionary(),keys=Object.keys(target)
+    if(keys.length>1000){keys.sort(function(a,b){return Number(a)-Number(b)});keys.slice(0,keys.length-1000).forEach(function(k){delete target[k]})}
+  }
+  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^torrent:/.test(topic))delete s.topics[topic]})}
+  s.logEntries=function(hash){var rows=s.topics.log || {};return Object.keys(rows).map(function(k){return rows[k]}).filter(function(r){return !hash || r.hash===hash}).sort(function(a,b){return a.seq-b.seq})}
   function keepMutation(reference, value) {
     var refs = Object.keys(s.mutations)
     if (!s.mutations[reference] && refs.length >= 256) delete s.mutations[refs[0]]
@@ -164,6 +171,7 @@ function create(options) {
         if (topic === "summary" || topic === "network" || topic === "settings") s[topic] = frame.data
       } else if (frame.ev === "delta") {
         if (s.snapshots[snapshotKey]) throw Error("delta interleaves snapshot")
+        if(topic==="log" && ((frame.removed || []).length || Object.keys(frame.changed || {}).length))throw Error("log topic is append-only")
         if (topic === "torrents") {
           ;(frame.added || []).forEach(function(row) { upsert(row, false) })
           ;(frame.removed || []).forEach(remove)
@@ -192,6 +200,7 @@ function create(options) {
           s.topics[topic] = target
         }
       }
+      if(topic==="log")trimLog()
       badge(topic)
       return s.changes.length > 0
     }
@@ -215,11 +224,16 @@ function create(options) {
       s.instance = result.instance; s.info = result
     } else if (call.op === "app.info") s.info = result
     else if (call.op === "app.network") s.network = result.state
+    else if(call.op==="app.settings.get" || call.op==="app.settings.set")s.settings=result.settings || result
     else if (call.op === "transfer.info") s.transfer = result
+    else if(call.op==="app.log"){
+      var log=s.topics.log || dictionary();result.entries.forEach(function(r){log[String(r.seq)]=r});s.topics.log=log;trimLog()
+    }
     else if(call.op==="shows.list")domainList("shows",result.shows)
     else if(call.op==="rss.feeds")domainList("rss.feeds",result.feeds)
     else if (call.op === "torrents.list") replaceTorrents(result.torrents)
     else if (call.op === "torrents.get") upsert(result.torrent, false)
+    else if(call.op==="torrents.trackers")domainList("torrent:"+call.args.hash+".trackers",result.trackers)
     else if (call.op === "torrents.files") {
       var files = dictionary()
       result.files.forEach(function(file) { files[String(file.index)] = file })

@@ -10,6 +10,7 @@ import "Model.js" as Model
 import "Focus.js" as Focus
 import "AddFlow.js" as AddFlow
 import "AddSource.js" as AddSource
+import "DetailFlow.js" as DetailFlow
 
 Item {
   id: root
@@ -23,6 +24,32 @@ Item {
   property var windowFocus:null
   property int windowFocusSteps:0
   property var detailTopics: []
+  property var logConsumers:({})
+  property var logTopics:[]
+  property var detailFlow:null
+  property int detailRevision:0
+  property int logRevision:0
+  property real detailsWidth:360
+  property var savedPreferences:({})
+  onDetailsWidthChanged:if(preferencesLoaded)savePreferences.restart()
+  function hasCap(name){return !!client && client.caps.indexOf(name)>=0}
+  function subscribeDetail(hash,topics){detailTopics=topics.map(function(t){return "torrent:"+hash+"."+t})}
+  function unsubscribeDetail(){if(detailTopics.length){var old=detailTopics;detailTopics=[];store.releaseTopics(old.filter(function(t){return addTopics.indexOf(t)<0}))}}
+  function logConsumer(id,on){
+    if(!!logConsumers[id]===!!on)return
+    var next=Object.assign({},logConsumers);if(on)next[id]=true;else delete next[id];logConsumers=next
+    var wanted=Object.keys(next).length>0 && hasCap("log")
+    if(wanted!==!!logTopics.length){logTopics=wanted ? ["log"] : [];if(wanted)client.request("app.log",{limit:1000})}
+  }
+  function setFiles(hash,indexes,included,callback){var args={hash:hash};args[included ? "include" : "skip"]=indexes;return mutate("torrents.set_files",args,"files",callback)}
+  function lookupImdb(args,callback){return hasCap("imdb") ? client.request("imdb.lookup",args,{callback:callback}) : false}
+  function copyText(text){if(text!==undefined){Commons.Util.execArgv(["wl-copy","--",String(text)]);notify("Copied")}}
+  function openUrl(url){if(url && /^https?:\/\//.test(url))Commons.Util.execArgv(["xdg-open",url])}
+  function scheduleDetail(hash){detailChoice.hash=hash;detailChoice.restart();imdbChoice.restart()}
+  function hideDetail(){detailChoice.stop();imdbChoice.stop();if(detailFlow)detailFlow.hide()}
+  Timer {id:detailChoice;property string hash:"";interval:150;onTriggered:if(root.detailFlow)root.detailFlow.begin(hash)}
+  Timer {id:imdbChoice;interval:300;onTriggered:if(root.detailFlow)root.detailFlow.lookup()}
+
   property var addTopics:[]
   property var addFlow:null
   property int addRevision:0
@@ -74,11 +101,12 @@ Item {
   function pendingGlyph(hash) {var revision=actionRevision;return store.pendingByHash[hash] ? (Commons.Style.reduceMotion ? "…" : "⠋⠙⠹⠸⠼⠴⠦⠧"[pendingFrame]) : ""}
   function clearFailures(){if(client){store.clearFailures(client.actions);actionRevision++}}
   function notify(text){lastMessageText=text;lastMessageAt=Date.now();toast={text:text,until:Date.now()+5000};toastTimer.restart()}
-  function copyMagnet(hash){Quickshell.execDetached(["wl-copy","--","magnet:?xt=urn:btih:"+hash]);notify("Magnet copied")}
+  function copyMagnet(hash){copyText("magnet:?xt=urn:btih:"+hash)}
   function titleLink(hash,wikipedia) {
     var row=store.torrents[hash]
     if(!row)return
-    var url=wikipedia ? "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(row.name) : row.imdb_id ? "https://www.imdb.com/title/"+row.imdb_id+"/" : "https://www.imdb.com/find/?q="+encodeURIComponent(row.name)
+    var card=detailFlow && detailFlow.hash===hash ? detailFlow.card : null
+    var url=card && (wikipedia ? card.wiki_url : card.url) ? (wikipedia ? card.wiki_url : card.url) : wikipedia ? "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(row.name) : row.imdb_id ? "https://www.imdb.com/title/"+row.imdb_id+"/" : "https://www.imdb.com/find/?q="+encodeURIComponent(row.name)
     Quickshell.execDetached(["xdg-open",url])
   }
   function follow(hash) {
@@ -143,6 +171,9 @@ Item {
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
     syncRows();badgeCounts=store.badges
     if(addFlow)addFlow.frame(frame)
+    if(detailFlow)detailFlow.frame(frame,request)
+    if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
+    if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
@@ -174,7 +205,12 @@ Item {
     var args = {hash:hash}
     if (file !== undefined) args.file = file
     return client.request("torrents.open_target", args, {callback:function(result) {
-      if (result && result.path) Quickshell.execDetached(["xdg-open", result.path])
+      if(result && result.path){
+        var command=String(root.store.settings.open_command || "xdg-open")
+        // Match Config::open: the owner-configured command is shell syntax;
+        // the daemon-provided path remains a literal positional parameter.
+        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.path])
+      }
     }})
   }
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
@@ -192,7 +228,7 @@ Item {
   }
   function advanceWindowFocus() {
     var request=windowFocus
-    if(!request || !request.target || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
+    if(!request || !request.target || typeof request.target.forceActiveFocus!=="function" || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
     request.target.forceActiveFocus()
     var backing=request.window._backingWindow,elapsed=Date.now()-request.started
     if(backing && backing.active && request.target.activeFocus){windowFocus=null;focusRetry.stop();return}
@@ -257,10 +293,11 @@ Item {
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
-  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics))
-  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
+  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
+  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
+  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
+  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
+  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
 
   FileView {
     id:preferences
@@ -268,15 +305,16 @@ Item {
     atomicWrites:true;blockLoading:true;blockAllReads:true
     onLoaded:{
       try {
-        var saved=JSON.parse(text())
-        if(["added","name","progress","rate","size","state","eta","up","peers","ratio"].indexOf(saved.key)>=0)root.sortKey=saved.key
-        root.sortReverse=saved.reverse===true
+        var saved=JSON.parse(text());root.savedPreferences=saved;var sort=saved.sort || saved
+        if(["added","name","progress","rate","size","state","eta","up","peers","ratio"].indexOf(sort.key)>=0)root.sortKey=sort.key
+        root.sortReverse=sort.reverse===true
+        if(Number.isFinite(saved.details_width))root.detailsWidth=Math.max(300,Math.min(480,saved.details_width))
       }catch(error){}
       root.preferencesLoaded=true
     }
     onLoadFailed:root.preferencesLoaded=true
   }
-  Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify({key:root.sortKey,reverse:root.sortReverse})+"\n")}
+  Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify(Object.assign({},root.savedPreferences,{details_width:root.detailsWidth,sort:{key:root.sortKey,reverse:root.sortReverse}}))+"\n")}
   Timer {id:toastTimer;interval:5000;onTriggered:root.toast=null}
   Timer {interval:125;repeat:true;running:(root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
   Socket {
@@ -325,14 +363,15 @@ Item {
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }
   }
   Component.onCompleted: {
+    detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
-      instance:function() { root.store = Store.create(); root.torrents = [] }})
-    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics))
+      instance:function() { root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
+    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

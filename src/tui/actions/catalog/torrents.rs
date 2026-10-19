@@ -1,5 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("details.previous",Scope::Screen(Screen::Torrents),&[],"Previous details tab",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('['))]),None,None),
+    action!("details.next",Scope::Screen(Screen::Torrents),&[],"Next details tab",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char(']'))]),None,None),
     action!(
         "torrents.add",
         Scope::Global,

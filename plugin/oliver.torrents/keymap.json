@@ -239,6 +239,30 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "details.previous",
+      "keys": {
+        "dashboard": [
+          "["
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Previous details tab",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "details.next",
+      "keys": {
+        "dashboard": [
+          "]"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Next details tab",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [
@@ -1340,7 +1364,10 @@
     {
       "id": "files.down",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "j",
+          "↓"
+        ],
         "popup": null,
         "tui": [
           "j",
@@ -1353,7 +1380,10 @@
     {
       "id": "files.up",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "k",
+          "↑"
+        ],
         "popup": null,
         "tui": [
           "k",
@@ -1366,7 +1396,9 @@
     {
       "id": "files.toggle",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "Space"
+        ],
         "popup": null,
         "tui": [
           "Space"
@@ -1378,7 +1410,9 @@
     {
       "id": "files.all",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "a"
+        ],
         "popup": null,
         "tui": [
           "a"
@@ -1390,7 +1424,9 @@
     {
       "id": "files.none",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "n"
+        ],
         "popup": null,
         "tui": [
           "n"

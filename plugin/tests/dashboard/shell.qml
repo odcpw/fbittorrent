@@ -62,6 +62,8 @@ ShellRoot {
   }
   IpcHandler {
     target:"fbt-dashboard"
+    function fileEditing():bool{return dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? dashboard.item.torrents.pane.editing : false}
+    function logEntries():string{return JSON.stringify(service.store.logEntries(service.detailFlow ? service.detailFlow.hash : ""))}
     function confirmed(hash:string):string{return JSON.stringify(service.store.torrents[hash] || null)}
     function activeWindow():bool{return dashboard.item ? dashboard.item.isWindowActive() : false}
     function startScrolling():bool {

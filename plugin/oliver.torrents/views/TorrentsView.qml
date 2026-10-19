@@ -18,12 +18,26 @@ FocusScope {
   property var selection:({})
   property bool detailsOpen:false
   readonly property int tier:TableLayout.tier(windowLogicalWidth)
-  readonly property bool dialogOpen:removeDialog.opened
-  readonly property bool editing:filterInput.activeFocus
-  readonly property var current:service.store.torrents[cursorHash] || null
+  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened
+  readonly property var pane:docked.item || floating.item
+  readonly property bool editing:filterInput.activeFocus || (pane ? pane.editing : false)
+  readonly property real scale:Commons.Style.effectiveSpacingScale
+  readonly property real dockWidth:Math.max(300,Math.min(service.detailsWidth,480,maxDockWidth))
+  readonly property real maxDockWidth:windowLogicalWidth-TableLayout.chrome(windowLogicalWidth)+360-(TableLayout.columns(windowLogicalWidth,0,1).reduce(function(sum,c){return sum+(c.name==="name" ? 0 : c.width)},0))-210
+  readonly property bool showingDetail:visible && (tier>=2 || detailsOpen)
+  readonly property var detailState:({visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
+    hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
+    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],poster:pane && pane.posterLoaded ? "loaded" : "none"})
+  function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
+  function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
+  onCursorHashChanged:scheduleDetail()
+  onShowingDetailChanged:scheduleDetail()
+  Component.onCompleted:scheduleDetail()
+  Component.onDestruction:service.hideDetail()
+  readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
   readonly property var viewState:({columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
     toast:service.toast,cursor:cursorHash,selection:Object.keys(selection),filter:filter,query:query,
-    focus:focusPane,details:detailsOpen,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : null,
+    focus:focusPane,details:detailState,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
     panes:{sidebar:sideFrame.visible,detailsDocked:detailsFrame.visible,detailsSheet:sheet.visible},
     hover:table.hoverHash,rows:table.count,listWidth:table.width})
   signal routed(string view)
@@ -48,15 +62,20 @@ FocusScope {
     if(hash){choose(hash,modifiers || 0);table.reveal(hash)}
   }
   function back() {
+    if(focusPane==="details" && pane && pane.editing)return pane.key({key:Qt.Key_Escape})
     if(removeDialog.opened){removeDialog.canceled();return true}
     if(query){query="";focusTable();return true}
-    if(detailsOpen){detailsOpen=false;focusPane="table";return true}
+    if(detailsOpen || focusPane==="details"){detailsOpen=false;focusPane="table";return true}
     if(filter!=="all"){filter="all";return true}
     if(Object.keys(selection).length){selection=({});return true}
     return false
   }
   function handleKey(event) {
+    if(recheckConfirm.opened){recheckConfirm.handleKey(event);return true}
     if(removeDialog.key(event))return true
+    if(focusPane==="details" && pane && pane.editing)return pane.key(event)
+    if((event.text==="[" || event.text==="]") && service.detailFlow){service.detailFlow.cycle(event.text==="]" ? 1 : -1);return true}
+    if(focusPane==="details" && pane && pane.key(event))return true
     if(event.key===Qt.Key_Escape){back();return true}
     if(editing)return false
     service.clearFailures()
@@ -136,7 +155,7 @@ FocusScope {
             id:table;width:parent.width;height:parent.height-Commons.Style.space(2)-parent.spacing
             service:root.service;windowLogicalWidth:root.windowLogicalWidth;stateFilter:root.filter;textFilter:root.query
             cursorHash:root.cursorHash;selection:root.selection
-            onHovered:function(hash){root.cursorHash=hash}
+            onHovered:function(hash){if(root.focusPane==="table")root.cursorHash=hash}
             onChosen:function(hash,modifiers){root.choose(hash,modifiers)}
             onActivated:function(hash){root.activate(hash)}
             onSortRequested:function(key){root.service.sortBy(key)}
@@ -152,8 +171,15 @@ FocusScope {
       }
       Components.PaneFrame {
         id:detailsFrame
-        visible:root.tier>=2;Layout.preferredWidth:Commons.Style.space(360);Layout.fillHeight:true
-        Components.DetailsPlaceholder {torrent:root.current;focused:root.focusPane==="details"}
+        visible:root.tier>=2;Layout.preferredWidth:Commons.Style.space(root.dockWidth);Layout.fillHeight:true
+        Loader {id:docked;anchors.fill:parent;active:root.tier>=2;sourceComponent:detailComponent}
+        MouseArea {
+          width:Commons.Style.space(10);height:parent.height;anchors.right:parent.left;cursorShape:Qt.SizeHorCursor
+          property real pressX:0
+          property real startWidth:0
+          onPressed:function(mouse){pressX=mapToItem(root,mouse.x,mouse.y).x;startWidth=root.dockWidth}
+          onPositionChanged:function(mouse){if(pressed)root.setPaneWidth(startWidth+(pressX-mapToItem(root,mouse.x,mouse.y).x)/root.scale)}
+        }
       }
     }
     Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   p pause   u seed   d remove   D delete files   o open   s sort   / filter   q close"}
@@ -176,10 +202,18 @@ FocusScope {
     visible:root.detailsOpen && root.tier<2
     anchors.fill:parent;color:Commons.Util.alpha(Commons.Color.background,0.7)
     MouseArea {anchors.fill:parent;onClicked:{root.detailsOpen=false;root.focusPane="table"}}
-    Components.PaneFrame {width:Math.min(parent.width-Commons.Style.space(32),Commons.Style.space(420));height:parent.height-Commons.Style.space(32);anchors.right:parent.right;anchors.margins:Commons.Style.space(16);anchors.verticalCenter:parent.verticalCenter
+    Components.PaneFrame {id:sheetFrame;width:Math.min(parent.width-2*Commons.Style.spacing.panelGap,Commons.Style.space(720));height:parent.height-Commons.Style.space(32);anchors.right:parent.right;anchors.margins:Commons.Style.space(16);anchors.verticalCenter:parent.verticalCenter
       MouseArea {anchors.fill:parent;onClicked:{}}
-      Components.DetailsPlaceholder {torrent:root.current;focused:root.focusPane==="details"}
+      Loader {id:floating;anchors.fill:parent;active:sheet.visible;sourceComponent:detailComponent}
     }
+  }
+  Component {id:detailComponent;DetailsPane {service:root.service;focused:root.focusPane==="details";onRecheckRequested:function(hash){recheckConfirm.hash=hash;recheckConfirm.selectedIndex=0;recheckConfirm.opened=true}}}
+  Ui.ConfirmDialog {
+    id:recheckConfirm
+    property string hash:""
+    anchors.fill:parent;selectedIndex:0;confirmText:"Recheck";message:"Recheck this torrent's files? File selection is locked until checking finishes."
+    onCanceled:opened=false
+    onConfirmed:{root.service.recheck(hash);opened=false}
   }
   Components.RemoveDialog {id:removeDialog;anchors.fill:parent;onRemoveRequested:function(hash,files){root.service.remove(hash,files)}}
 }

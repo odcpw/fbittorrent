@@ -198,6 +198,7 @@ def run(binary):
             q.wait(lambda:json.loads(q.ipc('registryState'))['enabled'])
             result=q.native_hook('summonView','{"view":"search"}')
             case.check(q.ipc('startScrolling')=='false','private scroll driver also refuses without hooks','no timer started')
+            case.check(q.native_hook('setPaneWidth','420').startswith('refused:'),'pane width hook refuses without FBT_TEST_HOOKS=1','production guard checked before any width mutation')
             case.check(result.startswith('refused:') and q.state()['view'] is None,'production summonView refuses without FBT_TEST_HOOKS=1',result)
             case.check(not (sandbox.root/'shims/fbittorrent.log').exists(),'refused hook never starts a daemon','recording up shim untouched')
         finally:q.close()

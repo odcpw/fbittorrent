@@ -3539,12 +3539,13 @@ def imdb_owned(name, binary, systemd, oversized=False):
             sandbox.env["FBT_IMDB_BASE_URL"] = source.base
             with Harness(case, binary, sandbox, systemd) as harness:
                 process = harness.start_serve()
+                harness.imdb_process = process
                 if not (harness.receive_ready() and harness.wait_engine()):
                     raise RuntimeError("private IMDb daemon did not start")
                 try:
                     yield case, sandbox, harness, source, directory, cache
                 finally:
-                    harness.stop_serve(process)
+                    harness.stop_serve(harness.imdb_process)
                     harness.lock_free()
 
 

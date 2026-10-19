@@ -179,6 +179,20 @@ hl.window_rule({
 })
 ```
 
+The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
+logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
+closes it. Drag the divider to resize it; width and sort order survive reopening
+the window or restarting the shell. `h` / `l` change pane focus. In focused Files,
+Space toggles the selected file, `a` / `n` include or skip the filtered files, `/`
+filters names, and `o` opens the selected file. Files sort naturally by episode
+number. Overview loads the daemon's local IMDb poster and shows the confirmed
+seed policy. Log shares one bounded subscription and filters by torrent hash.
+
+Run `plugin/tests/qs-dashboard.sh --details --binary /path/to/fbittorrent` for the
+private-compositor acceptance cases. They use isolated state and a local IMDb
+server, restart their own daemon and shell, and retain JSONL plus native captures
+under `target/test-logs/qs_details/`; they never restart the owner's shell.
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become
@@ -436,6 +450,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `screen:torrents` | Previous details tab | — | `[` | — |  |
+| `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
@@ -509,11 +525,11 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | EZTV | `O` | `O` | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
 | `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
-| `modal:files` | Next | `j`, `↓` | — | — |  |
-| `modal:files` | Previous | `k`, `↑` | — | — |  |
-| `modal:files` | Include/skip | `Space` | — | — |  |
-| `modal:files` | All | `a` | — | — |  |
-| `modal:files` | None | `n` | — | — |  |
+| `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:files` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:files` | Include/skip | `Space` | `Space` | — |  |
+| `modal:files` | All | `a` | `a` | — |  |
+| `modal:files` | None | `n` | `n` | — |  |
 | `modal:files` | Reload | `r` | — | — |  |
 | `modal:files` | First | `g`, `Home` | — | — |  |
 | `modal:files` | Last | `G`, `End` | — | — |  |

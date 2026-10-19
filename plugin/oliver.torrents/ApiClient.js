@@ -23,6 +23,7 @@ function utf8Bytes(s) {
 
 function create(io, options) {
   var o = options || {}, now = o.now || Date.now
+  var subscriptionGeneration=0
   var c = { online: false, instance: "", caps: [], hello: null, pending: Object.create(null), actions: Object.create(null),
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
@@ -97,7 +98,7 @@ function create(io, options) {
   }
   c.disconnected = function() {
     var wasOnline = c.online
-    c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
+    subscriptionGeneration++; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (!c.graceful && wasOnline) c.reconnecting = true
     c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
     // Unsent actions have no unknown outcome and are never replayed.
@@ -140,22 +141,31 @@ function create(io, options) {
   function topics() {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
+    if(c.dashboardVisible)wanted.push("events")
+    if(c.dashboardVisible && c.caps.indexOf("settings")>=0)wanted.push("settings")
     if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
     if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")
-    return wanted.concat(c.details).slice(0, 16)
+    return wanted
   }
   c.subscribeAll = function() {
+    subscriptionGeneration++
     Object.keys(c.subs).forEach(function(sub) { c.request("unsubscribe", { sub: Number(sub) }) })
     c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (c.caps.indexOf("subscribe") < 0 || c.mode === "poll") { c.mode = "poll"; c.pollAt = 0; c.poll(); return }
-    c.request("subscribe", { topics: topics(), interval_ms: c.popupOpen || c.dashboardVisible ? 1000 : 5000 }, {
-      callback: function(result, failure) {
-        if (failure && failure.code === "unknown_op") { c.mode = "poll"; c.pollAt = 0; c.poll() }
-        else if (result) c.subs[result.sub] = { topics: result.topics, rev: 0, resync: false }
-        changed()
-      }
+    var generation=++subscriptionGeneration
+    var groups=[topics()].concat(c.details.slice(0,12).map(function(topic){return [topic]}))
+    groups.forEach(function(group){
+      c.request("subscribe", {topics:group,interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000}, {
+        callback:function(result,failure){
+          if(result && generation!==subscriptionGeneration){c.request("unsubscribe",{sub:result.sub});return}
+          if(failure && failure.code==="unknown_op"){c.mode="poll";c.pollAt=0;c.poll()}
+          else if(result)c.subs[result.sub]={topics:result.topics,rev:0,resync:false}
+          changed()
+        }
+      })
     })
   }
+
   c.resubscribe = function(topic) {
     // A subscription shares one revision counter across its topics.
     // Rebuild its entire atomic group, never retain a partially ordered group.

@@ -21,6 +21,7 @@ Item {
   property string selectedHash:""
   property string tableQuery:""
   property bool closingFromHost:false
+  property bool disposing:false
   property string routeError:""
   readonly property var torrents:torrentsLoader.item
   readonly property var views:["torrents","search","shows","rss","settings","log"]
@@ -29,7 +30,7 @@ Item {
   function openAdd(source,options){var accepted=svc ? svc.beginAdd(source,options) : false;Qt.callLater(function(){if(addSheet.item)addSheet.item.focusSheet()});return accepted}
   function acceptDrop(urls,text){var parsed=Source.drop(urls,text);if(!parsed)return false;return openAdd(parsed.source)}
   function publish() {
-    if (!svc || !window || !searchInput)return
+    if (disposing || !svc || !window || !searchInput)return
     if(!window.visible && svc.dashboardOwner!==root)return
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
@@ -40,7 +41,7 @@ Item {
 
   }
   function focusView() {
-    if (!svc || !window.visible)return
+    if (disposing || !svc || !window.visible)return
     if(addSheet.item){svc.focusWindow(window,addSheet.item);return}
     var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" ? searchInput : currentView==="torrents" && torrents ? torrents : scope
     svc.focusWindow(window,target)
@@ -87,6 +88,7 @@ Item {
   function rowPoint(index){return torrents ? torrents.rowPoint(index) : null}
   function grab(path){return scope.grabToImage(function(result){result.saveToFile(path)})}
   function scroll(dy){if(torrents)torrents.scroll(dy)}
+  function setPaneWidth(px){return torrents ? torrents.setPaneWidth(px) : 0}
   function resize(width,height){window.implicitWidth=width;window.implicitHeight=height}
   function windowState() {return JSON.stringify(svc ? svc.dashboardState : null)}
   onSvcChanged: if(window && window.visible){publish();focusView()}
@@ -95,7 +97,7 @@ Item {
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
   Connections {target:root.svc;function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
-  Component.onDestruction:if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window)}
+  Component.onDestruction:{disposing=true;if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window);svc.hideDetail()}}
 
   FloatingWindow {
     id:window
@@ -118,8 +120,9 @@ Item {
       Keys.priority:Keys.AfterItem
       Keys.onPressed:function(event) {
         if(addSheet.active){if(addSheet.item && addSheet.item.handleKey(event))event.accepted=true;return}
-        if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
+        if(root.currentView==="torrents" && torrents && torrents.editing)return
+        if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(event.key===Qt.Key_Escape) {
           if(root.query!==""){root.query="";event.accepted=true}
           else if(root.selectedHash!==""){root.selectedHash="";event.accepted=true}
@@ -163,6 +166,7 @@ Item {
           }
           Loader {
             id:torrentsLoader
+            onActiveChanged:if(!active && root.svc)root.svc.cancelWindowFocus(window)
             anchors.fill:parent
             active:window.visible && !!root.svc && root.svc.online && root.currentView==="torrents"
             onLoaded:{root.publish();Qt.callLater(root.focusView)}

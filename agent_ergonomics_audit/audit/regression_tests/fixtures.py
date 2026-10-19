@@ -249,6 +249,22 @@ def torrent_fixture(directory, files, name="fixture", tracker=None, piece_length
     return TorrentFixture(paths, torrent, info, magnet, info_hash)
 
 
+def multi_file_fixture(names, directory=None, name="Local Fixture"):
+    """Real metainfo preserves the caller's deliberately scrambled file indices."""
+    parent = directory if directory is not None else _sandbox_root.get()
+    if parent is None:
+        raise ValueError("multi_file_fixture requires an isolated Sandbox or directory")
+    directory = Path(tempfile.mkdtemp(prefix="files-natural-", dir=parent))
+    paths = []
+    for filename in names:
+        if Path(filename).name != filename:
+            raise ValueError("fixture file names must be leaf paths")
+        path = directory / filename
+        path.write_bytes((filename.encode() + b" local payload\n") * 1024)
+        paths.append(path)
+    return torrent_fixture(directory, paths, name=name)
+
+
 class magnet_fixture:
     """256 KiB random bytes, private torrent, local tracker and HTTP exact source.
 
