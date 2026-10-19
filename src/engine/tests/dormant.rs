@@ -228,6 +228,7 @@ fn dormant_missing_files() {
     let row = rows.iter().find(|r| &r.hash == hash).unwrap();
     assert_eq!(row.state, TorrentState::Error);
     assert_eq!(row.reason.as_deref(), Some("missing_files"));
+    assert_eq!(row.error.as_deref(), Some(format!("Files missing: {} restore failed: missing files", records[0].name).as_str()));
     assert!(!row.checked);
     assert!(row.completed_at.is_none());
     assert!(dispatcher.inner.handle(hash).is_err());
