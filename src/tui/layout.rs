@@ -2,6 +2,7 @@
 use super::*;
 mod table;
 mod sort;
+mod notice;
 pub(super) use table::{Column,Rects,TorrentTable,visible_range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,7 +41,7 @@ impl TuiApp {
             let mut spans = vec![
                 Span::styled("↓ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.dl_info_speed),|info|format::rate(info.dl_bps)), th.text()),
                 Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.up_info_speed),|info|format::rate(info.ul_bps)), th.text()),
-                Span::styled(format!("  {} ", th.name), th.dimmed()),
+                Span::styled(if Tier::at(area.width)==Tier::Wide {format!("  {} ", th.name)} else {String::new()}, th.dimmed()),
             ];
             if self.poll_inflight { spans.insert(0, Span::styled(format!("{} ", SPINNER[self.tick % 4]), th.dimmed())); }
             Line::from_spans(spans)

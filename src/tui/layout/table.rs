@@ -51,11 +51,15 @@ pub(in crate::tui) struct Rects {
     pub tabs: [Rect; 4],
     pub footer: Rect,
     pub table: Option<Rect>,
+    pub details: Option<Rect>,
+    pub files: Option<Rect>,
 }
 impl Rects {
     pub fn begin(&mut self) {
         self.headers.clear();
         self.table = None;
+        self.details = None;
+        self.files = None;
     }
     fn rows(&mut self, app: &TuiApp, range: std::ops::Range<usize>, area: Rect) {
         self.table = Some(area);

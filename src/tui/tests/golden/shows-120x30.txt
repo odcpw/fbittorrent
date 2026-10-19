@@ -1,4 +1,4 @@
-  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS                                     ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS                                               ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Shows (2) ─────────────────────────╮╭ All unread · 2 releases · newest first ────────────────────────────────────────╮
 │                                    ││                                                                                │
 │ ▌ All unread                     2 ││ Cached releases · (R) Check all · (←) Browse shows                             │

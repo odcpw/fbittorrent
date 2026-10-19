@@ -413,7 +413,7 @@
                 .map(|(i, name)| Torrent { hash: format!("fixture-{i}"), name: name.into(), state: "stoppedDL".into(), progress_known: true, up_limit: 32768, ..Default::default() }).collect();
             app.tor_list.borrow_mut().select(Some(0));
             let text = render(&app, width, 24);
-            assert_eq!(text.contains(" Details "), width >= 140, "width {width}: {text}");
+            assert_eq!(text.contains("╭ Details "), width >= 140, "width {width}: {text}");
             assert!(text.contains("Short.txt"), "width {width}: {text}");
             let (y, row) = text.lines().enumerate().find(|(_, row)| row.contains("Episode.S01E02.1080p.mkv"))
                 .unwrap_or_else(|| panic!("filename truncated at width {width}: {text}"));

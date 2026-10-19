@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Files  (o) Open  (u) Seed  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (k) Previous  (g) First  (G) Last …     (?) Help
+[Torrents] (Enter) Details  (o) Open  (u) Seed  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (k) Previous  (g) First  (G) Last …   (?) Help
 Sintel.2010.1080p

@@ -155,3 +155,100 @@ fn header_clicks_sort_bytes_numerically_and_keep_unknown_last() {
         vec![Some(943_718_400), Some(1_181_116_006), None]
     );
 }
+
+#[test]
+fn enter_opens_overview_and_brackets_stop_at_tab_ends_at_each_size() {
+    for (width, height) in [(80, 24), (120, 30), (160, 45), (120, 24)] {
+        let mut app = fixture::app("torrents");
+        app.on_key(KeyEvent::new(KeyCode::Enter));
+        assert!(app.details.is_some());
+        assert!(app.files.is_none(), "Overview must not fetch file data");
+        let text = super::golden::render(&app, width, height);
+        assert!(text.contains("[Overview]  Files"));
+        assert!(text.contains("↓ Down · downloading"));
+        let rect = app.rects.borrow().details.unwrap();
+        assert_eq!(
+            rect,
+            if width < 100 || height < 30 {
+                Rect::new(0, 0, width, height)
+            } else {
+                Rect::new((width - 100) / 2, (height - 30) / 2, 100, 30)
+            }
+        );
+        app.on_key(KeyEvent::new(KeyCode::Char('[')));
+        assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Overview);
+        assert!(matches!(
+            app.on_key(KeyEvent::new(KeyCode::Char(']'))),
+            Cmd::Task(..)
+        ));
+        assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Files);
+        assert!(app.files.is_some());
+        assert!(matches!(
+            app.on_key(KeyEvent::new(KeyCode::Char(']'))),
+            Cmd::None
+        ));
+        app.on_key(KeyEvent::new(KeyCode::Char('[')));
+        assert!(app.files.is_none());
+        assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Overview);
+        app.on_key(KeyEvent::new(KeyCode::Char('h')));
+        assert!(app.details.is_none());
+        println!(
+            "{width}x{height}: Enter Overview; ] Files; ] at end; [ Overview; [ at start; h Back"
+        );
+    }
+}
+#[test]
+fn details_keeps_its_hash_and_never_retargets_a_removed_torrent() {
+    let mut app = fixture::app("torrents");
+    app.on_key(KeyEvent::new(KeyCode::Enter));
+    let hash = app.selected_torrent().unwrap().hash.clone();
+    app.torrents.swap(0, 1);
+    assert_eq!(app.selected_torrent().unwrap().hash, hash);
+    app.torrents.retain(|t| t.hash != hash);
+    assert!(app.selected_torrent().is_none());
+    assert!(matches!(
+        app.on_key(KeyEvent::new(KeyCode::Char('p'))),
+        Cmd::None
+    ));
+    let text = super::golden::render(&app, 80, 24);
+    assert!(text.contains("no longer in your list"));
+    app.on_key(KeyEvent::new(KeyCode::Escape));
+    assert!(app.details.is_none());
+}
+#[test]
+fn priority_banner_preserves_disk_vpn_and_reconnect_order() {
+    let mut app = fixture::app("torrents");
+    app.daemon_stopped = true;
+    assert!(app.priority_banner().unwrap().contains("stopped"));
+    app.store.network = Some(crate::api::NetworkState {
+        ready: false,
+        message: "Waiting for ProtonVPN (proton0). Downloads resume when it connects.".into(),
+        selection: Some("proton".into()),
+        interface: Some("proton0".into()),
+    });
+    assert!(app
+        .priority_banner()
+        .unwrap()
+        .starts_with("Waiting for ProtonVPN"));
+    let frame: serde_json::Value = include_str!("../../../contracts/ipc/v1/torrents.ndjson")
+        .lines()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+        .find(|v| v["frame"]["result"]["torrents"].is_array())
+        .unwrap();
+    let mut row: crate::api::Torrent =
+        serde_json::from_value(frame["frame"]["result"]["torrents"][0].clone()).unwrap();
+    row.reason = Some("disk_full".into());
+    row.state = crate::api::TorrentState::Error;
+    row.error = Some("Disk full; free space".into());
+    app.store.torrents.insert(row.hash.to_string(), row);
+    assert!(app.priority_banner().unwrap().starts_with("Disk full"));
+    let text = super::golden::render(&app, 80, 24);
+    assert!(text.contains("! Disk full; free space"));
+    app.store.torrents.clear();
+    app.store.network = None;
+    app.daemon_stopped = false;
+    assert!(
+        app.priority_banner().is_none(),
+        "no permanent empty banner slot"
+    );
+}

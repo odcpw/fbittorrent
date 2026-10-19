@@ -27,7 +27,7 @@
 │                                     │   (G/End) Last                                                                   │                                     │
 │                                     │   (PgDn) Page down                                                               │                                     │
 │                                     │   (PgUp) Page up                                                                 │                                     │
-│                                     │   (Enter) Files                                                                  │                                     │
+│                                     │   (Enter) Details                                                                │                                     │
 │                                     │   (o) Open                                                                       │                                     │
 │                                     │   (p/Space) Pause/resume                                                         │                                     │
 │                                     │   (u) Seed on/off                                                                │                                     │

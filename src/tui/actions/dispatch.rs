@@ -34,6 +34,8 @@ pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
         Scope::Prompt
     } else if app.files.is_some() {
         Scope::Modal(ModalKind::Files)
+    } else if app.details.is_some() {
+        Scope::Modal(ModalKind::Details)
     } else if app.providers.is_some() {
         Scope::Modal(ModalKind::Providers)
     } else if app.daemon_stopped {

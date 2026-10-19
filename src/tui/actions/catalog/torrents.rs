@@ -98,7 +98,7 @@ pub(super) const ACTIONS: &[Action] = &[
         "torrents.primary",
         Scope::Screen(Screen::Torrents),
         &[KeyChord::plain(KeyCode::Enter)],
-        "Files",
+        "Details",
         10,
         |a| a.selected_torrent().is_some(),
         Some(|a| a.on_torrents_action(Intent::Primary)),

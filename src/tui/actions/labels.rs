@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
+    let id=match id { "details.pause"=>"torrents.pause", "details.seed"=>"torrents.seed", _=>id };
     Some(
         match id {
             "torrents.pause" => {

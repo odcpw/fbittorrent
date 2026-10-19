@@ -5,7 +5,7 @@ use std::{fs, path::PathBuf};
 #[path = "fixture.rs"]
 mod fixture;
 
-fn render(app: &TuiApp, width: u16, height: u16) -> String {
+pub(super) fn render(app: &TuiApp, width: u16, height: u16) -> String {
     let mut pool = ftui::GraphemePool::new();
     let mut frame = Frame::new(width, height, &mut pool);
     app.view(&mut frame);
@@ -90,7 +90,7 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done);
+goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details);
 
 #[test]
 fn done_row_offers_seed_instead_of_resume() {
