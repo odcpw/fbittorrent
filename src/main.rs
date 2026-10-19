@@ -39,7 +39,7 @@ fn main() {
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
-    let cli = match Cli::try_parse() {
+    let cli = match cli::parse_entry(std::env::args_os()) {
         Ok(cli)=>cli,
         Err(error)=>{
             if std::env::args().any(|arg|arg=="--json") && !matches!(error.kind(),clap::error::ErrorKind::DisplayHelp|clap::error::ErrorKind::DisplayVersion) {
@@ -89,6 +89,8 @@ fn emit(json: bool, value: serde_json::Value, human: impl FnOnce()) {
     if json { println!("{}",agent::with_warnings(value)); } else { human(); }
 }
 
+#[cold]
+#[inline(never)]
 fn run(cli: Cli) -> Result<Code> {
     // Static key documentation must not read or create app state.
     if let Some(Cmd::RobotDocs { section, surface }) = &cli.cmd {

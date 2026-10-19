@@ -24,6 +24,8 @@ pub(crate) struct Sample {
     pub prefix: u64,
     pub last: bool,
     pub downloading: bool,
+    /// Unpaused work still needs ticks even when its current rate is zero.
+    pub active: bool,
     pub dl_bps: Option<u64>,
 }
 pub(crate) fn video(path: &Path) -> bool {
@@ -104,6 +106,7 @@ pub(crate) struct Watch {
     rows: BTreeMap<String, Row>,
     next: Instant,
     fired: BTreeSet<String>,
+    active: bool,
 }
 impl Watch {
     pub fn open(path: PathBuf) -> Self {
@@ -140,10 +143,14 @@ impl Watch {
             rows: BTreeMap::new(),
             next: Instant::now(),
             fired: BTreeSet::new(),
+            active: false,
         }
     }
     pub fn due(&self) -> bool {
         Instant::now() >= self.next
+    }
+    pub fn needs_tick(&self) -> bool {
+        self.active
     }
     fn save(&self) {
         let result = || -> anyhow::Result<()> {
@@ -171,6 +178,7 @@ impl Watch {
     }
     pub fn sample(&mut self, samples: Vec<Sample>) -> Vec<Value> {
         self.next = Instant::now() + Duration::from_secs(1);
+        self.active = samples.iter().any(|sample| sample.active);
         let mut dirty = false;
         let mut events = Vec::new();
         for s in samples {
