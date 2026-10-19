@@ -35,6 +35,8 @@ Column {
   }
   function reveal(hash) {var index=indexOf(hash);if(index>=0)list.positionViewAtIndex(index,ListView.Contain)}
   function scroll(dy) {list.contentY=Math.max(0,Math.min(Math.max(0,list.contentHeight-list.height),list.contentY+dy))}
+  function progress(hash){var item=list.itemAtIndex(indexOf(hash));return item ? item.progress() : 0}
+  function stateText(hash){var item=list.itemAtIndex(indexOf(hash));return item ? item.stateText() : ""}
   function rowPoint(index) {
     var item=list.itemAtIndex(index)
     if(!item)return null

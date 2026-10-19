@@ -8,6 +8,8 @@ Ui.BorderSurface {
   required property var torrent
   property bool selected:false
   readonly property bool hasCursor:host.cursorHash===torrent.hash
+  function progress(){for(var i=0;i<cells.count;i++){var cell=cells.itemAt(i);if(cell && cell.column.name==="progress")return cell.renderedProgress}return 0}
+  function stateText(){for(var i=0;i<cells.count;i++){var cell=cells.itemAt(i);if(cell && cell.column.name==="state")return cell.renderedState}return ""}
   height:Commons.Style.spacing.popupRowHeight
   color:hasCursor ? Commons.Style.selectedAccentFill : selected ? Commons.Style.selectionFill : "transparent"
   borderSpec:Commons.Border.none()
@@ -16,6 +18,7 @@ Ui.BorderSurface {
   Row {
     anchors.fill:parent
     Repeater {
+      id:cells
       model:root.host.columns
       TorrentCell {required property var modelData;width:modelData.width;height:root.height;visible:!modelData.hidden;column:modelData;torrent:root.torrent;pendingText:root.host.service.pendingGlyph(root.torrent.hash);failed:root.host.service.rowFailed(root.torrent.hash)}
     }

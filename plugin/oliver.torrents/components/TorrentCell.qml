@@ -9,6 +9,8 @@ Item {
   required property var column
   property string pendingText:""
   property bool failed:false
+  readonly property real renderedProgress:progressRule.value
+  readonly property string renderedState:stateText.text
   readonly property bool unknown:value()==="—"
   function value() {
     var t=torrent
@@ -43,6 +45,7 @@ Item {
     elide:Text.ElideRight
   }
   StateText {
+    id:stateText
     visible:root.column.name==="state"
     anchors.fill:parent
     anchors.leftMargin:Commons.Style.spacing.controlPaddingX
@@ -51,6 +54,7 @@ Item {
     torrent:root.torrent
   }
   ProgressRule {
+    id:progressRule
     visible:root.column.name==="progress"
     anchors.fill:parent
     anchors.leftMargin:Commons.Style.spacing.controlPaddingX

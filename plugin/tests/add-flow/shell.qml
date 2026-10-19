@@ -77,7 +77,9 @@ ShellRoot {
     s.reply("search.grab",{hash:hash});check("search_review","confirmed grab selects the downloaded torrent",f.snapshot(),!f.snapshot().visible && s.selected===hash)
     s=service(["torrents","search","staging"]);f=Flow.create(s,function(){},true);f.search(result,7)
     check("search_review","negotiated staging uses the session/key and stage true",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.stage===true && s.calls[0].args.search_id===7 && s.calls[0].args.key===hash)
-    s.reply("search.grab",{hash:hash});check("search_review","staged grab enters the shared metadata/file selection flow",f.snapshot(),f.snapshot().owned && s.calls[1].op==="torrents.get")
+    s.reply("search.grab",{state:"pending",ref:"unit-1"});s.store.mutations["unit-1"]={status:"pending",result:{state:"pending",ref:"unit-1"}};f.frame({topic:"events",ev:"delta"})
+    check("search_review","a pending snapshot is an acknowledgement, not a failed add",f.snapshot(),f.snapshot().phase==="staging" && !f.snapshot().error)
+    f.frame({ev:"mutation.result",ref:"unit-1",outcome:"done",result:{hash:hash}});check("search_review","staged grab enters the shared metadata/file selection flow",f.snapshot(),f.snapshot().owned && s.calls[1].op==="torrents.get")
     s=service(["torrents","search","free_space"]);f=Flow.create(s,function(){},true)
     result={key:hash,name:"100 MiB fixture",size:100*1024*1024,providers:["local"],magnet:source.magnet}
     f.search(result,1);s.reply("app.free_space",{writable:true,free_bytes:64*1024*1024});count=s.calls.length;f.commit()

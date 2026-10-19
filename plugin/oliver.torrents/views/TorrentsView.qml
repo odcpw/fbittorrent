@@ -39,7 +39,7 @@ FocusScope {
   Component.onDestruction:service.hideDetail()
   readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
   readonly property var viewState:({errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
-    cleanup:({undo:undoAvailable,hashes:service.cleanupFlow ? service.cleanupFlow.hashes : []}),toast:service.toast,cursor:cursorHash,selection:Object.keys(selection),filter:filter,query:query,
+    cleanup:({undo:undoAvailable,hashes:service.cleanupFlow ? service.cleanupFlow.hashes : []}),toast:service.toast,cursor:cursorHash,rowProgress:service.detailRevision>=0 ? table.progress(cursorHash) : 0,stateLabel:service.detailRevision>=0 ? table.stateText(cursorHash) : "",selection:Object.keys(selection),filter:filter,query:query,
     focus:focusPane,details:detailState,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
     panes:{sidebar:sideFrame.visible,detailsDocked:detailsFrame.visible,detailsSheet:sheet.visible},
     hover:table.hoverHash,rows:table.count,listWidth:table.width})

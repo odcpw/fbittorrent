@@ -34,6 +34,9 @@ Item {
   readonly property var views:["torrents","search","shows","rss","settings","log"]
   readonly property var labels:["Torrents","Search","Shows","RSS","Settings","Log"]
   function selectTorrent(hash){currentView="torrents";selectedHash=hash;if(torrents)torrents.cursorHash=hash}
+  function focusAfterAdd(){
+    if(currentView==="search" && search){search.focusResults();svc.focusWindow(window,search)}else focusView()
+  }
   function openAdd(source,options){var accepted=svc ? svc.beginAdd(source,options) : false;Qt.callLater(function(){if(addSheet.item)addSheet.item.focusSheet()});return accepted}
   function acceptDrop(urls,text){var parsed=Source.drop(urls,text);if(!parsed)return false;return openAdd(parsed.source)}
   function publish() {
@@ -98,7 +101,7 @@ Item {
     if(shell && typeof shell.hide==="function")shell.hide("oliver.torrents")
   }
   function openSettings(){if(currentView!=="settings")settingsReturnView=currentView;currentView="settings";publish();Qt.callLater(focusView)}
-  function selectView(index) {if(views[index]==="settings"){openSettings();return}currentView=views[index];publish();Qt.callLater(focusView)}
+  function selectView(index) {if(views[index]==="settings"){openSettings();return}currentView=views[index];publish();Qt.callLater(focusView);if(currentView==="search")Qt.callLater(function(){if(root.search)root.search.focusQuery()})}
   function cycleView(direction) {selectView((Math.max(0,views.indexOf(currentView))+direction+4)%4)}
   function isWindowActive(){return window._backingWindow && window._backingWindow.active}
   function rowPoint(index){return torrents ? torrents.rowPoint(index) : null}
@@ -268,7 +271,7 @@ Item {
       DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
       Loader {id:settingsLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
       Loader {id:helpLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.helpOpen;onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.HelpOverlay {service:root.svc;onDismissed:root.helpOpen=false}}
-      Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusView)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
+      Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusAfterAdd)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }
   }
 }

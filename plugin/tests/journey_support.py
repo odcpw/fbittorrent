@@ -10,7 +10,7 @@ class JourneySession(Session):
         # not lose its active focus on every wtype process exit.
         self.keyboard=subprocess.Popen(['wtype','-s','600000'],env=self.env)
     def keys(self,args,predicate):
-        self.compositor.ipc('[title="^fbittorrent$"] focus')
+        self.wait(lambda:self.compositor.ipc('[title="^fbittorrent$"] focus'))
         try:return super().keys(args,predicate)
         except TimeoutError as error:raise TimeoutError('Journey keys '+repr(args)+': '+str(error)) from error
     def close(self):

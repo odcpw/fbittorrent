@@ -1,5 +1,8 @@
 .pragma library
 
+// Declare optional display roles when a row is first inserted. The native
+// proxy cannot expose a role added later (for example, after staging ends).
+var DISPLAY_ROLES={playable:null,size:null,progress:null,dl_bps:null,ul_bps:null,eta_s:null,peers:null,seeds:null,ratio:null,added_at:null,completed_at:null,reason:null}
 var STATES = ["metadata", "checking", "downloading", "stalled", "queued", "paused", "done", "seeding", "waiting_vpn", "error"]
 function dictionary() { return Object.create(null) }
 function equal(a, b) {
@@ -314,7 +317,7 @@ function create(options) {
           }
         } else if (index === undefined) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
-          model.append(Object.assign({},row,{uiReady:ready(row),uiName:s.sortNames[change.hash],uiVisible:s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText)})); structural = true
+          model.append(Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[change.hash],uiVisible:s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText)})); structural = true
         } else {
           change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? null : row[field]) })
           if(change.fields.some(function(field){return ["playable","name","state"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText))

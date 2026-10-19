@@ -9,7 +9,7 @@ from fbtlog import Case,suite_status
 
 
 def run(binary):
-    with Case('qs_journeys','w8_cleanup') as case,daemon.Sandbox() as box,daemon.Harness(case,binary,box) as h:
+    with Case('qs_journey_w8','w8_cleanup') as case,daemon.Sandbox() as box,daemon.Harness(case,binary,box) as h:
         data=box.root/'watched';data.mkdir()
         prepared=[]
         for name in ('Watched one','Watched two','Unrelated film'):
@@ -27,10 +27,7 @@ def run(binary):
                 assert h.wait_for(lambda:(len(rows())==3 and all(r['state']=='done' for r in rows()),str(rows())),'three watched private films verified')
                 q=JourneySession(case,box)
                 def view():return q.state().get('view') or {}
-                def press(keys,predicate):
-                    q.compositor.ipc('[title="^fbittorrent$"] focus')
-                    try:return q.keys(keys,predicate)
-                    except TimeoutError as error:raise TimeoutError('W8 keys '+repr(keys)+': '+str(error)) from error
+                def press(keys,predicate):return q.keys(keys,predicate)
                 def intact():return all(p.exists() and hashlib.sha256(p.read_bytes()).hexdigest()==digest for _,p,digest in prepared) and sentinel.read_text()=='Never remove files outside the torrent'
                 q.wait(lambda:q.ipc('ready')=='true');q.shell('summon',json.dumps(dict(view='torrents',hash=prepared[0][0].info_hash)))
                 q.wait(lambda:view().get('cursor')==prepared[0][0].info_hash)
@@ -75,7 +72,7 @@ def run(binary):
                 if q:q.close()
             finally:
                 if process.child.poll() is None:h.stop_serve(process)
-    return suite_status('qs_journeys')
+    return suite_status('qs_journey_w8')
 
 if __name__=='__main__':
     import private_net
