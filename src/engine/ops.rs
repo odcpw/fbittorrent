@@ -345,14 +345,11 @@ impl EngineDispatcher {
             return Ok(EngineResult::Acknowledged);
         }
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
-        if matches!(
-            op,
-            EngineOp::SetDownloadLimit { .. } | EngineOp::SetUploadLimit { .. } | EngineOp::Delete { files: true, .. }
-        ) {
+        // Caps are durable record settings. A completed, queued or unresolved
+        // torrent need not own an rqbit handle to accept its next live limits.
+        if matches!(op, EngineOp::Delete { files: true, .. }) {
             for hash in &hashes {
-                if !matches!(op, EngineOp::Delete { .. }) || !self.inner.dormant(hash) {
-                    self.inner.handle(hash)?;
-                }
+                if !self.inner.dormant(hash) { self.inner.handle(hash)?; }
             }
         }
         if let EngineOp::Delete { files, .. } = &op {
@@ -481,17 +478,18 @@ impl EngineDispatcher {
             if matches!(op, EngineOp::SetShareLimits {..}) {
                 if let Some(handle) = &handle { handle.set_upload_enabled(ledger.records[index].upload); }
             }
-            if matches!(op,EngineOp::SetDownloadLimit{..}){
-                handle.as_ref().expect("validated download-cap handle").set_download_bps(ledger.records[index].download_limit)?;
+            if matches!(op,EngineOp::SetDownloadLimit{..}) {
+                if let Some(handle) = &handle {
+                    handle.set_download_bps(ledger.records[index].download_limit)?;
+                }
             }
             if matches!(op, EngineOp::SetUploadLimit { .. }) {
                 // Validate before saving, then apply synchronously under the
                 // ledger lock. A failed save leaves the live limiter unchanged.
                 let limit = ledger.records[index].upload_limit;
-                handle
-                    .as_ref()
-                    .expect("validated upload-cap handle")
-                    .set_upload_bps((limit != 0).then_some(limit as u64))?;
+                if let Some(handle) = &handle {
+                    handle.set_upload_bps((limit != 0).then_some(limit as u64))?;
+                }
             }
             if matches!(op, EngineOp::Stop { .. }) {
                 self.inner.cancel_restore(&hash, false);

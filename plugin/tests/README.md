@@ -118,6 +118,15 @@ for an unchanged-order role patch. `FBT_TEST_QS_DIAG=1` enables per-owned-proces
 ptrace authorization and a bounded GDB stack capture if the profile stalls; it
 never changes the system ptrace policy or inspects an owner process.
 
+`plugin/tests/qs-dashboard.sh --rss --binary <debug-binary>` starts from a saved
+feed after a daemon restart, enters RSS with `4`, and drives add/cancel, refresh,
+read toggles and deliberate staged Download. `--recheck` scrolls to the real
+Overview button, checks Cancel-first confirmation and verifies a corrupted private
+payload through the pending acknowledgement and final receipt. Both use private
+Sway/XDG/network state. `plugin/tests/qs-client.sh` advances the client clock past
+the ordinary reply deadline to cover long checks, lost connections and late
+receipts without claiming that the live hash scan took that long.
+
 ## M2 owner journeys
 
 Run `plugin/tests/qs-dashboard.sh --journeys --binary <current-binary>` at an

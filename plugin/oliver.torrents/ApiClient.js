@@ -245,7 +245,11 @@ function create(io, options) {
       if (frame.ev === "mutation.result") {
         delete c.awaiting[frame.ref]
         var action = c.actions[frame.ref]
-        if (action) { action.status = frame.outcome === "timeout" ? "no answer" : frame.outcome; action.error = frame.error }
+        if (action) {
+          if (c.lastError === action.error) c.lastError = null
+          action.status = frame.outcome === "timeout" ? "no answer" : frame.outcome; action.error = frame.error
+          if (frame.error) c.lastError = frame.error
+        }
       }
       if (frame.sub !== undefined) {
         if (typeof frame.topic !== "string" || !Number.isSafeInteger(frame.sub) || frame.sub < 1 ||
@@ -291,7 +295,14 @@ function create(io, options) {
     } else if (!frame.ok) fail(entry, frame.error)
     else if (entry.ref && c.actions[entry.ref]) {
       c.actions[entry.ref].status = frame.result.state === "pending" ? "pending" : "confirmed"
-      if (frame.result.state === "pending") c.awaiting[entry.ref] = entry
+      if (frame.result.state === "pending") {
+        // The reply arrived. Hashing and other accepted work finish through a
+        // mutation receipt, not the initial reply timer. Silence/EOF still
+        // detects a lost owner; never resend a non-idempotent check.
+        entry.deadline = Infinity
+        c.actions[entry.ref].accepted = true
+        c.awaiting[entry.ref] = entry
+      }
     }
     if (entry.callback && frame.ok) entry.callback(frame.result, null)
     deliver(frame, entry); pump(); changed()

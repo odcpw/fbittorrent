@@ -408,3 +408,6 @@ fn undo_rechecks_real_data_once_without_redownload() {
 mod fast_resume;
 #[path="moving.rs"]
 mod moving;
+
+#[path = "dormant_operations.rs"]
+mod dormant_operations;
