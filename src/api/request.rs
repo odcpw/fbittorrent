@@ -341,6 +341,8 @@ pub enum Call {
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
     AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
+    #[serde(rename = "app.free_space")]
+    AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -426,6 +428,7 @@ impl Call {
             Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",
+            Self::AppFreeSpace { .. } => "app.free_space",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",

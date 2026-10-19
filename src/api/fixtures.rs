@@ -14,6 +14,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
     ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
+    ("free-space", include_str!("../../contracts/ipc/v1/free-space.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
     ("hello", include_str!("../../contracts/ipc/v1/hello.ndjson")),
@@ -248,7 +249,9 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
             // known transfer for unknown values. Rates may be genuinely zero.
             if child.as_f64() == Some(0.0) {
                 let invalid = match key.as_str() {
-                    "eta_s" | "rating" | "uploaded_at" | "free_bytes" => true,
+                    "eta_s" | "rating" | "uploaded_at" => true,
+                    // P6-11 reports an observed zero in its typed destination result.
+                    "free_bytes" => !map.get("writable").is_some_and(Value::is_boolean),
                     "size" => !map.contains_key("index"),
                     "progress" => {
                         !map.contains_key("index")
@@ -321,6 +324,7 @@ fn sentinel_negative_controls() {
         assert!(sentinel(&value, "").unwrap_err().starts_with(pointer));
     }
     // Known, observed zeros survive; unknown is represented by omission.
+    sentinel(&json!({"free_bytes":0,"writable":false}), "").unwrap();
     sentinel(&json!({"size":4096,"progress":0,"completed_bytes":0,"dl_bps":0,"ul_bps":0,"index":0,"total":0}), "").unwrap();
     sentinel(
         &json!({"state":"stalled","peers":0,"seeds":0,"completed_bytes":1024,"ratio":0}),
@@ -449,6 +453,7 @@ fn operation_event_error_and_document_coverage() {
         "torrents.recheck",
         "app.log",
         "app.stats",
+        "app.free_space", // P6-11: planned additive operation.
         "app.settings.get",
         "app.settings.set",
         "imdb.lookup",

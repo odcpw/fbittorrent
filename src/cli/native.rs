@@ -209,6 +209,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             if *no_seq || *no_first_last {
                 return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
             }
+            if let Some(path) = save { crate::free_space::require_writable(path)?; }
             let client = connect(cfg, true, no_start, json_mode)?;
             if origin=="handler" && cfg.handler=="confirm" {
                 let value=super::handler::confirm(&client,cfg,source,*stopped,*seed,save.clone(),category.clone())?;
@@ -556,6 +557,7 @@ pub(super) fn add(
     origin: &str,
     stage: bool,
 ) -> Result<Value> {
+    if let Some(path) = &save { crate::free_space::require_writable(path)?; }
     let input=super::handler::source(source)?;
     let mut args =
         json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});

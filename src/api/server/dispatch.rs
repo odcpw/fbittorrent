@@ -122,6 +122,7 @@ impl Shared {
             match &job.request.call {
                 Call::AppLog { .. }
                 | Call::AppStats { .. }
+                | Call::AppFreeSpace { .. }
                 | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }
                 | Call::AppInfo { .. }

@@ -36,7 +36,7 @@ Item {
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
       cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
-    if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
+    if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
 
   }
   function focusView() {

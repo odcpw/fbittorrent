@@ -209,6 +209,13 @@ def exit_code_dictionary_total(binary,systemd):
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 
+def add_save_unwritable(binary, systemd):
+    sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
+    import private_net
+    private_net.enter()
+    from destination import cli_unwritable
+    cli_unwritable(binary,systemd)
+
 
 def reannounce_verb(binary,systemd):
     from daemon import tracker_live_fixture,tracker_rows
@@ -238,7 +245,7 @@ from agent_stream import (events_follow_completion, events_since_seq_replay, eve
 
 from daemon_limits import limits_verb
 
-CASES={f.__name__:f for f in [limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

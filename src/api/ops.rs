@@ -9,6 +9,14 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {
+        name: "app.free_space",
+        mutating: false,
+        idempotent: false,
+        since: "P6-11",
+        args: "`path: str` (absolute local directory, ≤4096 bytes, no controls)",
+        result: "`{free_bytes: bytes?, writable: bool}`",
+    },
     Operation { name: "torrents.trackers", mutating: false, idempotent: false, since: "P6-01",
         args: "`hash: hash`", result: "`{trackers: [Tracker]}`" },
     Operation { name: "torrents.reannounce", mutating: true, idempotent: true, since: "P6-01",
