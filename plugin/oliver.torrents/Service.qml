@@ -48,7 +48,7 @@ Item {
   property var savedPreferences:({})
   onDetailsWidthChanged:if(preferencesLoaded)savePreferences.restart()
   function hasCap(name){return !!client && client.caps.indexOf(name)>=0}
-  function subscribeDetail(hash,topics){detailTopics=topics.map(function(t){return "torrent:"+hash+"."+t})}
+  function subscribeDetail(hash,topics){var old=detailTopics;detailTopics=topics.map(function(t){return "torrent:"+hash+"."+t});store.releaseTopics(old.filter(function(t){return detailTopics.indexOf(t)<0 && addTopics.indexOf(t)<0}))}
   function unsubscribeDetail(){if(detailTopics.length){var old=detailTopics;detailTopics=[];store.releaseTopics(old.filter(function(t){return addTopics.indexOf(t)<0}))}}
   function logConsumer(id,on){
     if(!!logConsumers[id]===!!on)return
@@ -61,6 +61,7 @@ Item {
   function copyText(text){if(text!==undefined){Commons.Util.execArgv(["wl-copy","--",String(text)]);notify("Copied")}}
   function openUrl(url){if(url && /^https?:\/\//.test(url))Commons.Util.execArgv(["xdg-open",url])}
   function scheduleDetail(hash){detailChoice.hash=hash;detailChoice.restart();imdbChoice.restart()}
+  function showDetail(hash){detailChoice.stop();if(detailFlow)detailFlow.begin(hash);imdbChoice.restart()}
   function hideDetail(){detailChoice.stop();imdbChoice.stop();if(detailFlow)detailFlow.hide()}
   Timer {id:detailChoice;property string hash:"";interval:150;onTriggered:if(root.detailFlow)root.detailFlow.begin(hash)}
   Timer {id:imdbChoice;interval:300;onTriggered:if(root.detailFlow)root.detailFlow.lookup()}
@@ -156,7 +157,7 @@ Item {
   readonly property alias torrentModel: rowsModel
   ListModel { id: rowsModel; dynamicRoles: true }
   property bool modelReordering:false
-  function orderBoundary(starting){modelReordering=starting;if(starting)rowOrderChanging();else rowOrderChanged()}
+  function orderBoundary(starting){if(starting)rowOrderChanging();modelReordering=starting;if(!starting)rowOrderChanged()}
   signal rowOrderChanging()
   signal rowOrderChanged()
   function syncRows() {
@@ -240,7 +241,7 @@ Item {
     }
     return client.request(op, args, {mutating:true, callback:callback})
   }
-  function refresh() { if (client) client.subscribeAll() }
+  function refresh() { if (client) client.subscribeAll(true) }
   function pause(hash) { return mutate("torrents.stop", {hashes:[hash]}) }
   function resume(hash) { return mutate("torrents.start", {hashes:[hash]}) }
   function toggleSeed(hash) {
@@ -290,7 +291,7 @@ Item {
     var request=windowFocus
     if(!request || !request.target || typeof request.target.forceActiveFocus!=="function" || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
     request.target.forceActiveFocus()
-    var backing=request.window._backingWindow,elapsed=Date.now()-request.started
+    var backing=request.window.contentItem.Window.window,elapsed=Date.now()-request.started
     if(backing && backing.active && request.target.activeFocus){windowFocus=null;focusRetry.stop();return}
     if(request.stage===0) {
       request.target.forceActiveFocus()

@@ -48,26 +48,26 @@ def healthy_diagnostics(stderr):
     return True
 
 
-def ordered_shutdown(stderr, complete=True, *, engine_active=True):
+def ordered_shutdown(stderr, complete=True, empty_slot=False):
     """Require each owner drain to release the engine before unlinking sockets.
 
     Engine-only restarts may drain before the owner starts shutting down.
-    Unrelated success diagnostics may appear between any two phases. A caller
-    that observed a parked/starting owner may omit the absent engine drain.
+    A parked slot has no session to drain and must explicitly report its absence.
+    Unrelated success diagnostics may appear between any two phases.
     """
-    phases = [r"daemon draining\b", r"engine drained\b", r"daemon slot released\b",
+    phases = [r"daemon draining\b", r"engine (?:drained\b|slot empty state=parked session=absent\b)", r"daemon slot released\b",
               r"daemon sockets unlinked\b", r"daemon stopped\b"]
+    if empty_slot:
+        phases[1] = r"engine slot empty state=parked session=absent\b"
     next_phase = 0
     stopped = False
     for line in diagnostic_lines(stderr):
         phase = next((i for i, pattern in enumerate(phases) if re.search(pattern, line)), None)
-        if phase is None or (phase == 1 and next_phase == 0):
+        if phase is None or (not empty_slot and phase == 1 and next_phase == 0):
             continue
-        if phase == 2 and next_phase == 1 and not engine_active:
-            next_phase = 2
         if phase != next_phase:
             return False
-        if phase == 4:
+        if phase == len(phases)-1:
             if re.search(r"\bcode=0(?:\s|$)", line) is None:
                 return False
             stopped = True
@@ -77,5 +77,5 @@ def ordered_shutdown(stderr, complete=True, *, engine_active=True):
     return not complete or (stopped and next_phase == 0)
 
 
-def expected_daemon_stderr(stderr, complete=True, *, engine_active=True):
-    return healthy_diagnostics(stderr) and ordered_shutdown(stderr, complete, engine_active=engine_active)
+def expected_daemon_stderr(stderr, complete=True, empty_slot=False):
+    return healthy_diagnostics(stderr) and ordered_shutdown(stderr, complete, empty_slot)

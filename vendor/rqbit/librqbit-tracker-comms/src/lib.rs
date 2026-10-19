@@ -8,4 +8,6 @@ pub use tracker_comms::*;
 pub use tracker_comms_udp::UdpTrackerClient;
 
 mod stats;
-pub use stats::{TrackerStats,TrackerStat,TrackerStatus,redact_url,sanitize};
+mod redaction;
+pub use redaction::{redact_url,sanitize};
+pub use stats::{TrackerStats,TrackerStat,TrackerStatus};

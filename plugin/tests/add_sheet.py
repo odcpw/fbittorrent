@@ -40,19 +40,21 @@ def sheet(binary,commit):
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
             q.wait(lambda:(q.state().get('view') or {}).get('window',{}).get('visible'))
             keys=['a'] if commit else ['-M','ctrl','v','-m','ctrl']
-            q.keys(keys,lambda:state(q).get('visible'));preview=wait_sheet(q,'preview')
+            q.keys(keys,lambda:state(q).get('visible'));preview=wait_sheet(q,'ready')
             record(case,q,'review existing-daemon add before any write')
-            case.check(client.call('torrents.list',{})['result']['torrents']==[] and not preview['trace'],'a/Ctrl+V reads the clipboard and opens review without starting a download',json.dumps(preview))
+            staged=client.call('torrents.list',{})['result']['torrents']
+            case.check(len(staged)==1 and staged[0]['staged'] and not staged[0]['checked'] and len(preview['files'])==2 and not staged[0]['upload_enabled'],'a/Ctrl+V stages real metadata and file choices with no payload transfer or upload permission',json.dumps(preview))
             image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.exists() and image.stat().st_size>0)
             if commit:
                 q.keys(['-k','Return'],lambda:not state(q).get('visible'))
                 result=client.call('torrents.get',dict(hash=torrent.info_hash))
                 trace=state(q)['trace'];requests=[t for t in trace if t['kind']=='request']
-                case.check(result['ok'] and len(requests)==1 and requests[0]['op']=='torrents.add' and 'stage' not in requests[0]['data'],'Download sends one real existing add request with no unsupported stage field',json.dumps(dict(reply=result,trace=trace)))
+                case.check(result['ok'] and not result['result']['torrent']['staged'] and [r['op'] for r in requests]==['torrents.add','torrents.commit'] and requests[0]['data']['stage'] is True and not requests[1]['data']['seed'],'Download commits the reviewed stage exactly once with upload off',json.dumps(dict(reply=result,trace=trace)))
                 case.check(result['result']['torrent']['hash']==torrent.info_hash,'the confirmed hash belongs to the actual local metainfo',json.dumps(result))
             else:
                 q.keys(['-k','Escape'],lambda:not state(q).get('visible'))
-                case.check(client.call('torrents.list',{})['result']['torrents']==[] and not state(q)['trace'],'Discard from compatibility review sends no add or discard mutation',json.dumps(state(q)))
+                requests=[t for t in state(q)['trace'] if t['kind']=='request']
+                case.check(client.call('torrents.list',{})['result']['torrents']==[] and [r['op'] for r in requests]==['torrents.add','torrents.discard'],'Discard removes only the reviewed stage without committing it',json.dumps(state(q)))
             case.check(all(p.read_bytes()==body for p,body in original.items()) and saved.read_bytes()==b'keep existing download','source payloads and existing downloads remain byte-identical',str(saved))
             record(case,q,'final sheet state and actual request/reply trace')
         finally:q.close()
@@ -63,15 +65,16 @@ def drop_routing(binary):
         try:
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{}')
             q.wait(lambda:(q.state().get('view') or {}).get('window',{}).get('visible'))
-            accepted=q.ipc('routeDrop',torrent.torrent.as_uri());preview=wait_sheet(q,'preview')
+            accepted=q.ipc('routeDrop',torrent.torrent.as_uri());preview=wait_sheet(q,'ready')
             case.check(accepted=='true' and preview['source']==dict(path=str(torrent.torrent)),'production drop-routing function decodes a local .torrent URL into the real sheet',json.dumps(preview))
-            case.check(not preview['trace'],'drop routing has not started a download',json.dumps(preview))
+            rows=client.call('torrents.list',{})['result']['torrents']
+            case.check(len(rows)==1 and rows[0]['staged'] and not list(sandbox.downloads.iterdir()),'drop review resolves metadata without starting a payload download',json.dumps(preview))
             q.keys(['-k','Escape'],lambda:not state(q).get('visible'))
             case.check(q.ipc('routeDrop','file://remote/path.torrent')=='false','non-local file URLs are rejected','false')
             fixtures.path_shim('wl-paste','exit 0',sandbox.root)
             q.keys(['a'],lambda:state(q).get('phase')=='input')
             magnet='magnet:?xt=urn:btih:'+'a'*40
-            q.keys(['magnet:?xt=urn:btih:','-s','1200','a'*40,'-k','Return'],lambda:state(q).get('phase')=='preview')
+            q.keys(['magnet:?xt=urn:btih:','-s','1200','a'*40,'-k','Return'],lambda:state(q).get('hash')=='a'*40 and state(q).get('owned'))
             case.check(state(q)['source']==dict(magnet=magnet),'typing across the one-second service tick preserves the complete source',json.dumps(state(q)))
             q.keys(['-k','Escape'],lambda:not state(q).get('visible'))
             case.check(True,'record manual drag qualification boundary','NOT RUN: this is routing under private Sway, not the requested manual Hyprland check')

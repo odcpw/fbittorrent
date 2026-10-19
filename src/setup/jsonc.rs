@@ -1,5 +1,5 @@
 //! Small JSONC editor: retain unrelated bytes/comments, replace owned root keys.
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};
 
 fn string_end(bytes: &[u8], start: usize) -> Result<usize> {
@@ -68,6 +68,137 @@ pub(super) fn parse(text: &str) -> Result<Value> {
         i += 1;
     }
     serde_json::from_slice(&bytes).context("invalid JSONC settings")
+}
+
+/// Byte spans in an already validated JSONC document, including separators.
+/// Keep comments/whitespace out of replacement ranges when removing an item.
+pub(super) struct Entry {
+    pub key: Option<String>,
+    pub value: std::ops::Range<usize>,
+    pub comma: Option<usize>,
+}
+pub(super) struct Syntax {
+    bytes: Vec<u8>,
+    root: std::ops::Range<usize>,
+}
+impl Syntax {
+    pub fn new(text: &str) -> Result<Self> {
+        parse(text)?;
+        let bytes = clean(text)?;
+        let start = bytes
+            .iter()
+            .position(|b| !b.is_ascii_whitespace())
+            .context("empty JSONC")?;
+        let end = value_end(&bytes, start)?;
+        Ok(Self {
+            bytes,
+            root: start..end,
+        })
+    }
+    pub fn is_array(&self, span: &std::ops::Range<usize>) -> bool {
+        self.bytes[span.start] == b'['
+    }
+    pub fn at(&self, path: &[&str]) -> Result<Option<std::ops::Range<usize>>> {
+        let mut span = self.root.clone();
+        for key in path {
+            if self.bytes[span.start] != b'{' {
+                bail!("JSONC path must be an object");
+            }
+            let mut matching = self
+                .members(span)?
+                .into_iter()
+                .filter(|entry| entry.key.as_deref() == Some(*key));
+            let Some(entry) = matching.next() else {
+                return Ok(None);
+            };
+            if matching.next().is_some() {
+                bail!("ambiguous duplicate JSONC key {key}");
+            }
+            span = entry.value;
+        }
+        Ok(Some(span))
+    }
+    pub fn members(&self, span: std::ops::Range<usize>) -> Result<Vec<Entry>> {
+        let bytes = &self.bytes;
+        let object = bytes[span.start] == b'{';
+        anyhow::ensure!(
+            object || bytes[span.start] == b'[',
+            "JSONC collection required"
+        );
+        let mut entries = Vec::new();
+        let mut i = span.start + 1;
+        loop {
+            while bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i == span.end - 1 {
+                break;
+            }
+            let key = if object {
+                let end = string_end(bytes, i)?;
+                let key = serde_json::from_slice(&bytes[i..end])?;
+                i = end;
+                while bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                anyhow::ensure!(bytes[i] == b':', "missing JSONC colon");
+                i += 1;
+                while bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                Some(key)
+            } else {
+                None
+            };
+            let start = i;
+            i = value_end(bytes, i)?;
+            let value = start..i;
+            while bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let comma = if bytes[i] == b',' {
+                let comma = i;
+                i += 1;
+                Some(comma)
+            } else {
+                None
+            };
+            entries.push(Entry { key, value, comma });
+        }
+        Ok(entries)
+    }
+}
+fn value_end(bytes: &[u8], start: usize) -> Result<usize> {
+    if bytes[start] == b'"' {
+        return string_end(bytes, start);
+    }
+    if matches!(bytes[start], b'{' | b'[') {
+        let mut depth = 0;
+        let mut i = start;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'"' => {
+                    i = string_end(bytes, i)?;
+                    continue;
+                }
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(i + 1);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        bail!("unterminated JSONC value");
+    }
+    Ok(start
+        + bytes[start..]
+            .iter()
+            .take_while(|b| !b.is_ascii_whitespace() && !matches!(b, b',' | b']' | b'}'))
+            .count())
 }
 
 pub(super) fn edit(

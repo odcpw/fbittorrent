@@ -377,7 +377,8 @@ fn optional_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Op
     bool::deserialize(deserializer).map(Some)
 }
 
-/// Full URLs stay on the private socket; clients redact queries when rendering.
+/// Tracker URLs on the wire are redacted aliases. Their opaque fragment is an
+/// identity for removal, never an announce endpoint or a tracker credential.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all="snake_case")]
 pub enum TrackerStatus { Ok, Error, Updating, NotContacted }

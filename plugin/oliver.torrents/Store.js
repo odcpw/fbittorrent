@@ -15,7 +15,8 @@ function equal(a, b) {
   return true
 }
 function safeField(key) { return key !== "__proto__" && key !== "constructor" && key !== "prototype" }
-function ready(row) { return !!(row && row.playable && row.playable.ready) }
+function rowState(row) {return row.staged ? "reviewing" : row.state}
+function ready(row) { return !!(row && !row.staged && row.playable && row.playable.ready) }
 // Name comparisons dominate cold UI sorts; avoid dynamic field lookup and
 // comparing 40-byte hashes unless the case-folded names actually tie.
 function compareNames(a,b) {return a.name<b.name ? -1 : a.name>b.name ? 1 : a.hash<b.hash ? -1 : a.hash>b.hash ? 1 : 0}
@@ -24,7 +25,7 @@ function create(options) {
   var o = options || {}, clock = o.now || Date.now
   var s = { torrents: dictionary(), summary: {}, network: {}, settings: {}, info: {}, transfer: {},
     badges: {}, topics: dictionary(), subscriptions: dictionary(), snapshots: dictionary(), calls: dictionary(),
-    mutations: dictionary(), events: [], eventSeen: dictionary(), cards: dictionary(), counts: {total:0, ready:0, staged:0},
+    mutations: dictionary(), events: [], eventSeen: dictionary(), cards: dictionary(), counts: {total:0, ready:0, staged:0, reviewing:0},
     changes: [], hasTorrents: false, membershipChanged: false, proto: undefined, compatible: false, instance: "",
     generation: 0, membershipVersion: 0, sortVersions: {added:0,name:0,progress:0,rate:0,size:0,state:0,eta:0,up:0,peers:0,ratio:0}, sortNames: dictionary(), sortValues: dictionary(), keys: [], keysDirty: true, sortCache: dictionary(), lastError: null }
   STATES.forEach(function(state) { s.counts[state] = 0 })
@@ -34,7 +35,7 @@ function create(options) {
   function recount(row, sign) {
     if (!row) return
     s.counts.total += sign
-    if (s.counts[row.state] !== undefined) s.counts[row.state] += sign
+    if (s.counts[rowState(row)] !== undefined) s.counts[rowState(row)] += sign
     if (ready(row)) s.counts.ready += sign
     if (row.staged) s.counts.staged += sign
   }
@@ -42,7 +43,7 @@ function create(options) {
     s.changes.push({hash:hash, fields:fields})
     s.membershipChanged = s.membershipChanged || membership
     if (membership) s.membershipVersion++
-    var sortFields = {added_at:"added", name:"name", progress:"progress", dl_bps:"rate", size:"size", state:"state", eta_s:"eta",ul_bps:"up",peers:"peers",ratio:"ratio"}
+    var sortFields = {added_at:"added", name:"name", progress:"progress", dl_bps:"rate", size:"size", state:"state", staged:"state", eta_s:"eta",ul_bps:"up",peers:"peers",ratio:"ratio"}
     ;(fields || []).forEach(function(field) { if (sortFields[field]) s.sortVersions[sortFields[field]]++ })
     s.generation++
   }
@@ -50,7 +51,7 @@ function create(options) {
     var hash = incoming.hash
     if (!/^[0-9a-f]{40}$/.test(hash)) throw Error("invalid torrent hash")
     var old = s.torrents[hash], added = !old, fields = [], next = old || {}
-    var oldState = old && old.state, oldReady = ready(old), oldStaged = !!(old && old.staged)
+    var oldState = old && rowState(old), oldReady = ready(old), oldStaged = !!(old && old.staged)
     var keys = Object.keys(incoming)
     if (!patch && old) keys = keys.concat(Object.keys(old).filter(function(k) { return incoming[k] === undefined }))
     keys.forEach(function(key) {
@@ -66,14 +67,14 @@ function create(options) {
     if (!added && !fields.length) return
     if (added) { s.torrents[hash] = next; recount(next, 1); s.keysDirty = true }
     else {
-      if (oldState !== next.state) { if (s.counts[oldState] !== undefined) s.counts[oldState]--; if (s.counts[next.state] !== undefined) s.counts[next.state]++ }
+      if (oldState !== rowState(next)) { if (s.counts[oldState] !== undefined) s.counts[oldState]--; if (s.counts[rowState(next)] !== undefined) s.counts[rowState(next)]++ }
       if (oldReady !== ready(next)) s.counts.ready += ready(next) ? 1 : -1
       if (oldStaged !== !!next.staged) s.counts.staged += next.staged ? 1 : -1
     }
     if (added || fields.indexOf("name") >= 0) s.sortNames[hash] = String(next.name || "").toLocaleLowerCase()
-    if (next.state==="error") errors[hash]=true; else delete errors[hash]
-    if (next.playable && next.playable.ready && next.playable.acked===false) unacknowledged[hash]=true; else delete unacknowledged[hash]
-    var rank = STATES.indexOf(next.state)
+    if (!next.staged && next.state==="error") errors[hash]=true; else delete errors[hash]
+    if (ready(next) && next.playable.acked===false) unacknowledged[hash]=true; else delete unacknowledged[hash]
+    var rank = STATES.indexOf(rowState(next))
     var values = s.sortValues[hash] || {hash:hash}
     values.added_at = next.added_at; values.name = s.sortNames[hash]; values.progress = next.progress
     values.dl_bps = next.dl_bps; values.size = next.size; values.state = rank < 0 ? STATES.length : rank; values.eta_s = next.eta_s; values.ul_bps=next.ul_bps;values.peers=next.peers;values.ratio=next.ratio
@@ -272,7 +273,7 @@ function create(options) {
   }
   s.filter = function(state) {
     if (s.keysDirty) { s.keys = Object.keys(s.torrents); s.keysDirty = false }
-    return state === "all" ? s.keys.slice() : s.keys.filter(function(hash) { return s.torrents[hash].state === state })
+    return state === "all" ? s.keys.slice() : s.keys.filter(function(hash) { return rowState(s.torrents[hash]) === state })
   }
   s.sort = function(key, reverse) {
     key = String(key || "added").toLowerCase(); reverse = !!reverse
@@ -302,6 +303,7 @@ function create(options) {
   }
   // Qt's model owns stable delegates. Only changed roles emit row updates.
   var mirror = {model:null, indexes:dictionary(), order:[], generation:-1, sorted:null}
+  function modelRow(hash,row){return Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)})}
   s.syncModel = function(model, key, reverse, reorder) {
     var structural = false
     if (mirror.model !== model) {
@@ -310,6 +312,19 @@ function create(options) {
     }
     function reindex(from) {
       for (var index = from; index < mirror.order.length; ++index) mirror.indexes[mirror.order[index]] = index
+    }
+    if(!mirror.order.length && !model.count && s.hasTorrents){
+      var initial=s.sort(key,reverse)
+      if(initial.length){
+        // A snapshot must not build/move visible delegates once per insert.
+        // Admit its final sorted source in one proxy boundary, just as a sort.
+        if(reorder)reorder(true)
+        mirror.order=initial.slice();reindex(0)
+        initial.forEach(function(hash){model.append(modelRow(hash,s.torrents[hash]))})
+        mirror.generation=s.generation;mirror.sorted=initial
+        if(reorder)reorder(false)
+        return true
+      }
     }
     if (mirror.generation !== s.generation) {
       s.changes.forEach(function(change) {
@@ -321,11 +336,11 @@ function create(options) {
           }
         } else if (index === undefined) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
-          model.append(Object.assign({},DISPLAY_ROLES,row,{uiReady:ready(row),uiName:s.sortNames[change.hash],uiVisible:s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText)})); structural = true
+          model.append(modelRow(change.hash,row)); structural = true
         } else {
           change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? null : row[field]) })
-          if(change.fields.some(function(field){return ["playable","name","state"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
-          if(change.fields.indexOf("playable")>=0)model.setProperty(index,"uiReady",ready(row))
+          if(change.fields.some(function(field){return ["playable","name","state","staged"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
+          if(change.fields.indexOf("playable")>=0 || change.fields.indexOf("staged")>=0)model.setProperty(index,"uiReady",ready(row))
           if(change.fields.indexOf("name")>=0)model.setProperty(index,"uiName",s.sortNames[change.hash])
           if (change.fields.indexOf("state") >= 0 || change.fields.indexOf("staged") >= 0) structural = true
         }
@@ -354,7 +369,7 @@ function create(options) {
     if(state===s.filterState && text===s.filterText)return
     s.filterState=state;s.filterText=text
     if(!mirror.model)return
-    mirror.order.forEach(function(hash,index){var row=s.torrents[hash];mirror.model.setProperty(index,"uiVisible",s.matches(row.state,ready(row),s.sortNames[hash],state,text))})
+    mirror.order.forEach(function(hash,index){var row=s.torrents[hash];mirror.model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[hash],state,text))})
   }
   s.pendingByHash=dictionary();s.failedByHash=dictionary()
   s.syncActions=function(actions) {
@@ -374,7 +389,7 @@ function create(options) {
   }
   s.visibleKeys=function(filter,text,key,reverse) {
     text=String(text || "").toLocaleLowerCase()
-    return s.sort(key,reverse).filter(function(hash){var row=s.torrents[hash];return s.matches(row.state,ready(row),s.sortNames[hash],filter,text)})
+    return s.sort(key,reverse).filter(function(hash){var row=s.torrents[hash];return s.matches(rowState(row),ready(row),s.sortNames[hash],filter,text)})
   }
   s.selectRange=function(order,anchor,target,selected) {
     var result=Object.assign({},selected),from=order.indexOf(anchor),to=order.indexOf(target)

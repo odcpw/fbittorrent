@@ -838,22 +838,29 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
 `Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
 optional `last_announce_at`, `next_announce_at`, `peers`, `message` (200 characters),
-and `tier` (currently absent because the fork flattens tiers). Full URLs travel only
-to the owner's clients; every diagnostic message redacts query strings as `?…`.
+and `tier` (currently absent because the fork flattens tiers). The daemon redacts
+userinfo, query/fragment credentials and credential-shaped path segments before
+any URL or diagnostic leaves it. Hex/base64 path tokens of at least 16 characters
+and named `passkey`/`key`/`token` values (including encoded forms) are hidden.
+Each wire `url` is a safe URL alias with an opaque `#fbt-tracker=` identity; the
+HMAC key is private to the daemon process. Pass that exact alias to removal,
+never to a network request. Two trackers with identical visible endpoints remain
+distinct. Presentation omits the opaque fragment. Tracker diagnostics retain
+the query-redacted `?…` marker.
 A paused torrent retains observations. Dormant, metadata and parked records with no
 observations return saved URLs as `not_contacted`. `tracker_count` counts every
 metainfo URL, including private secondary and unsupported URLs. Forced announces
 wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
 Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
-a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription is keyed by the complete URL, with
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription is keyed by the safe URL alias, with
 one typed `Tracker` per snapshot item and ordinary keyed deltas. Its default
 cadence is 1,000 ms; status changes are structural. The daemon reads observations
 only for subscribed tracker details, releases them when the last subscriber
 leaves, and resets the snapshot across engine epochs. Paused torrents retain
 their last available observations. Clients render URLs without userinfo,
 queries or fragments. Tracker failure messages and ordinary CLI diagnostics
-also strip URL credentials and known echoed credential values; the private URL
-identity is retained for explicit socket tracker operations.
+also strip URL credentials and known echoed credential values. Original URLs
+remain in the private engine/store; socket operations use the safe aliases.
 
 
 ### Payload moves (P7-02, contract 1.2.21)
@@ -951,7 +958,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.31` | `status.history` |
 | `1.2.31` | `pieces` |
 | `1.2.31` | `cli.catalogue` |
-| `1.2.32` | `status.all_time` |
+| `1.2.32` | `status.session`, `status.all_time` |
 | `1.2.32` | `torrents.rename` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
@@ -1132,7 +1139,10 @@ is exit 2. Dashboard rendering is deferred to track C/D; no new TUI control.
 `tracker_edit` enables idempotent `torrents.add_tracker {hash,url}` and
 `torrents.remove_tracker {hash,url}`, both returning `{state:"done"}`. URLs must
 use HTTP, HTTPS or UDP, contain a host, and fit within 4096 bytes; UDP requires an
-explicit port. Invalid input names `url` and never echoes it (queries may carry
+explicit port. Removal also accepts the exact safe alias from `torrents.trackers`
+(up to 8192 bytes). Aliases are rejected by Add and resolve only to their original
+internal tracker; stale aliases cannot remove another tracker. Alias identities
+survive engine restarts in one daemon and refresh after a daemon restart. Invalid input names `url` and never echoes it (queries may carry
 passkeys). An admitted handle is required, including when paused. The ordered
 set changes without restarting the handle or rechecking data. Each torrent has
 at most 256 edited trackers. Added URLs merge with metainfo on restore; durable

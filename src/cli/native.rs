@@ -55,9 +55,11 @@ fn list(client: &ApiClient) -> Result<Vec<api::Torrent>> {
 fn selected(rows: &[api::Torrent], selectors: &[String]) -> Result<Vec<String>> {
     crate::cli_sources::resolve_in(&shapes::legacy(rows)?, selectors)
 }
-fn emit(json_mode: bool, value: Value) {
+pub(super) fn emit(json_mode: bool, value: Value) {
     crate::emit(json_mode, value.clone(), || {
-        if value["action"] == "add" {
+        if value["daemon"]["state"]=="stopping" {
+            println!("fbittorrent is stopping; draining downloads");
+        } else if value["action"] == "add" {
             println!(
                 "{}: {}  ({})",
                 if value["deferred"] == true {
@@ -110,19 +112,30 @@ fn emit(json_mode: bool, value: Value) {
                     value["total"]
                 );
             }
+            for (key, label) in [("session", "Session"), ("all_time", "All time")] {
+                if let (Some(downloaded), Some(uploaded)) =
+                    (value[key]["downloaded"].as_u64(), value[key]["uploaded"].as_u64())
+                {
+                    if let Some(completed) = value[key]["completed"].as_u64() {
+                        println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B; completed {completed}");
+                    } else {
+                        println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B");
+                    }
+                }
+            }
         } else if let Some(rows) = value["torrents"].as_array() {
             for row in rows {
                 let hash = row["hash"].as_str().unwrap_or("");
-                let progress = if row["progress_known"] == false {
-                    "—".into()
-                } else {
-                    format!("{:.1}%", 100.0 * row["progress"].as_f64().unwrap_or(0.0))
-                };
+                let progress=crate::torrent_format::progress((row["progress_known"]!=false)
+                    .then(||row["progress"].as_f64()).flatten());
+                let key=serde_json::from_value(row["native_state"].clone()).map_or("unknown",|state|
+                    crate::torrent_format::key(state,row["reason"].as_str(),row["playable"]["ready"]==true));
+                let state=crate::torrent_format::cell(key,row["reason"].as_str()).trim_end();
                 println!(
                     "{}  {:>6}  {:<12} {}",
                     &hash[..hash.len().min(8)],
                     progress,
-                    row["state"].as_str().unwrap_or("unknown"),
+                    state,
                     row["name"].as_str().unwrap_or("")
                 );
             }
@@ -263,7 +276,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             value["action"] = json!("add");
             emit(json_mode, value);
         }
-        Cmd::List { .. } | Cmd::Show { .. } | Cmd::Status { .. } | Cmd::Triage => {
+        Cmd::Status {quiet} => return super::status::run(cfg,json_mode,*quiet),
+        Cmd::List { .. } | Cmd::Show { .. } | Cmd::Triage => {
             let (client, rows) = snapshot(cfg, json_mode)?;
             let running = client.is_some();
             match cmd {
@@ -312,12 +326,6 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                         } else {json!([])};
                     } else { value["trackers"]=json!([]); }
                     emit(json_mode, value);
-                }
-                Cmd::Status { quiet } => {
-                    if *quiet {
-                        return Ok(if running { Code::Ok } else { Code::Backend });
-                    }
-                    status(client.as_ref(), &rows, cfg, json_mode)?;
                 }
                 Cmd::Triage => {
                     let mut value = json!({"ok":true,"running":running,"contract_version":crate::agent::CONTRACT_VERSION,"backend":{"engine":"native","running":running,"connection":if running{"api"}else{"stopped"}},"counts":counts(&rows),"torrents":shapes::rows(&rows),"next_commands":["fbittorrent events --follow","fbittorrent search \"<title>\" --json"],"docs":"fbittorrent robot-docs"});
@@ -588,49 +596,9 @@ pub(super) fn add(
     }
     await_mutation(c, result)
 }
-fn counts(rows: &[api::Torrent]) -> Value {
+pub(super) fn counts(rows: &[api::Torrent]) -> Value {
     let visible:Vec<_>=rows.iter().filter(|r|!r.staged).collect();
     json!({"total":visible.len(),"active":visible.iter().filter(|r|matches!(r.state,api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
-}
-fn status(
-    c: Option<&ApiClient>,
-    rows: &[api::Torrent],
-    cfg: &Config,
-    json_mode: bool,
-) -> Result<()> {
-    let Some(c) = c else {
-        emit(
-            json_mode,
-            json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,"total":rows.len(),"all_time":crate::daemon::stats::read(&crate::daemon::stats::path())?}),
-        );
-        return Ok(());
-    };
-    let info = c.call("app.info", json!({}))?;
-    let transfer = c.call("transfer.info", json!({}))?;
-    let stats = c.call("app.stats", json!({}))?;
-    let mut value = counts(rows);
-    value["ok"] = json!(true);
-    value["running"] = json!(true);
-    value["all_time"] = stats["all_time"].clone();
-    value["connection"] = json!("api");
-    value["backend"] = json!("native");
-    value["engine"] = json!(cfg.engine);
-    // Cumulative app.info counters cannot represent interactive presence.
-    // P1-08 supplies the frozen Summary.daemon.busy_reasons signal instead.
-    let summary = summary(c, cfg)?;
-    if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
-    value["app_open"] = json!(summary.as_ref().is_some_and(|v| v["daemon"]["busy_reasons"]
-        .as_array()
-        .is_some_and(|reasons| reasons.iter().any(|reason| reason == "interactive"))));
-    value["dl"] = json!(transfer["dl_bps"].as_u64().unwrap_or(0));
-    value["up"] = json!(transfer["ul_bps"].as_u64().unwrap_or(0));
-    value["daemon"] = summary
-        .as_ref()
-        .map(|v| v["daemon"].clone())
-        .unwrap_or_else(|| daemon_status(&info));
-    value["torrents"] = json!(shapes::rows(rows));
-    emit(json_mode, value);
-    Ok(())
 }
 fn wait_for(
     cfg: &Config,
@@ -735,7 +703,7 @@ fn timeout_value(reason: &str) -> Value {
     json!({"ok":false,"action":"wait","complete":false,"reason":reason,"code":8,"code_name":"timeout","error":reason,"hint":"fbittorrent wait <hash> --timeout N"})
 }
 
-fn daemon_status(info: &Value) -> Value {
+pub(super) fn daemon_status(info: &Value) -> Value {
     let mut value = json!({"state":info["state"],"upgrade_pending":info["upgrade_pending"]});
     for key in ["busy_reasons", "idle_exit_in_s"] {
         if let Some(field) = info.get(key) {
@@ -746,10 +714,13 @@ fn daemon_status(info: &Value) -> Value {
 }
 
 fn summary(c: &ApiClient, cfg: &Config) -> Result<Option<Value>> {
+    summary_with(c,cfg,|op,args|c.call(op,args))
+}
+pub(super) fn summary_with(c:&ApiClient,cfg:&Config,read:impl Fn(&str,Value)->Result<Value>)->Result<Option<Value>> {
     if !c.hello.caps.iter().any(|cap| cap == "subscribe") {
         return Ok(None);
     }
-    let reply = c.call(
+    let reply = read(
         "subscribe",
         json!({"topics":["summary"],"interval_ms":1000}),
     )?;
@@ -759,7 +730,7 @@ fn summary(c: &ApiClient, cfg: &Config) -> Result<Option<Value>> {
             if event["ev"] == "state" && event["topic"] == "summary" && event["sub"] == reply["sub"]
             {
                 let _: api::Summary = serde_json::from_value(event["data"].clone())?;
-                c.unsubscribe(reply["sub"].as_u64().context("subscribe omitted sub")?)?;
+                read("unsubscribe",json!({"sub":reply["sub"].as_u64().context("subscribe omitted sub")?}))?;
                 return Ok(Some(event["data"].clone()));
             }
         }

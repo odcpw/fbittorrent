@@ -9,6 +9,9 @@ ShellRoot {
   function find(item,name){if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
   function check(name,ok,expect,observed){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise actual tracker editor",expect:expect,observed:observed,ok:!!ok,ms:0}))}
   Component.onCompleted:{
+    editor.show(false,"https://tracker.invalid/SYNTHETIC_PATH_PASSKEY/announce#fbt-tracker=opaque-identity")
+    check("privacy",editor.confirmationText.indexOf("SYNTHETIC_PATH_PASSKEY")<0 && editor.confirmationText.indexOf("opaque-identity")<0,"Remove confirmation exposes only the redacted endpoint",editor.confirmationText)
+    editor.close()
     editor.show(false,"https://private-user:private-password@tracker.invalid/a?passkey=private-token")
     check("cancel",editor.cancelFocused,"remove starts with Cancel selected",editor.cancelFocused)
     editor.key({key:Qt.Key_Return});check("cancel",edits.length===0 && !editor.opened,"Enter cancels without a mutation",edits.length)

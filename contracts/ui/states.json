@@ -59,8 +59,8 @@
     "state": "seeding",
     "qml_glyph": "U+F0552",
     "text_glyph": "↑",
-    "word": "Seeding",
-    "short": "Seed",
+    "word": "Uploading",
+    "short": "Upload",
     "secondary": "rate · ratio"
   },
   {
@@ -144,7 +144,7 @@
     "phrases": {
       "user": "paused by you",
       "queue_full": "waiting for a download slot",
-      "complete_no_seed": "complete; seeding is off",
+      "complete_no_seed": "complete; upload is off",
       "vpn_down": "waiting for <interface>",
       "restore_failed": "could not restore: <error>",
       "metadata_timeout": "no peers answered",

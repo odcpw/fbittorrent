@@ -181,7 +181,7 @@ impl Client {
     pub fn connect_named(cfg: &Config, name: &str) -> Result<Self> {
         Self::connect_at_named(cfg,true,&crate::config::runtime_dir().join("api.sock"),Some(name))
     }
-    pub(super) fn connect_at(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
+    pub(crate) fn connect_at(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
         Self::connect_at_named(cfg,agent,path,None)
     }
     fn connect_at_named(cfg: &Config, agent: bool, path: &std::path::Path, name: Option<&str>) -> Result<Self> {

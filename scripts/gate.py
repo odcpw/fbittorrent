@@ -331,6 +331,8 @@ def full_checks(env, binary):
             Check('hygiene', ['bash', 'scripts/check-gitignore.sh']),
             Check('licences', ['bash', 'scripts/check-nova3-licences.sh']),
             Check('widget_model', ['bash', 'plugin/tests/lint.sh']),
+            Check('tracker_text', ['node','--test','plugin/tests/tracker-text.test.js']),
+            python_check('tracker_privacy','plugin/tests/tracker_privacy.py','--binary',str(binary),'--log-root','{logs}'),
             python_check('widget_online', 'scripts/check-widget-online.py', '--self-test'),
             python_check('tui_controls', 'agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py', str(binary)),
             python_check('ci_gates', 'agent_ergonomics_audit/audit/regression_tests/ci_test.py'),
@@ -339,16 +341,17 @@ def full_checks(env, binary):
 
 
 def resource_checks(env):
-    checks = []
-    for flag, name, extra in [('RESOURCES', 'resources', []),
-                             ('DAEMON_RESOURCES', 'daemon_budget', ['--daemon', '--matrix', '--runs', '3', '--seconds', '60'])]:
-        if opted_in(env, flag):
-            checks.append(python_check(name, str(HARNESS.relative_to(ROOT) / 'resources.py'),
-                '{perf_binary}', *extra, '--baseline', str(HARNESS / 'baselines/resources.json'),
-                '--output', '{logs}/measurement.json'))
-            checks[-1].timeout = 2100
-    if checks: checks.insert(0, Check('performance_build', ['cargo', 'build', '--profile', 'release-perf', '--locked', '--message-format=json'], timeout=1200))
-    return checks
+    # The TUI now attaches to a daemon and q detaches. Measure the current
+    # ownership model against P1-08's recorded daemon workloads instead of
+    # invoking P0-06's embedded-engine TUI start/quit benchmark.
+    if not any(opted_in(env, flag) for flag in ('RESOURCES', 'DAEMON_RESOURCES')):
+        return []
+    check = python_check('daemon_budget', str(HARNESS.relative_to(ROOT) / 'resources.py'),
+        '{perf_binary}', '--daemon', '--matrix', '--runs', '3', '--seconds', '60',
+        '--baseline', str(HARNESS / 'baselines/resources.json'), '--output', '{logs}/measurement.json')
+    check.timeout = 2100
+    return [Check('performance_build', ['cargo', 'build', '--profile', 'release-perf', '--locked',
+                                      '--message-format=json'], timeout=1200), check]
 
 
 def summary(checks, elapsed, logs, mode):

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 from dashboard import Session,ROOT
+from journey_support import JourneySession
 import fixtures
 from fbtlog import Case,suite_status
 from visual_fixture import running
@@ -48,7 +49,13 @@ def click_row(q,index,button='button1',times=1):
 def functional(binary):
     with Case('qs_dashboard_table','table_actions') as case,running(binary,'paused',case) as (sandbox,harness,client,row):
         for name in ('xdg-open','wl-copy'):fixtures.path_shim(name,'exit 0',sandbox.root)
-        q=Session(case,sandbox)
+        cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent/imdb'
+        for directory in ('by-id','by-name-v2'):(cache/directory).mkdir(parents=True,exist_ok=True)
+        ident='tt1234001'
+        (cache/'by-id'/f'{ident}.json').write_text(json.dumps(dict(id=ident,name='Owned table show',year=2026,kind='tvSeries',stars='',poster_url='',blurb='',wiki_url='')))
+        key=re.sub(r'[^a-z0-9]','_',row['name'].lower())[:120]
+        (cache/'by-name-v2'/f'{key}.json').write_text(json.dumps(dict(id=ident)))
+        q=JourneySession(case,sandbox)
         try:
             q.compositor.ipc('output * mode 1920x1080')
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
@@ -59,12 +66,18 @@ def functional(binary):
             q.keys(['-k','Return'],lambda:view(q).get('details',{}).get('visible'))
             case.check(view(q)['details']['visible'],'Enter opens the details slot',json.dumps(view(q)))
             q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
-            for width in (900,1099,1100,1101,1399,1400,1401,1599,1600,1601):
+            for width in (900,1098,1099,1100,1101,1280,1398,1399,1400,1401,1500,1598,1599,1600,1601):
                 q.compositor.ipc('[title="^fbittorrent$"] resize set '+str(width)+' px 700 px')
                 state=wait_view(q,lambda s:q.state()['view']['window']['width']==width and abs(sum(c['width'] for c in s['columns'])-s['listWidth'])<.1)
                 columns={c['name']:c for c in state['columns']}
                 case.check(columns['name']['width']>=210 and columns['up']['hidden']==(width<1600) and columns['ratio']['hidden']==(width<1600) and columns['added']['hidden']==(width<1600) and state['panes']['sidebar']==(width>=1100) and state['panes']['detailsDocked']==(width>=1400),
                            'width tier '+str(width)+' keeps NAME and documented columns',json.dumps(dict(width=width,list=state['listWidth'],columns=columns)))
+                if width in (900,1280,1500,1600):
+                    q.keys(['-k','Return'],lambda:view(q).get('details',{}).get('visible'))
+                    image=case.path.with_name('dashboard-'+str(width)+'.png')
+                    q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
+                    case.check(True,'capture native dashboard and details at '+str(width)+' px',str(image))
+                    q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
             image=case.path.with_suffix('.before-click.png');q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
             click=click_row(q,0,times=2)
             case.check(True,'send two native pointer clicks to the first visible row',json.dumps(dict(click=click,point=q.ipc('rowPoint',0))))
@@ -93,8 +106,13 @@ def functional(binary):
             q.keys(['p'],lambda:json.loads(q.ipc('confirmed',row['hash']))['intent']=='run')
             q.keys(['-k','space'],lambda:json.loads(q.ipc('confirmed',row['hash']))['intent']=='pause')
             case.check(client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['intent']=='pause','p resumes and Space pauses through confirmed daemon state',q.ipc('confirmed',row['hash']))
-            q.keys(['u'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['seed'])
-            case.check(True,'u changes the confirmed per-torrent seed policy',json.dumps(client.call('torrents.get',dict(hash=row['hash']))))
+            q.keys(['u'],lambda:view(q).get('focus')=='details')
+            case.check(not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'],
+                       'table u opens Details without enabling upload',q.ipc('detailTexts'))
+            q.keys(['u'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'])
+            q.keys(['u'],lambda:not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'])
+            case.check(True,'Details u explicitly opts in and back out of upload',json.dumps(client.call('torrents.get',dict(hash=row['hash']))))
+            q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
             shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
             case.check(client.call('torrents.open_target',dict(hash=row['hash']))['ok'],'a genuine local payload exists before the open action',row['content_path'])
             q.keys(['o'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
@@ -109,7 +127,7 @@ def functional(binary):
         shutil.copy2(q.log,q.log.with_suffix('.before-restart.log'))
         shutil.copy2(q.compositor.log,q.compositor.log.with_suffix('.before-restart.log'))
         q.config.rename(sandbox.root/'first-shell')
-        q=Session(case,sandbox)
+        q=JourneySession(case,sandbox)
         try:
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
             state=wait_view(q,lambda s:s.get('sort')==dict(key='name',reverse=True))
@@ -118,8 +136,8 @@ def functional(binary):
             q.keys(['i'],lambda:'imdb.com' in (sandbox.root/'shims/xdg-open.log').read_text())
             q.keys(['w'],lambda:'wikipedia.org' in (sandbox.root/'shims/xdg-open.log').read_text())
             case.check(True,'i and w launch encoded IMDb/Wikipedia URLs through the private recording shim',(sandbox.root/'shims/xdg-open.log').read_text())
-            q.keys(['f'],lambda:(view(q).get('toast') or {}).get('text','').startswith('Shows is unavailable'))
-            case.check(True,'f is guarded when the real daemon lacks Shows','SKIP positive follow: this binary has no shows cap; unavailable notice verified')
+            q.keys(['f'],lambda:any(show['imdb']==ident for show in client.call('shows.list')['result']['shows']))
+            case.check(True,'f follows the selected torrent through the real Shows service with cache-only title resolution',json.dumps(client.call('shows.list')))
             q.keys(['/quit'],lambda:view(q).get('query')=='quit')
             q.keys(['-M','ctrl','q','-m','ctrl'],lambda:not q.state()['online'])
             case.check(not q.state()['pending'],'Ctrl+Q shuts down the real daemon; shutdown bye confirms the correlated action',json.dumps(q.state()))

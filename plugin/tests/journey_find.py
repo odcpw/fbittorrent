@@ -69,7 +69,7 @@ def run(binary):
             result=view()['rows'][0]
             case.check(result['key']==torrent.info_hash and len(result['providers'])==2 and result['size']==video.stat().st_size+notes.stat().st_size and result['seeds']==7 and result.get('uploaded_at'),'typed query streams one deduplicated result with size, seeds, providers, date, IMDb rating and a decoded poster',json.dumps(view()))
             press(['-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)
-            case.check(row()['staged'] and not row()['checked'] and not list(box.downloads.iterdir()) and len(add()['files'])==2 and add()['savePath']==str(box.downloads) and add()['seed'] is False,'review stages metadata with files, seed choice and destination, before any transfer',json.dumps(add()))
+            case.check(row()['staged'] and not row()['checked'] and not list(box.downloads.iterdir()) and len(add()['files'])==2 and add()['savePath']==str(box.downloads) and add()['seed'] is False,'review stages metadata with files, upload off and destination, before any transfer',json.dumps(add()))
             press(['-k','Escape'],lambda:not add().get('visible'))
             case.check(not c.call('torrents.list',{})['result']['torrents'],'Discard leaves no torrent or download','no transfer was started')
             press(['-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)

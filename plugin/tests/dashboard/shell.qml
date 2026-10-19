@@ -71,6 +71,7 @@ ShellRoot {
   IpcHandler {
     target:"fbt-dashboard"
     function renderedRows():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.tableRows(dashboard.item.torrents) : [])}
+    function viewTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.texts(dashboard.item.torrents) : [])}
     function detailTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? root.texts(dashboard.item.torrents.pane) : [])}
     function setting(key:string,valueJson:string):string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.settingsSheet)return "refused"
@@ -142,7 +143,7 @@ ShellRoot {
     }
     function trackerEditorState():string {
       var editor=dashboard.item ? root.find(dashboard.item.torrents,"tracker-editor") : null,input=editor ? root.find(editor,"tracker-url-input") : null
-      return JSON.stringify(editor ? {mode:editor.mode,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
+      return JSON.stringify(editor ? {mode:editor.mode,confirmation:editor.confirmationText,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
     }
     function clickDetailTab(tab:string):bool {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false

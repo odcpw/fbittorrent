@@ -1223,7 +1223,13 @@ class AttachedTui:
         self.status()
 
     def status(self):
-        return self.h.cli("status")
+        value=self.h.cli("status")
+        live=value.get("running") is True
+        valid=(value.get("ok") is True and
+               (live and value.get("daemon",{}).get("state") in ("starting","running","parked","stopping")
+                or value.get("running") is False and value.get("backend")=="stopped"))
+        self.case.check(valid,"status reports the live owner phase or a completed stop",json.dumps(value))
+        return value
 
     def clients(self):
         with daemon.ApiConn(self.h) as connection:

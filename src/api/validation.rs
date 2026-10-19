@@ -142,8 +142,10 @@ impl Validate for Request {
             Call::Subscribe { args } => args.validate(),
             Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
                 let url=url::Url::parse(&args.url).ok();
-                require(args.url.len()<=4096 && url.is_some_and(|u|u.host_str().is_some()
-                    && matches!(u.scheme(),"http"|"https"|"udp")
+                let limit=if matches!(&self.call,Call::TorrentsRemoveTracker{..}){8192}else{4096};
+                require(args.url.len()<=limit && url.is_some_and(|u|u.host_str().is_some()
+                    && ((matches!(&self.call,Call::TorrentsRemoveTracker{..})&&crate::api::trackers::is_alias(&u)) || matches!(u.scheme(),"http"|"https"|"udp"))
+                    && (matches!(&self.call,Call::TorrentsRemoveTracker{..}) || !crate::api::trackers::is_alias(&u))
                     && (u.scheme()!="udp" || u.port().is_some())),"url","http(s) or udp tracker URL with a host (UDP requires a port)")
             },
             Call::TorrentsSetDownloadLimit{args}=>{

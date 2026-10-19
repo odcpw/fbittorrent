@@ -113,6 +113,11 @@ def cli_search_parked_fallback(binary,systemd):
                 frames=RevisionStream(observer).snapshot(sub,['events'])
                 events=[item for frame in frames for item in frame.get('items',[])]
                 case.check(not any(e.get('ev')=='search.done' for e in events),'parked fallback never creates an owner search session',json.dumps(events))
+                # The generic fixture shutdown asserts a live engine drain;
+                # restore that precondition after the parked refusal control.
+                observer.call('app.settings.set',dict(network_interface='lo'))
+                h.wait_for(lambda:((value:=observer.call('app.info')['result'])['state']=='running',json.dumps(value)),
+                           'restore the fixture engine after the parked catalogue control')
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 

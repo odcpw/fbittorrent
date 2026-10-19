@@ -52,7 +52,23 @@ def setup_dry_run_lists_actions(binary,systemd=False):
 
 def setup_idempotent(binary,systemd=False):
     with Case('daemon','setup_idempotent') as case,fixtures.Sandbox() as sandbox:
-        config=prepare(sandbox);first=call(case,binary,sandbox,'--magnet','--plugin=link');before=snapshot(sandbox)
+        config=prepare(sandbox)
+        shell=config/'omarchy/shell.json'
+        original='{\n  "bar" : { "layout" : { "right" : [\n    {"id":"oliver.torrents","settings":{"owner":true}},\n    {"id":"other.widget"}\n  ] } },\n  "unrelated" : { "spacing" : "keep me" }\n}\n'
+        shell.write_text(original)
+        call(case,binary,sandbox,'--plugin=copy')
+        case.check(shell.read_text()==original,'copy setup recognizes an existing object widget and preserves all shell bytes',shell.read_text())
+        before=snapshot(sandbox);copied=call(case,binary,sandbox,'--plugin=copy')
+        case.check(copied['actions']==[] and snapshot(sandbox)==before,'second copy setup leaves the object placement and entire tree byte/mtime-identical',json.dumps(copied))
+        duplicated=original.replace('    {"id":"other.widget"}\n','    {"id":"other.widget"},\n    "oliver.torrents"\n')
+        shell.write_text(duplicated)
+        call(case,binary,sandbox,'--plugin=copy')
+        repaired=shell.read_text();right=json.loads(repaired)['bar']['layout']['right']
+        expected=original.replace('    {"id":"other.widget"}\n','    {"id":"other.widget"}\n    \n')
+        case.check(right==[dict(id='oliver.torrents',settings=dict(owner=True)),dict(id='other.widget')] and repaired==expected,'setup repairs its string duplicate, keeps the first object/settings and unrelated formatting',repaired)
+        before=snapshot(sandbox);again=call(case,binary,sandbox,'--plugin=copy')
+        case.check(again['actions']==[] and snapshot(sandbox)==before,'repaired layout stays unchanged on the next copy setup',json.dumps(again))
+        first=call(case,binary,sandbox,'--magnet','--plugin=link');before=snapshot(sandbox)
         logs={p.name:p.read_bytes() for p in (sandbox.root/'shims').glob('*.log')}
         second=call(case,binary,sandbox,'--magnet','--plugin=link')
         case.check(second['actions']==[] and snapshot(sandbox)==before,'second setup has an empty plan and byte/mtime-identical tree',json.dumps(second))

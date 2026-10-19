@@ -64,7 +64,7 @@ FocusScope {
     else selection=({})
     cursorHash=hash;focusPane="table";focusTable()
   }
-  function activate(hash){cursorHash=hash;detailsOpen=true;focusPane="details";focusTable()}
+  function activate(hash){cursorHash=hash;detailsOpen=true;focusPane="details";service.showDetail(hash);focusTable()}
   function move(delta,absolute,modifiers) {
     if(focusPane==="sidebar"){sidebar.move(delta);return}
     var previous=table.indexOf(cursorHash),index=absolute===undefined ? Math.max(0,Math.min(table.count-1,previous+delta)) : absolute
@@ -209,7 +209,7 @@ FocusScope {
         }
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u seed   d remove   D delete files   U undo   Ctrl+A select visible   o open   s sort   / filter   q close"}
+    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u upload   d remove   D delete files   U undo   Ctrl+A select visible   o open   s sort   / filter   q close"}
     RowLayout {
       Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding
       Text {

@@ -32,16 +32,30 @@ class BehaviorChecks(unittest.TestCase):
                 self.assertFalse(expected_daemon_stderr("\n".join(self.phases[:index] + self.phases[index+1:])))
         self.assertFalse(expected_daemon_stderr("INFO startup only"))
 
-    def test_parked_owner_releases_its_empty_slot_without_a_session_drain(self):
-        parked=self.phases[:1]+self.phases[2:]
-        self.assertTrue(expected_daemon_stderr("\n".join(parked),engine_active=False))
-        self.assertTrue(expected_daemon_stderr("\n".join(self.phases),engine_active=False))
+    def test_parked_shutdown_proves_session_absence_in_the_drain_phase(self):
+        parked = self.phases.copy()
+        parked[1] = "INFO engine slot empty state=parked session=absent"
+        self.assertTrue(expected_daemon_stderr("\n".join(parked)))
+        for line in ("INFO parked", "INFO engine slot empty state=running session=absent",
+                     "INFO engine slot empty state=parked", "INFO engine slot released"):
+            invalid = parked.copy(); invalid[1] = line
+            self.assertFalse(expected_daemon_stderr("\n".join(invalid)))
+        for index in range(len(parked)):
+            self.assertFalse(expected_daemon_stderr("\n".join(parked[:index]+parked[index+1:])))
+        parked[0], parked[1] = parked[1], parked[0]
         self.assertFalse(expected_daemon_stderr("\n".join(parked)))
+
+    def test_parked_owner_releases_its_empty_slot_without_a_session_drain(self):
+        parked=self.phases.copy()
+        parked[1]="INFO engine slot empty state=parked session=absent"
+        self.assertTrue(expected_daemon_stderr("\n".join(parked)))
+        self.assertTrue(expected_daemon_stderr("\n".join(self.phases)))
+        self.assertFalse(expected_daemon_stderr("\n".join(parked[:1]+parked[2:])))
         for index in range(len(parked)):
             with self.subTest(missing=index):
-                self.assertFalse(expected_daemon_stderr("\n".join(parked[:index]+parked[index+1:]),engine_active=False))
+                self.assertFalse(expected_daemon_stderr("\n".join(parked[:index]+parked[index+1:])))
         wrong=parked.copy();wrong[1],wrong[2]=wrong[2],wrong[1]
-        self.assertFalse(expected_daemon_stderr("\n".join(wrong),engine_active=False))
+        self.assertFalse(expected_daemon_stderr("\n".join(wrong)))
 
     def test_every_drain_phase_keeps_its_order(self):
         for index in range(len(self.phases)-1):
@@ -63,6 +77,19 @@ class BehaviorChecks(unittest.TestCase):
         self.assertTrue(expected_daemon_stderr("INFO new activity", complete=False))
         self.assertTrue(expected_daemon_stderr("INFO daemon draining", complete=False))
         self.assertFalse(expected_daemon_stderr("INFO daemon sockets unlinked", complete=False))
+
+    def test_verified_empty_slot_still_requires_every_owner_release_phase(self):
+        phases=self.phases.copy()
+        phases[1]="INFO engine slot empty state=parked session=absent"
+        self.assertTrue(expected_daemon_stderr("\n".join(phases),empty_slot=True))
+        self.assertFalse(expected_daemon_stderr("\n".join(self.phases),empty_slot=True))
+        self.assertFalse(expected_daemon_stderr("\n".join(phases[:1]+phases[2:]),empty_slot=True))
+        for i in range(len(phases)):
+            self.assertFalse(expected_daemon_stderr("\n".join(phases[:i]+phases[i+1:]),empty_slot=True))
+        for i in range(len(phases)-1):
+            swapped=phases.copy();swapped[i],swapped[i+1]=swapped[i+1],swapped[i]
+            self.assertFalse(expected_daemon_stderr("\n".join(swapped),empty_slot=True))
+        self.assertFalse(expected_daemon_stderr("\n".join(phases).replace("code=0","code=70"),empty_slot=True))
 
     def test_catalogue_includes_table_and_explicit_operation_addenda(self):
         document = "## Capability catalogue\n| `files`, `torrents` | operations |\n## Additions\nCapability `free_space` adds read-only space checks.\nIncidental `invented` text."
