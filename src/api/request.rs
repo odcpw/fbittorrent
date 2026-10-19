@@ -376,7 +376,7 @@ pub enum Call {
     #[serde(rename = "app.log")]
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
-    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
+    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<super::StatsArgs> },
     #[serde(rename = "app.free_space")]
     AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]

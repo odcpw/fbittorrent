@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","tracker_edit"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","tracker_edit","history"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -36,9 +36,10 @@ pub fn dispatch(
             Reply::AppClipboardDismiss(EmptyResult {})
         }
         Call::AppLog { args } => Reply::AppLog(daemon.logs.query(&args.clone().unwrap_or_default())),
-        Call::AppStats { .. } => Reply::AppStats(StatsResult {
+        Call::AppStats { args } => Reply::AppStats(StatsResult {
             connections: serde_json::from_value(counts).unwrap(),
             active_clients: serde_json::from_value(active_counts).unwrap(),
+            history:args.as_ref().filter(|a|a.history==Some(true)).map(|_|daemon.history.lock().unwrap().snapshot()),
         }),
         Call::AppFreeSpace { args } => Reply::AppFreeSpace(crate::free_space::inspect(std::path::Path::new(&args.path))),
         Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),

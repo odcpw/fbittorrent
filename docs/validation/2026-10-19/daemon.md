@@ -873,3 +873,30 @@ expectations. Both daemon acceptance criteria met; dropdown/TUI rendering is
 deferred to tracks C/D. Python compile/diff/source-size checks passed. Per the
 ownership correction, 553b597 was fully reversed by 7fd01cd; P6-10 is solely
 track D's a5d35d0, with no duplicate implementation retained. No umbrella rerun.
+
+## P6-03 — global rate history
+
+One preallocated 600-point global download/upload ring samples real rates once
+per second without subscribers; Summary and `status --json` expose its latest
+60 download samples, `app.stats {history:true}` exposes both arrays, and the
+`stats` topic pushes every five seconds. No padding, interpolation, per-torrent
+rings or persisted rates. Contract 1.2.31 adds `history`, a new transcript and
+changelog row. Per the owner's exact-cap ruling, existing hello/error transcript
+cap arrays alone now list the live caps; every other existing fixture value is
+unchanged. The no-watch negative control derives a cap-free copy without changing
+payloads or gap checks. Minimal neighbours include the typed TUI stats cache and
+test-only negotiated EventSink setup; chart rendering/goldens remain with C/D.
+Private-XDG evidence under `target/test-logs/fbt-p6-03-n6s/`: `check/`,
+`history-unit/` (11 matching tests), `build/`, `foreground/` and `systemd/`
+(`daemon.py --case history_points`, 30 steps each) passed. The actual loopback
+`agent_contract.py --case status_history_field` passed (`cli-minute/`, 170 steps,
+64.23 s): exactly 60 samples, final ten all positive (~65,400 B/s), 4,079,616 of
+8,388,608 bytes received and still downloading. Ring unit logs all 600 retained
+points after 700 simulated clock ticks and rejects extra half-second samples.
+Initial full-suite failures caught missing fixture hello, stale embedded caps and
+negative-control setup; fixed without weakening controls. Final full-suite result
+is recorded below. No umbrella run between track beads; no hosted Actions.
+Final `cargo test --locked -- --nocapture` passed 553/0 with three existing
+opt-in ignores (`full-green/development_full/`); the corrected negative control
+also passed in isolation (`negative-corrected/`). Python compile, diff check,
+source-size gate and exact non-cap fixture preservation audit passed.

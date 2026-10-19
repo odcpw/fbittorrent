@@ -14,6 +14,8 @@ pub mod objects;
 pub mod rss;
 pub mod shows;
 pub mod peers;
+pub mod history;
+pub use history::*;
 pub mod ops;
 pub mod request;
 pub mod search;

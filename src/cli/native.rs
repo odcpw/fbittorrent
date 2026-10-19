@@ -638,6 +638,7 @@ fn status(
     // Cumulative app.info counters cannot represent interactive presence.
     // P1-08 supplies the frozen Summary.daemon.busy_reasons signal instead.
     let summary = summary(c, cfg)?;
+    if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
     value["app_open"] = json!(summary.as_ref().is_some_and(|v| v["daemon"]["busy_reasons"]
         .as_array()
         .is_some_and(|reasons| reasons.iter().any(|reason| reason == "interactive"))));

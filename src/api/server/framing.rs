@@ -124,7 +124,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
     if op == "app.settings.set" || op.starts_with("search.") { return None; }
     for (key, value) in args {
         let valid = match key.as_str() {
-            "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
+            "history" | "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
             | "on" | "unread_only" | "read" | "inbox" => value.is_boolean(),
             "quality" if op=="shows.set_quality" => value.is_null() || serde_json::from_value::<ShowQuality>(value.clone()).is_ok(),
             "feed" | "item" | "url" | "name" | "imdb" | "query" | "key" | "quality" => value.is_string(),

@@ -93,7 +93,7 @@ when a required cap is missing.
 | `watch` | `playable` fields, `torrent.playable` event, `wait --until playable` | P5-05 |
 | `trackers` | `torrents.trackers/reannounce`, topic `torrent:<h>.trackers` | P6-01 |
 | `pieces` | `torrents.pieces`, topic `torrent:<h>.pieces` | P6-02 |
-| `history` | `summary.history`; statistics reserved for later beads | P6-03, P6-04 |
+| `history` | `app.stats {history:true}`, summary/status history and `stats` | P6-03 |
 | `queue` | `torrents.force_start/queue_move`, `queue_pos`, `force` | P6-05 |
 | `origin` | `origin` field, `{restore: hash}` undo source | P6-08 |
 | `clipboard` | `clipboard.magnet` event, `app.clipboard.dismiss` | P6-13 |
@@ -162,7 +162,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
 | `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
-| `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
+| `app.stats` | `history?: bool` | `{active_clients: ClientCounts, connections: ClientCounts, history?: RateHistory}`; current clients, cumulative connections, optional 600 samples | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
 | `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
@@ -472,7 +472,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","tracker_edit"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","tracker_edit","history"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -953,6 +953,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.27` | `download_limit_bps` |
 | `1.2.28` | `search.install_torznab` |
 | `1.2.30` | `shows.quality` |
+| `1.2.31` | `status.history` |
 | `1.2.29` | `trackers.edit` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
@@ -1153,3 +1154,16 @@ or downloads. CLI `shows quality <show> <q|default>` returns
 exit codes are 0, 2 (quality), 6 (not followed) and 7 (ambiguous selector).
 `shows.releases {inbox:true, unread_only:true, quality:"2160p"}` applies both
 filters; `unread_only:false` explicitly includes read releases.
+
+### P6-03: global speed history (contract 1.2.31)
+
+Capability `history` adds one daemon-owned ring of 600 one-second global
+download/upload byte rates, oldest first. It starts empty and is neither padded
+nor interpolated. `Summary.history` and CLI `status --json` contain the latest
+60 download points. `app.stats {history:true}` additionally returns
+`history: {download:[u64], upload:[u64], interval_s:1}`, at most 600 matching
+points per direction; omission/false excludes this optional field. The `stats`
+topic sends `state {data:{history:...}}` initially and at most every 5,000 ms,
+independent of subscriber count. No per-torrent rings or on-disk history exist.
+Hello capability lists in existing fixtures are updated exactly per the owner
+cap-bookkeeping ruling; all other existing fixture values remain unchanged.

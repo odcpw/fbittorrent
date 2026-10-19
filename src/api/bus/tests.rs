@@ -1,7 +1,16 @@
 use super::*;
 #[test]
+fn history_state_waits_for_its_tick() {
+    let old=json!({"history":{"download":[1],"upload":[0],"interval_s":1}});
+    let new=json!({"history":{"download":[1,2],"upload":[0,0],"interval_s":1}});
+    assert_eq!(structural_projection(&Topic::Stats,&old,&new),old);
+    let old=json!({"history":[1],"counts":{},"top":[]});
+    let new=json!({"history":[1,2],"counts":{},"top":[]});
+    assert_eq!(structural_projection(&Topic::Summary,&old,&new),old);
+}
+#[test]
 fn rev_monotonic() {
-    let sink = EventSink::testing();
+    let sink = EventSink::testing_with_hello();
     let mut subscription = Subscription {
         sub: 1,
         sink: sink.clone(),
@@ -20,6 +29,7 @@ fn rev_monotonic() {
         active: true,
     };
     let mut sample = Sample {
+        history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
         rows: vec![],

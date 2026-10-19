@@ -49,6 +49,7 @@ pub(super) struct Store {
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
+    pub stats:Option<api::SampledStats>,
     pub network: Option<api::NetworkState>,
     pub settings: Option<api::Settings>,
     pub subscriptions: BTreeMap<u64, Subscription>,
@@ -208,6 +209,7 @@ impl Store {
         match event {
             api::Event::State { data, .. } => match data {
                 api::StateData::Summary(data) => self.summary = Some(data.clone()),
+                api::StateData::Stats(data) => self.stats=Some(data.clone()),
                 api::StateData::Network(data) => self.network = Some(data.clone()),
                 api::StateData::Settings(data) => self.settings = Some(data.clone()),
             },

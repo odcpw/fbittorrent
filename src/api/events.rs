@@ -22,6 +22,7 @@ pub enum Item {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StateData {
+    Stats(super::SampledStats),
     Summary(Summary),
     Network(NetworkState),
     Settings(Settings),

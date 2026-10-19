@@ -114,6 +114,7 @@ impl EventRing {
     }
 }
 struct Sample {
+    history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
     rows: Vec<Torrent>,
@@ -134,6 +135,7 @@ struct Sample {
 impl Sample {
     fn value(&self, topic: &Topic) -> Value {
         match topic {
+            Topic::Stats=>self.stats.clone(),
             Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
             Topic::RssFeeds=>self.rss_feeds.clone(),
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
@@ -170,6 +172,7 @@ impl Sample {
             })
             .collect();
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
+        result["history"]=json!(self.history);
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -299,6 +302,7 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
+                            Topic::Stats=>Duration::from_secs(5),
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
@@ -465,7 +469,11 @@ impl Bus {
         for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
             if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
         }
+        let (history,stats)={let mut ring=self.daemon.history.lock().unwrap();
+            ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
+            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot()})}else{Value::Null})};
         Ok(Sample {
+            history,stats,
             peers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
             show_releases,
@@ -589,7 +597,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
-            if self.daemon.watch.lock().unwrap().due() { dirty = true; }
+            if self.daemon.watch.lock().unwrap().due() || self.daemon.history.lock().unwrap().due(Instant::now()) { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;
