@@ -150,6 +150,7 @@ pub(super) enum Intent {
     Follow,
     Providers,
     Browse,
+    Card,
     Query,
     Source,
     New,

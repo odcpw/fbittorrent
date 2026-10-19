@@ -175,12 +175,7 @@ impl TuiApp {
                 .selected_result()
                 .map(|r| (r.file_name.clone(), r.file_url.clone()));
             let mut rows: Vec<_> = rows.values().collect();
-            rows.sort_by(|a, b| {
-                b.seeds
-                    .cmp(&a.seeds)
-                    .then(a.name.cmp(&b.name))
-                    .then(a.providers.cmp(&b.providers))
-            });
+            rows.sort_by(|a,b|store::search_order(a,b,self.search_sort,self.search_descending));
             self.search_wire = rows.into_iter().take(MAX_RESULTS).cloned().collect();
             self.search_results = self.search_wire.iter().map(display).collect();
             let index = selected.and_then(|(name, url)| {

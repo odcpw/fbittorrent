@@ -220,7 +220,9 @@ def tui_search_api(binary, systemd):
             case.check(all(daemon_pid in chain for chain in ancestry),
                        'provider process groups descend from the daemon owner',json.dumps(ancestry))
             ui.keys(target,'Escape',literal=False)
+            ui.keys(target,'v')
             ui.assert_pane(target,'alpha, beta')
+            ui.keys(target,'v')
             ui.keys(target,'P');ui.assert_pane(target,'Search providers')
             ui.keys(target,' ')
             h.wait_for(lambda:((ps:=observer.call('search.providers')['result']['providers']) and any(not p['enabled'] for p in ps),json.dumps(ps)),

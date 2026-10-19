@@ -3,6 +3,8 @@ use super::*;
 mod table;
 mod sort;
 mod notice;
+mod list;
+pub(super) use list::{ListTable,fingerprint};
 pub(super) use table::{Column,Rects,TorrentTable,visible_range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,7 +62,7 @@ impl TuiApp {
 pub(super) fn pad(r: Rect) -> Rect { r.inner(Sides::horizontal(1)) }
 
 pub(super) fn detail_columns(area: Rect) -> [Rect; 2] {
-    columns_with_details(area, 100)
+    columns_with_details(area, 140)
 }
 
 pub(super) fn torrent_columns(area: Rect) -> [Rect; 2] {

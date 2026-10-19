@@ -83,6 +83,7 @@ impl TuiApp {
     pub(super) fn view_files(&self, frame: &mut Frame) {
         let th = &self.theme;
         let Some(m) = &self.files else { return };
+        self.rects.borrow_mut().overlay();
         let area = files_area(frame.bounds());
         let w = area.width;
         let blank = Text::from_lines((0..area.height).map(|_| Line::styled(" ".repeat(area.width as usize), Style::new().bg(th.selection))));
@@ -118,7 +119,9 @@ impl TuiApp {
         let header = Line::from_spans([Span::styled(format!("      {}", cell("FILE", name_w)), bg.fg(th.dim).bold()), Span::styled(format!(" {:>9} {:>6} {:>7}", "SIZE", "DONE", "PRIO"), bg.fg(th.dim).bold())]);
         Paragraph::new(Text::from_line(header)).wrap(WrapMode::None).render(rows[0], frame);
         let elapsed = self.marquee_elapsed();
-        let items: Vec<ListItem> = m.files.iter().enumerate().map(|(i, f)| {
+        self.view_rows(MouseList::Files,rows[1],m.files.len(),
+            |i|layout::fingerprint(&(&m.files[i],self.cfg.native())),
+            |i|{let f=&m.files[i];
             let (mark, prio, pst) = match f.priority {
                 0 => ("[ ]", "skip", bg.fg(th.dim)),
                 6 => ("[x]", "high", bg.fg(th.yellow)),
@@ -126,16 +129,14 @@ impl TuiApp {
                 _ => ("[x]", if self.cfg.native() { "include" } else { "normal" }, bg.fg(th.fg)),
             };
             let name_style = if f.priority == 0 { bg.fg(th.dim) } else { bg.fg(th.fg) };
-            li(Line::from_spans([
+            Line::from_spans([
                 Span::styled(format!("{mark} "), name_style),
                 Span::styled(readable_cell(&f.name, name_w, hovered_for(&m.list,i,elapsed)), name_style),
                 Span::styled(format!(" {:>9} {:>6}", human_bytes(f.size), if f.progress_known { format!("{:.0}%", f.progress * 100.0) } else { "—".into() }), bg.fg(th.dim)),
                 Span::styled(format!(" {prio:>7}"), pst),
-            ]))
-        }).collect();
-        let selected: i64 = m.files.iter().filter(|f| f.priority > 0).map(|f| f.size).sum();
-        let list = List::new(items).style(bg).highlight_style(th.selected().bg(th.accent).fg(th.selection)).highlight_symbol("▌");
-        StatefulWidget::render(&list, rows[1], frame, &mut m.list.borrow_mut());
+            ])
+            },frame);
+        let selected:i64=m.files.iter().filter(|f|f.priority>0).map(|f|f.size).sum();
         let controls = if self.cfg.native() { "Space include/skip · a/n all/none · Esc close" }
             else { "Space toggle · 1 normal · 2 high · 3 max · a/n all/none · Esc close" };
         let foot = format!("{}/{} · {} · {controls}",

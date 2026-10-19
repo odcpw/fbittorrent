@@ -15,6 +15,9 @@ mod attach;
 mod screens_torrents;
 #[path = "screens/search.rs"]
 mod screens_search;
+#[path = "screens/search_view.rs"]
+mod screens_search_view;
+use screens_search_view::*;
 use screens_search::*;
 #[path = "screens/rss.rs"]
 mod screens_rss;
@@ -159,6 +162,7 @@ impl Model for TuiApp {
                         self.backend_error.clear();
                         let sel_hash = self.selected_torrent().map(|t| t.hash.clone());
                         self.torrents = ts;
+                        self.torrent_revision=self.torrent_revision.wrapping_add(1);
                         let mut st = self.tor_list.borrow_mut();
                         let cur = st.selected().unwrap_or(0);
                         match sel_hash.and_then(|h| self.torrents.iter().position(|t| t.hash == h)) {
@@ -207,7 +211,7 @@ impl Model for TuiApp {
                 if self.presence.as_ref().map(|c|c.id)!=connection || sequence!=self.search_seq {return Cmd::none();}
                 self.browse_loading=None;
                 match result {
-                    Ok(Some(rows))=>{self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
+                    Ok(Some(mut rows))=>{rows.sort_by(|a,b|store::search_order(a,b,self.search_sort,self.search_descending));self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
                     Ok(None)=>{self.set_status(format!("opened {label} in browser"),false);Cmd::none()},
                     Err(error)=>{self.set_status(error,true);Cmd::none()}
                 }
@@ -218,7 +222,7 @@ impl Model for TuiApp {
                 if !results.is_empty() || done {
                     let sel_url = self.selected_result().map(|r| r.file_url.clone());
                     let mut rs = dedupe_results(results);
-                    rs.sort_by(|a, b| b.seeders.cmp(&a.seeders));
+                    rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
                     // Best 100 by seeders is all anyone reads; dedupe first so the cap
                     // is not spent on the same torrent from five providers.
                     rs.truncate(MAX_RESULTS);
@@ -247,7 +251,8 @@ impl Model for TuiApp {
             Msg::Browse(label, r) => {
                 self.browse_loading = None;
                 match r {
-                    Ok(rs) => {
+                    Ok(mut rs) => {
+                        if !self.cfg.native(){rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));}
                         self.search_sub = None; self.search_running = false;
                         let n = rs.len();
                         self.search_results = rs;
@@ -402,7 +407,7 @@ impl Model for TuiApp {
         self.rects.borrow_mut().begin();
         self.poster_drawn.set(false);
         let banner=self.priority_banner();
-        let strip=self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
+        let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
             .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(u16::from(strip)),Constraint::Fixed(u16::from(banner.is_some())),Constraint::Fixed(2)])
             .split(frame.bounds());
@@ -416,7 +421,7 @@ impl Model for TuiApp {
         if strip {self.view_selected_strip(root[3],frame);}
         if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
         self.rects.borrow_mut().footer=root[5];
-        self.view_status(root[5], frame);
+        if self.details.is_none(){self.view_status(root[5], frame);}
         if self.details.is_some() { self.view_details(frame); }
         else if self.files.is_some() { self.view_files(frame); }
         if self.providers.is_some() { self.view_providers(frame); }

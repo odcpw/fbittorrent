@@ -24,7 +24,7 @@
 │         │                                                                                                  │         │
 │         │                                                                                                  │         │
 │         │                                                                                                  │         │
-╰─────────│                                                                                                  │─────────╯
-↓ Down · d╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Details] [Details] (Esc) Back  (o) Open  (p) Pause  (u) Seed on  (d) Remove  (D) Delete files …      (?) Help  (?) Help
-The DiplomThe Diplomat S04E01 1080p WEB-DL H264-GROUP
+│         │                                                                                                  │         │
+╰─────────╰──────────────────────────────────────────────────────────────────────────────────────────────────╯─────────╯
+          [Details] (Esc) Back  (o) Open  (p) Pause  (u) Seed on  (d) Remove  (D) Delete files …      (?) Help
+          The Diplomat S04E01 1080p WEB-DL H264-GROUP

@@ -683,6 +683,18 @@
       "scope": "screen:torrents"
     },
     {
+      "id": "search.card",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "v"
+        ]
+      },
+      "label": "Card",
+      "scope": "screen:search"
+    },
+    {
       "id": "search.next",
       "keys": {
         "dashboard": [

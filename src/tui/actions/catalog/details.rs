@@ -8,9 +8,13 @@ macro_rules! detail {
             &[KeyChord::plain(KeyCode::Char($key))],
             $label,
             30,
-            |a| a
-                .selected_torrent()
-                .is_some_and(|t| a.store.pending_for_key(&t.hash).is_none()),
+            |a| a.selected_torrent().is_some_and(|t| !matches!(
+                Intent::$intent,
+                Intent::Pause | Intent::Seed | Intent::Remove | Intent::DeleteFiles
+            ) || a
+                .store
+                .pending_for_key(&t.hash)
+                .is_none()),
             Some(|a| a.on_torrents_action(Intent::$intent)),
             T,
             None,

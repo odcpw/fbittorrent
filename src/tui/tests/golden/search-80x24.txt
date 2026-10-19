@@ -3,22 +3,22 @@
 │ Sintel                                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ Results (10) · 2/3 providers ────────────────────────────────────────────────╮
+│  NAME                                                       SIZE SEEDS↓     ★│
+│▌ Sintel                                                512.0 MiB    124     —│
+│  Sintel - 2010 - Multisubs mkv                         512.0 MiB    123     —│
+│  Sintel.2010.1080p.WEB.H264-CLASSiCALHD                512.0 MiB    122     —│
+│  Sintel (2010) [720p] [x264] [bluray] [YTS]            512.0 MiB    121     —│
+│  Sintel 2010 x264 DMRip 1080p mkv                      512.0 MiB    120     —│
+│  Sintel 2010 820p H264                                 512.0 MiB    119     —│
+│  Sintel (2010) BR2Mini-DVD DD5 1 NL Subs               512.0 MiB    118     —│
+│  Sintel.2010.720p.WEB.H264-CLASSiCALHD                 512.0 MiB    117     —│
+│  Sintel [辛特尔] Cafe                                  512.0 MiB    116     —│
+│  [philosophy-raws][è¾›ç‰¹å°”][sinte…10bitåŽ‹åˆ¶][2Kç.. 512.0 MiB    115     —│
 │                                                                              │
-│   NAME                                                 IMDB  SEEDS      SIZE │
-│ ▌ Sintel                                                       124 512.0 MiB │
-│   Sintel - 2010 - Multisubs mkv                                123 512.0 MiB │
-│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD                       122 512.0 MiB │
-│   Sintel (2010) [720p] [x264] [bluray] [YTS]                   121 512.0 MiB │
-│   Sintel 2010 x264 DMRip 1080p mkv                             120 512.0 MiB │
-│   Sintel 2010 820p H264                                        119 512.0 MiB │
-│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                      118 512.0 MiB │
-│   Sintel.2010.720p.WEB.H264-CLASSiCALHD                        117 512.0 MiB │
-│   Sintel [辛特尔] Cafe                                         116 512.0 MiB │
-│   [philosophy-raws][è¾›ç‰¹å°”][sint…0bitåŽ‹åˆ¶][2Kç..          115 512.0 MiB │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Results] (Enter) Download  (P) Providers  (a) Add  (i) IMDb …          (?) Help
+[Results] (Enter) Download  (v) Card  (P) Providers  (a) Add …          (?) Help
 Sintel
