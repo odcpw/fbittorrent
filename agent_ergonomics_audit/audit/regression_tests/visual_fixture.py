@@ -30,7 +30,7 @@ def running(binary,state,case):
     private_net.require()
     case.check(True,'private network and DNS contain every fixture socket',private_net.describe())
     with ExitStack() as stack:
-        sandbox=stack.enter_context(fixtures.Sandbox())
+        sandbox=stack.enter_context(daemon.Sandbox())
         harness=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),sandbox,False))
         process=harness.start_serve()
         stack.callback(stop_owned,harness,process)
@@ -42,7 +42,7 @@ def running(binary,state,case):
             payload=source/'UI fixture.bin';payload.write_bytes(os.urandom(8*fixtures.MIB))
             torrent=fixtures.torrent_fixture(source,[payload])
             if state in ('downloading','table-200'):
-                seedbox=stack.enter_context(fixtures.Sandbox())
+                seedbox=stack.enter_context(daemon.Sandbox())
                 seed=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),seedbox,False))
                 seed_process=seed.start_serve();stack.callback(seed.stop_serve,seed_process)
                 if not (seed.receive_ready() and seed.wait_engine()):raise RuntimeError('UI seed did not become ready')

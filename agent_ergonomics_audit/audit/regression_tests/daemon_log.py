@@ -91,19 +91,22 @@ def log_follow(binary,systemd):
 def hello_counters(binary,systemd):
     with owned('hello_counters',binary,systemd) as (case,box,h,p,client,item):
         before=client.call('app.info')['result']['clients']
+        h.wait_for(lambda:((stats:=client.call('app.stats')['result'])['active_clients']['test']==1 and sum(stats['active_clients'].values())==1,json.dumps(stats)), 'closed API startup probes retire before live-counter baseline')
+        before_active=client.call('app.stats')['result']['active_clients']
         sessions=[]
         try:
             for kind in ['cli','agent','tui','bar','test']:
                 session=d.ApiConn(h);session.hello(kind);sessions.append(session)
             after=client.call('app.info')['result']['clients']
             stats=client.call('app.stats')['result']
-            case.check(all(after[k]==before[k]+1 for k in before) and stats['connections']==after,
+            case.check(all(after[k]==before[k]+1 for k in before) and stats['connections']==after and
+                       all(stats['active_clients'][k]==before_active[k]+1 for k in before_active),
                        'each successful hello increments its own kind once',json.dumps(dict(before=before,after=after,stats=stats)))
         finally:
             for session in sessions:session.close()
         def detached():
             stats=client.call('app.stats')['result']
-            return stats['active_clients']==before,json.dumps(stats)
+            return stats['active_clients']==before_active,json.dumps(stats)
         h.wait_for(detached,'all five real sockets disappear from live counts')
         total=client.call('app.info')['result']['clients']
         case.check(total==after,'usage counters retain connections after detach',json.dumps(total))

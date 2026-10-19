@@ -244,3 +244,42 @@ while the actual distance-two typo torrents.lsit suggests torrents.list. Neither
 an old version nor a false neighbour is fabricated. Other criteria met. No
 all.sh between track beads per owner policy. Follow-up: app.log queries with many
 maximum-length messages need a byte budget beneath the 1 MiB response cap.
+
+## P1-07b — real fixture serving (`fbt-y8i`)
+
+Added idle/seeding/downloading/paused JSON recipes (empty aliases idle), --throttle,
+FBTFIXTURE socket/summary/resource metadata and a managed seed/leech context. An
+initially closed stdin retains the fixture; closing an initially open pipe ends
+it for UI callers. A parent-death guardian drains daemons and removes private
+sandboxes after launcher SIGKILL or daemon death. Child evidence roots are unique
+per invocation, including --log-root forwarding. Replaced the interim TUI engine
+host/probe with real serve/API v1; cap observers serialize one typed connection,
+retain their timing/rate/metainfo assertions and observe normalized states.
+Neighbouring visual fixture sandboxes now use the retaining subclass. The hello
+counter test now establishes separate exact active/cumulative baselines after
+API startup probes retire, and checks live per-kind increments too.
+
+Private-XDG `target/test-logs/fbt-y8i/run.py cases fixture_serving_states
+fixture_launcher_killed fixture_daemon_killed fixture_stdin_lifetime
+fixture_peer_pair daemon_api_probe cap_change_no_check seed_toggle_no_check
+launcher_exit_cleanup hello_counters` passes ten cases in foreground-final/
+(37.037 s) and FBT_BUS_SYSTEMD=1 systemd-final/ (41.073 s); both retain eight
+independent daemon_fixture worker JSONLs and verify no unit/PID/sandbox survives.
+Explicit 65536-B/s fixture flag, real capped loopback bytes, SIGKILL launcher,
+SIGKILL daemon, EOF, closed stdin, metadata identity and seed/noseed transitions
+all pass. The corrected counter test also passes counter-final/. Initial API
+argument/status assumptions and refusal-shim manager-query failures are retained.
+Python compilation and diff checks pass; single full cargo test --locked
+(full-final/) passes 368, zero failures, three intentional process bridges ignored.
+
+Unmet: the *entire expanded* daemon.py suite does not fit three minutes. One
+--no-systemd invocation reached 48 completed cases/250.872 logged seconds before
+interrupt at 252.346 s (all-cases-driver/ and archived all-cases/processes/).
+Interruption drained its owned process and removed its sandbox, verified after
+exit; this is not a green whole-suite claim. It found the counter-baseline issue
+fixed above. Systemd whole-suite timing remains unqualified; the focused batch is
+green in both modes. Global transfer.set_limits is absent until P5-04, so only
+the marked DaemonContract.throttle adapter temporarily uses the existing typed
+single-seed upload cap; that Do-step remains deferred. No all.sh between track
+beads. Follow-ups: wire that adapter when P5-04 lands; restore the expanded CI
+runtime budget without deleting or shortening coverage.
