@@ -1190,7 +1190,7 @@ class AttachedTui:
     def clients(self):
         with daemon.ApiConn(self.h) as connection:
             connection.hello()
-            return connection.call("app.info")["result"]["clients"]["tui"]
+            return connection.call("app.stats")["result"]["active_clients"]["tui"]
 
     def close(self):
         self.tmux("kill-server")

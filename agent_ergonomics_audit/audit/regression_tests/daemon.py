@@ -3222,6 +3222,9 @@ from daemon_notify import (notify_completed, notify_action_open, notify_action_d
     notify_action_folder, notify_added_undo, notify_off, notify_failed, notify_queue_bounded,
     notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
 
+from daemon_log import log_injected_error, log_follow, hello_counters, log_down_never_starts
+from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
+
 from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
@@ -3779,7 +3782,7 @@ def tui_single_connection(binary, systemd):
         mutation_request(client,"torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True,save_path=str(directory)))
         cache=Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent/imdb/by-name-v2/two_files.json"
         cache.write_text('{"missing":true}')
-        before=client.call("app.info")["result"]["clients"]
+        before=client.call("app.stats")["result"]["active_clients"]
         case.check(before["tui"]==0,"no TUI presence before the real terminal starts",json.dumps(before))
         hidden=harness.engine_path.with_name("hidden-compat.sock")
         harness.engine_path.rename(hidden)
@@ -3788,8 +3791,8 @@ def tui_single_connection(binary, systemd):
             target,done=ui.start()
             ui.assert_pane(target,"two-files")
             def one_client():
-                info=client.call("app.info")["result"]
-                return info["clients"]["tui"]==1,json.dumps(info["clients"])
+                info=client.call("app.stats")["result"]
+                return info["active_clients"]["tui"]==1,json.dumps(info["active_clients"])
             harness.wait_for(one_client,"one TUI connection after loading its real API rows")
             ui.keys(target,"Enter",literal=False)
             ui.assert_pane(target,"first.bin")
@@ -3846,7 +3849,7 @@ def tui_single_connection(binary, systemd):
             harness.wait_for(one_client,"data and file operations retain the same one TUI connection")
             ui.keys(target,"q")
             harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches the API client")
-            harness.wait_for(lambda:((counts:=client.call("app.info")["result"]["clients"])["tui"]==0,json.dumps(counts)),
+            harness.wait_for(lambda:((counts:=client.call("app.stats")["result"]["active_clients"])["tui"]==0,json.dumps(counts)),
                              "TUI presence is released on detach")
         finally:
             ui.close()
@@ -3882,7 +3885,7 @@ def tui_reconnect_existing_owner(binary, systemd):
             with ApiConn(harness) as observer:
                 hello=mutation_hello(observer,"replacement-ui-owner")
                 case.check(hello["instance"]!=first,"the replacement has a new daemon instance",json.dumps(hello))
-                harness.wait_for(lambda:((counts:=observer.call("app.info")["result"]["clients"])["tui"]==1,json.dumps(counts)),
+                harness.wait_for(lambda:((counts:=observer.call("app.stats")["result"]["active_clients"])["tui"]==1,json.dumps(counts)),
                                  "existing terminal reconnects without an Enter key")
                 harness.wait_for(lambda:("fbittorrent stopped" not in ui.capture(target) and "Connecting" not in ui.capture(target),ui.capture(target)),
                                  "fresh API data clears the recovery banner")
@@ -3892,7 +3895,7 @@ def tui_reconnect_existing_owner(binary, systemd):
                 case.check("two-files" not in ui.capture(target),"fresh data replaces the old confirmed rows",ui.capture(target))
                 ui.keys(target,"q")
                 harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after automatic reconnection")
-                harness.wait_for(lambda:((counts:=observer.call("app.info")["result"]["clients"])["tui"]==0,json.dumps(counts)),
+                harness.wait_for(lambda:((counts:=observer.call("app.stats")["result"]["active_clients"])["tui"]==0,json.dumps(counts)),
                                  "recovered client releases its one connection")
         finally:
             ui.close()
@@ -3926,7 +3929,7 @@ def tui_pending_rss_failure(binary, systemd):
                     ui.keys(target,"?")
                     ui.assert_pane(target,"GLOBAL")
                     ui.keys(target,"Escape",literal=False)
-                    case.check(client.call("app.info")["result"]["clients"]["tui"]==1,
+                    case.check(client.call("app.stats")["result"]["active_clients"]["tui"]==1,
                                "held URL confirmation does not block other RPCs or the UI",ui.capture(target))
                     # Leaving this source context below releases an actual HTTP 404.
                 finally:
@@ -4446,7 +4449,9 @@ def undo_incomplete_download(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state,
+         (upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
+          log_injected_error, log_follow, hello_counters, log_down_never_starts,
+          origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state,
           settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
           settings_offline_no_start, tui_single_connection, tui_reconnect_existing_owner, tui_pending_rss_failure, offline_stop_ledger,
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,

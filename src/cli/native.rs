@@ -474,12 +474,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             }
         }
         Cmd::Restart => {
-            let c = connect(cfg, false, true, json_mode)?;
-            c.call("app.restart", json!({"scope":"engine"}))?;
-            emit(
-                json_mode,
-                json!({"ok":true,"action":"restart","scope":"engine","count":0,"hashes":[]}),
-            );
+            emit(json_mode, super::restart::daemon(cfg,json_mode)?);
         }
         _ => unreachable!("non-native CLI command"),
     }

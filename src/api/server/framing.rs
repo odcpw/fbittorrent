@@ -141,6 +141,9 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
             "reason" | "save_path" | "category" | "origin" => value.is_string(),
             "to" if op=="torrents.queue_move" => serde_json::from_value::<QueueTo>(value.clone()).is_ok(),
             "scope" => serde_json::from_value::<RestartScope>(value.clone()).is_ok(),
+            "source" if op == "app.log" => value.is_string(),
+            "level" => serde_json::from_value::<LogLevel>(value.clone()).is_ok(),
+            "limit" => value.is_u64(),
             "source" => serde_json::from_value::<AddSource>(value.clone()).is_ok(),
             "client" => {
                 let Some(client) = value.as_object() else {
@@ -288,7 +291,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
             .split('`')
             .nth(1)
             .or_else(|| {
-                ["topics", "hashes", "bps", "since_seq"]
+                ["topics", "hashes", "bps", "since_seq", "limit", "source"]
                     .into_iter()
                     .find(|key| text.starts_with(&format!("{key}:")))
             })

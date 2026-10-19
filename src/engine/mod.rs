@@ -229,8 +229,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
                 break;
             }
             if let Err(error) = inner.maintain(cx).await {
-                // Keep the failure available without writing over a running TUI.
-                let _ = inner.write_store(cx, "last-error.txt", format!("{error:#}\n").as_bytes()).await;
+                eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
             }
         }
     });

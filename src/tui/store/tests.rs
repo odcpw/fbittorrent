@@ -255,3 +255,19 @@ fn reconnecting_to_the_same_instance_resets_connection_scoped_revisions() {
     assert!(store.stale);
     assert_eq!(store.torrents, before);
 }
+
+#[test]
+fn log_snapshot_and_append_remain_bounded_and_monotonic() {
+    let (mut store, _) = replay(&fixture("log.ndjson")).unwrap();
+    assert_eq!(store.logs.iter().map(|entry| entry.seq).collect::<Vec<_>>(), [1, 2]);
+    let entry = store.logs.back().unwrap().clone();
+    for seq in 3..=2001 {
+        let mut next = entry.clone();
+        next.seq = seq;
+        store.push_log(next);
+    }
+    store.push_log(entry);
+    assert_eq!(store.logs.len(), MAX_LOGS);
+    assert_eq!(store.logs.front().unwrap().seq, 2);
+    assert_eq!(store.logs.back().unwrap().seq, 2001);
+}

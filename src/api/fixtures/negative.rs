@@ -138,7 +138,7 @@ fn revision_and_typed_loss_checks_remain_on_roundtrip_path() {
     assert!(check_group("negative", &mutation.to_string())
         .unwrap_err()
         .contains("typed mutation result differs"));
-    for op in ["app.log", "app.stats"] {
+    for op in ["app.not_a_bead", "app.unassigned"] {
         assert!(serde_json::from_value::<Request>(json!({"id":1,"op":op,"args":{}})).is_err());
         assert!(Reply::decode(op, json!({})).is_err());
     }

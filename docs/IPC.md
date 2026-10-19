@@ -77,7 +77,7 @@ when a required cap is missing.
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
-| `log` | Reserved for P1-14 | P1-14 |
+| `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
 | `settings` | `app.settings.get/set`, topic `settings` | P3-05 |
 | `staging` | `stage: true`, `torrents.commit/discard` | P3-06 |
 | `search` | `search.*`, topic `search:<id>` | P3-01 |
@@ -85,9 +85,7 @@ when a required cap is missing.
 | `shows` | `shows.*`, topics `shows`, `shows.releases:*` | P3-03 |
 | `imdb` | `imdb.lookup` | P3-04 |
 | `peers` | `torrents.peers`, topic `torrent:<h>.peers`, `seeds` field | P5-01 |
-| `recheck` | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
-| `torrents.queue_move` | `hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
-| `torrents.recheck` | P5-03 |
+| `recheck` | `torrents.recheck` | P5-03 |
 | `limits` | `transfer.set_limits/set_alt`, `summary.alt`, `summary.limits` | P5-04 |
 | `watch` | `playable` fields, `torrent.playable` event, `wait --until playable` | P5-05 |
 | `trackers` | `torrents.trackers/reannounce`, topic `torrent:<h>.trackers` | P6-01 |
@@ -153,6 +151,10 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | Op | Args | Result | Mutating | Since |
 |---|---|---|---|---|
 | `hello` | See handshake | HelloResult | no | P1-06 |
+| `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
+| `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
+| `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
@@ -649,3 +651,67 @@ fields and the existing restore source; contract patch 1.2.5 records them.
 The filtered count/known-byte sum/unknown-size count, confirmation and undo
 toast are presented by the UI tracks. CLI undo and origin/filter argument
 wiring are tracked separately from this daemon/API increment.
+### P1-14: daemon log history and usage
+
+`log` is a keyed, append-only collection of `LogEntry`, keyed by `seq`. Subscribe
+uses the normal snapshot/delta revision rules. The server retains the latest
+2,000 entries; retention eviction never means deleting client history. Entries
+are fed from daemon stderr, preserving the original journald byte stream. Stored
+messages are capped at 8,192 characters; source names at 64. Unstructured stderr
+is represented as debug/daemon without rewriting its journald copy.
+
+`app.log` returns the latest matching 200 entries by default. With `since_seq`,
+it returns the first matching entries strictly after that sequence, up to limit.
+`next_seq` is the last returned sequence (or current sequence if none matched),
+an exclusive cursor for the next call. Levels are minimum severity: warn includes
+error and warn, debug includes all levels. Source and hash filters match exactly.
+`app.info.clients` and `app.stats.connections` are cumulative successful hello
+counts, reset per daemon instance. `app.stats.active_clients` tracks currently
+connected clients; reconnects increment cumulative counts again. Both are local
+memory only. CLI `log --follow` emits one LogEntry JSON object per line; `log`
+never starts a daemon and exits 4 when closed, with up/journalctl hints.
+
+Changelog: P1-14 adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
+existing fixture files remain byte-for-byte unchanged.
+
+### P1-17: executable upgrades
+
+`hello.server.build` is the short git id (with -dirty for modified sources), or
+unknown when git metadata is unavailable. Build-time FBT_BUILD_ID_OVERRIDE is a
+fixture override. The owner records executable device/inode/mtime at startup and
+checks every 30 seconds. A replacement sets app.info/summary.daemon.upgrade_pending
+while the existing busy table is nonempty, then drains with bye reason upgrade
+and unit exit 75. The systemd unit starts the replacement binary. Explicit
+app.restart with scope daemon drains immediately, including while busy. CLI
+restart never starts an absent owner, and waits at most 30 seconds for a different
+hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
+keeps the process and API connections. No capability or frozen fixture changes;
+P1-17 implements the existing fields and operation. CLI contract 1.2.4 adds the
+replacement instance/server to restart output.
+
+### P1-18: agent event stream and raw operation catalogue
+
+`fbittorrent events [--follow] [--since-seq N] [--kinds a,b] --json` prints only
+retained/live event items, each with the daemon's `instance` and original `seq`.
+Store the pair; sequences reset per instance. Without follow, snapshot.end ends
+the replay. EOF or SIGINT exits 0 and never stops the daemon. A cursor older than
+the ring prints an explicit `{ev:"resync", reason:"resync", oldest_seq, seq,
+instance}` control line before replay; its seq is oldest_seq-1. Kind filters do
+not hide this data-loss marker. Unknown kinds exit 2; a closed read exits 4.
+
+`fbittorrent api <op> [--arg key=value] [--json-args '{...}'] [--ref r]` prints
+the response envelope verbatim, including id/ok/result or the full typed error.
+JSON values in --arg stay typed; other strings remain strings. Duplicate keys
+are rejected. Hello sends the supplied initial hello (or the standard agent
+hello); other operations use the shared API client, with stable raw-api client
+identity so explicit refs survive separate CLI invocations. Startup and retry
+policy use the compiled operation table. Reads and unknown operations never
+start an owner; writes respect autostart and --no-start. The envelope's A.3 code
+determines the CLI exit. Unknown names suggest at most three table entries with
+Levenshtein distance <=2; unrelated names have an empty nearest list and the
+api --list hint. api --list and robot-docs api show the same args/results,
+mutating/idempotent/since metadata; a unit test compares every documented row.
+
+Changelog P1-18: CLI contract 1.2.5 adds events/api and capabilities.api_operations.
+The original planned 1.2.1 number predates already-integrated additive changes;
+all earlier fields and frozen fixture bytes remain intact. No new API operation.

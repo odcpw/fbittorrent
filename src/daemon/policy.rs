@@ -59,7 +59,7 @@ impl Policy {
         self.override_seconds = None;
         self.configure(seconds, now);
     }
-    fn busy(&self) -> bool {
+    pub(super) fn busy(&self) -> bool {
         let t = self.transfers;
         t.downloading || t.seeding || t.parked_waiting || t.restoring || t.starting
             || self.mutations != 0 || self.searches != 0

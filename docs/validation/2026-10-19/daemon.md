@@ -134,3 +134,113 @@ Unmet acceptance criteria: none. Follow-ups: Open-log is wired to the CLI log
 verb supplied by P1-14; actual desktop notification rendering/action selection
 remains outside these recording-shim checks. P1-14 keeps the existing app.info counts cumulative (connections since start),
 as its canonical rule requires.
+
+## Integration batch 2 — merge `6ec496e`
+
+Reconciled main's canonical CLI/server/TUI/settings modules with the bus, idle
+policy and notifications. Private-XDG checks in `target/test-logs/track-a-batch2/`:
+`run.py check` and Python harness compilation passed; all 38 bus/idle/notification/
+settings/TUI cases passed in each launch mode; `run.py full` passed 359 tests,
+zero failures, two intentional ignores. Main's structural layout is retained.
+
+## P1-14 — log ring and connection usage (`fbt-p1-14-bqf`)
+
+Added the 2,000-entry stderr-fed ring while preserving original diagnostic bytes,
+filtered/cursor API history, bounded append-only log subscriptions, read-only
+`log`/NDJSON follow and separate active/cumulative hello counters. Production no
+longer writes last-error.txt. Added the authorized app.log/app.stats contract
+extension, independent log transcript and capability/version bookkeeping; all ten
+existing transcript SHA-256 values remain unchanged. Minimal neighbouring edits
+let the TUI's all-fixture mirror consume log snapshots/deltas within the same
+2,000-entry bound, and its real one-connection test now reads active app.stats
+counts while retaining every original equality assertion.
+
+Evidence root: `target/test-logs/fbt-p1-14-bqf/`; private-XDG commands use its
+`run.py`. `policy` (`ring-units/`) passed all three named ring tests; `api`
+(`module-tests-fixed/`) passed 86 tests with one bridge ignore; debug `build`
+(`final-build/`) passed. `cases log_injected_error log_follow hello_counters
+log_down_never_starts tui_single_connection` passed five cases in each mode
+(`foreground-final/daemon/`, `FBT_BUS_SYSTEMD=1` in `systemd/daemon/`): one real
+injected engine failure with its hash/source through CLI JSON and original stderr,
+no last-error file, exact per-kind cumulative increments and live detach counts,
+follow entry within one second and clean exit on owner stop, closed read exits 4
+without starting anything, real TUI uses one API connection. `full`
+(`full-fixed/development_full/`) passes the full locked suite (363 passed, zero failed, two intentional
+ignores), including all fixtures and the added bounded mirror regression; the earlier full failure that
+identified the unsupported TUI log topic is retained in `full-final/`. Python
+compilation, diff whitespace and changed-source 900-line checks pass. No all.sh
+between track beads per owner instruction. Unmet criteria: none. Follow-up:
+notification Open-log still needs a visible terminal/log pane; these checks prove
+CLI history/stream delivery, not desktop presentation.
+
+## P1-17 — upgrade detection and restart (`fbt-p1-17-2ds`)
+
+Added build-time git/dirty identity with the fixture override, owner executable
+identity checks every 30 seconds, busy-table deferral and live upgrade_pending,
+exit-75 replacement, and a restart CLI that requests daemon scope and waits up to
+30 seconds for a different hello instance. A foreground owner exits 75; without
+a supervisor the CLI times out with exit 8 and never launches an owner itself.
+Existing P1-11 skew warnings remain verified. Neighbouring edits publish pending
+state in app.info/summary and route the split CLI to the bounded restart helper.
+No existing contract fixture changed; contract patch 1.2.4 records new restart
+instance/server output.
+
+Evidence: `target/test-logs/fbt-p1-17-2ds/`; commands use private-XDG `run.py`.
+`policy` (`upgrade-units/`) passes two upgrade unit tests. `cases
+upgrade_idle_exit_75 upgrade_pending_while_busy restart_now
+restart_closed_never_starts` passes all four cases in `foreground/daemon/` and
+`FBT_BUS_SYSTEMD=1` in `systemd-fixed/daemon/`: two actual locked builds differ by
+compiled p1-17-old/new ids; private copy/rename changes the inode; idle replacement
+records systemd SubState=auto-restart and ExecMainStatus=75 then a new build/instance;
+a real 8 MiB capped loopback transfer retains the old instance with pending=true
+until stopped; explicit restart overrides an interactive busy owner, while the
+foreground wait expires cleanly after 30 seconds. Replacement unit environment
+and working directory are verified before launch and again in the actual child.
+The original systemd fixture checked lock freedom before stopping its replacement
+owner; that failure is retained in `systemd/` and corrected by checking after
+verified unit/cgroup teardown. `skew.py` (`skew/agent_contract/`) passes the
+existing human/JSON version-skew test. Single `full` (`full-final/development_full/`)
+passes 365 locked Rust tests, zero failures, two intentional ignores. Python compilation, diff whitespace and changed
+source-size checks pass. No all.sh between track beads per owner instruction.
+Unmet criteria: none. Follow-up: actual desktop banners/installation remain the
+integrated milestone's qualification, outside these isolated unit/process checks.
+
+## P1-18 — events and raw API (`fbt-p1-18-s18`)
+
+Added bounded event replay/follow with instance/seq, filters, explicit resync,
+EOF/SIGINT detachment; raw response/error envelopes, typed arguments, stable raw
+client identity for cross-process refs, per-op startup/retry policy; a compiled
+args/result catalogue shared by api --list, robot-docs api and capabilities. A
+unit checks every IPC operation row/argument/result/mutating column. No existing
+fixture bytes changed. Neighbouring client plumbing retains transport envelopes
+and names across reconnect; the old unit initializer only adds name=None. The
+live shape bridge applies actual cli::shapes::rows, rather than duplicating it in
+Python. Documentation corrects stale restart/exit-75 wording.
+
+Private-XDG evidence: `target/test-logs/fbt-p1-18-s18/`; `run.py check`
+(`initial-check/`) passed; `api` (`module-tests-fixed/`) passed 88/one bridge
+ignore; `policy` (`raw-units-fixed/`) passed the argument unit. `agent
+ events_follow_completion events_since_seq_replay events_resync_when_older
+ events_down_exit_4 api_list_matches api_list_matches_ipc_md api_unknown_op_hint
+ api_mutating_starts_daemon_read_does_not` passed eight real cases in each mode
+(`foreground/agent_contract/`, `FBT_BUS_SYSTEMD=1` in `systemd/agent_contract/`).
+Completion arrived in 0.855/0.804 s with exact real loopback bytes; killing the
+reader then resuming prints exactly the two later additions; 1,002 real parked
+ledger additions force actual 1,000-entry ring eviction and explicit oldest_seq;
+raw A.9 objects equal the actual Rust shape conversion; raw typed failures retain
+field details; explicit refs replay identical mutation results across processes;
+raw read never starts, write starts the verified private static unit. The final
+catalogue also works with an invalid private config (`catalog-final/` and
+`catalog-systemd-final/`). `build` (`final-build/`) and single full `cargo test
+--locked -- --nocapture` (`full-final/`) pass: 368 tests, zero failures, three
+intentional process-bridge ignores (the new shape bridge ran in both live cases).
+Python, whitespace, unchanged-fixture and <=900 source-line checks pass.
+
+Literal bead deviations: planned contract 1.2.1 was already superseded by
+integrated features; the required monotonic patch is 1.2.5, with separate events
+and api changes entries. No catalogue operation is within Levenshtein distance 2
+of literal `nope`; it exits 2/unknown_op with nearest=[] and api --list hint,
+while the actual distance-two typo torrents.lsit suggests torrents.list. Neither
+an old version nor a false neighbour is fabricated. Other criteria met. No
+all.sh between track beads per owner policy. Follow-up: app.log queries with many
+maximum-length messages need a byte budget beneath the 1 MiB response cap.

@@ -126,6 +126,11 @@ impl Validate for UploadLimitArgs {
 impl Validate for Request {
     fn validate(&self) -> Checked {
         match &self.call {
+            Call::AppLog { args: Some(args) } => {
+                require(args.limit.is_none_or(|v| v <= 1000), "limit", "at most 1000")?;
+                if let Some(source) = &args.source { text(source, 64, "source")?; }
+                Ok(())
+            },
             Call::Subscribe { args } => args.validate(),
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
@@ -193,6 +198,11 @@ impl Validate for Summary {
 impl Validate for Reply {
     fn validate(&self) -> Checked {
         match self {
+            Self::AppLog(result) => {
+                require(result.entries.len() <= 1000, "entries", "at most 1000")?;
+                for entry in &result.entries { entry.validate()?; }
+                Ok(())
+            }
             Self::TorrentsList(result) => {
                 for value in &result.torrents {
                     value.validate()?;
@@ -297,11 +307,13 @@ impl TorrentFileSizes {
 #[derive(Debug, Default)]
 pub struct NegotiatedCaps {
     watch: bool,
+    log: bool,
 }
 impl NegotiatedCaps {
     pub fn from_hello(hello: &HelloResult) -> Self {
         Self {
             watch: hello.caps.iter().any(|cap| cap == "watch"),
+            log: hello.caps.iter().any(|cap| cap == "log"),
         }
     }
     fn playable(&self, present: bool, path: &str) -> Checked {
@@ -325,6 +337,7 @@ impl NegotiatedCaps {
     }
     pub fn reply(&self, value: &Reply) -> Checked {
         match value {
+            Reply::AppLog(_) | Reply::AppStats(_) => require(self.log, "result", "requires the log capability"),
             Reply::TorrentsList(result) => {
                 for torrent in &result.torrents {
                     self.torrent(torrent)?;
@@ -340,13 +353,20 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::File(_) => Ok(()),
+                Item::File(_) | Item::Log(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
         Ok(())
     }
     pub fn event(&self, value: &Event) -> Checked {
+        match value {
+            Event::SnapshotBegin { topic: Topic::Log, .. } | Event::SnapshotChunk { topic: Topic::Log, .. }
+            | Event::SnapshotEnd { topic: Topic::Log, .. } | Event::Delta { topic: Topic::Log, .. } => {
+                require(self.log, "topic", "requires the log capability")?;
+            }
+            _ => {}
+        }
         match value {
             Event::TorrentPlayable { .. } => require(
                 self.watch,
@@ -389,6 +409,7 @@ impl NegotiatedCaps {
 fn items(topic: &Topic, values: &[Item]) -> Checked {
     for value in values {
         match (topic, value) {
+            (Topic::Log, Item::Log(entry)) => entry.validate()?,
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
             (Topic::Events, Item::Event(e))
@@ -474,7 +495,7 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
-                                Topic::Files(_) | Topic::Events => key.as_u64().is_some(),
+                                Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
                                 _ => false,
                             },
                             "removed",
@@ -484,7 +505,7 @@ impl Validate for Event {
                 }
                 if let Some(changed) = changed {
                     require(
-                        *topic != Topic::Events || changed.is_empty(),
+                        !matches!(topic, Topic::Events | Topic::Log) || changed.is_empty(),
                         "changed",
                         "events topic is append-only",
                     )?;
@@ -569,3 +590,11 @@ impl Revisions {
 
 #[cfg(test)]
 mod tests;
+
+impl Validate for LogEntry {
+    fn validate(&self) -> Checked {
+        require(self.seq > 0, "seq", "starts at one")?;
+        text(&self.source, 64, "source")?;
+        text(&self.message, 8192, "message")
+    }
+}

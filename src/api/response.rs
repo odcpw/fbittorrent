@@ -205,6 +205,8 @@ pub enum Reply {
     TorrentsForceStart(DoneResult),
     TorrentsQueueMove(QueueMoveResult),
     TorrentsRecheck(RecheckReply),
+    AppLog(LogResult),
+    AppStats(StatsResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -235,6 +237,8 @@ impl Reply {
             "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
             "torrents.queue_move" => serde_json::from_value(result).map(Self::TorrentsQueueMove),
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
+            "app.log" => serde_json::from_value(result).map(Self::AppLog),
+            "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
@@ -304,3 +308,7 @@ pub struct RecheckFailure { pub hash: Hash, pub message: String }
 
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatsResult { pub active_clients: ClientCounts, pub connections: ClientCounts }

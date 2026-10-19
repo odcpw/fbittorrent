@@ -100,7 +100,9 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppSettingsGet { .. }
+                Call::AppLog { .. }
+                | Call::AppStats { .. }
+                | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }
                 | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
@@ -109,6 +111,7 @@ impl Shared {
                     &self.daemon,
                     &job.request.call,
                     &reference,
+                    serde_json::to_value(&*self.connections_since_start.lock().unwrap()).unwrap(),
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
                     self.bus.counts(),
