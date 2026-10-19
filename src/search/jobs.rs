@@ -186,6 +186,18 @@ pub(super) fn job(id: i64) -> Result<Arc<SearchJob>> {
         .ok_or_else(|| anyhow!("search job not found: {id}"))
 }
 
+/// Local catalogue clients consume the same normalized items and resolved-hash
+/// dedupe as the daemon service; legacy sentinels are introduced by the CLI only.
+pub(crate) fn normalized_snapshot(id:i64) -> Result<(Vec<crate::api::SearchItem>,bool,Vec<crate::api::ProviderWarning>)> {
+    let job=job(id)?;
+    let state=job.state.lock().map_err(|_|anyhow!("search results lock failed"))?;
+    let complete=job.done.load(Ordering::Acquire);
+    let warnings=(!state.error.is_empty()).then(||crate::api::ProviderWarning {
+        provider:"nova".into(),message:state.error.chars().take(200).collect(),
+    }).into_iter().collect();
+    Ok((normalize::aggregate_with_hashes(&state.results,MAX_RESULTS,&state.hashes),complete,warnings))
+}
+
 pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
     let job = job(id)?;
     let state = job

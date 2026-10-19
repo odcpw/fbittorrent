@@ -14,7 +14,7 @@ from fbtlog import Case, suite_status
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
 import private_net
 
-STATES=('empty','downloading','paused','table-200')
+STATES=('empty','downloading','paused','table-200','ready','may-stall')
 
 
 def stop_owned(harness,process):
@@ -29,6 +29,17 @@ def stop_owned(harness,process):
 def running(binary,state,case):
     private_net.require()
     case.check(True,'private network and DNS contain every fixture socket',private_net.describe())
+    if state in ('ready','may-stall'):
+        from daemon_watch import pair,row,MIB
+        with pair('visual_watch',binary,False,case_override=case) as (_,box,h,p,client,peer,item,payload):
+            if not h.wait_for(lambda:((v:=row(client,item.info_hash)).get('playable',{}).get('ready') is True,json.dumps(v)),
+                              'real watch prefix reaches the playback threshold',timeout=75):raise RuntimeError('watch threshold not reached')
+            peer.call('transfer.set_limits',dict(upload_bps=MIB//2 if state=='may-stall' else 3*MIB//2))
+            desired=state=='ready'
+            if not h.wait_for(lambda:((v:=row(client,item.info_hash)).get('playable',{}).get('stall_free') is desired,json.dumps(v)),
+                              'real watch fixture has truthful '+state+' rate',timeout=10):raise RuntimeError('watch rate not observed')
+            yield box,h,client,row(client,item.info_hash)
+        return
     with ExitStack() as stack:
         sandbox=stack.enter_context(daemon.Sandbox())
         harness=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),sandbox,False))

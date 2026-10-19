@@ -383,19 +383,30 @@ impl Bus {
             }
             Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new(), false),
         };
-        let completions = match &slot.slot {
+        let mut completions = match &slot.slot {
             Slot::Running(app) => app.dispatcher().take_completions(),
             _ => Vec::new(),
         };
         self.daemon.disk.lock().unwrap().observe(&rows);
         if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
-        let rows: Vec<Torrent> = rows
+        if let Slot::Running(app)=&slot.slot {
+            let mut watch=self.daemon.watch.lock().unwrap();
+            if watch.due() {
+                completions.extend(watch.sample(app.dispatcher().watch_samples().map_err(ops::engine_error)?));
+            }
+        } else {
+            let mut watch=self.daemon.watch.lock().unwrap();
+            if watch.due() {watch.sample(Vec::new());}
+        }
+        let mut rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)
             .collect::<ApiResult<Vec<_>>>()?;
+        self.daemon.watch.lock().unwrap().decorate(&mut rows);
         let files = details
             .into_iter()
             .map(|(hash, files)| {
+                let playable=rows.iter().find(|r|r.hash.as_str()==hash).and_then(|r|r.playable.clone());
                 (
                     hash,
                     json!(files
@@ -407,7 +418,7 @@ impl Bus {
                             progress: f.progress,
                             included: f.priority != 0,
                             sort_key: ops::torrents::sort_key(&f.name),
-                            ready: None
+                            ready: playable.as_ref().filter(|p|p.file==f.index as u64).map(|p|p.ready)
                         })
                         .collect::<Vec<_>>()),
                 )
@@ -566,6 +577,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
+            if self.daemon.watch.lock().unwrap().due() { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;

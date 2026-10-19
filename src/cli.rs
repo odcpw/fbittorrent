@@ -1,6 +1,9 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
 pub mod shapes;
+pub(super) mod catalog_search;
+pub(super) mod catalog_imdb;
+mod fallback;
 pub(super) mod logs;
 pub(super) mod stream;
 pub(super) mod raw;
@@ -157,6 +160,9 @@ pub(super) enum Cmd {
     /// Block until torrents complete. Progress on stderr, result on stdout. Exit 8 on timeout.
     Wait {
         selectors: Vec<String>,
+        /// Wait for completion, the verified playback threshold or stall-free playback
+        #[arg(long, value_enum, default_value_t = Until::Complete)]
+        until: Until,
         /// Give up after N seconds (0 = forever)
         #[arg(long, default_value_t = 0)]
         timeout: u64,
@@ -399,3 +405,7 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
     }
     Ok(Code::Ok)
 }
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Until { Complete, Playable, StallFree }

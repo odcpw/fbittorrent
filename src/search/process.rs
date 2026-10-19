@@ -13,6 +13,15 @@ pub(super) fn python(directory: &Path) -> Command {
     // its resource tracker, and any provider subprocesses together.
     unsafe {
         command.pre_exec(move || {
+            // The daemon consumes TERM/INT with sigwait. External Python runners
+            // must not inherit that blocked mask: Nova terminates idle pool
+            // workers with TERM when a multi-provider search completes.
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            let error = libc::pthread_sigmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut());
+            if error != 0 {
+                return Err(std::io::Error::from_raw_os_error(error));
+            }
             if libc::setpgid(0, 0) != 0 {
                 return Err(std::io::Error::last_os_error());
             }

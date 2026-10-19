@@ -465,7 +465,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -523,7 +523,26 @@ Staged rows are excluded from queue admission and all counts except `staged`;
 their metadata-resolution tasks are excluded from every idle busy reason.
 Summary top rows and pending-download disk demand also exclude staged records.
 
+## CLI catalogue sources (P3-07)
+
+CLI search and IMDb use the existing API after a bounded 200 ms hello when the
+owner is running and advertises the relevant capability. When the owner is down,
+parked, stopping, silent or lacks the capability, the same normalized sources run
+in-process. These reads never start the daemon. Search waits for `search.done`,
+then takes a final atomic result snapshot before releasing its owned session;
+`--limit` applies after shared deduplication and sorting. `--install` waits for its
+mutation result. The legacy WebUI selection retains its existing route.
+The frozen `search.install` accepts HTTPS sources; Invalid non-HTTPS CLI install URLs retain their local validation failure
+(exit 5), including while a daemon is running. No API input rule is relaxed. Contract 1.2.24 adds only `providers[]` to each native CLI search row;
+legacy fields and human output share one shaper. `imdb --refresh` forwards
+`refresh:true` so the daemon replaces its index exactly once per forced call.
+RSS/Shows routing and TUI on-open refresh removal follow their service integration.
+
 ## Changelog
+
+- **P3-07:** CLI search/IMDb use capable running daemons or shared local sources;
+  contract 1.2.24 adds search result `providers[]` and deterministic provenance.
+
 
 - **P3-06:** implements `staging`, `torrents.commit/discard`, and the reserved
   `stage` argument; CLI contract 1.2.22 includes additive `staged` row visibility.
@@ -888,7 +907,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.23**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.25**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -921,6 +940,8 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.21` | `api.move` |
 | `1.2.22` | `api.staging` |
 | `1.2.23` | `app.client.dashboard_visible` |
+| `1.2.24` | `search.results[].providers` |
+| `1.2.25` | `playable` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1040,3 +1061,24 @@ presence. Popup `glance` remains independent and freezes the idle countdown.
 The plugin declares visibility after hello and reconnect, including when the
 window was already visible before connecting. It omits the new marker for
 servers without the capability, preserving their strict request parsing.
+
+## Watch readiness (P5-05)
+
+`watch` advertises the existing `Playable` object and `torrent.playable` event.
+Once a second the owner samples verified pieces of the largest included video.
+The prefix begins at that file's offset; readiness requires both
+`max(32 MiB, 3% of file size)` and the file's last piece. Pausing retains the
+verified prefix. MKV Info/Duration or MP4 mvhd headers consume at most 1 MiB per
+file; absent/unreadable duration stays absent. `stall_free` is absent without a
+known duration, positive rate and active downloading. Buffer/finish counters
+coalesce; readiness and stall-free flips remain structural.
+
+`watch.json` is private durable history: a still-ready incomplete record does not
+notify again after restart. A verified lost prefix re-arms a later daemon's
+notification; each daemon emits at most one per hash. The Open notification and
+`torrents.open_target` acknowledge the shared flag. Opening the popup/dashboard
+via a glance acknowledges existing ready rows; completion acknowledges too.
+`wait --until complete|playable|stall-free` uses pushed changes with polling as a
+reconnect fallback; a timeout or an unmet paused condition exits 8.
+The default stays completion. Contract 1.2.25 adds readiness fields/conditions to
+the CLI; API field types and event meaning stay those defined in A.8/A.9.

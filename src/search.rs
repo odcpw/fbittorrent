@@ -482,6 +482,7 @@ pub(crate) use download::{resolve_download, ResolvedDownload};
 #[cfg(test)]
 use download::resolve_download_in;
 pub use jobs::{begin_session, delete, results, shutdown_all, start, stop};
+pub(crate) use jobs::normalized_snapshot;
 use jobs::{jobs, parse_result, start_in};
 #[cfg(test)]
 use jobs::job;

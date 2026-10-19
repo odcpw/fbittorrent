@@ -9,6 +9,12 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 - **Streaming priority is automatic.** The native engine downloads each file
   sequentially and prioritizes its first and last pieces. These policies cannot
   be toggled off in native mode.
+- **Ready to watch.** The largest selected video gets a playback badge after its
+  verified contiguous prefix reaches 32 MiB or 3% of the file, whichever is larger,
+  and its last piece is present. The row says when playback may stall. Known MKV/MP4
+  duration supplies the buffer estimate; unknown duration stays unknown. The
+  notification's Open action plays the file. Agents can use
+  `fbittorrent wait <hash> --until playable --json` or `--until stall-free`.
 - **Seeding off by default.** New torrents get a 32 KiB/s upload cap while
   downloading and stop when complete. This limits uploaded payload; it does not
   guarantee zero upload. Allow seeding per torrent with `u` in the TUI or widget,

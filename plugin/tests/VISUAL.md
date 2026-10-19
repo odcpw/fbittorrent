@@ -38,14 +38,14 @@ recipe is not replaced by a simulated daemon or a decorative screenshot.
 | popup | idle countdown | presentation unit; optional `summary.daemon.idle_exit_in_s`; live integration pending |
 | popup | clipboard magnet | real wl-paste offer in W-013; opt-in clipboard service pending |
 | popup | quick add offer | real wl-paste offer in W-013 |
-| popup | playable may stall | actual PopupRow presentation control; watch service capture pending |
+| popup | playable may stall | real throttled watch service capture: target/test-logs/visual/2026-10-19/popup-may-stall-tokyo-night.png |
 | popup | disk low | presentation path; disk service capture pending |
 | popup | disk full | real disk refusal fixture pending |
 | popup row | cursor | actual keyboard cursor W-001..003 |
 | popup row | pending | actual confirmed client action path; held-response capture pending |
 | popup row | error | frozen error row/presentation text; real restore-error capture pending |
 | popup row | done | real completion recipe capture pending |
-| popup row | ready to watch | actual PopupRow contrast control; watch service capture pending |
+| popup row | ready to watch | real throttled watch service capture: target/test-logs/visual/2026-10-19/popup-ready-tokyo-night.png |
 | dashboard | no torrents | native empty view; empty real daemon |
 | dashboard | filter matches nothing | native filter against `paused`; dashboard table suite |
 | dashboard | downloading / paused | `downloading` / `paused`; dashboard table suite |

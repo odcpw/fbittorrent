@@ -53,6 +53,9 @@ pub(in crate::tui) fn state_cell(legacy: &Torrent, row: Option<&api::Torrent>) -
     definitions().iter().find(|s|s.definition.state==key).map_or("? Unknown",|s|s.padded.as_str())
 }
 pub(in crate::tui) fn state_word(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
+    if let Some(p)=row.filter(|r|r.state==api::TorrentState::Downloading).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
+        if p.stall_free!=Some(true) && !(p.stall_free.is_none() && p.buffered_s.is_some_and(|s|s>=120)) {return "Playable · may stall";}
+    }
     let key=key(legacy,row);
     definitions().iter().find(|s|s.definition.state==key).map_or("Unknown",|s|s.definition.word)
 }
@@ -83,5 +86,23 @@ mod tests {
             assert_eq!(dw(state_cell(&row,None)),9);
             for width in [80,120,160] { assert!(width>dw(state_cell(&row,None))); }
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use super::*;
+    #[test]
+    fn ready_and_may_stall_words_are_truthful() {
+        let mut row:api::Torrent=serde_json::from_value(serde_json::json!({"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"Video.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"default_cap","save_path":"/tmp/fixture","added_at":1,"force":false,"playable":{"file":0,"prefix_bytes":33554432,"ready":true,"acked":false,"buffered_s":32,"stall_free":false}})).unwrap();
+        let legacy=Torrent::default();
+        assert_eq!(state_cell(&legacy,Some(&row)).trim_end(),"▶ Ready");
+        assert_eq!(state_word(&legacy,Some(&row)),"Playable · may stall");
+        row.playable.as_mut().unwrap().stall_free=Some(true);
+        assert_eq!(state_word(&legacy,Some(&row)),"Ready to watch");
+        row.playable.as_mut().unwrap().stall_free=None;
+        row.playable.as_mut().unwrap().buffered_s=Some(120);
+        assert_eq!(state_word(&legacy,Some(&row)),"Ready to watch");
+        println!("same ready glyph; truthful may-stall and known/120s-buffer words");
     }
 }
