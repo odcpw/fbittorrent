@@ -15,17 +15,16 @@ fn feed_in(service:&crate::daemon::rss::Service,id:&str)->ApiResult<Feed> {
     })
 }
 pub fn dispatch(daemon:&Daemon,call:&Call)->ApiResult<Reply> {
-    dispatch_in(&daemon.rss,call,|args| {
-        let Reply::TorrentsAdd(added)=super::torrents::dispatch(daemon,&Call::TorrentsAdd {args})? else {unreachable!()};
-        Ok(added)
+    dispatch_in(&daemon.rss,call,|args,feed,item| {
+        crate::daemon::staged_sources::add(daemon,args,crate::daemon::staged_sources::Source::Rss {feed:feed.into(),item:item.into()})
     })
 }
 /// In-process catalogue operations share the daemon's exact handlers and store.
 /// Grabs always go through the running owner's engine operation.
 pub(crate) fn catalogue(service:&crate::daemon::rss::Service,call:&Call)->ApiResult<Reply> {
-    dispatch_in(service,call,|_|Err(error(ErrorCode::EngineUnavailable,"grab requires the daemon",None)))
+    dispatch_in(service,call,|_,_,_|Err(error(ErrorCode::EngineUnavailable,"grab requires the daemon",None)))
 }
-fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl FnOnce(AddArgs)->ApiResult<AddResult>)->ApiResult<Reply> {
+fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl FnOnce(AddArgs,&str,&str)->ApiResult<AddResult>)->ApiResult<Reply> {
     let store=Store::default();
     Ok(match call {
         Call::RssFeeds { .. }=>Reply::RssFeeds(FeedsResult { feeds:service.feeds().map_err(failure)? }),
@@ -54,9 +53,8 @@ fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl 
         Call::RssGrab { args }=> {
             let f=feed_in(service,&args.feed)?; let item=require_item(service,&args.feed,&args.item)?;
             let source=if let Some(magnet)=item.magnet {AddSource::Magnet(magnet)}else if let Some(url)=item.torrent_url {AddSource::Url(url)}else {return Err(error(ErrorCode::InvalidState,"item has no downloadable source",Some("item")));};
-            let add=serde_json::from_value(json!({"source":source,"stopped":args.stopped,"seed":args.seed,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"rss"})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
-            let added=add_torrent(add)?;
-            store.mark_grabbed(&f.name,&args.item).map_err(failure)?;
+            let add=serde_json::from_value(json!({"source":source,"stopped":args.stopped,"seed":args.seed,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"rss","stage":args.stage})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
+            let added=add_torrent(add,&f.id,&args.item)?;
             Reply::RssGrab(added)
         },
         _=>return Err(error(ErrorCode::Unsupported,"not an RSS operation",None)),
