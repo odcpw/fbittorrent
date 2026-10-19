@@ -1,5 +1,11 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("search.sort",Scope::Screen(Screen::Search),&[],"Sort results",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
+    action!("search.reverse_sort",Scope::Screen(Screen::Search),&[],"Reverse results sort",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('S'))]),None,None),
+    action!("search.copy_magnet",Scope::Pane(Screen::Search,Pane::Results),&[],"Copy magnet",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('y'))]),None,None),
     action!(
         "search.next",
         Scope::Screen(Screen::Search),

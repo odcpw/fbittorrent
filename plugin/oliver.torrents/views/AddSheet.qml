@@ -56,7 +56,7 @@ FocusScope {
       anchors.fill:parent;anchors.margins:Commons.Style.space(18)
       spacing:Commons.Style.spacing.xxl
       Text {textFormat:Text.PlainText;text:"Add torrent";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title;font.bold:true}
-      Ui.TextField {id:sourceInput;visible:root.model.phase==="input" || (root.model.phase==="error" && !root.model.source && !root.model.owned);Layout.fillWidth:true;placeholderText:"Magnet, HTTP URL or .torrent path";maximumLength:65536;onAccepted:root.flow.review(text)}
+      Ui.TextField {id:sourceInput;visible:root.model.phase==="input" || (root.model.phase==="error" && !root.model.source && !root.model.owned && !root.model.search);Layout.fillWidth:true;placeholderText:"Magnet, HTTP URL or .torrent path";maximumLength:65536;onAccepted:root.flow.review(text)}
       Text {visible:root.model.name!=="";Layout.fillWidth:true;textFormat:Text.PlainText;text:(root.model.duplicate ? "Already in your list: " : "")+root.model.name;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;wrapMode:Text.Wrap;maximumLineCount:3;elide:Text.ElideRight;HoverHandler {id:nameHover} Components.FullTextTip {visible:nameHover.hovered;text:parent.text}}
       Text {
         Layout.fillWidth:true;textFormat:Text.PlainText;wrapMode:Text.Wrap

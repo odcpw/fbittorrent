@@ -24,6 +24,7 @@ Item {
   property bool disposing:false
   property string routeError:""
   readonly property var torrents:torrentsLoader.item
+  readonly property var search:searchLoader.item
   readonly property var views:["torrents","search","shows","rss","settings","log"]
   readonly property var labels:["Torrents","Search","Shows","RSS","Settings","Log"]
   function selectTorrent(hash){currentView="torrents";selectedHash=hash;if(torrents)torrents.cursorHash=hash}
@@ -37,17 +38,18 @@ Item {
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
       cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
+    if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
     if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
 
   }
   function focusView() {
     if (disposing || !svc || !window.visible)return
     if(addSheet.item){svc.focusWindow(window,addSheet.item);return}
-    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" ? searchInput : currentView==="torrents" && torrents ? torrents : scope
+    var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" && search ? search.queryTarget : currentView==="torrents" && torrents ? torrents : scope
     svc.focusWindow(window,target)
   }
   function open(payloadJson) {
-    var payload={}
+    var payload={},searchWasOpen=!!root.search
     routeError=""
     if(payloadJson) {
       if(String(payloadJson).length>65536) {routeError="Window request is too large";return false}
@@ -72,6 +74,7 @@ Item {
       svc.client.request("torrents.get",{hash:hash},{callback:function(result){if(result && result.torrent.staged)svc.addFlow.existing(hash)}})
     }
     publish()
+    if(searchWasOpen && payload.query!==undefined && currentView==="search")Qt.callLater(function(){if(root.search)root.search.open(payload.query,true)})
     Qt.callLater(focusView)
     return true
   }
@@ -121,7 +124,8 @@ Item {
       Keys.onPressed:function(event) {
         if(addSheet.active){if(addSheet.item && addSheet.item.handleKey(event))event.accepted=true;return}
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
-        if(root.currentView==="torrents" && torrents && torrents.editing)return
+        if(root.currentView==="search" && root.search && root.search.handleKey(event)){event.accepted=true;return}
+        if((root.currentView==="torrents" && torrents && torrents.editing) || (root.currentView==="search" && root.search && root.search.editing))return
         if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(event.key===Qt.Key_Escape) {
           if(root.query!==""){root.query="";event.accepted=true}
@@ -135,8 +139,8 @@ Item {
       }
       Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active;onActivated:root.svc.addClipboardSheet()}
       Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online;onActivated:root.svc.quit()}
-      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(1)}
-      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(-1)}
+      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen);onActivated:root.cycleView(1)}
+      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen) && (!root.search || !root.search.dialogOpen);onActivated:root.cycleView(-1)}
       ColumnLayout {
         anchors.fill:parent
         anchors.margins:Commons.Style.space(0)
@@ -184,9 +188,22 @@ Item {
               onDismissRequested:root.dismiss()
             }
           }
+          Loader {
+            id:searchLoader
+            anchors.fill:parent
+            active:window.visible && !!root.svc && root.svc.online && root.currentView==="search"
+            onActiveChanged:if(!active && root.svc)root.svc.cancelWindowFocus(window)
+            onLoaded:{root.publish();Qt.callLater(root.focusView)}
+            sourceComponent:Views.SearchView {
+              service:root.svc;initialQuery:root.query
+              onQueryEdited:function(text){root.query=text}
+              onChanged:root.publish()
+              onDismissRequested:root.dismiss()
+            }
+          }
           ColumnLayout {
             anchors.fill:parent
-            visible:!!root.svc && root.svc.online && root.currentView!=="torrents"
+            visible:!!root.svc && root.svc.online && root.currentView!=="torrents" && root.currentView!=="search"
             spacing:Commons.Style.spacing.panelGap
             Text {text:root.labels[root.views.indexOf(root.currentView)];textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title;font.bold:true}
             Ui.TextField {

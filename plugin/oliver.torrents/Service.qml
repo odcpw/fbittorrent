@@ -11,6 +11,7 @@ import "Focus.js" as Focus
 import "AddFlow.js" as AddFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
+import "SearchFlow.js" as SearchFlow
 
 Item {
   id: root
@@ -42,7 +43,7 @@ Item {
     if(wanted!==!!logTopics.length){logTopics=wanted ? ["log"] : [];if(wanted)client.request("app.log",{limit:1000})}
   }
   function setFiles(hash,indexes,included,callback){var args={hash:hash};args[included ? "include" : "skip"]=indexes;return mutate("torrents.set_files",args,"files",callback)}
-  function lookupImdb(args,callback){return hasCap("imdb") ? client.request("imdb.lookup",args,{callback:callback}) : false}
+  function lookupImdb(args,callback){return hasCap("imdb") ? client.request("imdb.lookup",args,{callback:callback,quiet:true}) : false}
   function copyText(text){if(text!==undefined){Commons.Util.execArgv(["wl-copy","--",String(text)]);notify("Copied")}}
   function openUrl(url){if(url && /^https?:\/\//.test(url))Commons.Util.execArgv(["xdg-open",url])}
   function scheduleDetail(hash){detailChoice.hash=hash;detailChoice.restart();imdbChoice.restart()}
@@ -50,6 +51,12 @@ Item {
   Timer {id:detailChoice;property string hash:"";interval:150;onTriggered:if(root.detailFlow)root.detailFlow.begin(hash)}
   Timer {id:imdbChoice;interval:300;onTriggered:if(root.detailFlow)root.detailFlow.lookup()}
 
+  property var searchTopics:[]
+  property var searchFlow:null
+  property int searchRevision:0
+  function scheduleSearchPoster(){searchPoster.restart()}
+  Timer {id:searchPoster;interval:300;onTriggered:if(root.searchFlow)root.searchFlow.lookup()}
+  function beginSearchAdd(row,session){return addFlow ? addFlow.search(row,session) : false}
   property var addTopics:[]
   property var addFlow:null
   property int addRevision:0
@@ -172,6 +179,7 @@ Item {
     syncRows();badgeCounts=store.badges
     if(addFlow)addFlow.frame(frame)
     if(detailFlow)detailFlow.frame(frame,request)
+    if(searchFlow)searchFlow.frame(frame)
     if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
     if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
@@ -217,6 +225,7 @@ Item {
   function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard() { return mutate("app.clipboard.dismiss", {}, "clipboard") }
+  function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}
   function cancelWindowFocus(window) {
     if(windowFocus && windowFocus.window===window){windowFocus=null;focusRetry.stop()}
   }
@@ -293,11 +302,12 @@ Item {
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
-  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
-  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
-  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics))
+  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics))
+  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics))
+  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
+  onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
+  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
+  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics))
 
   FileView {
     id:preferences
@@ -363,6 +373,7 @@ Item {
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }
   }
   Component.onCompleted: {
+    searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
@@ -371,7 +382,7 @@ Item {
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
-    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics))
+    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics))
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

@@ -109,6 +109,11 @@ ShellRoot {
     s=session();s.c.connected();s.reply({proto:1,caps:[],instance:"bad"})
     check("protocol",s.resets.length===1,"invalid hello shape resets session",s.c.lastError.message)
     console.log("FBTQS-PASS protocol")
+    s=session();s.hello();var optionalError=null
+    var optional=s.c.request("imdb.lookup",{name:"Missing"},{quiet:true,callback:function(result,error){optionalError=error}})
+    s.c.receive(JSON.stringify({id:optional,ok:false,error:{code:"upstream",message:"optional poster unavailable",retryable:true}}))
+    check("optional_error",optionalError && optionalError.code==="upstream" && !s.c.lastError,"optional read retains its typed callback failure without becoming a global mutation/error banner",optionalError)
+    console.log("FBTQS-PASS optional_error")
     s=session();s.hello([]);length=s.writes.length
     s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)

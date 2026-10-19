@@ -137,7 +137,7 @@ def run(binary):
             case.check(state['view']['window']['view']=='search' and state['view']['query']=='sintel','actual omarchy-shell CLI routes Search/query to the private real Dashboard',json.dumps(state))
             keyboard=subprocess.Popen(['wtype','-s','80','-k','End','-s','30',' typed','-s','700'],env=q.env)
             try:
-                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view']['cursor']=='query' else None)
+                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view'].get('focus',s['view']['cursor'])=='query' else None)
                 case.check(True,'typing through wtype reaches the focused native search field',json.dumps(dict(state=typed,focus_steps=q.ipc('focusSteps'))))
             finally:keyboard.wait(timeout=3)
             q.keys(['-k','Tab'],lambda:q.state()['view']['window']['view']=='shows')

@@ -66,7 +66,15 @@ ShellRoot {
     check("destination","old path replies cannot enable a new destination",f.snapshot(),!f.snapshot().destinationReady && f.snapshot().savePath==="/latest")
     s.now=600;f.tick();s.reply("app.free_space",{writable:true,free_bytes:0});f.commit()
     check("destination","known zero is kept and writable destination reaches add",s.calls[s.calls.length-1],f.snapshot().space.free_bytes===0 && s.calls[s.calls.length-1].op==="torrents.add" && s.calls[s.calls.length-1].args.save_path==="/latest")
-    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription","destination"].forEach(function(name){console.log("FBTQS-PASS "+name)})
+    s=service(["torrents","search"]);f=Flow.create(s,function(){},true)
+    var result={key:hash,name:"Search selection",providers:["alpha"],magnet:source.magnet}
+    f.search(result,7);check("search_review","legacy search opens review without a write",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && f.snapshot().search)
+    f.commit();check("search_review","Download invokes real search.grab from a stable result with review defaults",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.result.key===hash && s.calls[0].args.seed===true && !s.calls[0].args.stage)
+    s.reply("search.grab",{hash:hash});check("search_review","confirmed grab selects the downloaded torrent",f.snapshot(),!f.snapshot().visible && s.selected===hash)
+    s=service(["torrents","search","staging"]);f=Flow.create(s,function(){},true);f.search(result,7)
+    check("search_review","negotiated staging uses the session/key and stage true",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.stage===true && s.calls[0].args.search_id===7 && s.calls[0].args.key===hash)
+    s.reply("search.grab",{hash:hash});check("search_review","staged grab enters the shared metadata/file selection flow",f.snapshot(),f.snapshot().owned && s.calls[1].op==="torrents.get")
+    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})
     Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})
   }
 }

@@ -179,6 +179,15 @@ hl.window_rule({
 })
 ```
 
+Search starts from a query payload or Enter in the focused query field. Results
+stream from the daemon, merge duplicate hashes, and keep provider names. Press
+`s` to sort Seeds, Size, Uploaded, Name or rating, and `S` to reverse; unknown
+measurements stay last. `b` opens browse lists and `P` manages providers. A result
+marked `+ In your list` selects its existing torrent on Enter. New results open
+the shared review sheet: staged add is used when the daemon advertises it; older
+daemons send `search.grab` only after Download. `y` copies a magnet, `O` opens the
+source page, and `f` follows an IMDb-linked show. The table renders at most 500 rows.
+
 The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
 logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
 closes it. Drag the divider to resize it; width and sort order survive reopening
@@ -471,6 +480,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Sort results | — | `s` | — |  |
+| `screen:search` | Reverse results sort | — | `S` | — |  |
+| `pane:search.results` | Copy magnet | — | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -537,9 +549,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:files` | High (legacy) | `2` | — | — |  |
 | `modal:files` | Max (legacy) | `3` | — | — |  |
 | `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
-| `modal:providers` | Next | `j`, `↓` | — | — |  |
-| `modal:providers` | Previous | `k`, `↑` | — | — |  |
-| `modal:providers` | Toggle | `Space` | — | — |  |
+| `modal:providers` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:providers` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:providers` | Toggle | `Space` | `Space` | — |  |
 | `modal:providers` | All | `a` | — | — |  |
 | `modal:providers` | None | `n` | — | — |  |
 | `modal:providers` | Reload | `r` | — | — |  |

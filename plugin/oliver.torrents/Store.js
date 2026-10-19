@@ -89,6 +89,7 @@ function create(options) {
   }
   function topicKey(topic, row) {
     if (topic === "torrents") return row.hash
+    if (/^search:/.test(topic)) return row.key
     if (/^torrent:.*\.trackers$/.test(topic)) return row.url
     if (/^torrent:.*\.files$/.test(topic)) return String(row.index)
     if (topic === "events" || topic === "log") return String(row.seq)
@@ -98,7 +99,7 @@ function create(options) {
     var target=s.topics.log || dictionary(),keys=Object.keys(target)
     if(keys.length>1000){keys.sort(function(a,b){return Number(a)-Number(b)});keys.slice(0,keys.length-1000).forEach(function(k){delete target[k]})}
   }
-  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^torrent:/.test(topic))delete s.topics[topic]})}
+  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^(torrent:|search:)/.test(topic))delete s.topics[topic]})}
   s.logEntries=function(hash){var rows=s.topics.log || {};return Object.keys(rows).map(function(k){return rows[k]}).filter(function(r){return !hash || r.hash===hash}).sort(function(a,b){return a.seq-b.seq})}
   function keepMutation(reference, value) {
     var refs = Object.keys(s.mutations)

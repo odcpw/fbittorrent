@@ -34,7 +34,7 @@ function create(io, options) {
   function fail(entry, failure, status) {
     if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
     if (entry.callback) entry.callback(null, failure)
-    c.lastError = failure
+    if(!entry.quiet)c.lastError = failure
   }
   function write(entry, resend) {
     var frame = { id: c.nextId++, op: entry.op }
@@ -65,7 +65,7 @@ function create(io, options) {
       if (settings.callback) settings.callback(null, unsupported)
       changed(); return false
     }
-    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance,
+    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance, quiet:settings.quiet===true && !settings.mutating,
       ref: settings.mutating ? "qs-" + c.started + "-" + c.nextRef++ : undefined }
     if (entry.ref) {
       var refs = Object.keys(c.actions)
