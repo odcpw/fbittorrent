@@ -97,4 +97,3 @@ impl TuiApp {
         Paragraph::new(foot).style(bg.fg(th.dim)).wrap(WrapMode::None).render(rows[1], frame);
     }
 }
-

@@ -92,4 +92,3 @@ impl TuiApp {
         if target.is_some() && target == self.marquee_key { self.marquee_since.elapsed() } else { Duration::ZERO }
     }
 }
-

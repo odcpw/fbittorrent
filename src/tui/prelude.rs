@@ -27,4 +27,3 @@ pub(super) use crate::shows::{self, Episode, Show, Shows};
 pub(super) use crate::qbt::{human_bytes, human_eta, human_rate, ymd, AddOptions, Client, RssFeed, SearchPlugin, SearchResult, Torrent, TorrentFile, TransferInfo};
 pub(super) use super::poster::{KittyPlacer, Poster};
 pub(super) use super::theme::Theme;
-

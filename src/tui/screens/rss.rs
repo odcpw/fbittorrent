@@ -176,4 +176,3 @@ impl TuiApp {
         StatefulWidget::render(&list, inner, frame, &mut self.item_list.borrow_mut());
     }
 }
-

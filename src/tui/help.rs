@@ -108,4 +108,3 @@ Defaults: seeding off; (U) allows it per torrent.")
             .style(Style::new().fg(th.accent).bg(th.selection)).wrap(WrapMode::None).render(rows[1], frame);
     }
 }
-

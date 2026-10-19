@@ -99,4 +99,3 @@ impl TuiApp {
         Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { bg.fg(th.red) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(3), inner.width, remaining), frame);
     }
 }
-
