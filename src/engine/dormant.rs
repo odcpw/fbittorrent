@@ -66,8 +66,8 @@ impl Inner {
                 let start = file.pieces.start.max(selected_end);
                 if selected && !file.details.attrs().padding && start < file.pieces.end {
                     let piece_length = u64::from(lengths.default_piece_length());
-                    let end_bytes = (u64::from(file.pieces.end) * piece_length)
-                        .min(lengths.total_length());
+                    let end_bytes =
+                        (u64::from(file.pieces.end) * piece_length).min(lengths.total_length());
                     selected_bytes += end_bytes - u64::from(start) * piece_length;
                     selected_end = file.pieces.end;
                 }
@@ -117,7 +117,10 @@ impl Inner {
             &hash,
             RestoreOutcome::Failed {
                 reason: "missing_files",
-                message: "downloaded files are missing".into(),
+                message: format!(
+                    "{} restore failed: missing files",
+                    ledger.records[index].name
+                ),
             },
         );
         self.save(cx, ledger).await?;

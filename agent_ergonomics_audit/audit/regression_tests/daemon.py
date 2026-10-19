@@ -1559,6 +1559,50 @@ def api_start_results(binary, systemd):
         case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
                    "bulk start preserves completed and already-running skip reasons", str(bulk))
 
+
+def api_missing_completed_payload(binary, systemd):
+    with api_owned("api_missing_completed_payload", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        client.hello()
+        directory = sandbox.root / "missing-payload-source"
+        directory.mkdir()
+        payload = directory / "Fixture.bin"
+        payload.write_bytes(os.urandom(4096))
+        fixture = fixtures.torrent_fixture(directory, [payload])
+        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(sandbox.downloads), stopped=True))
+        replay_missing_payload(client, harness, dict(hash=fixture.info_hash, fixture=fixture, pristine=directory), sandbox.downloads)
+
+
+def api_loopback_seed_receives(binary, systemd):
+    with api_owned("api_loopback_seed_receives", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client, \
+            Sandbox() as seedbox, Harness(case, binary, seedbox, systemd) as seed_harness:
+        seed_process = seed_harness.start_serve()
+        if not (seed_harness.receive_ready() and seed_harness.wait_engine()):
+            raise RuntimeError("real seed fixture did not start")
+        try:
+            client.hello()
+            directory = sandbox.root / "loopback-payload"
+            directory.mkdir()
+            payload = directory / "Receive.bin"
+            payload.write_bytes(os.urandom(8 * fixtures.MIB))
+            fixture = fixtures.torrent_fixture(directory, [payload])
+            peer_port = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())["peer_port"]
+            tracker = fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=socket.inet_aton("127.0.0.1") + struct.pack("!H", peer_port)))
+            with fixtures.HttpFixture(directory, {"/announce": dict(base64=base64.b64encode(tracker).decode())}) as http:
+                fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info, announce=http.base + "/announce")))
+                item = dict(hash=fixture.info_hash, fixture=fixture, pristine=directory)
+                harness.seed_harness, harness.replay_seedbox = seed_harness, seedbox
+                client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(sandbox.downloads), stopped=True))
+                start_replay_seed(client, harness, item)
+                client.call("torrents.start", dict(hashes=[fixture.info_hash]))
+                frame = receive_replay_sample(client, item, dict(id=50000, op="torrents.get", args=dict(hash=fixture.info_hash)))
+                row = frame["result"]["torrent"]
+                case.check(row["state"] == "downloading" and row.get("dl_bps", 0) > 0 and 0 < row["completed_bytes"] < row["size"],
+                           "real 8 MiB loopback payload is receiving at sample time", json.dumps(row))
+        finally:
+            seed_harness.stop_serve(seed_process)
+            seed_harness.lock_free()
+
+
 def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     """Use P1-05's exact Rust decoder, not a Python schema approximation."""
     trace = case.path.with_suffix("." + kind + ".ndjson")
@@ -1677,12 +1721,13 @@ class ReplayNormalizer:
             if type(wanted) is not type(got):
                 raise ReplayMismatch(f"JSON pointer {pointer or '/'}: expected {wanted!r}, observed {got!r}")
             if isinstance(wanted, dict):
-                for key in sorted(wanted.keys() | got.keys()):
+                for key in sorted(wanted):
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                    if key not in wanted:
-                        self.extra_optional.append((here, got[key]))
-                    elif key not in got:
+                    if key not in got:
                         raise ReplayMismatch(f"JSON pointer {here}: expected {wanted.get(key, '<missing>')!r}, observed {got.get(key, '<missing>')!r}")
+                for key in sorted(got.keys() - wanted.keys()):
+                    here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
+                    self.extra_optional.append((here, got[key]))
                 result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
                 result.update((key, value) for key, value in got.items() if key not in wanted)
                 return result
@@ -1699,6 +1744,44 @@ class ReplayNormalizer:
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         if canonical(normalized) != canonical(live):
             raise ReplayMismatch("JSON pointer /: canonical byte comparison failed")
+
+
+def replay_namespace_child(manifest_path):
+    """VPN fixture pattern: real seed, tracker and daemon in one owned netns."""
+    manifest = json.loads(Path(manifest_path).read_text())
+    if os.readlink("/proc/self/ns/net") == manifest["host_netns"]:
+        raise RuntimeError("refusing replay interface mutations outside the owned network namespace")
+    subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
+    subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
+    compact = socket.inet_aton("127.0.0.1") + struct.pack("!H", manifest["seed_port"])
+    tracker = fixtures.HttpFixture(Path(manifest_path).parent, {
+        "/announce": dict(base64=base64.b64encode(fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=compact))).decode())})
+    children = []
+    def terminate(*_):
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+    signal.signal(signal.SIGTERM, terminate)
+    signal.signal(signal.SIGINT, terminate)
+    try:
+        seed = subprocess.Popen(manifest["seed"], env=manifest["seed_env"], stdin=subprocess.DEVNULL)
+        children.append(seed)
+        main = subprocess.Popen(manifest["main"], stdin=subprocess.DEVNULL)
+        children.append(main)
+        Path(manifest["info"]).write_text(json.dumps(dict(namespace=os.readlink("/proc/self/ns/net"), tracker=tracker.base + "/announce",
+            seed_port=manifest["seed_port"], seed_pid=seed.pid, main_pid=main.pid), sort_keys=True))
+        return main.wait()
+    finally:
+        terminate()
+        exits = []
+        for child in children:
+            try:
+                exits.append(child.wait(timeout=10))
+            except subprocess.TimeoutExpired:
+                child.kill(); child.wait()
+                raise RuntimeError("owned replay child required SIGKILL")
+        tracker.close()
+        Path(manifest["cleanup"]).write_text(json.dumps(dict(exits=exits, tracker_closed=tracker.closed), sort_keys=True))
 
 
 @contextmanager
@@ -1732,13 +1815,36 @@ def replay_owned(group, binary, systemd):
                 config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
                 select_replay_interface(config, None)
                 config.write_text(config.read_text() + '\nmax_active_downloads = 1\n')
-                setup = 'set -e; ip link set lo name fixture0; ip link set fixture0 up; exec "$@"'
-                command = ["unshare", "--user", "--map-root-user", "--net", "--", "sh", "-c", setup, "fbt-replay", *command]
+                seedbox = harness.resources.enter_context(Sandbox())
+                seedconfig = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+                select_replay_interface(seedconfig, None)
+                if tomllib.loads(seedconfig.read_text())["peer_port"] == tomllib.loads(config.read_text())["peer_port"]:
+                    with socket.socket() as reservation:
+                        reservation.bind(("127.0.0.1", 0))
+                        port = reservation.getsockname()[1]
+                    seedconfig.write_text(re.sub(r'^peer_port = .*$', 'peer_port = ' + str(port), seedconfig.read_text(), flags=re.M))
+                harness.seed_harness = harness.resources.enter_context(Harness(case, binary, seedbox))
+                harness.replay_seedbox = seedbox
+                manifest = sandbox.root / "replay-namespace.json"
+                harness.replay_namespace_info = sandbox.root / "replay-namespace-info.json"
+                harness.replay_namespace_cleanup = sandbox.root / "replay-namespace-cleanup.json"
+                manifest.write_text(json.dumps(dict(main=command, seed=DaemonContract.command(str(binary), 300, True),
+                    seed_env=seedbox.env, seed_port=tomllib.loads(seedconfig.read_text())["peer_port"],
+                    info=str(harness.replay_namespace_info), cleanup=str(harness.replay_namespace_cleanup), host_netns=os.readlink("/proc/self/ns/net"))))
+                command = ["unshare", "-Urn", "--", sys.executable, str(Path(__file__).resolve()), "--replay-namespace-child", str(manifest)]
             # No NOTIFY_SOCKET is injected: the hello fixture presupposes the
             # documented foreground identity. All launches still use Harness.
             process = harness.spawn(command)
             if not harness.wait_engine():
                 raise RuntimeError("replay daemon did not answer")
+            if group == "torrents":
+                if not harness.wait_for(lambda: (harness.replay_namespace_info.exists(), str(harness.replay_namespace_info)), "owned namespace seed/tracker manifest exists"):
+                    raise RuntimeError("replay namespace did not publish fixture endpoints")
+                harness.replay_network = json.loads(harness.replay_namespace_info.read_text())
+                if not harness.seed_harness.wait_engine():
+                    raise RuntimeError("real loopback seed daemon did not answer")
+                shutil.copyfile(harness.replay_namespace_info, case.path.with_suffix(".namespace.json"))
+                case.check(True, "VPN namespace fixture availability", json.dumps(dict(opt_in=os.environ.get("FBT_TEST_VPN") == "1", **harness.replay_network), sort_keys=True))
             with ApiConn(harness) as ready:
                 ready.hello()
                 harness.wait_for(lambda: ((info := ready.call("app.info")["result"])["state"] == "running", json.dumps(info)), "replay owner is running before transcript")
@@ -1751,6 +1857,11 @@ def replay_owned(group, binary, systemd):
                     process.wait()
             if process is not None:
                 harness.lock_free()
+            if group == "torrents" and hasattr(harness, "replay_namespace_cleanup") and harness.replay_namespace_cleanup.exists():
+                cleanup = json.loads(harness.replay_namespace_cleanup.read_text())
+                case.check(cleanup["exits"] == [0, 0] and cleanup["tracker_closed"], "real seed, tracker and main daemon exit with owned namespace", str(cleanup))
+                harness.seed_harness.lock_free()
+                shutil.copyfile(harness.replay_namespace_cleanup, case.path.with_suffix(".namespace-cleanup.json"))
             if payload_root is not None:
                 live = process is not None and (process.child.poll() is None or process.group_members())
                 if live:
@@ -1786,7 +1897,7 @@ def replay_preconditions(lines, client, normalizer, root):
             specs = [(file["path"], file["size"], file["progress"]) for file in files]
         else:
             count = detail.get("file_count", 1)
-            total = row.get("size", 4096)
+            total = detail.get("size", row.get("size", 4096))
             specs = [(row["name"] if count == 1 else row["name"] + f" {index + 1}.bin",
                       total // count + (index < total % count), row.get("progress", 0.0)) for index in range(count)]
         if files and "size" in row:
@@ -1800,9 +1911,15 @@ def replay_preconditions(lines, client, normalizer, root):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(os.urandom(size))
             payloads.append(path)
+        pristine = directory / "pristine"
+        pristine.mkdir()
+        for payload in payloads:
+            shutil.copyfile(payload, pristine / payload.name)
         fixture = fixtures.torrent_fixture(directory, payloads, name=row["name"], piece_length=detail.get("piece_size", 1024))
         fixture.info["private"] = int(detail.get("private", False))
         document = dict(info=fixture.info)
+        if row["state"] == "downloading":
+            document["announce"] = client.harness.replay_network["tracker"]
         for key, wire_key in (("comment", "comment"), ("created_by", "created by")):
             if key in detail: document[wire_key] = detail[key]
         fixture.torrent.write_bytes(fixtures.bencode(document))
@@ -1821,7 +1938,7 @@ def replay_preconditions(lines, client, normalizer, root):
         actual_hash = reply["result"]["hash"]
         client.case.check(actual_hash == fixture.info_hash, "API add identity matches the generator's actual metainfo hash", f"expected={fixture.info_hash}; observed={actual_hash}")
         normalizer.bind("hash", fixture_hash, actual_hash, "/preconditions/hash")
-        prepared[fixture_hash] = dict(row=row, fixture=fixture, hash=actual_hash, specs=specs)
+        prepared[fixture_hash] = dict(row=row, fixture=fixture, hash=actual_hash, specs=specs, pristine=pristine)
         # Establish files using the API's save_path, separate from the pristine
         # source/generator directory. These are real payloads, never ledger edits.
         for payload in payloads:
@@ -1849,7 +1966,56 @@ def replay_preconditions(lines, client, normalizer, root):
     return prepared
 
 
-def drive_replay_state(client, prepared, fixture_hash, harness):
+def replay_missing_payload(client, harness, item, save_path):
+    """Complete through the engine, unlink real payloads, restart, then activate."""
+    digest, fixture = item["hash"], item["fixture"]
+    client.call("torrents.remove", dict(hashes=[digest], delete_files=False))
+    for payload in fixture.files:
+        shutil.copyfile(item["pristine"] / payload.name, save_path / payload.name)
+    client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(save_path), seed=True))
+    harness.wait_for(lambda: ((row := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["state"] == "seeding", json.dumps(row)), "missing-payload fixture is actually completed and seeding")
+    client.call("torrents.set_seed", dict(hashes=[digest], on=False))
+    for payload in fixture.files:
+        (save_path / payload.name).unlink()
+    epoch = client.call("app.info")["result"]["engine_epoch"]
+    client.call("app.restart", dict(scope="engine"))
+    harness.wait_for(lambda: ((info := client.call("app.info")["result"])["engine_epoch"] > epoch and info["state"] == "running", json.dumps(info)), "completed missing-payload record restarts without admitting data")
+    dormant = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
+    client.case.check(dormant["state"] == "done" and not dormant["checked"], "restart retains the unverified dormant completion claim before explicit activation", json.dumps(dormant))
+    client.call("torrents.set_seed", dict(hashes=[digest], on=True), error="invalid_state")
+    row = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
+    client.case.check(row["state"] == "error" and row["reason"] == "missing_files" and
+                      row["error"] == row["name"] + " restore failed: missing files" and "completed_at" not in row,
+                      "missing payload activation has canonical text/reason and clears stale completion", json.dumps(row))
+
+
+def start_replay_seed(client, harness, item):
+    seedbox = harness.replay_seedbox
+    for payload in item["fixture"].files:
+        shutil.copyfile(item["pristine"] / payload.name, seedbox.downloads / payload.name)
+    with ApiConn(harness.seed_harness) as seed:
+        seed.hello()
+        added = seed.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path=str(seedbox.downloads), seed=True))
+        client.case.check(added["result"]["hash"] == item["hash"], "real loopback seed and client use identical metainfo", str(added))
+        harness.wait_for(lambda: ((row := seed.call("torrents.get", dict(hash=item["hash"]))["result"]["torrent"])["state"] == "seeding", json.dumps(row)), "loopback seed finishes its real checksum check")
+        seed.call("torrents.set_upload_limit", dict(hashes=[item["hash"]], bps=32768))
+
+
+def receive_replay_sample(client, item, query, timeout=8):
+    began, attempt, frame = time.monotonic(), 0, None
+    while time.monotonic() - began < timeout:
+        attempt += 1
+        client.send_frame(query)
+        frame = client.response(query["id"])
+        row = frame["result"]["torrent"]
+        client.case.check(True, "bounded real loopback receive/query attempt", json.dumps(dict(attempt=attempt, elapsed_ms=round((time.monotonic()-began)*1000), torrent=row), sort_keys=True))
+        if (row["state"] == "downloading" and row.get("dl_bps", 0) > 0) or row["state"] == "done":
+            break
+        time.sleep(.05)
+    return frame
+
+
+def drive_replay_state(client, prepared, fixture_hash, harness, query):
     """Establish each detail scenario using real intent/restart operations."""
     item = prepared[fixture_hash]
     row, digest = item["row"], item["hash"]
@@ -1858,7 +2024,7 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
     live_hashes = {value["hash"] for value in available}
     if digest not in live_hashes:
         client.case.check(True, "ruling 4E defers the removed-record detail precondition to P6-08", f"JSON pointer /result/torrent/hash: {fixture_hash} was removed earlier; no silent re-add")
-        return desired
+        return None
     if desired in ("queued", "stalled", "downloading"):
         for other in prepared.values():
             if other["hash"] != digest and other["hash"] in live_hashes:
@@ -1872,7 +2038,13 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
             harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["checked"], json.dumps(value)), "real queued target completes its initial check")
             blocker = next(other for other in prepared.values() if other["hash"] != digest and other["hash"] in live_hashes and 0 < other["row"].get("progress", 0) < 1)
             client.call("torrents.start", dict(hashes=[blocker["hash"]]))
+        if desired == "downloading":
+            start_replay_seed(client, harness, item)
+            # Re-admit so the real tracker/seed is available on the first dial.
+            client.call("torrents.set_files", dict(hash=digest, include=list(range(len(item["specs"])))))
         client.call("torrents.start", dict(hashes=[digest]))
+        if desired == "downloading":
+            return receive_replay_sample(client, item, query)
         if desired == "queued":
             harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["state"] == "queued", json.dumps(value)), "FIFO queue precondition is actually queued")
     elif desired == "paused":
@@ -1880,23 +2052,20 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
     elif desired == "metadata":
         client.call("torrents.start", dict(hashes=[digest]))
     elif desired == "checking":
-        # A real new add starts verification; do not invent an activity flag or
-        # alter the immutable 4 KiB fixture to prolong the check artificially.
-        client.call("torrents.remove", dict(hashes=[digest], delete_files=False))
-        client.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=row["intent"] == "pause"))
+        # SetFiles admission performs a real recheck; the frozen v1 table has
+        # no recheck operation. Retain the immediate response, never re-query it.
+        frame = None
+        for attempt in range(1, 4):
+            client.call("torrents.set_files", dict(hash=digest, include=list(range(len(item["specs"])))))
+            client.send_frame(query)
+            frame = client.response(query["id"])
+            sample = frame["result"]["torrent"]
+            client.case.check(True, "bounded real recheck/query attempt", json.dumps(dict(attempt=attempt, size=sample.get("size"), torrent=sample), sort_keys=True))
+            if sample["state"] == "checking":
+                break
+        return frame
     elif desired == "error":
-        client.call("torrents.start", dict(hashes=[digest]))
-        # Corrupt an owned cache only after the record was added via API, then
-        # genuinely restore it. This is not a synthetic ledger/error entry.
-        cache = Path(harness.sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine" / (digest + ".torrent")
-        original = cache.read_bytes()
-        cache.write_bytes(b"not bencoded metainfo")
-        client.call("app.restart", dict(scope="engine"))
-        try:
-            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "running", json.dumps(info)), "real cache-corruption owner restarts")
-            harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["state"] == "error", json.dumps(value)), "real cache corruption becomes a restore error")
-        finally:
-            cache.write_bytes(original)
+        replay_missing_payload(client, harness, item, Path("/tmp/fbt-fixture/downloads"))
     elif desired == "waiting_vpn":
         client.call("torrents.start", dict(hashes=[digest]))
         config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
@@ -1904,7 +2073,7 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
         select_replay_interface(config, "fbmissing0")
         client.call("app.restart", dict(scope="engine"))
         harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "parked", json.dumps(info)), "missing private fixture interface parks the real owner")
-    return desired
+    return None
 
 
 def select_replay_interface(config, interface):
@@ -2083,7 +2252,7 @@ def contract_group(group, binary, systemd):
     path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     normalizer = ReplayNormalizer()
-    deferred, frames, request, prepared, optional = [], [], None, {}, []
+    deferred, frames, request, prepared, optional, driven = [], [], None, {}, [], None
     with replay_owned(group, binary, systemd) as (case, sandbox, harness, process, root):
         if group == "torrents":
             with ApiConn(harness) as setup:
@@ -2097,13 +2266,20 @@ def contract_group(group, binary, systemd):
             for number, line in enumerate(lines, 1):
                 if line["dir"] == "c2s":
                     request = line["frame"]
-                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared:
-                        drive_replay_state(client, prepared, request["args"]["hash"], harness)
-                    if group != "errors" or request["op"] == "hello":
-                        live_request = normalizer.request(request)
+                    driven = None
+                    live_request = normalizer.request(request) if group != "errors" or request["op"] == "hello" else None
+                    next_frame = lines[number].get("frame", {}) if number < len(lines) and lines[number]["dir"] == "s2c" else {}
+                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared and not replay_frame_deferrals(next_frame, request["op"]):
+                        driven = drive_replay_state(client, prepared, request["args"]["hash"], harness, live_request)
+                    if live_request is not None and driven is None:
                         client.send_frame(live_request)
                 elif line["dir"] == "s2c":
                     expected = line["frame"]
+                    if group == "torrents" and number in (43, 63):
+                        minimum = (64 if number == 43 else 8) * fixtures.MIB
+                        size = expected.get("result", {}).get("torrent", {}).get("size", 0)
+                        if size < minimum:
+                            case.check(True, "P1-05b pending fixture size; comparison remains active", json.dumps(dict(fixture=str(path.relative_to(REPO)), line=number, pointer="/result/torrent/size", size=size, required_minimum=minimum, bead="P1-05b", reason="ruling 5: tiny fixture cannot retain the required live state; pending enlarged transcript"), sort_keys=True))
                     if request is None and group == "errors":
                         # Dedicated input validation scenarios have no c2s line.
                         raw = b'{"id":0,"op":"app.info"}\n' if number == 36 else b'x' * 65537 if number == 37 else None
@@ -2114,6 +2290,8 @@ def contract_group(group, binary, systemd):
                     condition_deferrals = []
                     if group == "errors" and current and "error" in expected:
                         actual, condition_deferrals = replay_error(expected, current, client, normalizer, harness, number, frames)
+                    elif driven is not None:
+                        actual, driven = driven, None
                     elif "id" in expected and expected["id"] is not None:
                         actual = client.response(normalizer.identities["request"][expected["id"]])
                     else:
@@ -2128,6 +2306,8 @@ def contract_group(group, binary, systemd):
                     # Frame-level deferral: its raw expected and live frame are
                     # both run through frozen P1-05 validation, never synthesized.
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
+                    if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
+                        owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 5: auto selection resolving to a present, ready fixture0 interface requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
                     if group == "torrents" and number == 13:
                         owners.append(("/result/torrents/0/size", "P1-05b", "ruling 4F: hash has total size 4096 but its two file sizes total 8192; impossible fixture precondition"))
                     if group == "torrents" and number in (27, 29, 31, 35, 37, 39):
@@ -2793,6 +2973,7 @@ CASES = {function.__name__: function for function in
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
           api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
+          api_missing_completed_payload, api_loopback_seed_receives,
           contract_hello, contract_errors, contract_torrents)}
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
@@ -2830,4 +3011,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] == "--replay-namespace-child":
+        sys.exit(replay_namespace_child(sys.argv[2]))
     sys.exit(main())

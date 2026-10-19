@@ -359,6 +359,13 @@ Missing or changed fixture-asserted members still fail. A
 future-capability/proto-2/unreachable-error frame is validated with the frozen
 P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
 mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
+Ruling 5 additionally makes the auto-network frame environment-conditional on
+the VPN namespace fixture (`vpn.py`, `FBT_TEST_VPN=1`); an opted-out run records
+that exact precondition deferral. Small checking/downloading fixtures remain
+active comparisons pending P1-05b. Recheck/query attempts are bounded and logged;
+downloading uses a real loopback native seed and tracker. Missing-file restore
+preconditions complete the payload, delete it, restart dormant history and
+explicitly activate it, preserving startup's lazy restore policy.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
