@@ -6,6 +6,7 @@ service or torrents are touched. Requires tmux, util-linux script and Python 3.
 """
 import argparse
 import contextlib
+from contextvars import ContextVar
 import hashlib
 import http.server
 import io
@@ -30,6 +31,33 @@ from behavior_checks import expected_daemon_stderr, healthy_diagnostics, well_fo
 import fixtures
 import fbtlog
 from fbtlog import Case, REPO, suite_status
+from process_cleanup import ProcessRun, finish_cleanup
+
+_process_run = ContextVar("native_process_run", default=None)
+
+
+@contextlib.contextmanager
+def private_directory(**kwargs):
+    with tempfile.TemporaryDirectory(**kwargs) as directory:
+        if run := _process_run.get():
+            run.register(directory)
+        yield directory
+
+
+@contextlib.contextmanager
+def private_sandbox():
+    with daemon.Sandbox() as sandbox:
+        if run := _process_run.get():
+            run.register(sandbox.root)
+        yield sandbox
+
+
+def cleanup_private_processes(root):
+    run = _process_run.get()
+    if run is None:  # Also protect callers exercising an individual fixture directly.
+        run = ProcessRun()
+        run.register(root)
+    run.cleanup([root])
 
 CASES = (
     "dec_mouse_mode", "closed_status_stays_closed", "one_enter_adds_once",
@@ -44,7 +72,7 @@ CASES = (
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
     with Case("native", "launcher_never_called") as case, \
-            tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary, \
+            private_directory(prefix="fbt-no-start-") as temporary, \
             socket.socket() as legacy_endpoint:
         root = Path(temporary)
         env = dict(os.environ)
@@ -234,7 +262,7 @@ def launcher_never_called(binary):
 
 
 def terminal_close_is_graceful(binary):
-    with Case("native", "terminal_close_is_graceful") as case, tempfile.TemporaryDirectory(prefix="fbt-hup-") as temporary:
+    with Case("native", "terminal_close_is_graceful") as case, private_directory(prefix="fbt-hup-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color", FBT_DEBUG_SIGNALS="1")
         for key in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
@@ -449,7 +477,9 @@ class NativeHarness:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill(); process.wait(timeout=2)
-                self.record("clean up owned daemon", "daemon drains within ten seconds", "required SIGKILL", False)
+                # Teardown can run after its Case has closed. Raise so a late
+                # failed drain cannot be hidden behind an already-green result.
+                raise TimeoutError("owned daemon failed to drain within ten seconds; required SIGKILL")
 
     def record(self, action, expect, observed, ok=True, started=None):
         if self.polling and action == "capture terminal pane" and ok:
@@ -840,7 +870,7 @@ def expected_shutdown_stderr(stderr):
 def startup_survives_bad_record(binary):
     """Open the real TUI with a corrupt cache and a local unresolved magnet."""
     with Case("native", "startup_survives_bad_record") as case, \
-            tempfile.TemporaryDirectory(prefix="fbittorrent-bad-record-") as temporary:
+            private_directory(prefix="fbittorrent-bad-record-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
@@ -905,7 +935,7 @@ def startup_survives_bad_record(binary):
                           f'save_path = {json.dumps(str(downloads))}\n')
         tmux_socket, session = f"fbt-fbt-p0-09-kzw-{os.getpid()}", "fbt-fbt-p0-09-kzw"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
@@ -1006,15 +1036,14 @@ def startup_survives_bad_record(binary):
                        json.dumps(stderr_examples))
 
         finally:
-            tmux("kill-server", check=False)
-            harness.close_serve()
-            tracker.shutdown()
+            finish_cleanup(lambda: tmux("kill-server", check=False), harness.close_serve,
+                           tracker.shutdown, lambda: cleanup_private_processes(root))
 
 
 def stop_during_hashing(binary):
     """Observe saved-paused verification, then Stop and Resume a real check."""
     with Case("native", "stop_during_hashing") as case, \
-            tempfile.TemporaryDirectory(prefix="fbittorrent-hashing-") as temporary:
+            private_directory(prefix="fbittorrent-hashing-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
@@ -1053,7 +1082,7 @@ def stop_during_hashing(binary):
                           f'save_path = {json.dumps(str(downloads))}\n')
         tmux_socket, session = f"fbt-fbt-p0-09-kzw-hash-{os.getpid()}", "fbt-fbt-p0-09-kzw"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
@@ -1133,8 +1162,8 @@ def stop_during_hashing(binary):
                        "The hashing daemon emits healthy diagnostics with an ordered drain.",
                        stderr or "No stderr was emitted.")
         finally:
-            tmux("kill-server", check=False)
-            harness.close_serve()
+            finish_cleanup(lambda: tmux("kill-server", check=False), harness.close_serve,
+                           lambda: cleanup_private_processes(root))
 
 
 # Presence and quit cases use the real static-unit startup path, scoped to a
@@ -1204,7 +1233,7 @@ def local_download(case, binary, leech):
     import base64
     import struct
     import tomllib
-    with daemon.Sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
+    with private_sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
         config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
         peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
         body = fixtures.bencode(dict(interval=1, peers=peer))
@@ -1229,7 +1258,7 @@ def local_download(case, binary, leech):
 
 
 def attachment_case(name, binary):
-    with Case("native", name) as case, daemon.Sandbox() as sandbox, \
+    with Case("native", name) as case, private_sandbox() as sandbox, \
             daemon.Harness(case, binary, sandbox) as h, daemon.InstalledUnit(h) as unit:
         ui = AttachedTui(case, binary, sandbox, h)
         try:
@@ -1314,7 +1343,7 @@ def attachment_case(name, binary):
 
 
 
-def main():
+def run_cases():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
     parser.add_argument("--list", action="store_true", help="list case slugs without launching anything")
@@ -1348,7 +1377,7 @@ def main():
     if options.case == "terminal_close_is_graceful":
         terminal_close_is_graceful(binary)
         return suite_status("native")
-    with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
+    with private_directory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"),
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "runtime"),
@@ -1443,7 +1472,7 @@ def main():
         session = "fbt-fbt-p4-02-6bx" if options.case == "file_modal_shows_help_80x24" else "fbt-fbt-p0-14-rsx"
         tmux_socket = f"{session}-{os.getpid()}"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
@@ -1858,20 +1887,28 @@ def main():
                 return suite_status("native")
         except Exception:
             print(f"fixture state: {fixture}", file=sys.stderr)
-            print(capture(log=False), file=sys.stderr)
-            if error_file.exists():
-                print(error_file.read_text(), file=sys.stderr)
+            # Diagnostics must not mask the failure or delay the finally block.
+            with contextlib.suppress(Exception):
+                print(capture(log=False), file=sys.stderr)
+                if error_file is not None and error_file.exists():
+                    print(error_file.read_text(), file=sys.stderr)
             raise
         finally:
-            if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
-                terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
-                terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
-                terminal_artifact.write_bytes(terminal_bytes.read_bytes())
-                print(f"Terminal stream retained: {terminal_artifact}")
-            tmux("kill-server", check=False)
-            harness.close_serve()
-            if 'parked_harness' in locals(): parked_harness.close_serve()
-            server.shutdown()
+            def retain_terminal():
+                if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
+                    terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
+                    terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
+                    terminal_artifact.write_bytes(terminal_bytes.read_bytes())
+                    print(f"Terminal stream retained: {terminal_artifact}")
+
+            # Each action runs even if artifact I/O, tmux, or daemon teardown
+            # fails. The final sweep also covers script/pipe-pane children and
+            # the parked daemon, including descendants orphaned by tmux exit.
+            parked = locals().get("parked_harness")
+            finish_cleanup(retain_terminal, lambda: tmux("kill-server", check=False),
+                           harness.close_serve, parked.close_serve if parked else lambda: None,
+                           server.shutdown, server.server_close,
+                           lambda: cleanup_private_processes(root))
     if options.case is None:
         terminal_close_is_graceful(binary)
     # This case deliberately captures the widget's human error on stderr.
@@ -1879,6 +1916,34 @@ def main():
     if options.case is None:
         launcher_never_called(binary)
     return suite_status("native")
+
+
+def main():
+    run = ProcessRun()
+    token = _process_run.set(run)
+    # A runner timeout normally sends TERM. Convert it to an unwind so the
+    # fixture finally blocks and the audit still run (SIGKILL cannot unwind).
+    previous_term = signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+    try:
+        try:
+            status = run_cases()
+        finally:
+            if run.roots:
+                survivors = run.wait(seconds=1)
+                try:
+                    run.cleanup()  # Emergency cleanup never erases the failing observation.
+                finally:
+                    with Case("native", "process_cleanup") as case:
+                        case.check(not survivors, "no process from this run's private directories survives fixture teardown",
+                                   repr(survivors))
+                        remaining = run.survivors()
+                        case.check(not remaining, "emergency cleanup leaves no owned process alive", repr(remaining))
+        # Early returns in run_cases evaluate suite_status before its finally;
+        # recompute it here so the audit can turn any such return into failure.
+        return status or suite_status("native")
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+        _process_run.reset(token)
 
 
 if __name__ == "__main__":
