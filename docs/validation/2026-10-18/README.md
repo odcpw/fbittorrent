@@ -240,3 +240,7 @@ Receipt: [P1-03c.md](P1-03c.md) (branch ntm/fbittorrent/cod_3-p1-03c, commits 64
 ## P1-05b
 
 Receipt: [P1-05b.md](P1-05b.md) (branch ntm/fbittorrent/cod_3-p1-05b, commits a3109de, 6a7f58e and dfac645; fixture corrections surfaced by P1-06's live replay, merged by the orchestrator after an Astra review with no findings; batch gate on main follows).
+
+## P1-05c
+
+Receipt: [P1-05c.md](P1-05c.md) (branch ntm/fbittorrent/cod_3-p1-05c, commits 7c07cdf and 84c17db with the orchestrator's merge a8c6dec; fixture corrections surfaced by P1-06's live replay, merged by the orchestrator after an Astra review with no findings; batch gate on main follows).
