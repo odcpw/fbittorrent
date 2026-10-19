@@ -457,25 +457,24 @@ isolated app fixtures and finishes with the JSONL case summary. Run it before
 each merge, including when hosted Actions is unavailable. On this workstation,
 use the release lock and memory scope prescribed in `AGENTS.md`.
 
-`.github/workflows/ci.yml` runs unit/background-worker, engine-library, native
-CLI/TUI and whitespace jobs on pushes and pull requests, plus a weekly RustSec
-audit. Every job retains `target/test-logs/` even on failure. A manual run can
-set `force_fail` to `native/quit_restart_down` to verify the failing JSONL
-artifact. The workflow's presence is not proof that a hosted run has passed.
+Hosted GitHub Actions is disabled by default. Verification uses the local gates;
+workflow files and retained artifacts do not imply that a hosted run passed.
 
 The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
 reference host before each release, after other builds and tests have finished.
 It measures the daemon with 10 and 100 paused local torrents and 0, 1 and 8
-summary subscribers: three 60-second windows per configuration, plus matched
+Summary subscribers: three 60-second windows per configuration, plus matched
 CLI polling references (about 24 minutes total). `FBT_TEST_DAEMON_RESOURCES=1`
-selects the same matrix; setting both runs it once.
+selects the same matrix; setting both runs it once. Each fixture has private
+HOME/XDG paths, local payloads and a loopback-bound daemon.
 
 The checked-in P1-08 daemon baseline is in `baselines/resources.json` beside
 P0-06's original TUI measurements. The gate uses the daemon workloads because
 the TUI now attaches to the daemon and `q` detaches. Every CPU/RSS observation
 must be at or below its baseline median plus the larger of 10% of that median
-and three times the range of the three baseline runs. A different reference host
-or window is rejected. Comparison runs never rewrite the baseline.
+and three times the range of the three baseline runs. One bar subscription must
+cost no more CPU than status polling every ten seconds. A different reference
+host or window is rejected. Comparison runs never rewrite the baseline.
 
 To run just the resource check after building `release-perf`, use the following
 under the release lock and memory scope. To deliberately record a new reference,
@@ -487,6 +486,10 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
   --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
   --output target/test-logs/resources/measurement.json
 ```
+
+`resources.py --daemon --torrents N --subscribers K --seconds 60 --runs 3
+--baseline <path> --output <path>` measures one workload; add `--matrix` for the
+complete matrix.
 
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.

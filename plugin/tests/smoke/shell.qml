@@ -37,7 +37,7 @@ ShellRoot {
         root.initialInstance=svc.instance
         svc.add({magnet:"magnet:?xt=urn:btih:"+root.hash+"&dn=fbt-smoke"},false);root.enter("add")
       } else if(root.phase==="add" && row && row.state==="metadata") {
-        root.mark("add","hash/name ledger appears as metadata without metadata peers",JSON.stringify(row),row.name==="fbt-smoke" && row.progress===undefined && row.size===undefined && svc.client.popupOpen)
+        root.mark("add","metadata intent is saved without peers, with payload upload off",JSON.stringify(row),row.name==="fbt-smoke" && row.upload_enabled===false && row.seed===false && row.progress===undefined && row.size===undefined && svc.client.popupOpen)
         svc.pause(root.hash);root.enter("pause")
       } else if(root.phase==="pause" && row && row.state==="paused") {
         root.mark("pause","confirmed paused state",JSON.stringify(row),true)
@@ -57,8 +57,8 @@ ShellRoot {
       } else if(root.phase==="reconnect" && root.readyAt>0 && svc.online && svc.instance!==root.initialInstance && svc.store.hasTorrents) {
         var state=svc.client.state(),subscribe=svc.client.caps.indexOf("subscribe")>=0
         var ok=Date.now()-root.readyAt<1000
-        if(subscribe)ok=ok && state.subs.summary>0 && state.subs.torrents>0
-        root.mark("reconnect","new daemon instance reconnects within 1 s of readiness; advertised subscriptions restored",JSON.stringify({elapsed_ms:Date.now()-root.readyAt,instance:svc.instance,subs:state.subs,mode:svc.client.mode,subscription_check:subscribe ? "checked" : "SKIP: server lacks subscribe cap; real bus integration remains unmet"}),ok)
+        ok=ok && subscribe && state.subs.summary>0 && state.subs.torrents>0
+        root.mark("reconnect","new daemon instance reconnects within 1 s of readiness; summary and torrent subscriptions restored",JSON.stringify({elapsed_ms:Date.now()-root.readyAt,instance:svc.instance,subs:state.subs,mode:svc.client.mode,subscription_check:subscribe ? "checked" : "missing required subscribe capability"}),ok)
         root.finish()
       }
       if(Date.now()-root.phaseAt>20000 || Date.now()-root.began>45000) {

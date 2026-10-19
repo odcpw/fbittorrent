@@ -161,13 +161,15 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
     def test_optional_commands_dispatch_and_missing_script_fails(self):
         with tempfile.TemporaryDirectory(prefix='fbt-gate-control-') as temporary:
             root = Path(temporary); plugins = root / 'plugin/tests'; plugins.mkdir(parents=True)
-            for name in ('qs-store.sh', 'qs-smoke.sh', 'qs-visual.sh'):
+            for name in ('qs-store.sh', 'qs-smoke.sh', 'qs-dashboard.sh', 'qs-visual.sh'):
                 (plugins / name).write_text('echo ' + name + ' >> dispatch.log\n')
             env = dict(os.environ, FBT_TEST_QS='1', FBT_TEST_VISUAL='1')
             with patch.object(gate, 'ROOT', root):
                 checks = gate.optional_checks(env, Path('/missing/binary'))
+                self.assertEqual(next(c for c in checks if c.name == 'visual').command[-3:], ['--milestone', '--binary', '/missing/binary'])
+                self.assertEqual(next(c for c in checks if c.name == 'qs_palette').command[2:4], ['--palette', '/missing/binary'])
                 self.assertTrue(gate.run_checks(checks, root / 'first', env))
-                self.assertTrue({'qs-store.sh', 'qs-smoke.sh', 'qs-visual.sh'} <= set((root / 'dispatch.log').read_text().splitlines()))
+                self.assertTrue({'qs-store.sh', 'qs-smoke.sh', 'qs-dashboard.sh', 'qs-visual.sh'} <= set((root / 'dispatch.log').read_text().splitlines()))
                 (plugins / 'qs-store.sh').unlink()
                 checks = gate.optional_checks(env, Path('/missing/binary'))
                 self.assertFalse(gate.run_checks(checks, root / 'missing', env))
@@ -219,7 +221,7 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
         self.assertEqual(gate.optional_checks({}, Path('/missing/binary')), [])
         enabled = {key: '1' for key in ('FBT_TEST_QS', 'FBT_TEST_VISUAL', 'FBT_TEST_WIDGET', 'FBT_TEST_VPN')}
         chosen = gate.optional_checks(enabled, Path('/missing/binary'))
-        self.assertTrue({'qs_store', 'qs_smoke', 'visual', 'widget', 'vpn'} <= {c.name for c in chosen})
+        self.assertTrue({'qs_store', 'qs_smoke', 'qs_palette', 'visual', 'widget', 'vpn'} <= {c.name for c in chosen})
         self.assertFalse(gate.optional_checks({'FBT_TEST_QS': '0'}, Path('/missing/binary')))
         self.assertFalse(gate.optional_checks({'FBT_TEST_LEGACY': '1'}, Path('/missing/binary')), 'removed backends cannot be reinstated by an old opt-in')
         self.assertTrue(any(c.name == 'tui_controls' for c in gate.full_checks({}, Path('/missing/binary'))))

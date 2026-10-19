@@ -31,6 +31,13 @@ ShellRoot {
     check("bootstrap", s.events.join(",") === "write,flush", "every write immediately flushed and newline terminated", s.events)
     check("bootstrap", s.writes[0].slice(-1) === "\n", "Socket.write includes newline", JSON.stringify(s.writes[0]))
     console.log("FBTQS-PASS bootstrap")
+    s=session();s.hello();s.c.disconnected()
+    check("transport_loss",s.c.lastError===null,"interrupted automatic presence/subscription requests use reconnect state, not a sticky action error",JSON.stringify(s.c.lastError))
+    s=session();s.hello();s.c.request("app.info");s.c.disconnected()
+    check("transport_loss",s.c.lastError && s.c.lastError.message==="no answer","an interrupted explicit request still reports its failure",JSON.stringify(s.c.lastError))
+    s=session();s.hello();var uncertain=s.c.request("torrents.remove",{hashes:["a".repeat(40)],delete_files:false},{mutating:true,internal:true});s.c.disconnected()
+    check("transport_loss",s.c.actions[uncertain].status==="no answer" && s.c.lastError.message==="no answer","internal setting never suppresses uncertainty for a user mutation",JSON.stringify(s.c.actions[uncertain]))
+    console.log("FBTQS-PASS transport_loss")
     s = session(); s.hello();
     var ref = s.c.request("torrents.stop", {hashes:["a".repeat(40)]}, {mutating:true})
     var stop = JSON.parse(s.writes[s.writes.length-1])

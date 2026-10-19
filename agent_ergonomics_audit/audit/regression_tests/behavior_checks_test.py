@@ -45,6 +45,18 @@ class BehaviorChecks(unittest.TestCase):
         parked[0], parked[1] = parked[1], parked[0]
         self.assertFalse(expected_daemon_stderr("\n".join(parked)))
 
+    def test_parked_owner_releases_its_empty_slot_without_a_session_drain(self):
+        parked=self.phases.copy()
+        parked[1]="INFO engine slot empty state=parked session=absent"
+        self.assertTrue(expected_daemon_stderr("\n".join(parked)))
+        self.assertTrue(expected_daemon_stderr("\n".join(self.phases)))
+        self.assertFalse(expected_daemon_stderr("\n".join(parked[:1]+parked[2:])))
+        for index in range(len(parked)):
+            with self.subTest(missing=index):
+                self.assertFalse(expected_daemon_stderr("\n".join(parked[:index]+parked[index+1:])))
+        wrong=parked.copy();wrong[1],wrong[2]=wrong[2],wrong[1]
+        self.assertFalse(expected_daemon_stderr("\n".join(wrong)))
+
     def test_every_drain_phase_keeps_its_order(self):
         for index in range(len(self.phases)-1):
             phases = self.phases.copy()

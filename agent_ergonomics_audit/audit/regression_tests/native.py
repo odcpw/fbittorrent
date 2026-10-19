@@ -130,7 +130,7 @@ def launcher_never_called(binary):
 
         probes = (
             (("status",), 0, {}, "stopped"),
-            (("reconcile", "--recent", "180"), 0, {}, "intrinsic"),
+            (("reconcile", "--recent", "180"), 2, {}, "removed_command"),
             (("--no-start", "list"), 0, {}, "offline"),
             (("list", "--no-start"), 0, {}, "offline"),
             (("list",), 0, {"FBITTORRENT_NO_START": "1"}, "offline"),
@@ -167,8 +167,9 @@ def launcher_never_called(binary):
                 expected = value.get("backend") == "stopped" and value.get("app_open") is False
             elif outcome == "offline":
                 expected = value.get("ok") is True and value.get("running") is False and value.get("count") == 0
-            elif outcome == "intrinsic":
-                expected = value == dict(ok=True, touched=0, note="native scheduling is intrinsic")
+            elif outcome == "removed_command":
+                expected = (value.get("ok") is False and value.get("code_name") == "usage"
+                            and "unrecognized subcommand 'reconcile'" in value.get("error", ""))
             else:
                 expected = (value.get("ok") is False and value.get("code") == 4 and
                             value.get("code_name") == "backend" and
@@ -230,16 +231,23 @@ def launcher_never_called(binary):
         case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock").exists(),
                    "No probe has started a native engine socket.")
         legacy_endpoint.bind(("127.0.0.1", 0))
+        legacy_endpoint.listen(4)
+        legacy_endpoint.setblocking(False)
         legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
                          f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
         config.write_text(legacy_config)
         for args in [("--no-start","setup"),("setup",),("status",)]:
             argv=[binary,*args,"--json"]
-            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 naming v0.4.0, with no launch, network or settings writes")
+            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 for a non-native engine, with no launch, network or settings writes")
             child=case.popen(argv,env=env,stdout=subprocess.PIPE,text=True)
             stdout,_=child.communicate(timeout=5);value=json.loads(stdout)
-            step.close(child.returncode==2 and "removed in v0.4.0" in value.get("error","") and not calls.read_text() and config.read_text()==legacy_config,
-                       f"exit={child.returncode}; envelope={value}; calls={calls.read_text()!r}",[calls])
+            try:
+                connection,_=legacy_endpoint.accept();connection.close();contacted=True
+            except BlockingIOError:contacted=False
+            step.close(child.returncode==2 and value.get("code_name")=="usage" and "engine must be native" in value.get("error","")
+                       and not contacted and not calls.read_text() and config.read_text()==legacy_config
+                       and not (Path(env["XDG_RUNTIME_DIR"])/"fbittorrent/api.sock").exists(),
+                       f"exit={child.returncode}; envelope={value}; contacted={contacted}; calls={calls.read_text()!r}",[calls])
 
 
 def terminal_close_is_graceful(binary):
