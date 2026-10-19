@@ -95,6 +95,22 @@ pub enum AddSource {
     Restore(Hash),
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetLimitsArgs {
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub download_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub upload_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub alt_download_bps: Update<u32>,
+    #[serde(default, skip_serializing_if = "Update::is_unset")]
+    pub alt_upload_bps: Update<u32>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetAltArgs { pub on: bool }
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EmptyArgs {}
@@ -107,6 +123,20 @@ pub struct Client {
     pub kind: ClientKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogArgs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_seq: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<LogLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<Hash>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelloArgs {
@@ -262,6 +292,14 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.trackers")]
+    TorrentsTrackers { args: HashArgs },
+    #[serde(rename="torrents.reannounce")]
+    TorrentsReannounce { args: HashesArgs },
+    #[serde(rename="torrents.force_start")]
+    TorrentsForceStart { args: SetSeedArgs },
+    #[serde(rename="torrents.queue_move")]
+    TorrentsQueueMove { args: QueueMoveArgs },
     #[serde(rename = "search.start")]
     SearchStart {
         args: SearchStartArgs,
@@ -299,6 +337,10 @@ pub enum Call {
 
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
+    #[serde(rename = "app.log")]
+    AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
+    #[serde(rename = "app.stats")]
+    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,6 +371,10 @@ pub enum Call {
         #[serde(skip_serializing_if = "Option::is_none")]
         args: Option<EmptyArgs>,
     },
+    #[serde(rename = "transfer.set_limits")]
+    TransferSetLimits { args: SetLimitsArgs },
+    #[serde(rename = "transfer.set_alt")]
+    TransferSetAlt { args: SetAltArgs },
     #[serde(rename = "transfer.info")]
     TransferInfo {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -364,6 +410,10 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsTrackers {..} => "torrents.trackers",
+            Self::TorrentsReannounce {..} => "torrents.reannounce",
+            Self::TorrentsForceStart {..} => "torrents.force_start",
+            Self::TorrentsQueueMove {..} => "torrents.queue_move",
             Self::SearchStart { .. } => "search.start",
             Self::SearchStop { .. } => "search.stop",
             Self::SearchProviders { .. } => "search.providers",
@@ -374,6 +424,8 @@ impl Call {
             Self::SearchGrab { .. } => "search.grab",
 
             Self::TorrentsRecheck { .. } => "torrents.recheck",
+            Self::AppLog { .. } => "app.log",
+            Self::AppStats { .. } => "app.stats",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",
@@ -383,6 +435,8 @@ impl Call {
             Self::AppShutdown { .. } => "app.shutdown",
             Self::AppRestart { .. } => "app.restart",
             Self::AppNetwork { .. } => "app.network",
+            Self::TransferSetLimits { .. } => "transfer.set_limits",
+            Self::TransferSetAlt { .. } => "transfer.set_alt",
             Self::TransferInfo { .. } => "transfer.info",
             Self::TorrentsList { .. } => "torrents.list",
             Self::TorrentsGet { .. } => "torrents.get",
@@ -418,3 +472,10 @@ fn deserialize_settings_patch<'de, D: Deserializer<'de>>(d: D) -> Result<serde_j
     }
     Ok(patch)
 }
+
+#[derive(Debug,Clone,Copy,PartialEq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum QueueTo { Top, Up, Down, Bottom }
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueMoveArgs { pub hash: Hash, pub to: QueueTo }

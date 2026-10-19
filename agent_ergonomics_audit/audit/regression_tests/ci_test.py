@@ -119,7 +119,7 @@ def umbrella_flags():
                     f"with Case({suite!r}, 'fixture') as case:\n"
                     " case.step('dispatch fixture', 'fixture selected').ok('fixture ran')\n")
         for name, suite in (("fbtlog_test.py", "fbtlog_test"), ("native.py", "native"),
-                            ("ci_test.py", "ci_gates"), ("resources.py", "resources"),
+                            ("ci_test.py", "ci_gates"), ("daemon.py", "daemon"), ("resources.py", "resources"),
                             ("tui_smoke.py","tui_smoke"),("tui_smoke_test.py","tui_smoke_control")):
             (regression / name).write_text(write_suite(suite))
         (regression / "tui_smoke.py").write_text(write_suite("tui_smoke")+"\n"+write_suite("tui_smoke_setup"))

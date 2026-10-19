@@ -115,6 +115,7 @@ struct Sample {
     state: String,
     rows: Vec<Torrent>,
     completions: Vec<Value>,
+    logs: Value,
     searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     network: Value,
@@ -131,6 +132,7 @@ impl Sample {
             Topic::Summary => self.summary(),
             Topic::Search(id) => self.searches.get(id).cloned().unwrap_or(json!([])),
             Topic::Events => unreachable!(),
+            Topic::Log => self.logs.clone(),
         }
     }
     fn summary(&self) -> Value {
@@ -160,7 +162,7 @@ impl Sample {
                 v
             })
             .collect();
-        let mut result = json!({"counts":counts,"alt":false,"limits":{},"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
+        let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -198,6 +200,8 @@ impl Bus {
         })
     }
     pub fn start(self: &Arc<Self>) -> std::io::Result<JoinHandle<()>> {
+        let wake = self.wake.clone();
+        self.daemon.logs.set_waker(Arc::new(move || wake.signal()));
         let bus = self.clone();
         thread::Builder::new()
             .name("fbt-api-bus".into())
@@ -284,7 +288,7 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
-                            Topic::Network | Topic::Settings | Topic::Events => {
+                            Topic::Network | Topic::Settings | Topic::Events | Topic::Log => {
                                 Duration::from_secs(86400)
                             }
                             Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
@@ -424,7 +428,7 @@ impl Bus {
             serde_json::to_value(policy.snapshot(now)).unwrap()
         };
         daemon["state"] = json!(state);
-        daemon["upgrade_pending"] = json!(false);
+        daemon["upgrade_pending"] = json!(self.daemon.upgrade_pending.load(Ordering::Acquire));
         self.daemon.notifier.enabled(cfg.notify && !self.daemon.no_notify);
         let network = serde_json::to_value(self.daemon.network()).unwrap();
         let mut effective = cfg;
@@ -436,6 +440,7 @@ impl Bus {
             state,
             rows,
             completions,
+            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
             searches,
             files,
             network,
@@ -686,7 +691,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events
+                Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log
             )
         });
         for index in order {
@@ -699,7 +704,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events);
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log);
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Files(_));
             if t.sent.is_none() || reset {

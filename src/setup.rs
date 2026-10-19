@@ -1,5 +1,9 @@
 //! Configure native app storage and desktop handlers, with explicit legacy setup.
 
+pub mod desktop;
+mod jsonc;
+mod menu;
+
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
@@ -281,6 +285,33 @@ mod tests {
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
         std::fs::remove_dir_all(directory).unwrap();
         println!("atomic unit rename, failed reload rollback and 0500 directory refusal verified");
+    }
+
+    #[test]
+    fn unit_text_matches_plan() {
+        let expected = r#"[Unit]
+Description=fbittorrent torrent engine (started on demand)
+Documentation=https://github.com/odcpw/fbittorrent
+# On-demand units start often; avoid wedging after normal idle/upgrade cycles.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart="/fixture/fbittorrent" serve
+KillSignal=SIGTERM
+# Signal the owner first; kill any remaining children only at the deadline.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+RestartForceExitStatus=75
+SuccessExitStatus=75
+NoNewPrivileges=yes
+# Static by design: no login enablement links.
+"#;
+        assert_eq!(super::daemon_unit(std::path::Path::new("/fixture/fbittorrent")).unwrap(), expected);
     }
 
     #[test]

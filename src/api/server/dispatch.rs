@@ -120,7 +120,9 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppSettingsGet { .. }
+                Call::AppLog { .. }
+                | Call::AppStats { .. }
+                | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }
                 | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
@@ -129,12 +131,17 @@ impl Shared {
                     &self.daemon,
                     &job.request.call,
                     &reference,
+                    serde_json::to_value(&*self.connections_since_start.lock().unwrap()).unwrap(),
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
                     self.bus.counts(),
                 ),
                 Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
                 Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
+                Call::TorrentsTrackers {..} | Call::TorrentsReannounce {..} => ops::trackers::dispatch(&self.daemon,&job.request.call),
+                Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
+                Call::TransferSetLimits { args } => ops::transfer::set_limits(&self.daemon, args),
+                Call::TransferSetAlt { args } => ops::transfer::set_alt(&self.daemon, args.on),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 call if call.op().starts_with("search.") => {
                     let result = ops::search::dispatch(&self.daemon, job.connection.number, call);

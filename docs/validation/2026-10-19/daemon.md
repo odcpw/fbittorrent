@@ -134,3 +134,254 @@ Unmet acceptance criteria: none. Follow-ups: Open-log is wired to the CLI log
 verb supplied by P1-14; actual desktop notification rendering/action selection
 remains outside these recording-shim checks. P1-14 keeps the existing app.info counts cumulative (connections since start),
 as its canonical rule requires.
+
+## Integration batch 2 — merge `6ec496e`
+
+Reconciled main's canonical CLI/server/TUI/settings modules with the bus, idle
+policy and notifications. Private-XDG checks in `target/test-logs/track-a-batch2/`:
+`run.py check` and Python harness compilation passed; all 38 bus/idle/notification/
+settings/TUI cases passed in each launch mode; `run.py full` passed 359 tests,
+zero failures, two intentional ignores. Main's structural layout is retained.
+
+## P1-14 — log ring and connection usage (`fbt-p1-14-bqf`)
+
+Added the 2,000-entry stderr-fed ring while preserving original diagnostic bytes,
+filtered/cursor API history, bounded append-only log subscriptions, read-only
+`log`/NDJSON follow and separate active/cumulative hello counters. Production no
+longer writes last-error.txt. Added the authorized app.log/app.stats contract
+extension, independent log transcript and capability/version bookkeeping; all ten
+existing transcript SHA-256 values remain unchanged. Minimal neighbouring edits
+let the TUI's all-fixture mirror consume log snapshots/deltas within the same
+2,000-entry bound, and its real one-connection test now reads active app.stats
+counts while retaining every original equality assertion.
+
+Evidence root: `target/test-logs/fbt-p1-14-bqf/`; private-XDG commands use its
+`run.py`. `policy` (`ring-units/`) passed all three named ring tests; `api`
+(`module-tests-fixed/`) passed 86 tests with one bridge ignore; debug `build`
+(`final-build/`) passed. `cases log_injected_error log_follow hello_counters
+log_down_never_starts tui_single_connection` passed five cases in each mode
+(`foreground-final/daemon/`, `FBT_BUS_SYSTEMD=1` in `systemd/daemon/`): one real
+injected engine failure with its hash/source through CLI JSON and original stderr,
+no last-error file, exact per-kind cumulative increments and live detach counts,
+follow entry within one second and clean exit on owner stop, closed read exits 4
+without starting anything, real TUI uses one API connection. `full`
+(`full-fixed/development_full/`) passes the full locked suite (363 passed, zero failed, two intentional
+ignores), including all fixtures and the added bounded mirror regression; the earlier full failure that
+identified the unsupported TUI log topic is retained in `full-final/`. Python
+compilation, diff whitespace and changed-source 900-line checks pass. No all.sh
+between track beads per owner instruction. Unmet criteria: none. Follow-up:
+notification Open-log still needs a visible terminal/log pane; these checks prove
+CLI history/stream delivery, not desktop presentation.
+
+## P1-17 — upgrade detection and restart (`fbt-p1-17-2ds`)
+
+Added build-time git/dirty identity with the fixture override, owner executable
+identity checks every 30 seconds, busy-table deferral and live upgrade_pending,
+exit-75 replacement, and a restart CLI that requests daemon scope and waits up to
+30 seconds for a different hello instance. A foreground owner exits 75; without
+a supervisor the CLI times out with exit 8 and never launches an owner itself.
+Existing P1-11 skew warnings remain verified. Neighbouring edits publish pending
+state in app.info/summary and route the split CLI to the bounded restart helper.
+No existing contract fixture changed; contract patch 1.2.4 records new restart
+instance/server output.
+
+Evidence: `target/test-logs/fbt-p1-17-2ds/`; commands use private-XDG `run.py`.
+`policy` (`upgrade-units/`) passes two upgrade unit tests. `cases
+upgrade_idle_exit_75 upgrade_pending_while_busy restart_now
+restart_closed_never_starts` passes all four cases in `foreground/daemon/` and
+`FBT_BUS_SYSTEMD=1` in `systemd-fixed/daemon/`: two actual locked builds differ by
+compiled p1-17-old/new ids; private copy/rename changes the inode; idle replacement
+records systemd SubState=auto-restart and ExecMainStatus=75 then a new build/instance;
+a real 8 MiB capped loopback transfer retains the old instance with pending=true
+until stopped; explicit restart overrides an interactive busy owner, while the
+foreground wait expires cleanly after 30 seconds. Replacement unit environment
+and working directory are verified before launch and again in the actual child.
+The original systemd fixture checked lock freedom before stopping its replacement
+owner; that failure is retained in `systemd/` and corrected by checking after
+verified unit/cgroup teardown. `skew.py` (`skew/agent_contract/`) passes the
+existing human/JSON version-skew test. Single `full` (`full-final/development_full/`)
+passes 365 locked Rust tests, zero failures, two intentional ignores. Python compilation, diff whitespace and changed
+source-size checks pass. No all.sh between track beads per owner instruction.
+Unmet criteria: none. Follow-up: actual desktop banners/installation remain the
+integrated milestone's qualification, outside these isolated unit/process checks.
+
+## P1-18 — events and raw API (`fbt-p1-18-s18`)
+
+Added bounded event replay/follow with instance/seq, filters, explicit resync,
+EOF/SIGINT detachment; raw response/error envelopes, typed arguments, stable raw
+client identity for cross-process refs, per-op startup/retry policy; a compiled
+args/result catalogue shared by api --list, robot-docs api and capabilities. A
+unit checks every IPC operation row/argument/result/mutating column. No existing
+fixture bytes changed. Neighbouring client plumbing retains transport envelopes
+and names across reconnect; the old unit initializer only adds name=None. The
+live shape bridge applies actual cli::shapes::rows, rather than duplicating it in
+Python. Documentation corrects stale restart/exit-75 wording.
+
+Private-XDG evidence: `target/test-logs/fbt-p1-18-s18/`; `run.py check`
+(`initial-check/`) passed; `api` (`module-tests-fixed/`) passed 88/one bridge
+ignore; `policy` (`raw-units-fixed/`) passed the argument unit. `agent
+ events_follow_completion events_since_seq_replay events_resync_when_older
+ events_down_exit_4 api_list_matches api_list_matches_ipc_md api_unknown_op_hint
+ api_mutating_starts_daemon_read_does_not` passed eight real cases in each mode
+(`foreground/agent_contract/`, `FBT_BUS_SYSTEMD=1` in `systemd/agent_contract/`).
+Completion arrived in 0.855/0.804 s with exact real loopback bytes; killing the
+reader then resuming prints exactly the two later additions; 1,002 real parked
+ledger additions force actual 1,000-entry ring eviction and explicit oldest_seq;
+raw A.9 objects equal the actual Rust shape conversion; raw typed failures retain
+field details; explicit refs replay identical mutation results across processes;
+raw read never starts, write starts the verified private static unit. The final
+catalogue also works with an invalid private config (`catalog-final/` and
+`catalog-systemd-final/`). `build` (`final-build/`) and single full `cargo test
+--locked -- --nocapture` (`full-final/`) pass: 368 tests, zero failures, three
+intentional process-bridge ignores (the new shape bridge ran in both live cases).
+Python, whitespace, unchanged-fixture and <=900 source-line checks pass.
+
+Literal bead deviations: planned contract 1.2.1 was already superseded by
+integrated features; the required monotonic patch is 1.2.5, with separate events
+and api changes entries. No catalogue operation is within Levenshtein distance 2
+of literal `nope`; it exits 2/unknown_op with nearest=[] and api --list hint,
+while the actual distance-two typo torrents.lsit suggests torrents.list. Neither
+an old version nor a false neighbour is fabricated. Other criteria met. No
+all.sh between track beads per owner policy. Follow-up: app.log queries with many
+maximum-length messages need a byte budget beneath the 1 MiB response cap.
+
+## P1-07b — real fixture serving (`fbt-y8i`)
+
+Added idle/seeding/downloading/paused JSON recipes (empty aliases idle), --throttle,
+FBTFIXTURE socket/summary/resource metadata and a managed seed/leech context. An
+initially closed stdin retains the fixture; closing an initially open pipe ends
+it for UI callers. A parent-death guardian drains daemons and removes private
+sandboxes after launcher SIGKILL or daemon death. Child evidence roots are unique
+per invocation, including --log-root forwarding. Replaced the interim TUI engine
+host/probe with real serve/API v1; cap observers serialize one typed connection,
+retain their timing/rate/metainfo assertions and observe normalized states.
+Neighbouring visual fixture sandboxes now use the retaining subclass. The hello
+counter test now establishes separate exact active/cumulative baselines after
+API startup probes retire, and checks live per-kind increments too.
+
+Private-XDG `target/test-logs/fbt-y8i/run.py cases fixture_serving_states
+fixture_launcher_killed fixture_daemon_killed fixture_stdin_lifetime
+fixture_peer_pair daemon_api_probe cap_change_no_check seed_toggle_no_check
+launcher_exit_cleanup hello_counters` passes ten cases in foreground-final/
+(37.037 s) and FBT_BUS_SYSTEMD=1 systemd-final/ (41.073 s); both retain eight
+independent daemon_fixture worker JSONLs and verify no unit/PID/sandbox survives.
+Explicit 65536-B/s fixture flag, real capped loopback bytes, SIGKILL launcher,
+SIGKILL daemon, EOF, closed stdin, metadata identity and seed/noseed transitions
+all pass. The corrected counter test also passes counter-final/. Initial API
+argument/status assumptions and refusal-shim manager-query failures are retained.
+Python compilation and diff checks pass; single full cargo test --locked
+(full-final/) passes 368, zero failures, three intentional process bridges ignored.
+
+Unmet: the *entire expanded* daemon.py suite does not fit three minutes. One
+--no-systemd invocation reached 48 completed cases/250.872 logged seconds before
+interrupt at 252.346 s (all-cases-driver/ and archived all-cases/processes/).
+Interruption drained its owned process and removed its sandbox, verified after
+exit; this is not a green whole-suite claim. It found the counter-baseline issue
+fixed above. Systemd whole-suite timing remains unqualified; the focused batch is
+green in both modes. Global transfer.set_limits is absent until P5-04, so only
+the marked DaemonContract.throttle adapter temporarily uses the existing typed
+single-seed upload cap; that Do-step remains deferred. No all.sh between track
+beads. Follow-ups: wire that adapter when P5-04 lands; restore the expanded CI
+runtime budget without deleting or shortening coverage.
+
+## P1-16b — dormant daemon integration (`fbt-awy`)
+
+The four frozen acceptance criteria pass in both launch modes. A bounded test-only
+runtime gate installs the torrents subscription before READY=1; five previously
+verified completed records list done/unchecked in 30.5–95.7 ms, with no checking
+state or matching initialization diagnostic. Explicit CLI seed has exactly one
+real validation-admission diagnostic and seeds only its record. Missing files
+stay saved done until acted on, then give invalid_state/missing_files and an
+unchecked error row. Open_target takes 1.45/1.41 ms and stays dormant; CLI open,
+nonempty file inclusion and typed CLI delete-files are also exercised. The delete
+check exposed the live-handle precondition: dormant deletion now uses saved
+metainfo, persists record removal before side effects, and unlinks exact relative
+files through directory descriptors; parent symlinks cannot redirect deletion.
+Three new units cover no admission, failed-save/no-deletion and symlink boundaries.
+
+Evidence root `target/test-logs/fbt-awy/`: private `run.py check` passes;
+`policy` dormant filter (`dormant-units-final/`) passes 11; `engine_ops` passes
+existing typed operations; `restore_unit` passes the named restore test. Grouped
+`cli_cases lazy_restore_no_checks dormant_seed_checks dormant_missing_files
+dormant_open_no_check` passes four real cases in foreground-final/daemon/ and
+FBT_BUS_SYSTEMD=1 systemd-final/daemon/. The initial delete refusal remains in
+foreground/ and systemd/. CI dispatcher regressions (`ci-dispatch/`, python-ci/)
+pass four cases; these run stub commands, not a live full gate. all.sh schedules
+the four real cases in one process and summarizes their daemon suite. Python,
+shell syntax, whitespace and <=900 source-line checks pass. Single full locked
+Rust (`full-final/`): 371 passed, zero failed, three process bridges ignored.
+
+Do-step remainder: torrents.recheck belongs to Track B's canonical asynchronous
+P5-03 contract (hashes, pending, mutation.result), available on integration/Track B
+but absent from this branch; it was not replaced with a conflicting synchronous route. Merge that
+track before claiming all of Do 2. No fixture byte changes, all.sh run between
+track beads, or owner installation. Follow-up: reconcile/replay the P5-03 hook
+when the orchestrator merges that work.
+
+
+## Track dependency boundary
+
+Current branch is clean at the P1-16b checkpoint. Per the track skip rule:
+P5-04 and P5-07 await P2-03/P3-09; P6-09 awaits P3-15; P6-13 awaits P2-03.
+These dependencies have no implementing bead commits in this branch's ancestry.
+P2-03/P3-09 and canonical P5-03 are available on other track/integration refs;
+main itself remains at 3a4eba8. No agent merge/rebase/branch switch was performed.
+On integration, new operation-table rows also need P1-18's args/result catalogue
+metadata. Keep the canonical server layout and the dormant delete-files path.
+M1a installation has not been performed; owner paths/binary remain untouched.
+
+## P5-04 — daemon/API/CLI checkpoint (fbt-p5-04-ipg)
+
+Added persisted `transfer.set_limits`/`transfer.set_alt`, tri-state updates,
+Summary.alt/limits, cap `limits`, offline/live CLI with K/M suffixes and contract
+1.2.6/new limits.ndjson. Existing live session limiters/settings transactions are
+reused; existing fixture bytes stay unchanged. UI criteria: **deferred to track C/D**.
+
+Evidence: `target/test-logs/fbt-p5-04-ipg/`. Its `run.py` proves private
+HOME/TMPDIR/XDG/downloads. `check`, `api`, `policy` pass (`module-fixed/`);
+one full `cargo test --locked -- --nocapture` passes **373/0/3 ignored**
+(`full-rust-final/`). `cases alt_limit_holds global_unlimited_keeps_cap alt_survives_restart`
+and `agent limits_verb` pass in both modes (`final-foreground/`, `final-systemd/`,
+`final-agent-{foreground,systemd}/`). Over 20 s after 5 s warm-up, alternative
+**upload** yields 65,525.8/65,527.4 bytes/s; alt pushes take 96.3/101.7 ms.
+Global upload zero retains the torrent's 32768 cap; turtle survives restart.
+
+The global API now throttles fixtures. Four isolated case workers preserve all
+JSONL/stderr and failures; real CLI/multiple-case/artifact/forced-failure regression
+passes (`worker-tests-artifacts/`, `worker-regression/`). Source-fingerprinted,
+SHA256-checked real upgrade binaries are prepared once (`prepare`,
+`upgrade-preparation-fixed/`: cold build 205.8 s, outside the timed matrix).
+Full foreground/systemd runs schedule 114/132 entries in **125.65/147.75 s**,
+but are **not green** (`all-{foreground,systemd}/processes/daemon/`). Subsequent
+focused repairs pass: live mode for optional-field traces, explicit soak skip
+(`replay-fix-focused/`); loopback IMDb env forwarded before systemd launch,
+incomplete Undo fixture preserving all owned bytes, canonical P1-11 exits
+(`systemd-repairs/`); recording shim limited to the owned unit's show/stop
+(`concurrent-down-final/`). Before the IMDb fix, failed systemd cases contacted
+public IMDb endpoints; every HOME/XDG/cache path remained private.
+
+Unmet: frozen hello/error replay requires exactly four caps; live advertises nine.
+P1-06 normalization says “no extra masks”; ruling requested before changing it.
+No full-suite green/all.sh claim. Follow-up: an initial download-direction live
+reduction probe exceeded the window while admitted requests drained
+(`live-foreground/daemon/alt_limit_holds.jsonl`); final bandwidth proof measures
+upload explicitly. P5-07 is not started: its 64 MiB recovery fixture cannot satisfy
+`free > remaining + 512 MiB`, and that frozen-rule ruling is also pending.
+
+## Orchestrator rulings, 2026-10-19
+
+Hello/error capability arrays follow the live list for merged additive features;
+update the fixture and changes[] bookkeeping, keeping replay comparison exact.
+P5-07's frozen 64 MiB/100 MiB recovery acceptance wins over Do 6's impossible
+margin: warning stays free < needed + 512 MiB; sample every 5 s, retry after free
+rises by max(16 MiB, one piece) from that torrent's ENOSPC baseline, once per
+rise; repeated ENOSPC resets its baseline. Log disk_full_recovered; explicit start
+retries immediately. UI criteria stay deferred to track C/D.
+
+P5-04 cap ruling applied: hello/error fixture capability arrays and the documented
+hello example now equal the live list, exactly. Contract 1.2.7 records each added
+cap via changes[].cap; agent unit test pins fixture equality and this coverage.
+`run.py api`, `run.py caps` pass (`caps-ruling/`); `cases contract_hello contract_errors`
+passes foreground and systemd (`caps-replay-{foreground,systemd}/`). No replay
+mask or deferral was added. Earlier full-suite failure is resolved for these rows;
+no additional full-suite run is claimed for this targeted bookkeeping delta.

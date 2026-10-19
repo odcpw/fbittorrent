@@ -14,7 +14,15 @@ from fbtlog import Case, suite_status
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
 import private_net
 
-STATES=('empty','downloading','paused')
+STATES=('empty','downloading','paused','table-200')
+
+
+def stop_owned(harness,process):
+    if process.child.poll() is None:harness.stop_serve(process)
+    else:
+        process.wait(timeout=10,code=0)
+        harness.case.check(not harness.engine_path.exists(),'client-initiated shutdown removes the owned socket','owned process exited before fixture cleanup')
+        harness.lock_free()
 
 
 @contextmanager
@@ -22,10 +30,10 @@ def running(binary,state,case):
     private_net.require()
     case.check(True,'private network and DNS contain every fixture socket',private_net.describe())
     with ExitStack() as stack:
-        sandbox=stack.enter_context(fixtures.Sandbox())
+        sandbox=stack.enter_context(daemon.Sandbox())
         harness=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),sandbox,False))
         process=harness.start_serve()
-        stack.callback(harness.stop_serve,process)
+        stack.callback(stop_owned,harness,process)
         if not (harness.receive_ready() and harness.wait_engine()):raise RuntimeError('UI fixture daemon did not become ready')
         client=stack.enter_context(daemon.ApiConn(harness));client.hello()
         row=None
@@ -33,8 +41,8 @@ def running(binary,state,case):
             source=sandbox.root/'pristine';source.mkdir()
             payload=source/'UI fixture.bin';payload.write_bytes(os.urandom(8*fixtures.MIB))
             torrent=fixtures.torrent_fixture(source,[payload])
-            if state=='downloading':
-                seedbox=stack.enter_context(fixtures.Sandbox())
+            if state in ('downloading','table-200'):
+                seedbox=stack.enter_context(daemon.Sandbox())
                 seed=stack.enter_context(daemon.Harness(case,Path(binary).resolve(),seedbox,False))
                 seed_process=seed.start_serve();stack.callback(seed.stop_serve,seed_process)
                 if not (seed.receive_ready() and seed.wait_engine()):raise RuntimeError('UI seed did not become ready')
@@ -49,16 +57,20 @@ def running(binary,state,case):
             def ready():
                 nonlocal row
                 row=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']
-                ok=row['state']==state and (state!='downloading' or (row.get('dl_bps',0)>0 and 0<row.get('completed_bytes',0)<row['size']))
+                desired='downloading' if state=='table-200' else state
+                ok=row['state']==desired and (desired!='downloading' or (row.get('dl_bps',0)>0 and 0<row.get('completed_bytes',0)<row['size']))
                 return ok,json.dumps(row)
             if not harness.wait_for(ready,'real UI precondition '+state,timeout=15):raise RuntimeError('UI state was not observed')
+        if state=='table-200':
+            import table_fixture
+            table_fixture.add_paused(client,sandbox)
         case.check(True,'real fixture daemon is available for isolated UI',json.dumps(dict(state=state,row=row)))
         yield sandbox,harness,client,row
 
 
 def serve(binary,state):
     private_net.enter()
-    with Case('qs_fixture',state) as case,running(binary,state,case) as (sandbox,harness,client,row):
+    with Case('qs_fixture',state.replace('-','_')) as case,running(binary,state,case) as (sandbox,harness,client,row):
         print('FBTFIXTURE '+json.dumps(dict(runtime=sandbox.env['XDG_RUNTIME_DIR'],root=str(sandbox.root),state=state,row=row)),flush=True)
         # EOF is the owner's teardown signal. No polling or retained children.
         sys.stdin.buffer.read(1)

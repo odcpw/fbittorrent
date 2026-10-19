@@ -17,6 +17,7 @@ mod tests;
 const MAX_ITEMS: usize = 100_000;
 const MAX_SNAPSHOT_BYTES: usize = 32 * api::LINE_OUT;
 const MAX_EVENTS: usize = 1000; // Match the daemon event ring, including reconnect snapshots.
+const MAX_LOGS: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct Subscription {
@@ -47,6 +48,7 @@ pub(super) struct Store {
     pub settings: Option<api::Settings>,
     pub subscriptions: BTreeMap<u64, Subscription>,
     pub events: VecDeque<api::Event>,
+    pub logs: VecDeque<api::LogEntry>,
     snapshots: BTreeMap<(u64, api::Topic), Snapshot>,
     caps: api::validation::NegotiatedCaps,
 }
@@ -266,11 +268,25 @@ impl Store {
                         self.push_event(*event.clone());
                     }
                 }
+                api::Topic::Log => {
+                    for item in added.iter().flatten() {
+                        let api::Item::Log(entry) = item else {
+                            bail!("non-log in log delta")
+                        };
+                        self.push_log(entry.clone());
+                    }
+                }
                 _ => bail!("delta on a singleton topic"),
             },
             _ => return Ok(Effect::None),
         }
         Ok(Effect::Changed)
+    }
+    fn push_log(&mut self, entry: api::LogEntry) {
+        if self.logs.back().is_none_or(|last| last.seq < entry.seq) {
+            if self.logs.len() == MAX_LOGS { self.logs.pop_front(); }
+            self.logs.push_back(entry);
+        }
     }
     fn push_event(&mut self, event: api::Event) {
         self.settle(&event);
@@ -299,6 +315,9 @@ impl Store {
                 for event in snapshot.events {
                     self.push_event(event);
                 }
+            }
+            api::Topic::Log => {
+                self.logs = snapshot.logs.into_values().collect();
             }
             _ => bail!("snapshot on a singleton topic"),
         }

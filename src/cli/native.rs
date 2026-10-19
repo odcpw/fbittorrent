@@ -20,6 +20,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::AddClipboard
             | Cmd::Start { .. }
             | Cmd::Stop { .. }
+            | Cmd::Reannounce { .. }
             | Cmd::Delete { .. }
             | Cmd::Seed { .. }
             | Cmd::Noseed { .. }
@@ -209,6 +210,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
             }
             let client = connect(cfg, true, no_start, json_mode)?;
+            if origin=="handler" && cfg.handler=="confirm" {
+                let value=super::handler::confirm(&client,cfg,source,*stopped,*seed,save.clone(),category.clone())?;
+                crate::emit(json_mode,value,||println!("Review torrent in the dashboard; download has not started."));return Ok(Code::Ok);
+            }
             let added = add(
                 &client,
                 cfg,
@@ -218,6 +223,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 save.clone(),
                 category.clone(),
                 if origin == "handler" && (*quiet || json_mode) { "agent" } else { origin },
+                false,
             )?;
             if !quiet && cfg.notify && !json_mode && origin != "handler" && origin != "agent"
                 && (*explicit_notify || crate::agent::stdout_is_tty()) {
@@ -265,7 +271,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 .output()?;
             let source = String::from_utf8_lossy(&out.stdout).trim().to_owned();
             let client = connect(cfg, true, no_start, json_mode)?;
-            let mut value = add(&client, cfg, &source, false, false, None, None, "manual")?;
+            let mut value = add(&client, cfg, &source, false, false, None, None, "manual", false)?;
             value["ok"] = json!(true);
             value["action"] = json!("add");
             emit(json_mode, value);
@@ -310,6 +316,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     } else {
                         json!([])
                     };
+                    if let Some(c)=&client {
+                        let detail=c.call("torrents.get",json!({"hash":hashes[0]}))?;
+                        if let Some(count)=detail["torrent"].get("tracker_count") {value["tracker_count"]=count.clone();}
+                        value["trackers"]=if c.hello.caps.iter().any(|cap|cap=="trackers") {
+                            c.call("torrents.trackers",json!({"hash":hashes[0]}))?["trackers"].clone()
+                        } else {json!([])};
+                    } else { value["trackers"]=json!([]); }
                     emit(json_mode, value);
                 }
                 Cmd::Status { quiet } => {
@@ -359,6 +372,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             );
         }
         Cmd::Start { .. }
+        | Cmd::Reannounce { .. }
         | Cmd::Seed { .. }
         | Cmd::Noseed { .. }
         | Cmd::Delete { .. }
@@ -370,6 +384,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let selectors = match cmd {
                 Cmd::Open { selector } => vec![selector.clone()],
                 Cmd::Start { selectors }
+                | Cmd::Reannounce { selectors }
                 | Cmd::Seed { selectors }
                 | Cmd::Noseed { selectors }
                 | Cmd::Delete { selectors, .. }
@@ -378,6 +393,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             };
             let hashes = selected(&rows, &selectors)?;
             match cmd {
+                Cmd::Reannounce {..} => {
+                    for batch in hashes.chunks(256) { c.call("torrents.reannounce",json!({"hashes":batch}))?; }
+                    emit(json_mode,json!({"ok":true,"action":"reannounce","count":hashes.len(),"hashes":hashes}));
+                }
                 Cmd::Wait {
                     timeout, interval, ..
                 } => return wait_for(cfg, c, hashes, *timeout, *interval, json_mode),
@@ -474,12 +493,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             }
         }
         Cmd::Restart => {
-            let c = connect(cfg, false, true, json_mode)?;
-            c.call("app.restart", json!({"scope":"engine"}))?;
-            emit(
-                json_mode,
-                json!({"ok":true,"action":"restart","scope":"engine","count":0,"hashes":[]}),
-            );
+            emit(json_mode, super::restart::daemon(cfg,json_mode)?);
         }
         _ => unreachable!("non-native CLI command"),
     }
@@ -531,7 +545,7 @@ fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     )
     .into())
 }
-fn add(
+pub(super) fn add(
     c: &ApiClient,
     cfg: &Config,
     source: &str,
@@ -540,15 +554,9 @@ fn add(
     save: Option<String>,
     category: Option<String>,
     origin: &str,
+    stage: bool,
 ) -> Result<Value> {
-    let local = crate::cli_sources::local_torrent_source(source)?;
-    let input = if source.starts_with("magnet:") {
-        json!({"magnet":source})
-    } else if source.starts_with("http://") || source.starts_with("https://") {
-        json!({"url":source})
-    } else {
-        json!({"path":std::fs::canonicalize(local).map_err(|_|AppError::new(Code::Usage,"torrent source must be an accessible local file, magnet or HTTP URL"))?.to_string_lossy()})
-    };
+    let input=super::handler::source(source)?;
     let mut args =
         json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});
     if let Some(save) = save.or(cfg.save_path.clone()) {
@@ -557,6 +565,7 @@ fn add(
     if let Some(category) = category.or(cfg.category.clone()) {
         args["category"] = json!(category);
     }
+    if stage {args["stage"]=json!(true);}
     let result = c.call("torrents.add", args)?;
     if result["deferred"] == true || result["state"] != "pending" || result.get("hash").is_some() {
         return Ok(result);
@@ -564,7 +573,7 @@ fn add(
     await_mutation(c, result)
 }
 fn counts(rows: &[api::Torrent]) -> Value {
-    json!({"total":rows.len(),"active":rows.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
+    json!({"total":rows.len(),"active":rows.iter().filter(|r|matches!(r.state, api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
 }
 fn status(
     c: Option<&ApiClient>,

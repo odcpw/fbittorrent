@@ -21,7 +21,9 @@ def config(box, **values):
     text = path.read_text()
     for key, value in values.items():
         import re
-        text = re.sub(r'^'+key+r' = .*$', key+' = '+json.dumps(value), text, flags=re.M)
+        line = key+' = '+json.dumps(value)
+        text, count = re.subn(r'^'+key+r' = .*$', line, text, flags=re.M)
+        if not count: text += line+'\n'
     path.write_text(text)
 
 
@@ -140,7 +142,10 @@ def notify_action_folder(binary,systemd): action_case(binary,systemd,'folder')
 def notify_added_undo(binary,systemd):
     with owned('notify_added_undo',binary,systemd,'undo') as (case,box,h,p,client):
         root=box.root/'handler';root.mkdir();payload=root/'Keep<&.bin';payload.write_bytes(os.urandom(16384))
-        item=fixtures.torrent_fixture(root,[payload]);before=payload.read_bytes()
+        item=fixtures.torrent_fixture(root,[payload])
+        # A stopped incomplete record isolates the Added/Undo notification.
+        # Keep file length fixed and preserve its exact owned bytes through Undo.
+        original=payload.read_bytes();payload.write_bytes(bytes([original[0]^1])+original[1:]);before=payload.read_bytes()
         client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(root),stopped=True,origin='handler'))
         h.wait_for(lambda:(not client.call('torrents.list',{})['result']['torrents'],json.dumps(calls(box))),'Undo removes only the handler torrent')
         rows=observe(case,box)
@@ -215,6 +220,8 @@ def notify_killed_handler(binary,systemd):
 
 def notify_handler_cli_once(binary,systemd):
     with owned('notify_handler_cli_once',binary,systemd) as (case,box,h,p,client):
+        # This case tests immediate-add notifications, not handler confirmation.
+        config(box,handler='add')
         for index,extra in enumerate([[],['--json'],['--quiet']]):
             root=box.root/f'click-{index}';root.mkdir();payload=root/'clicked.bin';payload.write_bytes(os.urandom(16384))
             item=fixtures.torrent_fixture(root,[payload]);fixtures.corrupt_byte(payload,0)

@@ -43,6 +43,7 @@ ShellRoot {
     check("deadlines", s.c.actions[ref].status === "pending", "add remains pending before 100 s", s.c.actions[ref].status)
     s.time.ms=100000; s.c.tick()
     check("deadlines", s.c.actions[ref].status === "no answer", "add times out at 100 s", s.c.actions[ref].status)
+    check("deadlines",s.c.actions[ref].args.source.magnet!==undefined,"failed action retains its row/source correlation",JSON.stringify(s.c.actions[ref]))
     console.log("FBTQS-PASS deadlines")
     s = session(); s.hello();
     var safe=s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
@@ -105,6 +106,13 @@ ShellRoot {
     s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)
     console.log("FBTQS-PASS capabilities")
+    ;["shutdown","idle","restart","invalid_message"].forEach(function(reason){
+      s=session();s.hello();ref=s.c.request("app.shutdown",{reason:"user"},{mutating:true})
+      request=JSON.parse(s.writes[s.writes.length-1]);s.reply({state:"pending",ref:ref},request.id)
+      s.c.receive(JSON.stringify({ev:"bye",reason:reason}));s.c.disconnected()
+      check("shutdown_outcome",s.c.actions[ref].status===(reason==="shutdown" ? "confirmed" : "no answer"),"only explicit shutdown bye confirms the pending shutdown",JSON.stringify(s.c.actions[ref]))
+    })
+    console.log("FBTQS-PASS shutdown_outcome")
     Qt.callLater(function() { Quickshell.execDetached(["qs", "kill", "-p", Quickshell.shellPath(".")]) })
   }
 }

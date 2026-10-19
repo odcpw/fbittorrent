@@ -160,7 +160,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Clear scheduled case logs after cache restore
-        run: python3 scripts/testlog-summary.py --reset --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes
+        run: python3 scripts/testlog-summary.py --reset --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes --suite ci_plugin_lint --suite qs_token_lint --suite qs_contrast
       - name: Check working tree and committed diff whitespace
         env:
           DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -174,10 +174,17 @@ jobs:
       - name: Check source file sizes (900-line ceiling; legacy files may only shrink) and the size-lint boundary cases
         run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test --baseline scripts/size-baseline.txt src
 
-      # Token and plugin-structure lints arrive in their named P2/P4 beads.
+      - name: Install plugin lint tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep nodejs
+      - name: Check plugin tokens, negative controls, structure and contrast
+        run: |
+          python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_plugin_lint -- bash plugin/tests/lint.sh
+          python3 plugin/tests/contrast.py --self-test
       - name: Summarize cases
         if: always()
-        run: python3 scripts/testlog-summary.py --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes
+        run: python3 scripts/testlog-summary.py --suite ci_lint_tree --suite ci_lint_commits --suite ci_lint_sizes --suite ci_plugin_lint --suite qs_token_lint --suite qs_contrast
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:

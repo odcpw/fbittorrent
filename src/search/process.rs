@@ -123,4 +123,3 @@ pub(super) fn drain_bounded(reader: &mut impl Read, limit: usize) -> std::io::Re
         exceeded |= retained < size;
     }
 }
-

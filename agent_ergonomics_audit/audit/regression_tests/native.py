@@ -526,9 +526,10 @@ class NativeHarness:
                 status = status if isinstance(status, dict) else {}
                 present = socket_path.exists()
                 observed = (f"socket={present}; status exit {status_exit}, ok={status.get('ok')}, "
-                            f"app_open={status.get('app_open')}, connection={status.get('connection')}")
-                if (status_exit == 0 and status.get("ok") is True and status.get("app_open") is True
-                        and status.get("connection") == "connected" and present and time.monotonic() < end):
+                            f"running={status.get('running')}, daemon={status.get('daemon')}, connection={status.get('connection')}")
+                if (status_exit == 0 and status.get("ok") is True and status.get("running") is True
+                        and status.get("daemon", {}).get("state") == "running"
+                        and status.get("connection") == "api" and present and time.monotonic() < end):
                     show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
@@ -543,7 +544,7 @@ class NativeHarness:
                 break
             time.sleep(max(0, min(.1, end-time.monotonic())))
         self.record("wait for settings safely reopen engine",
-                    f"Socket present, status ok/app_open/connected and show {hash_} exit 0 within {seconds} seconds",
+                    f"Socket present, status ok/running with daemon running over API and show {hash_} exit 0 within {seconds} seconds",
                     f"{'Ready' if ready else 'Timed out'} after {time.monotonic()-started:.3f} seconds; {observed}",
                     ready, started)
         return restored
@@ -823,6 +824,8 @@ def expected_daemon_stderr(stderr, complete=True):
                 r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
                 r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
                 r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
+                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
+                r'INFO imdb index loaded refresh=(?:true|false)',
                 r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
                 r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
                 r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
@@ -1099,6 +1102,11 @@ def stop_during_hashing(binary):
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
             # its fresh startup check before exercising the actual Resume key.
+            # A clean stop lets fast resume (P6-06) trust the saved state and
+            # skip the check, so consume the CLEAN marker as a crash would.
+            marker = store / "resume/CLEAN"
+            case.check(marker.is_file(), "A clean down leaves the fast-resume CLEAN marker.", str(marker))
+            marker.unlink(missing_ok=True)
             harness.start_tmux(tmux, session, launch)
             harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
@@ -1189,7 +1197,7 @@ class AttachedTui:
     def clients(self):
         with daemon.ApiConn(self.h) as connection:
             connection.hello()
-            return connection.call("app.info")["result"]["clients"]["tui"]
+            return connection.call("app.stats")["result"]["active_clients"]["tui"]
 
     def close(self):
         self.tmux("kill-server")
@@ -1684,13 +1692,13 @@ def main():
                          "live queue limit changes admission")
                 import tomllib
                 case.check(tomllib.loads((config_dir / "config.toml").read_text())["max_active_downloads"] == 1, 'The one-download limit is durable in the isolated config file.')
-                cli("settings", "--max-downloads", "0", code=1)
+                cli("settings", "--max-downloads", "0", code=2)  # usage: value out of range (CLI exit-code dictionary)
                 case.check(cli("settings").get("max_active_downloads") == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
                 for hash_ in extra_hashes:
                     cli("delete", hash_)
                 cli("settings", "--max-downloads", "3")
                 cli("settings", "--vpn", "fbmissing0")
-                wait_for(lambda: cli("status").get("connection") == "vpn_waiting", "required VPN blocks networking")
+                wait_for(lambda: cli("status").get("daemon", {}).get("state") == "parked", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
                 case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)

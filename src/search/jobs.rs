@@ -267,4 +267,3 @@ pub fn shutdown_all() {
         stop_job(&job);
     }
 }
-

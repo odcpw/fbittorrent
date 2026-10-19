@@ -147,6 +147,10 @@ pub struct TorrentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
     pub force: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_pos: Option<u64>,
     #[serde(skip)]
     legacy: Legacy,
 }
@@ -208,7 +212,9 @@ impl TorrentView {
             content_path: None,
             added_at: record.added_on,
             completed_at: (record.completion_on > 0).then_some(record.completion_on),
-            force: false,
+            origin: None, // projected once this row is attached to its owned ledger
+            force: record.force,
+            queue_pos: None,
             legacy: Legacy {
                 source,
                 facts,
@@ -221,6 +227,17 @@ impl TorrentView {
                 content_path: record.output_folder.clone(),
             },
         }
+    }
+
+    fn trusted_pending(record:&Record, value:resume::Measurement)->Self {
+        let facts=StateFacts {activity:Activity::Paused,paused:true,finished:value.have==value.size,
+            stop_on_complete:record.stop_on_complete(),record_paused:record.paused,
+            check_cancelled:false,receiving:false,parked:false};
+        let mut view=Self::record(record,facts,Source::Handle);
+        view.checked=true;view.size=Some(value.size);view.completed_bytes=Some(value.have);
+        view.progress=Some(if value.size==0 {1.0} else {value.have as f64/value.size as f64});
+        view.legacy.progress_known=true;
+        view
     }
 
     fn handle(record: &Record, handle: &Arc<ManagedTorrent>, check_cancelled: bool) -> Self {
@@ -502,6 +519,7 @@ impl EngineDispatcher {
     }
     pub(super) fn info_locked(&self, ledger: &Ledger) -> Vec<TorrentView> {
         let mut torrents = Vec::new();
+        let mut queue_position=0;
         for record in &ledger.records {
             let mut view = match self.inner.handle(&record.hash) {
                 Ok(handle) => TorrentView::handle(
@@ -511,6 +529,11 @@ impl EngineDispatcher {
                 ),
                 Err(_) => self.inner.unrestored_view(record),
             };
+            if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
+                if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
+                    view=TorrentView::trusted_pending(record,value);
+                } else {self.inner.resume_prepared.finish(&record.hash);}
+            }
             if view.error.is_none() {
                 view.error = self
                     .inner
@@ -530,6 +553,8 @@ impl EngineDispatcher {
                 view.completed_bytes = None;
                 view.progress = None;
             }
+            view.origin=Some(record.origin.clone());
+            view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
             view.retain_restore_reason();
             torrents.push(view);
         }

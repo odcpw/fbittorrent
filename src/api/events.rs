@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Item {
+    Log(LogEntry),
     Torrent(Torrent),
     File(File),
     Search(super::SearchItem),

@@ -115,4 +115,3 @@ pub(super) fn resolve_download_in(
     }
     bail!("{provider} returned no magnet link or .torrent file; open the selected result's details to download it manually")
 }
-

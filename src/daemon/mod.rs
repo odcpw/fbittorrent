@@ -1,9 +1,13 @@
 pub mod lifecycle;
 pub(crate) mod policy;
 pub(crate) mod notify;
+pub(crate) mod log;
+mod log_capture;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
+mod upgrade;
+mod test_ready;
 pub mod slot;
 
 use crate::{
@@ -31,7 +35,11 @@ pub struct Daemon {
     pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
+    pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
+    pub(crate) undo: Arc<engine::undo::History>,
+    pub(crate) logs: Arc<log::Ring>,
+    resume: Arc<engine::resume::Store>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
     network: RwLock<network_app::NetworkState>,
@@ -236,19 +244,20 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         daemon.replace(Slot::Parked(engine::ParkedLedger::new(
             crate::config::data_dir().join("engine"),
             daemon.lifecycle.clone(),
-        )))?;
+        ).with_undo(daemon.undo.clone())))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface.clone();
         eprintln!("INFO engine starting session");
         let engine =
-            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone()) {
+            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone(), Some(daemon.resume.clone())) {
                 Ok(engine) => engine,
                 Err(_) if cfg.network_interface.is_some() && !network_state(cfg).ready => {
                     return open_slot(daemon, cfg, lock);
                 }
                 Err(error) => return Err(error),
             };
+        engine.dispatcher().attach_undo(daemon.undo.clone());
         eprintln!(
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
@@ -273,13 +282,18 @@ fn supervise(
     lock: Arc<ipc::InstanceLock>,
     notify: &sdnotify::Notify,
 ) -> Result<StopReason> {
+    let mut upgrade = upgrade::Upgrade::new()?;
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
         let timeout = {
             let mut policy = daemon.policy.lock().unwrap();
             let now = Instant::now();
-            if policy.expired(now) { return Ok(StopReason::Idle); }
+            if upgrade.check(now, policy.busy()) {
+                daemon.lifecycle.request_stop(StopReason::Upgrade);
+            }
+            daemon.upgrade_pending.store(upgrade.pending(), Ordering::Release);
+            if policy.expired(now) && !upgrade.pending() { return Ok(StopReason::Idle); }
             policy.wait(now)
         };
         // Network safety still checks once a second when bound. Otherwise the
@@ -287,7 +301,8 @@ fn supervise(
         let timeout = if cfg.network_interface.is_some() {
             timeout.min(Duration::from_secs(1))
         } else { timeout };
-        let request = daemon.lifecycle.wait(timeout);
+        let request = daemon.lifecycle.wait(timeout.min(upgrade.wait(Instant::now())));
+        daemon.undo.expire(&crate::config::data_dir().join("engine"));
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -335,6 +350,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     let _search_drain = SearchDrain;
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
+    let log_capture = log_capture::Capture::install()?;
     let panicked = Arc::new(AtomicBool::new(false));
     let hook = PanicHook::install(lifecycle.clone(), panicked.clone());
     let notify = sdnotify::Notify::from_env()?;
@@ -352,9 +368,13 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         settings: Default::default(),
         no_notify,
+        upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
+        logs: log_capture.ring.clone(),
         imdb: Default::default(),
+        undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         search: Default::default(),
+        resume: Arc::new(engine::resume::Store::open(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
@@ -368,6 +388,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     // P1-13 owns desktop notifications. sd_notify remains active when
     // NOTIFY_SOCKET is set, independently of the notification preference.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        test_ready::wait(&daemon, &directory)?;
         notify.send("READY=1")?;
         eprintln!("INFO daemon ready state=starting");
         std::thread::scope(|scope| {
@@ -417,6 +438,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
             .copied()
             .unwrap_or(StopReason::Panic)
     };
+    if drain_reason==StopReason::Panic {daemon.resume.abandon_clean();}
+    else if let Err(error)=daemon.resume.preserve_parked_clean() {eprintln!("WARN resume parked clean marker unavailable error={error:?}");}
     api.drain(drain_reason);
     drop(api);
     drop(server);

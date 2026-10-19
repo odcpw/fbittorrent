@@ -204,7 +204,7 @@ def tui_search_api(binary, systemd):
             target,done=ui.start();ui.keys(target,'2');ui.keys(target,'hold-ui');ui.keys(target,'Enter',literal=False)
             ui.assert_pane(target,'辛特尔')
             original=wait_groups(h,runtime)
-            case.check(observer.call('app.info')['result']['clients']['tui']==1,
+            case.check(observer.call('app.stats')['result']['active_clients']['tui']==1,
                        'native search snapshots use the existing single TUI API connection',ui.capture(target))
             # Follow /proc ancestry: the Nova group is owned by the daemon,
             # rather than the shell/terminal or a Python worker in the TUI.
@@ -259,7 +259,7 @@ def tui_search_owner_restart(binary, systemd):
             if not (h.receive_ready() and h.wait_engine()):raise RuntimeError('replacement owner failed')
             with d.ApiConn(h) as observer:
                 observer.hello()
-                h.wait_for(lambda:((counts:=observer.call('app.info')['result']['clients'])['tui']==1,json.dumps(counts)),
+                h.wait_for(lambda:((counts:=observer.call('app.stats')['result']['active_clients'])['tui']==1,json.dumps(counts)),
                            'existing search terminal reconnects its single API connection')
                 ui.assert_pane(target,'run the query again')
                 case.check(groups(runtime)==original and all(not live(g['pgid']) for g in original),

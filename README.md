@@ -76,6 +76,14 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
   desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
   seeding for that add), or the CLI.
+- **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
+  torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
+  keeps files. Without the daemon staging capability, the sheet says that metadata
+  arrives after Download and creates no record before confirmation. With staging,
+  it resolves metadata first and offers file selection, seeding and destination.
+  The desktop handler respects `handler = "confirm"` by opening this sheet;
+  `handler = "add"` adds immediately. A local file drop uses the same sheet;
+  file-manager drag and drop on Hyprland still needs manual qualification.
 - **File selection.** Enter on a torrent opens its file list: Space toggles a
   file between included and skipped, `1` includes it, and `a`/`n` select all or
   none. Native mode does not support high/max file priorities.
@@ -97,28 +105,48 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 ## Install
 
 ```bash
-scripts/install.sh                 # locked build, atomic binary replacement, setup --magnet
-fbittorrent search --install        # provider scripts; Python 3 is required
-ln -s "$PWD/plugin/oliver.torrents" ~/.config/omarchy/plugins/oliver.torrents
-omarchy plugin enable oliver.torrents
-omarchy bar put oliver.torrents --before omarchy.tailscale
+scripts/install.sh                       # locked release build, atomic replacement, setup --magnet --plugin=link
+fbittorrent setup --magnet --plugin=copy  # stable plugin copy instead of a checkout symlink
+fbittorrent setup --magnet --plugin=link --dry-run --json  # exact plan, no changes
+fbittorrent search --install              # provider scripts; Python 3 required
 ```
 
-Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
-`torrents.*`.
+Setup writes the static user unit, desktop/MIME entries and icon, places the
+plugin in the bar only when missing, and updates only `torrents.*` menu entries.
+Open and Search summon the dashboard; Terminal keeps the TUI. Stop is shown
+while `fbittorrent status --quiet` succeeds. Repeating setup with the same
+options leaves files and commands unchanged. Nothing starts at login.
+
+For a private prefix or a build already produced by CI, use
+`scripts/install.sh --prefix /path/to/prefix --binary /path/to/fbittorrent` with
+an isolated HOME and XDG directories. The default prefix is `~/.local`.
+
+`fbittorrent setup --uninstall` removes desktop integration and keeps saved
+records, RSS, Shows and downloaded files. `setup --purge --yes` also removes
+application config/cache/state/data; it keeps downloaded payloads.
+
+Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activity):
+
+```lua
+o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
+```
+
+Add it to your own bindings file if desired. Setup does not change keybindings
+or reload your shell.
 
 ## Lifecycle
 
 `fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
-`down` drains it, and `restart` replaces the engine slot while its sockets stay
+`down` drains it, and `restart` replaces the daemon and waits for a new hello.
+The API can also replace just the engine slot while its sockets stay
 available. `dashboard` summons the desktop view. The static user unit starts on
 writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
 never start an owner. When it is down, saved reads report `running:false`; `stop`
 and keep-files `delete` update the saved ledger under the same instance lock.
 `--no-start` and `autostart=false` prevent automatic startup. Without a user
-manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
-replacement are delivered by their lifecycle work; this checkout reports the
-available daemon state without inventing missing idle counters.
+manager, run `serve` in a terminal or tmux. Automatic idle exit uses the busy
+table; binary replacement requests exit 75 when idle, and systemd starts the
+installed replacement.
 
 The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
 wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
@@ -179,7 +207,7 @@ fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
 fbittorrent up [--ui] | down          start daemon / drain and stop owner
 fbittorrent dashboard [--view v] [--query q]   summon panel, or fall back to TUI
-fbittorrent restart                  restart engine slot (upgrade handling follows)
+fbittorrent restart                  restart daemon now; wait up to 30 s for new hello
 fbittorrent serve                   run the native engine headlessly in the foreground
 fbittorrent status                   rates and counts; never opens the app
 fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
@@ -226,6 +254,15 @@ rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
 `setup` installs the monochrome download SVG under
 `$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
 desktop entries and notifications use fbittorrent.
+
+Daemon diagnostics are available with `fbittorrent log --json`, filtered with
+`--level error|warn|info|debug` and `--source engine` (or another source).
+`fbittorrent log --follow` streams NDJSON entries. These commands never start the
+daemon; when it is down they point to `fbittorrent up` and the journal's longer
+history (`journalctl --user -u fbittorrent`). The in-memory ring holds 2,000
+entries. `app.info.clients` counts successful connections since this daemon
+started; `app.stats.active_clients` reports current connections. Nothing is sent
+outside the machine.
 
 ### For agents
 
@@ -565,3 +602,35 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:poster` | IMDb | `i` | — | — |  |
 | `modal:poster` | Wikipedia | `w` | — | — |  |
 <!-- keys:end -->
+
+The daemon checks its executable inode and modification time every 30 seconds.
+An atomically installed replacement switches automatically when the busy table
+is empty, through exit 75 and the systemd unit's forced restart. While work is
+active, summary/app.info expose `upgrade_pending`; `restart` switches immediately.
+Foreground `serve` exits 75 too, but requires its supervisor to launch a new owner;
+CLI restart waits 30 seconds and exits 8 if no replacement hello arrives. Reads
+and restart never start a closed daemon. Hello reports the compiled git build id.
+
+Agents can use `fbittorrent events --follow --kinds torrent.completed --json`
+instead of polling. Save `(instance, seq)` and pass `--since-seq` to replay; an
+expired cursor emits an explicit resync marker. Ctrl+C detaches only the reader.
+`fbittorrent api torrents.list --json` prints the unchanged API envelope. Raw
+arguments accept repeated `--arg key=value` or one `--json-args` object; `--ref`
+keeps an explicit mutation identity across invocations. `api --list --json` and
+`robot-docs api` expose the operation catalogue. Reads never start a daemon.
+
+Local integration consumers can run `python3
+agent_ergonomics_audit/audit/regression_tests/daemon.py target/debug/fbittorrent
+--serve-fixture downloading --throttle 32768` (also idle/seeding/paused; empty is
+an idle alias). The FBTFIXTURE JSON line names its private socket, summary and
+owned resources. The fixture stays alive until stopped; an initially closed
+stdin does not stop it. Closing a pipe that was open at launch supports UI
+teardown. A guardian removes both private peer daemons even after launcher
+SIGKILL. --systemd uses only disposable transient units. Global throttle API
+wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
+
+Completed stop-on-complete records restore as `done, checked:false` without
+opening their payloads for hashing. `seed` and nonempty file-selection actions
+verify them before use; `open` only stats the saved target and stays dormant.
+Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
+`delete --files --yes` can remove a dormant record without creating a live handle.

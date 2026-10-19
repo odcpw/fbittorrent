@@ -67,6 +67,13 @@ fn catalog() -> Objects {
             collect(&serde_json::from_str::<Value>(line).unwrap(), "", &mut out);
         }
     }
+    // A reserved optional field is characterized as a standalone typed object,
+    // not an impossible Get reply for a record that has never been removed.
+    let object: Value=serde_json::from_str(include_str!("undo_detail.json")).unwrap();
+    let detail: TorrentDetail=serde_json::from_value(object.clone()).unwrap();
+    detail.validate().unwrap();
+    assert_eq!(serde_json::to_value(detail).unwrap(),object);
+    collect(&object,"",&mut out);
     out
 }
 fn both(objects: &Objects, kind: &str, fields: &[&str]) {

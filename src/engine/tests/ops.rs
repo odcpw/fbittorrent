@@ -137,7 +137,7 @@ fn typed_operations_execute_without_legacy_frames() {
             ratio_limit: 0.0,
             stopped: true,
             category: "typed".into(),
-            tags: String::new(),
+            tags: String::new(), origin: None,
         }))
         .unwrap();
     dispatcher.runtime.block_on(async {

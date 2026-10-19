@@ -125,3 +125,29 @@ Final receipts and measured resource bounds are recorded in
 in `docs/validation/2026-10-10/README.md`. WAN/private-tracker interoperability,
 large-library startup cost, heap allocation peaks and sustained throughput are
 outside the local measurements.
+
+## App-owned fast resume (P6-06)
+
+The embedded app owns resume authorization; upstream session persistence and
+upstream fastresume remain disabled. On clean drain it stops peer/file work,
+serializes each verified have-bitfield plus the exact selection and relevant
+file stamps into private `engine/resume/<hash>.bin`, syncs payload and snapshot
+files, and writes `engine/resume/CLEAN` last. The marker is consumed and synced
+at startup before any writer starts. The daemon retains authorization across
+engine-slot replacements without moving lifecycle or instance-lock ownership.
+
+Snapshots record size, nanosecond mtime, device and inode for every selected
+non-padding file and any other file sharing a claimed verified piece. The
+metainfo hash, selection, output folder, bitfield length/padding, snapshot checksum and measured
+selected-byte totals must also match. A missing marker, missing/changed file,
+invalid snapshot or incompatible selection falls back to a full check for that
+record. Completed stop-on-complete records retain P1-16's independent dormant
+path. Trusted initialization reports checked data without advertising hashing.
+
+While live, the engine refreshes snapshots every five minutes without creating
+CLEAN. A crash therefore rechecks regardless of those snapshots. Explicit
+recheck durably deletes resume data before its pending acknowledgement; undo
+restore likewise invalidates it so it performs the promised fresh check. A
+later initializer cannot reuse an admission's trusted bits: the fork consumes
+those bytes once, rejects malformed geometry, and performs full checks on error
+recovery. No wire type, capability or API operation is added.

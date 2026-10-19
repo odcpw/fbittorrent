@@ -24,6 +24,7 @@ fn rev_monotonic() {
         state: "starting".into(),
         rows: vec![],
         completions: vec![],
+        logs: json!([]),
         searches: BTreeMap::new(),
         files: BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),

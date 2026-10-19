@@ -144,6 +144,7 @@ closed_enum!(ByeReason {
 /// should ignore unsupported topics rather than inventing a store shape.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Topic {
+    Log,
     Summary,
     Torrents,
     Files(Hash),
@@ -155,6 +156,7 @@ pub enum Topic {
 impl Topic {
     pub fn as_str(&self) -> String {
         match self {
+            Self::Log => "log".into(),
             Self::Summary => "summary".into(),
             Self::Torrents => "torrents".into(),
             Self::Network => "network".into(),
@@ -174,6 +176,7 @@ impl<'de> Deserialize<'de> for Topic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         match s.as_str() {
+            "log" => Ok(Self::Log),
             "summary" => Ok(Self::Summary),
             "torrents" => Ok(Self::Torrents),
             "network" => Ok(Self::Network),

@@ -8,6 +8,7 @@ pub(super) struct Snapshot {
     pub files: BTreeMap<String, api::File>,
     pub searches: BTreeMap<String, api::SearchItem>,
     pub events: Vec<api::Event>,
+    pub logs: BTreeMap<u64, api::LogEntry>,
 }
 impl Snapshot {
     pub fn new(count: usize) -> Self {
@@ -18,10 +19,11 @@ impl Snapshot {
             files: BTreeMap::new(),
             searches: BTreeMap::new(),
             events: Vec::new(),
+            logs: BTreeMap::new(),
         }
     }
     pub fn len(&self) -> usize {
-        self.torrents.len() + self.files.len() + self.searches.len() + self.events.len()
+        self.torrents.len() + self.files.len() + self.events.len() + self.searches.len() + self.logs.len()
     }
     pub fn append(
         &mut self,
@@ -52,6 +54,10 @@ impl Snapshot {
                 (api::Topic::Events, api::Item::Event(_)) => {
                     self.events.len() + items.len() <= MAX_EVENTS
                 }
+                (api::Topic::Log, api::Item::Log(entry)) => {
+                    keys.insert(entry.seq.to_string()) && !self.logs.contains_key(&entry.seq)
+                        && self.logs.len() + items.len() <= MAX_LOGS
+                }
                 _ => bail!("snapshot item does not match topic"),
             };
             ensure!(
@@ -68,6 +74,9 @@ impl Snapshot {
                     self.files.insert(row.index.to_string(), row.clone());
                 }
                 api::Item::Event(event) => self.events.push(*event.clone()),
+                api::Item::Log(entry) => {
+                    self.logs.insert(entry.seq, entry.clone());
+                }
                 api::Item::Search(row) => { self.searches.insert(row.key.clone(),row.clone()); },
             }
         }

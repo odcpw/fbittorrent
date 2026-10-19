@@ -31,7 +31,7 @@ function create(io, options) {
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
   function fail(entry, failure, status) {
-    if (entry.ref) c.actions[entry.ref] = { op: entry.op, status: status || "failed", error: failure }
+    if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
     if (entry.callback) entry.callback(null, failure)
     c.lastError = failure
   }
@@ -140,6 +140,8 @@ function create(io, options) {
   function topics() {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
+    if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
+    if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")
     return wanted.concat(c.details).slice(0, 16)
   }
   c.subscribeAll = function() {
@@ -166,6 +168,9 @@ function create(io, options) {
     var active = Object.keys(c.pending).map(function(id) { return c.pending[id].op })
     if (active.indexOf("app.info") < 0) c.request("app.info")
     if (c.caps.indexOf("torrents") >= 0 && active.indexOf("torrents.list") < 0) c.request("torrents.list", {})
+    if(c.dashboardVisible && c.caps.indexOf("shows")>=0 && active.indexOf("shows.list")<0)c.request("shows.list")
+    if(c.dashboardVisible && c.caps.indexOf("rss")>=0 && active.indexOf("rss.feeds")<0)c.request("rss.feeds")
+    if (active.indexOf("app.network") < 0) c.request("app.network")
     if (active.indexOf("transfer.info") < 0) c.request("transfer.info")
   }
   c.tick = function() {
@@ -187,6 +192,13 @@ function create(io, options) {
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) { c.reset("expected an API object"); return }
     c.lastFrame = now()
     if (frame.ev) {
+      if(frame.ev==="bye" && frame.reason==="shutdown") {
+        Object.keys(c.pending).forEach(function(id){
+          var entry=c.pending[id]
+          if(entry.op==="app.shutdown"){if(entry.ref)c.actions[entry.ref].status="confirmed";delete c.pending[id]}
+        })
+        Object.keys(c.awaiting).forEach(function(ref){if(c.awaiting[ref].op==="app.shutdown"){c.actions[ref].status="confirmed";delete c.awaiting[ref]}})
+      }
       if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false }
       if (frame.ev === "error") c.lastError = frame.error
       if (frame.ev === "mutation.result") {

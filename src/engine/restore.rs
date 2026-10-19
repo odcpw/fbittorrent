@@ -128,6 +128,7 @@ impl Inner {
         // before admitting any storage, then apply the saved cap at admission.
         let mut options = record.options(paused)?;
         options.initial_peers = Some(metadata.seen_peers);
+        options.trusted_have_pieces = self.resume_prepared.take(&record.hash);
         let handle = self
             .session
             .add_torrent(
@@ -138,6 +139,7 @@ impl Inner {
             .await?
             .into_handle()
             .context("torrent admission did not return a handle")?;
+        eprintln!("DEBUG engine initial validation admitted source=engine hash={}", record.hash);
         // The bus may currently have no waiter for this newly resolved hash.
         // Wake its engine-wide observer so it arms the new handle before sampling.
         self.bus_changed.notify_waiters();
@@ -149,6 +151,7 @@ impl Inner {
     }
 
     pub(super) fn cancel_restore(&self, hash: &str, remove: bool) {
+        self.resume_prepared.remove(hash);
         let mut restores = self.restores.lock().unwrap();
         if let Some(restore) = restores.get_mut(hash) {
             if matches!(restore.outcome, RestoreOutcome::Dormant) && !remove {
@@ -240,6 +243,7 @@ impl Inner {
                 }
                 inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await
             }.await;
+            if result.is_err() {inner.resume_prepared.finish(&record.hash);}
             let mut restores = inner.restores.lock().unwrap();
             let mut changed = false;
             if let Some(restore) = restores.get_mut(&record.hash) {

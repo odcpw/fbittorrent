@@ -44,6 +44,7 @@ pub struct ParkedLedger {
     directory: PathBuf,
     lifecycle: Lifecycle,
     generation: Arc<LedgerGeneration>,
+    undo: Arc<undo::History>,
 }
 impl ParkedLedger {
     pub fn new(directory: PathBuf, lifecycle: Lifecycle) -> Self {
@@ -51,13 +52,17 @@ impl ParkedLedger {
             directory,
             lifecycle,
             generation: Arc::default(),
+            undo: Arc::default(),
         }
     }
+    pub fn with_undo(mut self, history: Arc<undo::History>) -> Self { self.undo=history; self }
     pub fn ledger_generation(&self) -> Arc<LedgerGeneration> {
         self.generation.clone()
     }
     pub fn execute(&self, op: EngineOp) -> Result<EngineResult> {
         op.validate()?;
+        let _undo_guard = matches!(&op, EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. })
+            .then(|| self.undo.transaction.lock().unwrap());
         let _guard = PARKED_LEDGER_LOCK
             .lock()
             .map_err(|_| anyhow!("saved torrent lock is unavailable"))?;
@@ -93,17 +98,19 @@ impl ParkedLedger {
             EngineOp::Queue
             | EngineOp::Info
             | EngineOp::Files { .. }
+            | EngineOp::Trackers { .. }
             | EngineOp::Start { .. }
             | EngineOp::Stop { .. }
-            | EngineOp::Delete { .. } => {}
+            | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
             // Typed API additions save intent without constructing a session.
-            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } => {}
+            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } | EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. } => {}
             _ => bail!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ),
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if let Some(result) = undo::parked(&self.undo, &self.directory, &mut ledger, &op) { return result; }
         if let EngineOp::AddMagnet(options) | EngineOp::AddSelected { options, .. } = &op {
             let cfg = Config::load()?;
             let folder = cfg.save_path.map(PathBuf::from).unwrap_or_else(|| {
@@ -144,6 +151,10 @@ impl ParkedLedger {
             }]));
         }
         match &op {
+            EngineOp::Trackers {hash} => {
+                let record=ledger.records.iter().find(|r|&r.hash==hash).context("torrent record not found")?;
+                return Ok(EngineResult::Trackers(trackers::saved(record,&self.directory)?));
+            }
             EngineOp::Queue => {
                 return Ok(EngineResult::Queue(QueueInfo {
                     max_active_downloads: Config::load()?.max_active_downloads,
@@ -160,14 +171,15 @@ impl ParkedLedger {
                 }));
             }
             EngineOp::Info => {
-                ledger.records.sort_by(|a, b| b.added_on.cmp(&a.added_on));
-                return Ok(EngineResult::Torrents(
-                    ledger
-                        .records
-                        .iter()
-                        .map(|record| parked_view(record, &self.directory))
-                        .collect::<Result<_>>()?,
-                ));
+                let mut queue_position=0;
+                let mut rows=ledger.records.iter().map(|record| {
+                    let mut view=parked_view(record,&self.directory)?;
+                    view.origin=Some(record.origin.clone());
+                    view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
+                    Ok(view)
+                }).collect::<Result<Vec<_>>>()?;
+                rows.sort_by(|a,b|b.added_at.cmp(&a.added_at));
+                return Ok(EngineResult::Torrents(rows));
             }
             EngineOp::Files { hash } => {
                 let record = ledger
@@ -205,7 +217,13 @@ impl ParkedLedger {
             }
             _ => {}
         }
+        if let EngineOp::QueueMove {hash,to}=&op {
+            let position=queue_policy::move_record(&mut ledger,hash,*to)?;
+            save_parked_ledger(&self.directory,&ledger)?;
+            return Ok(EngineResult::QueuePosition(position));
+        }
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
+        if let EngineOp::ForceStart {on,..}=&op {queue_policy::validate_force(&ledger,&hashes,*on)?;}
         if let EngineOp::Delete { files, .. } = op {
             if files {
                 bail!(
@@ -222,7 +240,11 @@ impl ParkedLedger {
         } else {
             for record in &mut ledger.records {
                 if hashes.contains(&record.hash) {
-                    record.paused = matches!(op, EngineOp::Stop { .. });
+                    match &op {
+                        EngineOp::ForceStart {on,..}=>{record.force=*on;if *on {record.paused=false;}},
+                        EngineOp::Stop {..}=>{record.paused=true;record.force=false;},
+                        _=>record.paused=false,
+                    }
                     record.resume_after_migration = false;
                 }
             }

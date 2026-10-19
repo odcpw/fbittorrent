@@ -6,23 +6,22 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::bail;
 use anyhow::Context;
+use futures::FutureExt;
+use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::stream::FuturesUnordered;
-use futures::FutureExt;
-use futures::StreamExt;
+use tracing::Instrument;
 use tracing::debug;
 use tracing::debug_span;
 use tracing::trace;
-use tracing::trace_span;
-use tracing::Instrument;
 use url::Url;
 
 use crate::tracker_comms_http;
 use crate::tracker_comms_udp;
 use crate::tracker_comms_udp::UdpTrackerClient;
+use crate::{TrackerStats, redact_url, sanitize};
 use librqbit_core::hash_id::Id20;
 
 pub struct TrackerComms {
@@ -35,6 +34,8 @@ pub struct TrackerComms {
     announce_port: u16,
     http_client: rqbit_runtime::http::Client,
     key: u32,
+    tracker_state: Arc<TrackerStats>,
+    started_generation: u64,
 }
 
 #[derive(Default)]
@@ -89,8 +90,8 @@ enum SupportedTracker {
 impl std::fmt::Debug for SupportedTracker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SupportedTracker::Udp(u) => std::fmt::Display::fmt(u, f),
-            SupportedTracker::Http(u) => std::fmt::Display::fmt(u, f),
+            SupportedTracker::Udp(u) => std::fmt::Display::fmt(&redact_url(u), f),
+            SupportedTracker::Http(u) => std::fmt::Display::fmt(&redact_url(u), f),
         }
     }
 }
@@ -154,13 +155,42 @@ impl TrackerComms {
         http_client: rqbit_runtime::http::Client,
         udp_client: UdpTrackerClient,
     ) -> Option<BoxStream<'static, SocketAddr>> {
+        Self::start_with_stats(
+            cx,
+            info_hash,
+            peer_id,
+            trackers,
+            stats,
+            force_interval,
+            announce_port,
+            http_client,
+            udp_client,
+            Arc::new(TrackerStats::default()),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_with_stats(
+        cx: &Cx,
+        info_hash: Id20,
+        peer_id: Id20,
+        trackers: HashSet<Url>,
+        stats: Box<dyn TorrentStatsProvider>,
+        force_interval: Option<Duration>,
+        announce_port: u16,
+        http_client: rqbit_runtime::http::Client,
+        udp_client: UdpTrackerClient,
+        tracker_state: Arc<TrackerStats>,
+    ) -> Option<BoxStream<'static, SocketAddr>> {
+        tracker_state.register(trackers.iter().cloned());
         let trackers = trackers
             .into_iter()
             .filter_map(|t| match t.scheme() {
                 "http" | "https" => Some(SupportedTracker::Http(t)),
                 "udp" => Some(SupportedTracker::Udp(t)),
                 _ => {
-                    debug!("unsupported tracker URL: {}", t);
+                    tracker_state.not_contacted(&t, "unsupported scheme");
+                    debug!("unsupported tracker URL: {}", redact_url(&t));
                     None
                 }
             })
@@ -175,6 +205,7 @@ impl TrackerComms {
         let (tx, mut rx) = rqbit_runtime::sync::mpsc::channel::<SocketAddr>(16);
 
         let cx = cx.clone();
+        let started_generation = tracker_state.generation();
         let s = async_stream::stream! {
             use futures::StreamExt;
             let comms = Arc::new(Self {
@@ -186,6 +217,8 @@ impl TrackerComms {
                 announce_port,
                 http_client,
                 key: rand::random(),
+                tracker_state,
+                started_generation,
             });
             let mut futures = FuturesUnordered::new();
             for tracker in trackers {
@@ -225,7 +258,7 @@ impl TrackerComms {
         let info_hash = self.info_hash;
         match url {
             SupportedTracker::Udp(url) => {
-                let span = debug_span!(parent: None, "udp_tracker", tracker = %url, info_hash = ?info_hash);
+                let span = debug_span!(parent: None, "udp_tracker", tracker = %redact_url(&url), info_hash = ?info_hash);
                 self.task_single_tracker_monitor_udp(cx, url, client.clone())
                     .instrument(span)
                     .right_future()
@@ -234,7 +267,7 @@ impl TrackerComms {
                 let span = debug_span!(
                     parent: None,
                     "http_tracker",
-                    tracker = %url,
+                    tracker = %redact_url(&url),
                     info_hash = ?info_hash
                 );
                 self.task_single_tracker_monitor_http(cx, url)
@@ -249,28 +282,39 @@ impl TrackerComms {
         cx: &Cx,
         tracker_url: Url,
     ) -> anyhow::Result<()> {
-        trace!(url=%tracker_url, "starting monitor");
+        trace!(url=%redact_url(&tracker_url), "starting monitor");
         let mut event = Some(tracker_comms_http::TrackerRequestEvent::Started);
-
+        let mut seen = self.started_generation;
+        let mut retry = Duration::from_secs(10);
         loop {
             cx.checkpoint()?;
-            let mut retry = Duration::from_secs(10);
-            let interval = loop {
-                match self.tracker_one_request_http(cx, &tracker_url, event).await {
-                    Ok(interval) => break interval,
-                    Err(err) => {
-                        debug!(?retry, "error calling tracker: {err:#}");
-                        rqbit_runtime::time::sleep(cx, retry).await;
-                        cx.checkpoint()?;
-                        retry = (retry * 2).min(Duration::from_secs(600));
-                    }
+            if self.tracker_state.generation() != seen {
+                event = None;
+            }
+            seen = self.tracker_state.generation();
+            let observation = self.tracker_state.updating(&tracker_url);
+            let delay = match self.tracker_one_request_http(cx, &tracker_url, event).await {
+                Ok((interval, peers)) => {
+                    let interval = self.force_tracker_interval.unwrap_or(interval);
+                    observation.ok(peers, interval);
+                    event = None;
+                    retry = Duration::from_secs(10);
+                    interval
+                }
+                Err(err) => {
+                    // A cancelled run must keep its last actual announce result.
+                    cx.checkpoint()?;
+                    let message = sanitize(&tracker_url, &format!("{err:#}"));
+                    debug!(?retry, "error calling tracker: {message}");
+                    observation.error(&message, retry);
+                    let delay = retry;
+                    retry = (retry * 2).min(Duration::from_secs(600));
+                    delay
                 }
             };
-
-            event = None;
-            let interval = self.force_tracker_interval.unwrap_or(interval);
-            debug!("sleeping for {:?} after calling tracker", interval);
-            rqbit_runtime::time::sleep(cx, interval).await;
+            if self.tracker_state.wait(cx, seen, delay).await {
+                event = None;
+            }
         }
     }
 
@@ -279,7 +323,7 @@ impl TrackerComms {
         cx: &Cx,
         tracker_url: &Url,
         event: Option<tracker_comms_http::TrackerRequestEvent>,
-    ) -> anyhow::Result<Duration> {
+    ) -> anyhow::Result<(Duration, u32)> {
         cx.checkpoint()?;
         let stats = self.stats.get();
         let request = tracker_comms_http::TrackerRequest {
@@ -317,16 +361,22 @@ impl TrackerComms {
         };
         let response = bencode::from_bytes_with_rest::<tracker_comms_http::TrackerResponse>(&bytes)
             .map_err(|e| {
-                tracing::trace!("error deserializing TrackerResponse: {e:#}");
+                tracing::trace!(
+                    "error deserializing TrackerResponse: {}",
+                    sanitize(tracker_url, &format!("{e:#}"))
+                );
                 e.into_kind()
             })?
             .0;
 
+        let mut peers = 0u32;
         for peer in response.iter_peers() {
+            peers = peers.saturating_add(1);
             self.tx.send(cx, peer).await?;
         }
-        Ok(Duration::from_secs(
-            response.min_interval.unwrap_or(response.interval),
+        Ok((
+            Duration::from_secs(response.min_interval.unwrap_or(response.interval)),
+            peers,
         ))
     }
 
@@ -337,70 +387,72 @@ impl TrackerComms {
         client: UdpTrackerClient,
     ) -> anyhow::Result<()> {
         cx.checkpoint()?;
-        if url.scheme() != "udp" {
-            bail!("expected UDP scheme in {}", url);
-        }
         let (host, port) = (
             url.host().context("missing host")?,
             url.port().context("missing port")?,
         );
-
-        let mut sleep_interval: Option<Duration> = None;
-        let mut prev_addrs: Option<UdpTrackerResolveResult> = None;
+        let mut seen = self.started_generation;
+        let mut delay = None;
+        let mut prev_addrs = None;
+        let mut retry = Duration::from_secs(1);
         loop {
             cx.checkpoint()?;
-            if let Some(i) = sleep_interval {
-                trace!(interval=?sleep_interval, "sleeping");
-                rqbit_runtime::time::sleep(cx, i).await;
+            if let Some(delay) = delay {
+                self.tracker_state.wait(cx, seen, delay).await;
             }
-
             cx.checkpoint()?;
-            let mut retry = Duration::from_secs(1);
-            let addrs = loop {
-                match udp_tracker_to_socket_addrs(cx, &self.http_client, host.clone(), port)
-                    .await
-                    .or_else(|err| prev_addrs.ok_or(err))
-                {
-                    Ok(addrs) => break addrs,
-                    Err(err) => {
-                        debug!(?retry, "error resolving tracker: {err:#}");
-                        rqbit_runtime::time::sleep(cx, retry).await;
-                        cx.checkpoint()?;
-                        retry = (retry * 2).min(Duration::from_secs(60));
-                    }
+            let forced = self.tracker_state.generation() != seen;
+            seen = self.tracker_state.generation();
+            let observation = self.tracker_state.updating(&url);
+            let addrs = match udp_tracker_to_socket_addrs(cx, &self.http_client, host.clone(), port)
+                .await
+                .or_else(|err| prev_addrs.ok_or(err))
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    cx.checkpoint()?;
+                    let message = sanitize(&url, &format!("{err:#}"));
+                    debug!(?retry, "error resolving tracker: {message}");
+                    observation.error(&message, retry);
+                    delay = Some(retry);
+                    retry = (retry * 2).min(Duration::from_secs(60));
+                    continue;
                 }
             };
-
+            retry = Duration::from_secs(1);
             prev_addrs = Some(addrs);
-
-            match addrs {
+            let result = match addrs {
                 UdpTrackerResolveResult::One(addr) => {
-                    match self
-                        .tracker_one_request_udp(cx, addr, &client)
-                        .instrument(trace_span!("udp request", ?addr))
+                    self.tracker_one_request_udp(cx, addr, &client, forced)
                         .await
-                    {
-                        Ok(sleep) => sleep_interval = Some(sleep),
-                        Err(_) => {
-                            sleep_interval = Some(sleep_interval.unwrap_or(Duration::from_secs(60)))
-                        }
-                    }
                 }
                 UdpTrackerResolveResult::Two(v4, v6) => {
                     let (r4, r6) = futures::join!(
-                        self.tracker_one_request_udp(cx, v4.into(), &client)
-                            .instrument(trace_span!("udp request", addr=?v4)),
-                        self.tracker_one_request_udp(cx, v6.into(), &client)
-                            .instrument(trace_span!("udp request", addr=?v6))
+                        self.tracker_one_request_udp(cx, v4.into(), &client, forced),
+                        self.tracker_one_request_udp(cx, v6.into(), &client, forced)
                     );
-                    sleep_interval = Some(
-                        r4.or(r6)
-                            .ok()
-                            .or(sleep_interval)
-                            .unwrap_or(Duration::from_secs(60)),
-                    )
+                    match (r4, r6) {
+                        (Ok((i4, p4)), Ok((i6, p6))) => Ok((i4.min(i6), p4.saturating_add(p6))),
+                        (Ok(value), _) | (_, Ok(value)) => Ok(value),
+                        (Err(err), _) => Err(err),
+                    }
                 }
-            }
+            };
+            delay = Some(match result {
+                Ok((interval, peers)) => {
+                    let interval = self.force_tracker_interval.unwrap_or(interval);
+                    observation.ok(peers, interval);
+                    interval
+                }
+                Err(err) => {
+                    cx.checkpoint()?;
+                    let interval = Duration::from_secs(60);
+                    let message = sanitize(&url, &format!("{err:#}"));
+                    debug!("error calling UDP tracker: {message}");
+                    observation.error(&message, interval);
+                    interval
+                }
+            });
         }
     }
 
@@ -409,7 +461,8 @@ impl TrackerComms {
         cx: &Cx,
         addr: SocketAddr,
         client: &UdpTrackerClient,
-    ) -> anyhow::Result<Duration> {
+        forced: bool,
+    ) -> anyhow::Result<(Duration, u32)> {
         cx.checkpoint()?;
         use tracker_comms_udp::*;
 
@@ -420,15 +473,19 @@ impl TrackerComms {
             downloaded: stats.downloaded_bytes,
             left: stats.get_left_to_download_bytes(),
             uploaded: stats.uploaded_bytes,
-            event: match stats.torrent_state {
-                TrackerCommsStatsState::None => EVENT_NONE,
-                TrackerCommsStatsState::Initializing => EVENT_STARTED,
-                TrackerCommsStatsState::Paused => EVENT_STOPPED,
-                TrackerCommsStatsState::Live => {
-                    if stats.is_completed() {
-                        EVENT_COMPLETED
-                    } else {
-                        EVENT_STARTED
+            event: if forced {
+                EVENT_NONE
+            } else {
+                match stats.torrent_state {
+                    TrackerCommsStatsState::None => EVENT_NONE,
+                    TrackerCommsStatsState::Initializing => EVENT_STARTED,
+                    TrackerCommsStatsState::Paused => EVENT_STOPPED,
+                    TrackerCommsStatsState::Live => {
+                        if stats.is_completed() {
+                            EVENT_COMPLETED
+                        } else {
+                            EVENT_STARTED
+                        }
                     }
                 }
             },
@@ -439,15 +496,15 @@ impl TrackerComms {
         match client.announce(cx, addr, request).await {
             Ok(response) => {
                 trace!(len = response.addrs.len(), "received announce response");
+                let peers = response.addrs.len().min(u32::MAX as usize) as u32;
                 for addr in response.addrs {
                     self.tx.send(cx, addr).await.context("rx closed")?;
                 }
                 let sleep = response.interval.max(5);
                 let sleep = Duration::from_secs(sleep as u64);
-                Ok(sleep)
+                Ok((sleep, peers))
             }
             Err(e) => {
-                debug!(?addr, "error reading announce response: {e:#}");
                 Err(e)
             }
         }
@@ -458,8 +515,8 @@ impl TrackerComms {
 mod native_tests {
     use super::*;
     use rqbit_runtime::{
-        io::{AsyncReadExt, AsyncWriteExt},
         Budget, RuntimeBuilder,
+        io::{AsyncReadExt, AsyncWriteExt},
     };
     use std::net::Ipv4Addr;
 
@@ -479,10 +536,12 @@ mod native_tests {
         let cx = runtime.request_cx_with_budget(Budget::INFINITE);
         let task = rqbit_runtime::task::spawn_with(&cx, move |cx| async move {
             if expect_worker {
-                assert!(std::thread::current()
-                    .name()
-                    .unwrap()
-                    .starts_with("asupersync-worker-"));
+                assert!(
+                    std::thread::current()
+                        .name()
+                        .unwrap()
+                        .starts_with("asupersync-worker-")
+                );
             }
             let region = cx
                 .open_child_region(rqbit_runtime::cx::ChildRegionSpec::inherit())
@@ -536,8 +595,10 @@ mod native_tests {
                     announce_port: 7777,
                     http_client: rqbit_runtime::http::Client::new("rqbit native test"),
                     key: 1,
+                    tracker_state: Arc::new(TrackerStats::default()),
+                    started_generation: 0,
                 };
-                let interval = comms
+                let (interval, peers) = comms
                     .tracker_one_request_http(
                         &cx,
                         &tracker,
@@ -546,6 +607,7 @@ mod native_tests {
                     .await
                     .unwrap();
                 assert_eq!(interval, Duration::from_secs(30));
+                assert_eq!(peers, 1);
                 assert_eq!(
                     rx.recv(&cx).await.unwrap(),
                     SocketAddr::from((Ipv4Addr::LOCALHOST, 4444))
@@ -564,10 +626,12 @@ mod native_tests {
                 rqbit_runtime::time::sleep(&cx, Duration::from_millis(10)).await;
                 assert!(!monitor.is_finished());
                 monitor.abort();
-                assert!(monitor
-                    .await
-                    .expect("HTTP monitor acknowledges native cancellation")
-                    .is_err());
+                assert!(
+                    monitor
+                        .await
+                        .expect("HTTP monitor acknowledges native cancellation")
+                        .is_err()
+                );
             };
             rqbit_runtime::time::timeout(&cx, Duration::from_secs(3), async {
                 futures::join!(server, client);

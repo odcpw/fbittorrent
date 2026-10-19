@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [[ "${1:-}" == --add-sheet ]]; then
+  shift
+  exec python3 plugin/tests/add_sheet.py "$@"
+fi
 exec python3 plugin/tests/dashboard.py "$@"

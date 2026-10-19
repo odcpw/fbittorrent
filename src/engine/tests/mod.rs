@@ -84,8 +84,12 @@
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
             rechecks: Default::default(),
+            resume: Arc::new(resume::Store::open(directory).unwrap()),
+            resume_prepared: Default::default(),
+            undo: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
+            queue_pins: Default::default(),
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
             retired_restores: std::sync::Mutex::new(Vec::new()),
@@ -166,6 +170,7 @@
 include!("ownership.rs");
 include!("startup.rs");
 include!("dormant.rs");
+include!("dormant_delete.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");

@@ -54,3 +54,26 @@ class Headless:
             except subprocess.TimeoutExpired:self.child.kill();self.child.wait(timeout=3)
         self.stream.close()
         self.case.check(self.child.poll() is not None,'owned compositor is reaped',f'pid={self.child.pid}; exit={self.child.returncode}; log={self.log}')
+
+    def ipc(self,command='',kind=0):
+        """Talk only to this compositor's private, sandbox-owned IPC socket."""
+        import json,socket,struct
+        paths=list(Path(self.env['XDG_RUNTIME_DIR']).glob('sway-ipc.*.sock'))
+        if len(paths)!=1:raise RuntimeError('expected exactly one private Sway IPC socket')
+        payload=command.encode()
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as channel:
+            channel.settimeout(3);channel.connect(str(paths[0]));channel.sendall(b'i3-ipc'+struct.pack('<II',len(payload),kind)+payload)
+            def read(count):
+                result=b''
+                while len(result)<count:
+                    chunk=channel.recv(count-len(result))
+                    if not chunk:raise EOFError('private compositor IPC closed')
+                    result+=chunk
+                return result
+            header=read(14)
+            if header[:6]!=b'i3-ipc':raise RuntimeError('invalid private compositor IPC magic')
+            length,_=struct.unpack('<II',header[6:])
+            if length>1048576:raise RuntimeError('private compositor reply exceeds 1 MiB')
+            reply=json.loads(read(length))
+        if kind==0 and any(not item.get('success') for item in reply):raise RuntimeError(str(reply))
+        return reply

@@ -94,6 +94,7 @@ fn subscription_fixture_revisions_and_gap_are_enforced() {
         connection: Mutex::new(Arc::new(connection)),
         cfg: Config::default(),
         agent: false,
+        name: None,
         path: PathBuf::new(),
         next: AtomicU64::new(2),
         hello,

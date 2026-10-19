@@ -1,0 +1,6 @@
+{"dir":"c2s","frame":{"id":2,"op":"torrents.trackers","args":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"trackers":[{"url":"http://127.0.0.1:8000/announce","status":"error","last_announce_at":1792348800,"next_announce_at":1792348810,"message":"fixture: not yet"}]}}}
+{"dir":"c2s","frame":{"id":3,"op":"torrents.reannounce","args":{"hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":4,"op":"torrents.trackers","args":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"trackers":[{"url":"http://127.0.0.1:8000/announce","status":"ok","last_announce_at":1792348801,"next_announce_at":1792349401,"peers":1}]}}}

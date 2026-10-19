@@ -97,6 +97,7 @@ fn run(cli: Cli) -> Result<Code> {
     if let Some(Cmd::RobotDocs { section, surface }) = &cli.cmd {
         return cli::robot_docs(section, surface, cli.json);
     }
+    if matches!(&cli.cmd,Some(Cmd::Api { list:true,.. })) { return cli::raw::catalog(cli.json); }
     let _search_cleanup = SearchCleanup;
     search::begin_session()?;
     let cfg = Config::load()?;
@@ -123,7 +124,14 @@ fn run(cli: Cli) -> Result<Code> {
     // Commands that never touch the backend.
     match cmd {
         Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
-        Cmd::Setup { port, save, magnet, uninstall } => {
+        Cmd::Setup { port, save, magnet, plugin, dry_run, uninstall, purge, yes } => {
+            if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
+            if cfg.native() {
+                let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,dry_run,uninstall,purge})?;
+                emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
+                return Ok(Code::Ok);
+            }
+            if dry_run || plugin.is_some() || purge { return Err(AppError::new(Code::Usage,"extended desktop setup requires the native engine").into()); }
             if uninstall {
                 setup::uninstall()?;
                 emit(json, serde_json::json!({"ok":true,"action":"setup-uninstall"}), || {});
@@ -177,6 +185,10 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
+        Cmd::Events { follow, since_seq, kinds } => return cli::stream::events(&cfg, follow, since_seq, kinds),
+        Cmd::Api { op, list, args, json_args, reference } => return cli::raw::run(&cfg, json, no_start, op, list, args, json_args, reference),
+        Cmd::Limits { down, up, alt, alt_down, alt_up } => return cli::limits::run(&cfg, json, down, up, alt, alt_down, alt_up),
+        Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
         Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
             return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
         }
@@ -223,18 +235,20 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
         }
-        Cmd::Dashboard { view, query } => {
+        Cmd::Dashboard { view, query, hash } => {
+            if let Some(hash)=&hash {api::Hash::new(hash.clone()).map_err(|message|AppError::new(Code::Usage,message))?;}
             let mut explicit = cfg.clone();
             explicit.autostart = !no_start;
             backend::ensure_running(&explicit, &c)?;
-            backend::dashboard(view.as_deref(), query.as_deref())?;
+            backend::dashboard_hash(view.as_deref(), query.as_deref(), hash.as_deref())?;
             emit(json, serde_json::json!({"ok":true,"action":"dashboard","count":0,"hashes":[]}), || {});
             Ok(Code::Ok)
         }
         Cmd::Restart => {
             if cfg.native() {
-                api::client::ensure_daemon(&cfg, true)?;
-                ipc::request(&cfg, "POST", "app/restart", &[], None)?;
+                let result = cli::restart::daemon(&cfg,json)?;
+                emit(json,result,|| println!("daemon restarted"));
+                return Ok(Code::Ok);
             } else {
                 backend::stop(&cfg)?;
                 let mut explicit = cfg.clone(); explicit.autostart = !no_start;
@@ -442,6 +456,7 @@ fn run(cli: Cli) -> Result<Code> {
             emit(json, serde_json::json!({"ok": true, "action": "add", "hash": magnet_hash(&text), "name": label}), || println!("added: {label}"));
             Ok(Code::Ok)
         }
+        Cmd::Reannounce {..} => Err(AppError::new(Code::Usage,"reannounce requires the native API daemon").into()),
         Cmd::Reconcile { recent } => {
             let result = reconcile_result(&cfg, || {
                 connect(&cfg, &c)?;
@@ -533,7 +548,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 
@@ -601,7 +616,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+    matches!(cmd, Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
         | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
