@@ -210,6 +210,7 @@ def python_check(name, path, *args):
     bootstrap = ('import sys,runpy;from pathlib import Path;'
                  'sys.path.insert(0,sys.argv[1]);import fbtlog;'
                  'fbtlog.LOG_ROOT=Path(sys.argv[2]);sys.argv=sys.argv[3:];'
+                 'sys.path.insert(0,str(Path(sys.argv[0]).parent));'
                  'runpy.run_path(sys.argv[0],run_name="__main__")')
     return Check(name, [PYTHON, '-B', '-c', bootstrap, str(HARNESS), '{logs}', str(ROOT / path), *args])
 

@@ -19,6 +19,17 @@ import gate
 
 
 class GateTests(unittest.TestCase):
+    def test_python_entrypoint_keeps_its_sibling_imports(self):
+        with tempfile.TemporaryDirectory(prefix='fbt-python-entry-') as directory:
+            root=Path(directory)
+            (root/'sibling.py').write_text('VALUE="actual sibling module"\n')
+            script=root/'journey.py'
+            script.write_text('from sibling import VALUE\nassert VALUE=="actual sibling module"\nprint(VALUE)\n')
+            check=gate.python_check('entrypoint',str(script))
+            self.assertTrue(gate.run_checks([check],root/'logs',dict(os.environ)))
+            self.assertEqual(check.status,'PASS')
+            self.assertIn('actual sibling module',Path(check.log).read_text())
+
     def test_release_wrapper_reuses_an_inherited_lock(self):
         with tempfile.NamedTemporaryFile(prefix='fbt-gate-lock-') as lock, patch.object(gate, 'RELEASE_LOCK', lock.name):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)

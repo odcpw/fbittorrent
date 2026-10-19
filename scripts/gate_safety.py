@@ -7,7 +7,7 @@ from fnmatch import fnmatchcase
 STRICT_CHECKS = (
     'daemon/zero_upload*', 'daemon/*delete*', 'daemon/*remove*', 'daemon/*redact*',
     'daemon/mutation_magnets_and_file_removal', 'daemon/api_torrent_operations',
-    'daemon/api_missing_completed_payload', 'daemon/dormant_operations',
+    'daemon/api_missing_completed_payload', 'daemon/live_missing*', 'daemon/dormant_operations',
     'daemon/bulk_remove_mixed_sizes', 'daemon/remove_requires_flag',
     'daemon/offline_delete_keep_files_ledger', 'daemon/ref_replay_remove',
     'daemon/tracker_url_redacted', 'daemon/tracker_credentials*', 'tracker_privacy',
@@ -17,6 +17,7 @@ STRICT_CHECKS = (
     'daemon/down_*', 'daemon/foreground_down', 'daemon/*shutdown*', 'daemon/*stop*',
     'daemon/cleanup_*stop*', 'daemon/*idle_exit*', 'daemon/killmode_mixed',
     'plugin_stop_rule', 'plugin_glance_policy', 'plugin_default_idle',
+    'safety_controls', 'upload_probe_controls',
 )
 STRICT_RUST_TESTS = (
     'engine::tests::*upload*', 'engine::tests::*delete*',
