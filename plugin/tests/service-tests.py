@@ -153,6 +153,8 @@ def hook_guard():
 
 
 if __name__=='__main__':
+    import private_net
+    private_net.enter()
     real_fallback(Path(sys.argv[1]).resolve())
     scripted_reload()
     hook_guard()

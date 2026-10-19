@@ -89,7 +89,9 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppInfo { .. }
+                Call::AppSettingsGet { .. }
+                | Call::AppSettingsSet { .. }
+                | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
                 | Call::AppShutdown { .. }
                 | Call::AppRestart { .. } => ops::app::dispatch(

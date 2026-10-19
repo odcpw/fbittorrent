@@ -15,7 +15,7 @@
             let command = app.on_key(KeyEvent::new(code));
             assert!(app.prompt.is_none());
             let yes = matches!(code, KeyCode::Char('y'));
-            assert!(app.lifecycle.pending_request().is_none(), "confirmation key {code:?} must not stop the owner");
+            assert!(app.presence.is_none(), "confirmation key {code:?} must not open an owner connection");
             if unfollow {
                 assert!(matches!(command, Cmd::None));
                 assert_eq!(app.shows.shows.len(), if yes { 1 } else { 2 });
@@ -74,18 +74,17 @@
     }
 
     #[test]
-    fn lifecycle_poll_and_quit_leave_the_request_for_the_owner() {
-        use crate::daemon::lifecycle::Request as LifecycleRequest;
+    fn client_poll_and_detach_do_not_consume_an_owner_request() {
+        use crate::daemon::lifecycle::{Lifecycle, Request as LifecycleRequest, RestartReason};
         let lifecycle = Lifecycle::default();
         let mut app = app();
-        app.lifecycle = lifecycle.clone();
         lifecycle.request_restart(RestartReason::Settings);
-        assert!(matches!(app.update(Msg::Poll), Cmd::Quit));
+        assert!(matches!(app.update(Msg::Poll), Cmd::Task(..)));
         assert_eq!(lifecycle.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Settings)));
-        // An explicit quit while the restart is pending must prevent reopening.
+        // Detaching a client cannot cancel or replace the daemon owner's restart.
         assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char('q'))), Cmd::Quit));
-        assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
-        assert_eq!(app.lifecycle.pending_request(), None);
+        assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(RestartReason::Settings)));
+        assert_eq!(lifecycle.pending_request(), None);
     }
 
     #[test]
@@ -534,7 +533,7 @@
         let mut app = app();
         let mut list = ListState::default();
         list.select(Some(0));
-        app.settings = Some(SettingsModal { cfg: Config::default(), list: RefCell::new(list), connections: vec![Some("proton".into()), None], error: String::new() });
+        app.settings = Some(SettingsModal { saving:false, cfg: Config::default(), list: RefCell::new(list), connections: vec![Some("proton".into()), None], error: String::new() });
         app.on_key(KeyEvent::new(KeyCode::Left));
         assert_eq!(app.settings.as_ref().unwrap().cfg.max_active_downloads, 2);
         app.on_key(KeyEvent::new(KeyCode::Down));

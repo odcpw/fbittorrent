@@ -20,7 +20,6 @@ pub(super) use ftui::widgets::{StatefulWidget, StatusLine, Tab, Tabs, TabsState,
 pub(super) use ftui::{Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
 
 pub(super) use crate::config::Config;
-pub(super) use crate::daemon::lifecycle::{Lifecycle, RestartReason, StopReason};
 pub(super) use crate::imdb::{self, Title};
 pub(super) use crate::browse;
 pub(super) use crate::shows::{self, Episode, Show, Shows};

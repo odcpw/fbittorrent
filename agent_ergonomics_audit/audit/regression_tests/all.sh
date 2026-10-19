@@ -10,10 +10,10 @@ CLI/TUI tests, CI/resource/summary regression tests, then the JSONL summary tabl
 Local release/all.sh runs must use the AGENTS.md release-lock/memory-scope wrapper.
 
 Environment flags (opt-ins default to 0; set exactly 1 to enable):
-  FBT_TEST_QS=1         Quickshell store/smoke fixtures (P2-02/P2-04); requires
+  FBT_TEST_QS=1         Quickshell store/real-daemon smoke (P2-02/P2-06); requires
                        Quickshell, Qt 6.12 and Omarchy shell modules.
   FBT_TEST_VISUAL=1     plugin/tests/qs-visual.sh captures (P2-08); requires the
-                       live shell, grim and its visual-fixture dependencies.
+                       private headless Sway and the installed Omarchy components.
   FBT_TEST_WIDGET=1     widget_keys.sh; requires the live shell, plugin and wtype.
   FBT_TEST_VPN=1        vpn.py in its isolated user/network namespace; requires
                        unshare, iproute2 and permission to create namespaces.

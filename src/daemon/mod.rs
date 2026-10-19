@@ -29,6 +29,7 @@ pub struct Daemon {
     pub instance: String,
     pub launcher: &'static str,
     pub(crate) policy: Arc<Mutex<policy::Policy>>,
+    pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
     pub(crate) notifier: notify::Notifier,
     pub(crate) imdb: crate::imdb::service::Service,
@@ -96,10 +97,30 @@ impl Daemon {
         }
     }
 
+    /// Apply settings to the current slot while its read guard prevents replacement.
+    /// The durable config remains authoritative across a subsequent slot restart.
+    pub(crate) fn apply_settings(&self, cfg: &Config) -> Result<()> {
+        let began = Instant::now();
+        loop {
+            let slot = self.slot.read().unwrap();
+            if self.is_stopping() { return Err(Self::unavailable(State::Stopping)); }
+            match &slot.slot {
+                Slot::Running(app) => { app.dispatcher().apply_settings(cfg)?; break; },
+                Slot::Parked(_) => break,
+                Slot::Starting if began.elapsed() < Duration::from_secs(60) => {},
+                Slot::Starting => return Err(Self::unavailable(State::Starting)),
+                Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
+            }
+            drop(slot);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    }
+
     pub fn info(&self) -> serde_json::Value {
         let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
         serde_json::json!({
-            "server": {"version": env!("CARGO_PKG_VERSION"), "build": option_env!("FBT_BUILD_ID").unwrap_or("unknown"),
+            "server": {"version": env!("CARGO_PKG_VERSION"), "build": crate::api::build_id(),
                 "pid": std::process::id(), "launcher": self.launcher,
                 "log": if self.launcher == "systemd" { "journalctl --user -u fbittorrent" }
                     else { "the terminal running fbittorrent serve" }},
@@ -231,6 +252,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
         );
+        engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
     daemon.notifier.enabled(cfg.notify && !daemon.no_notify);
@@ -323,6 +345,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
             "foreground"
         },
         policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
+        settings: Default::default(),
         no_notify,
         notifier: notify::Notifier::new(cfg.notify)?,
         imdb: Default::default(),

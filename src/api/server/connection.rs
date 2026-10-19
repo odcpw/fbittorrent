@@ -494,7 +494,18 @@ pub(super) fn write_client(
     }
     connection.closed.store(true, Ordering::Release);
     shared.bus.remove_connection(connection.number);
-    *connection.client.lock().unwrap() = ClientState::default();
+    let previous = std::mem::take(&mut *connection.client.lock().unwrap());
+    if let Some(client) = previous.client {
+        let mut counts = shared.counts.lock().unwrap();
+        let count = match client.kind {
+            ClientKind::Cli => &mut counts.cli,
+            ClientKind::Agent => &mut counts.agent,
+            ClientKind::Tui => &mut counts.tui,
+            ClientKind::Bar => &mut counts.bar,
+            ClientKind::Test => &mut counts.test,
+        };
+        *count = count.saturating_sub(1);
+    }
     connection.pending.lock().unwrap().clear();
     let _ = stream.shutdown(Shutdown::Both);
     shared.clients.lock().unwrap().remove(&connection.number);

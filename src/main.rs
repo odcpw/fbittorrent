@@ -32,10 +32,8 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use engine::migrate_legacy;
 #[cfg(test)]
 use engine::LegacyMigration;
-use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -44,7 +42,15 @@ fn main() {
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli)=>cli,
+        Err(error)=>{
+            if std::env::args().any(|arg|arg=="--json") && !matches!(error.kind(),clap::error::ErrorKind::DisplayHelp|clap::error::ErrorKind::DisplayVersion) {
+                std::process::exit(agent::report(&AppError::new(Code::Usage,error.to_string()).into(),true));
+            }
+            error.exit();
+        }
+    };
     let json = cli.json;
     if let Some(Cmd::Serve { idle_exit_secs, no_notify }) = &cli.cmd {
         if no_start_requested(cli.no_start, std::env::var_os("FBITTORRENT_NO_START").as_deref()) {
@@ -83,7 +89,7 @@ fn main() {
 
 /// Print a JSON value or, when not in JSON mode, run the human printer.
 fn emit(json: bool, value: serde_json::Value, human: impl FnOnce()) {
-    if json { println!("{value}"); } else { human(); }
+    if json { println!("{}",agent::with_warnings(value)); } else { human(); }
 }
 
 fn run(cli: Cli) -> Result<Code> {
@@ -107,6 +113,8 @@ fn run(cli: Cli) -> Result<Code> {
     if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
+    if !cfg.native() { agent::warning("deprecated_engine", "engine = \"qbittorrent\" is deprecated and is removed in v0.4.0; see the README".into(), true); }
+    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
         return Err(AppError::new(Code::Usage, "native sequential and first/last scheduling are intrinsic; toggle commands require legacy mode")
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());
@@ -114,7 +122,7 @@ fn run(cli: Cli) -> Result<Code> {
 
     // Commands that never touch the backend.
     match cmd {
-        Cmd::Capabilities => { println!("{}", agent::capabilities_json()); return Ok(Code::Ok); }
+        Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
         Cmd::Setup { port, save, magnet, uninstall } => {
             if uninstall {
                 setup::uninstall()?;
@@ -152,7 +160,7 @@ fn run(cli: Cli) -> Result<Code> {
                 v["found"] = serde_json::json!(true);
                 v["url"] = serde_json::json!(t.url());
                 v["poster_path"] = serde_json::json!(poster);
-                println!("{v}");
+                println!("{}", agent::with_warnings(v));
                 return Ok(Code::Ok);
             }
             println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
@@ -169,31 +177,8 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
-        Cmd::Settings { max_downloads, encryption, vpn, interfaces } => {
-            anyhow::ensure!(cfg.native(), "these settings require the native engine");
-            let mut changed = cfg.clone();
-            if let Some(limit) = max_downloads { changed.max_active_downloads = limit; }
-            if let Some(policy) = encryption { changed.peer_encryption = policy; }
-            if let Some(selection) = vpn { changed.network_interface = if selection == "off" { None } else { Some(selection) }; }
-            changed.validate()?;
-            let altered = changed.max_active_downloads != cfg.max_active_downloads || changed.peer_encryption != cfg.peer_encryption || changed.network_interface != cfg.network_interface;
-            if altered {
-                let client = Client::from_config(&cfg);
-                if ipc::is_running(&cfg) && changed.peer_encryption == cfg.peer_encryption && changed.network_interface == cfg.network_interface {
-                    client.set_queue_limit(changed.max_active_downloads)?;
-                } else {
-                    changed.save()?;
-                    if ipc::is_running(&cfg) { client.restart_app()?; }
-                }
-            }
-            let available = if interfaces { Some(network_app::interfaces()?) } else { None };
-            emit(json, serde_json::json!({"ok": true, "max_active_downloads": changed.max_active_downloads, "peer_encryption": changed.peer_encryption, "network_interface": changed.network_interface, "network": network_app::state(&changed), "interfaces": available}), || {
-                println!("Simultaneous downloads: {}", changed.max_active_downloads);
-                println!("Peer encryption: {}", changed.peer_encryption);
-                println!("VPN: {}", network_app::state(&changed).message);
-                if let Some(names) = &available { println!("Connections: {}", names.join(", ")); }
-            });
-            return Ok(Code::Ok);
+        Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
+            return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
         }
         _ => {}
     }
@@ -201,8 +186,8 @@ fn run(cli: Cli) -> Result<Code> {
     let c = Client::from_config(&cfg);
 
     match cmd {
-        Cmd::Triage => { println!("{}", agent::triage(&cfg, &c)); Ok(Code::Ok) }
-        Cmd::Status => {
+        Cmd::Triage => { println!("{}", agent::with_warnings(agent::triage(&cfg, &c))); Ok(Code::Ok) }
+        Cmd::Status { quiet: _ } => {
             if c.version().is_err() {
                 let backend = if !cfg.native() && backend::is_active(&cfg.backend_unit) { "starting" } else { "stopped" };
                 emit(json, serde_json::json!({"ok": false, "backend": backend, "engine": cfg.engine, "app_open": false}), || {
@@ -271,9 +256,8 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() && ipc::is_running(&cfg) { tui::run(cfg, screen, Lifecycle::default())?; }
-            else if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
-            else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
+            if !cfg.native() { connect(&cfg, &c)?; }
+            tui::run(cfg, screen)?;
             Ok(Code::Ok)
         }
         Cmd::List { active } => {
@@ -327,7 +311,7 @@ fn run(cli: Cli) -> Result<Code> {
             let plain_notify = cfg.notify && !quiet && !json && origin != "handler" && origin != "agent"
                 && (explicit_notify || agent::stdout_is_tty());
             let opts = AddOptions {
-                origin: Some(if quiet || json { "agent".into() } else { origin.clone() }),
+                origin: Some(if origin == "handler" && (quiet || json) { "agent".into() } else { origin.clone() }),
                 sequential: cfg.native() || (cfg.sequential && !no_seq),
                 first_last: cfg.native() || (cfg.first_last && !no_first_last),
                 seed: cfg.seed_by_default || seed,
@@ -475,7 +459,7 @@ fn run(cli: Cli) -> Result<Code> {
             let h = resolve_in(&ts, &[selector])?;
             let t = ts.iter().find(|t| t.hash == h[0]).unwrap();
             let target = qbt::open_target(t);
-            Command::new("xdg-open").arg(&target).spawn()?;
+            cfg.open_target(&target)?;
             emit(json, serde_json::json!({"ok": true, "action": "open", "hash": t.hash, "target": target}), || println!("opened {target}"));
             Ok(Code::Ok)
         }
@@ -618,7 +602,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 
 fn native_may_start(cmd: &Cmd) -> bool {
     matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
-        | Cmd::Noseed { .. } | Cmd::Wait { .. } | Cmd::Delete { files: true, .. }
+        | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
 }
@@ -638,52 +622,6 @@ fn reconcile_result(cfg: &Config, legacy: impl FnOnce() -> Result<usize>) -> Res
 struct SearchCleanup;
 impl Drop for SearchCleanup {
     fn drop(&mut self) { search::shutdown_all(); }
-}
-
-fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
-    if ipc::is_running(&cfg) { return backend::open_app(); }
-    let lifecycle = Lifecycle::default();
-    loop {
-    let snapshot = network_app::state(&cfg);
-    lifecycle.set_expected_network(Some(snapshot.clone()));
-    if !snapshot.ready {
-        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot, lifecycle.clone())?);
-        let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-        drop(parked);
-        result?;
-        if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-            cfg = Config::load()?;
-            continue;
-        }
-        return Ok(());
-    }
-    let mut engine_cfg = cfg.clone();
-    if cfg.network_interface.is_some() { engine_cfg.network_interface = snapshot.interface.clone(); }
-    let mut app = match engine::start(&engine_cfg, lifecycle.clone()) {
-        Ok(app) => app,
-        Err(error) if error.to_string().contains("already open") => return backend::open_app(),
-        Err(_) if cfg.network_interface.is_some() && network_app::state(&cfg) != snapshot => continue,
-        Err(error) => return Err(error),
-    };
-    let dispatcher = app.dispatcher();
-    migrate_legacy(&cfg, &dispatcher)?;
-    let controls_lifecycle = lifecycle.clone();
-    app.serve(&cfg, move |request| {
-        network_app::controls(request, &snapshot, &controls_lifecycle).or_else(|| dispatcher.dispatch(request))
-            .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
-    })?;
-    let app = tui::signals::AppGuard::new(app);
-    // The guard drops before run() returns, including a TUI initialization error.
-    // main() only calls process::exit after network activity and searches stop.
-    let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-    drop(app);
-    result?;
-    if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-        cfg = Config::load()?;
-        continue;
-    }
-    return Ok(());
-    }
 }
 
 #[cfg(test)]

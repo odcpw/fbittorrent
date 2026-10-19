@@ -25,8 +25,8 @@ impl TuiApp {
 
         let right = if self.online {
             let mut spans = vec![
-                Span::styled("↓ ", th.dimmed()), Span::styled(human_rate(self.transfer.dl_info_speed), th.text()),
-                Span::styled("  ↑ ", th.dimmed()), Span::styled(human_rate(self.transfer.up_info_speed), th.text()),
+                Span::styled("↓ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.dl_info_speed),|info|format::rate(info.dl_bps)), th.text()),
+                Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.up_info_speed),|info|format::rate(info.ul_bps)), th.text()),
                 Span::styled(format!("  {} ", th.name), th.dimmed()),
             ];
             if self.poll_inflight { spans.insert(0, Span::styled(format!("{} ", SPINNER[self.tick % 4]), th.dimmed())); }

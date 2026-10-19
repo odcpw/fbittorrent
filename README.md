@@ -19,8 +19,12 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
   dashboard or TUI. Reads and status queries never start it. Nothing runs at
   login: the user unit is static. `down` stops the owner and drains the engine.
-  The current standalone TUI can still own an engine when started first;
-  full daemon attachment and quit verbs arrive in P1-15.
+  The TUI starts or attaches to that daemon in the current terminal, including
+  over SSH. `q` or Ctrl+C closes only the TUI; transfers continue. `Q` stops
+  fbittorrent, asking for lowercase `y` when transfers are active. `down` also
+  stops the daemon. The first `q` prints a one-time background-transfer notice
+  after restoring the terminal; its preference lives in
+  `$XDG_STATE_HOME/fbittorrent/notices.json`.
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
   app is open. Hover clipped names or details to see their full text.
@@ -103,6 +107,51 @@ omarchy bar put oliver.torrents --before omarchy.tailscale
 Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 `torrents.*`.
 
+## Lifecycle
+
+`fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
+`down` drains it, and `restart` replaces the engine slot while its sockets stay
+available. `dashboard` summons the desktop view. The static user unit starts on
+writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
+never start an owner. When it is down, saved reads report `running:false`; `stop`
+and keep-files `delete` update the saved ledger under the same instance lock.
+`--no-start` and `autostart=false` prevent automatic startup. Without a user
+manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
+replacement are delivered by their lifecycle work; this checkout reports the
+available daemon state without inventing missing idle counters.
+
+The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
+wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
+checked/reason/origin and optional `eta_s`/`seeds`. Stopped `status --json` now
+returns `ok:true,running:false`; `status --quiet` exits 4 when stopped. Magnets
+and local metainfo added while waiting for VPN return `deferred:true` and keep
+the requested intent until the interface returns. URL adds require a live engine.
+
+## Dashboard window
+
+The plugin exposes a separate window entry point while the bar keeps its popup:
+
+```sh
+omarchy-shell shell summon oliver.torrents '{"view":"search","query":"sintel"}'
+```
+
+The window shell routes Torrents, Search, Shows, RSS, Settings and Log. Their views
+land separately; this command currently proves window routing and query focus.
+The bar service owns its API connection across window closes. `q` closes the
+window; Esc clears one layer and leaves the window open at the top level.
+
+No window-manager rule is installed. The window tiles by default. To float it,
+an optional [Hyprland Lua window rule](https://wiki.hypr.land/configuring/core/rules/window-rules/)
+can match its initial title and Quickshell class:
+
+```lua
+hl.window_rule({
+  name = "fbittorrent-dashboard",
+  match = { initial_title = "^fbittorrent$", class = "^org[.]quickshell$" },
+  float = true,
+})
+```
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become
@@ -165,8 +214,7 @@ harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent se
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
 unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 `api.sock`: clients can subscribe to summary, torrents, files, network, settings
-and events, receive consistent snapshots, then pushed changes. The current CLI
-uses the framed compatibility socket; CLI migration and TUI attachment follow.
+and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
 
 The daemon posts completion notifications with Open File / Open Folder actions.
 Browser handlers use `add --origin handler`: the daemon posts Added with Undo
@@ -388,6 +436,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |

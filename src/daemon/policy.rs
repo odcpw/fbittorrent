@@ -55,6 +55,10 @@ impl Policy {
             clients: BTreeMap::new(), searches: 0, mutations: 0 }
     }
     pub fn seconds(&self) -> u64 { self.seconds }
+    pub fn replace_delay(&mut self, seconds: u64, now: Instant) {
+        self.override_seconds = None;
+        self.configure(seconds, now);
+    }
     fn busy(&self) -> bool {
         let t = self.transfers;
         t.downloading || t.seeding || t.parked_waiting || t.restoring || t.starting
@@ -224,5 +228,21 @@ mod tests {
         let snapshot=policy.lock().unwrap().snapshot(Instant::now());
         assert!(snapshot.busy_reasons.is_empty());
         assert_eq!(snapshot.idle_exit_in_s,Some(2));
+    }
+}
+
+#[cfg(test)]
+mod settings_integration_tests {
+    use super::*;
+    #[test]
+    fn explicit_setting_replaces_serve_override_but_other_config_updates_keep_it() {
+        let now = Instant::now();
+        let mut policy = Policy::new(300, Some(2), now);
+        policy.configure(300, now);
+        assert_eq!(policy.seconds(), 2);
+        policy.replace_delay(300, now);
+        assert_eq!(policy.seconds(), 300);
+        policy.configure(45, now);
+        assert_eq!(policy.seconds(), 45);
     }
 }

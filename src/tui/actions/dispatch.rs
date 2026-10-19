@@ -36,6 +36,8 @@ pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
         Scope::Modal(ModalKind::Files)
     } else if app.providers.is_some() {
         Scope::Modal(ModalKind::Providers)
+    } else if app.daemon_stopped {
+        Scope::Modal(ModalKind::Stopped)
     } else {
         pane(app, app.screen)
     }
@@ -85,7 +87,7 @@ pub(in crate::tui) fn dispatch_scope(app: &mut TuiApp, requested: Scope, key: Ke
         if let Some(action) =
             all().find(|a| a.scope == scope && a.keys.iter().any(|c| c.matches(key)) && (a.enabled)(app))
         {
-            return action.run.map_or_else(Cmd::none, |run| run(app));
+            return invoke(action,app,key);
         }
         if !matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
             if let Some(action) = all().find(|a| {
@@ -94,7 +96,7 @@ pub(in crate::tui) fn dispatch_scope(app: &mut TuiApp, requested: Scope, key: Ke
                         .iter()
                         .any(|c| c.mods.contains(Modifiers::CTRL) && c.matches(key))
             }) {
-                return action.run.unwrap()(app);
+                return invoke(action,app,key);
             }
             if scope == Scope::Prompt {
                 if let Some(prompt) = app.prompt.as_mut() {
@@ -114,7 +116,7 @@ pub(in crate::tui) fn dispatch_scope(app: &mut TuiApp, requested: Scope, key: Ke
             }
             matched = true;
             if (action.enabled)(app) {
-                return action.run.map_or_else(Cmd::none, |run| run(app));
+                return invoke(action,app,key);
             }
         }
         if matched && scope != Scope::Prompt {
@@ -204,4 +206,10 @@ pub(super) fn help(app: &mut TuiApp, intent: Intent) -> Cmd<Msg> {
         _ => app.show_help = false,
     }
     Cmd::none()
+}
+
+fn invoke(action:&Action,app:&mut TuiApp,key:KeyEvent)->Cmd<Msg> {
+    let command=action.run.map_or_else(Cmd::none,|run|run(app));
+    if action.id=="ui.close" && key.modifiers.contains(Modifiers::CTRL) { app.quit_notice=false; }
+    command
 }

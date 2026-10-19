@@ -35,6 +35,7 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 mod ledger;
 mod bus;
 mod queue;
+mod settings;
 pub mod ops;
 mod restore;
 mod dormant;
@@ -177,6 +178,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             options,
         ))
         .context("starting the native torrent engine")?;
+    settings::apply_limits(&session, cfg);
     let inner = Arc::new(Inner {
         session,
         bus_changed: rqbit_runtime::sync::Notify::new(),

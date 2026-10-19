@@ -1,10 +1,13 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
+import Quickshell.Hyprland
 import qs.Commons as Commons
 import "ApiClient.js" as ApiClient
 import "Store.js" as Store
 import "Model.js" as Model
+import "Focus.js" as Focus
 
 Item {
   id: root
@@ -13,6 +16,10 @@ Item {
   property var settings: ({})
   property bool popupOpen: false
   property bool dashboardVisible: false
+  property var dashboardState:null
+  property var dashboardOwner:null
+  property var windowFocus:null
+  property int windowFocusSteps:0
   property var detailTopics: []
   property string runtimeOverride: ""
   readonly property string runtimeDir: runtimeOverride || Quickshell.env("XDG_RUNTIME_DIR")
@@ -100,7 +107,7 @@ Item {
     return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.seed}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
-  function add(source, stage) { return mutate("torrents.add", {source:source, stage:!!stage}, stage ? "staging" : "") }
+  function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
   function commitStaged(hash, files, seed, savePath) { return mutate("torrents.commit", {hash:hash, files:files, seed:seed, save_path:savePath}, "staging") }
   function discardStaged(hash) { return mutate("torrents.discard", {hash:hash}, "staging") }
   function openTarget(hash, file) {
@@ -114,6 +121,44 @@ Item {
   function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard() { return mutate("app.clipboard.dismiss", {}, "clipboard") }
+  function cancelWindowFocus(window) {
+    if(windowFocus && windowFocus.window===window){windowFocus=null;focusRetry.stop()}
+  }
+  function focusWindow(window,target) {
+    if(!window || !target)return
+    windowFocus={window:window,target:target,started:Date.now(),stage:0}
+    windowFocusSteps=0
+    advanceWindowFocus()
+  }
+  function advanceWindowFocus() {
+    var request=windowFocus
+    if(!request || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
+    request.target.forceActiveFocus()
+    var backing=request.window._backingWindow,elapsed=Date.now()-request.started
+    if(backing && backing.active && request.target.activeFocus){windowFocus=null;focusRetry.stop();return}
+    if(request.stage===0) {
+      request.target.forceActiveFocus()
+      if(backing)backing.requestActivate()
+      request.stage=1;windowFocusSteps++
+    } else if(request.stage===1 && elapsed>=150) {
+      var tops=ToplevelManager.toplevels.values
+      for(var i=0;i<tops.length;i++)if(tops[i].title===request.window.title && tops[i].appId==="org.quickshell"){tops[i].activate();break}
+      request.stage=2;windowFocusSteps++
+    } else if(request.stage===2 && elapsed>=500 && Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")) {
+      var windows=Hyprland.toplevels.values
+      for(var j=0;j<windows.length;j++) {
+        var data=windows[j].lastIpcObject || {}
+        if(windows[j].title===request.window.title && data.class==="org.quickshell" && data.pid===Quickshell.processId) {
+          var command=Focus.command(windows[j].address,Hyprland.usingLua)
+          if(command)Hyprland.dispatch(command)
+          break
+        }
+      }
+      request.stage=3;windowFocusSteps++
+    }
+    if(elapsed>=1500){console.warn("fbittorrent dashboard focus timed out after 1500 ms");windowFocus=null;return}
+    focusRetry.restart()
+  }
   function startDaemon() {
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
@@ -134,8 +179,8 @@ Item {
     Qt.callLater(function() { reconnect.restart() })
     return "ok"
   }
-  function stateJson() { return JSON.stringify(client ? client.state() : {online:false, instance:"", subs:{}, pending:[], view:null}) }
-  function toggleTorrent(t) { return t ? (Model.isStopped(t) ? resume(t.hash) : pause(t.hash)) : false }
+  function stateJson() { var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
+  function toggleTorrent(t) { var current=t ? store.torrents[t.hash] : null; return current ? (Model.isStopped(current) ? resume(current.hash) : pause(current.hash)) : false }
   function removeTorrent(t) { return t ? remove(t.hash, false) : false }
   function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
@@ -182,6 +227,7 @@ Item {
     }
   }
   Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.client.tick(); root.syncRows() } }
+  Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
@@ -211,6 +257,7 @@ Item {
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { root.store = Store.create(); root.torrents = [] }})
+    client.visibility(popupOpen,dashboardVisible,detailTopics)
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

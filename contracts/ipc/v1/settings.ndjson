@@ -1,0 +1,8 @@
+{"dir":"c2s","frame":{"id":1,"op":"app.settings.get"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"alt_limits_on":false,"autostart":true,"clipboard_watch":false,"handler":"confirm","idle_exit_secs":300,"max_active_downloads":3,"notify":true,"open_command":"xdg-open","peer_encryption":"prefer","peer_port":6882,"reduce_motion":false,"restart_class":["peer_encryption","network_interface","peer_port"],"save_path":"/tmp/fbt-fixture/downloads","seed_by_default":false,"show_quality":"1080p","timeout_secs":10}}}
+{"dir":"c2s","frame":{"args":{"max_active_downloads":4},"id":2,"op":"app.settings.set"}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"applied":["max_active_downloads"],"restart":false}}}
+{"dir":"c2s","frame":{"args":{"peer_encryption":"require"},"id":3,"op":"app.settings.set"}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"applied":["peer_encryption"],"restart":true}}}
+{"dir":"c2s","frame":{"args":{"max_active_downloads":0},"id":4,"op":"app.settings.set"}}
+{"dir":"s2c","frame":{"error":{"code":"invalid_args","details":{"key":"max_active_downloads"},"message":"max_active_downloads: must be at least 1","retryable":false},"id":4,"ok":false}}

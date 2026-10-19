@@ -18,6 +18,7 @@ pub(super) enum PromptKind {
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
+    Shutdown,
     ConfirmUnfollow { imdb: String, title: String },
 }
 
@@ -50,6 +51,7 @@ impl TuiApp {
                 actions::Intent::Confirm => {
                     self.close_prompt();
                     return match kind {
+                        PromptKind::Shutdown => self.shutdown_daemon(),
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
                             self.action(if files { "deleted with files" } else { "removed" }, move |c| c.delete(&[hash], files)),
                         PromptKind::ConfirmRemoveFeed { name } => {

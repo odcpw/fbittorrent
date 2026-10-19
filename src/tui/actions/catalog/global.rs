@@ -118,10 +118,7 @@ pub(super) const ACTIONS: &[Action] = &[
         "Close this UI",
         90,
         |_| true,
-        Some(|a| {
-            a.lifecycle.request_stop(StopReason::Quit);
-            Cmd::quit()
-        }),
+        Some(|a| a.close_ui()),
         TDP,
         None,
         Some(&[KeyChord::plain(KeyCode::Char('q')), KeyChord::plain(KeyCode::Escape)]),
@@ -134,13 +131,7 @@ pub(super) const ACTIONS: &[Action] = &[
         "Stop fbittorrent",
         90,
         |_| true,
-        Some(|a| {
-            a.lifecycle.request_stop(StopReason::Quit);
-            if !a.cfg.native() {
-                let _ = crate::backend::stop(&a.cfg);
-            }
-            Cmd::quit()
-        }),
+        Some(|a| a.request_shutdown()),
         TDP,
         Some(&[KeyChord::plain(KeyCode::Char('Q')), KeyChord::ctrl(KeyCode::Char('q'))]),
         None,
@@ -224,4 +215,9 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
+];
+
+pub(super) const STOPPED: &[Action] = &[
+    action!("daemon.start",Scope::Modal(ModalKind::Stopped),&[KeyChord::plain(KeyCode::Enter)],
+        "Start fbittorrent",10,|a|a.daemon_stopped,Some(|a|a.start_daemon()),T,None,None,None),
 ];

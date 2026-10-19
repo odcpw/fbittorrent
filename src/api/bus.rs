@@ -411,10 +411,10 @@ impl Bus {
         daemon["upgrade_pending"] = json!(false);
         self.daemon.notifier.enabled(cfg.notify && !self.daemon.no_notify);
         let network = serde_json::to_value(self.daemon.network()).unwrap();
-        let mut settings = json!({"max_active_downloads":cfg.max_active_downloads,"peer_encryption":cfg.peer_encryption,"save_path":cfg.save_path.unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads")).to_string_lossy().into_owned()),"seed_by_default":cfg.seed_by_default,"autostart":cfg.autostart,"idle_exit_secs":self.daemon.idle_exit_secs(),"notify":cfg.notify,"timeout_secs":cfg.timeout_secs,"handler":"confirm","open_command":"xdg-open","clipboard_watch":false,"peer_port":cfg.peer_port,"show_quality":cfg.show_quality,"alt_limits_on":false,"restart_class":["network_interface","peer_encryption","peer_port"]});
-        if let Some(v) = cfg.network_interface {
-            settings["network_interface"] = json!(v);
-        }
+        let mut effective = cfg;
+        effective.idle_exit_secs = self.daemon.idle_exit_secs();
+        effective.notify &= !self.daemon.no_notify;
+        let settings = serde_json::to_value(ops::settings::view(&effective)).unwrap();
         Ok(Sample {
             epoch,
             state,

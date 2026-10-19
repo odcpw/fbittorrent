@@ -202,6 +202,8 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    AppSettingsGet(Settings),
+    AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
     Hello(HelloResult),
     AppInfo(AppInfo),
@@ -227,6 +229,8 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
+            "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
             "hello" => serde_json::from_value(result).map(Self::Hello),
             "app.info" => serde_json::from_value(result).map(Self::AppInfo),
@@ -267,4 +271,11 @@ impl Reply {
 pub struct ImdbLookupResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card: Option<ImdbCard>,
+}
+
+/// Durable settings acknowledgement; settings never produce mutation.result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingsSetResult {
+    pub applied: Vec<String>,
+    pub restart: bool,
 }

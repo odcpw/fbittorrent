@@ -4,10 +4,19 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const CONTRACT_VERSION: &str = "1.1.1";
+thread_local! { static WARNINGS: std::cell::RefCell<Vec<serde_json::Value>> = const { std::cell::RefCell::new(Vec::new()) }; }
+pub fn warning(code: &str, message: String, stderr: bool) {
+    if stderr { eprintln!("{message}"); }
+    WARNINGS.with(|list| { let mut list=list.borrow_mut(); let item=serde_json::json!({"code":code,"message":message}); if !list.contains(&item){list.push(item);} });
+}
+pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
+    WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
+}
+pub const CONTRACT_VERSION: &str = "1.2.2";
 
-const NATIVE_LIFETIME: &str = "The TUI owns its engine until quit; fbittorrent serve owns a headless engine until shutdown, independently of windows.";
-const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes. API v1 uses api.sock; today's CLI still uses the framed legacy socket (engine.sock).";
+const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
+const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; automatic upgrades follow P1-17.";
+
 const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
 const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
 
@@ -93,6 +102,7 @@ pub fn classify(e: &anyhow::Error) -> (Code, String, Option<String>) {
     if let Some(ae) = e.downcast_ref::<AppError>() {
         return (ae.code, ae.message.clone(), ae.hint.clone());
     }
+    if let Some(io)=e.downcast_ref::<std::io::Error>() { if matches!(io.kind(),std::io::ErrorKind::NotFound|std::io::ErrorKind::ConnectionRefused) { return (Code::Backend,format!("fbittorrent is closed: {io}"),Some("fbittorrent up".into())); } }
     let msg = format!("{e:#}");
     let low = msg.to_ascii_lowercase();
     if low.contains("connecting to qbittorrent") || low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
@@ -119,7 +129,7 @@ pub fn report(e: &anyhow::Error, json: bool) -> i32 {
     let (code, msg, hint) = classify(e);
     if json {
         let env = ErrorEnvelope { ok: false, code: code as i32, code_name: code.name(), error: &msg, hint: hint.as_deref() };
-        println!("{}", serde_json::to_string(&env).unwrap_or_default());
+        println!("{}", with_warnings(serde_json::to_value(&env).unwrap()));
     } else {
         eprintln!("fbittorrent: error[{}]: {}", code.name(), msg);
         if let Some(h) = hint { eprintln!("  try: {h}"); }
@@ -173,10 +183,11 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs keys", aliases: &[], summary: "Keyboard catalogue; --surface tui|dashboard|popup|all, Markdown or --json", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text", json: false, mutating: false, needs_backend: false },
+        CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text or JSON", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
+    let cmds = command_tree(&cmds);
     let mut exit_codes: Vec<serde_json::Value> = Code::ALL.iter().map(|c| serde_json::json!({
         "code": *c as i32, "name": c.name(), "meaning": c.describe()
     })).collect();
@@ -193,8 +204,9 @@ pub fn capabilities_json() -> serde_json::Value {
             "list[].num_seeds": "always 0 in native mode: unknown",
             "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
         },
-        "changes": [{
-            "version": "1.1.1", "field": "list[].num_seeds", "breaking": false,
+        "caps": crate::api::ops::app::CAPS,
+        "changes": [{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
+            "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
         "global_flags": ["--json", "--no-start"],
@@ -209,7 +221,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "selectors": "torrents are selected by hash prefix (>= 4 hex chars) or a unique case-insensitive substring of the name; `all` selects every torrent",
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
-            "native_connect": "write commands start the static user unit on demand unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; up/dashboard override autostart=false. Reads, stop and delete-keeping-files never start it; offline mutations arrive in P1-11. Without a user manager run fbittorrent serve.",
+            "native_connect": "write commands start the static user unit on demand unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; up/dashboard override autostart=false. Reads, stop and delete-keeping-files never start it; stop and delete-keeping-files edit the ledger under engine.lock while the daemon is down. Without a user manager run fbittorrent serve.",
             "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
             "native_upload": upload_cap_text(),
         },
@@ -230,7 +242,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "config": crate::config::config_path().display().to_string(),
             "cache": crate::imdb::cache_dir().display().to_string(),
             "data": crate::config::data_dir().display().to_string(),
-            "socket": crate::ipc::socket_path(&crate::config::Config::default()).display().to_string(),
+            "socket": crate::ipc::socket_path(&crate::config::Config::default()).with_file_name("api.sock").display().to_string(),
         },
         "agent_workflow": [
             "fbittorrent triage --json",
@@ -264,7 +276,7 @@ WHAT IT IS
   A native Rust torrent app. {native_lifetime}
   {serve_limitations}
   Write commands start the systemd user unit without a terminal. Reads, stop and
-  delete-keeping-files never start it (offline mutations arrive in P1-11).
+  delete-keeping-files never start it (stop and delete-keeping-files edit the ledger under engine.lock while the daemon is down).
   Status and triage never open it. Search, RSS browsing, and Shows tracking work
   locally without starting downloads.
   Upload is capped at {upload_policy}.
@@ -346,6 +358,9 @@ JSON SHAPES (stable within contract 1.x)
           stalledUP, stoppedUP (= done), checkingDL, waitingVPN, error, missingFiles
   When progress_known=false, do not interpret progress/completed as measured.
   `show.complete` is null while progress is unknown.
+  Read native_state, reason, checked and origin for the normalized model.
+  eta_s and seeds are absent when unknown; eta/num_seeds keep legacy sentinels.
+  API contract: docs/IPC.md. Add agents should pass --origin agent.
   Native `num_seeds` is always 0: unknown; `num_leechs` counts connected peers,
   not leechers. Seed counts describe connected seeds, never a tracker scrape.
 "#;
@@ -357,11 +372,11 @@ mod tests {
     #[test]
     fn native_seed_sentinel_is_documented_as_unknown() {
         let capabilities = capabilities_json();
-        assert_eq!(capabilities["contract_version"], "1.1.1");
+        assert_eq!(capabilities["contract_version"], CONTRACT_VERSION);
         assert_eq!(capabilities["field_notes"]["list[].num_seeds"], "always 0 in native mode: unknown");
         let change = capabilities["changes"].as_array().unwrap().iter()
             .find(|change| change["field"] == "list[].num_seeds").unwrap();
-        assert_eq!(change["version"], CONTRACT_VERSION);
+        assert_eq!(change["version"], "1.2.0");
         assert_eq!(change["breaking"], false);
         assert!(change["note"].as_str().unwrap().contains("unknown"));
         assert!(capabilities["field_notes"]["list[].num_leechs"].as_str().unwrap()
@@ -375,10 +390,10 @@ mod tests {
     #[test]
     fn no_start_contract_is_advertised() {
         let capabilities = capabilities_json();
-        assert_eq!(capabilities["contract_version"], "1.1.1");
+        assert_eq!(capabilities["contract_version"], CONTRACT_VERSION);
         assert!(capabilities["global_flags"].as_array().unwrap().contains(&serde_json::json!("--no-start")));
         assert!(capabilities["env"]["FBITTORRENT_NO_START"].is_string());
-        assert!(ROBOT_GUIDE.to_string().contains("contract 1.1.1"));
+        assert!(ROBOT_GUIDE.to_string().contains(&format!("contract {CONTRACT_VERSION}")));
     }
 
     #[test]
@@ -395,7 +410,7 @@ mod tests {
             assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
         }
         assert!(guide.contains("fbittorrent serve"));
-        for limitation in ["idle_exit_secs", "on demand", "framed legacy socket", "api.sock", "glance pauses"] {
+        for limitation in ["idle_exit_secs", "on demand", "API v1", "api.sock", "glance pauses"] {
             assert!(guide.contains(limitation));
         }
         for (code, name) in [(70, "panic"), (75, "upgrade")] {
@@ -407,7 +422,7 @@ mod tests {
         }
         assert!(guide.contains("outside the CLI 0..8 dictionary"));
         assert_eq!(Code::ALL.map(|code| code as i32), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
-        assert_eq!(capabilities["contract_version"], "1.1.1");
+        assert_eq!(capabilities["contract_version"], CONTRACT_VERSION);
         println!("serve docs/capabilities agree on lifetime, JSON exception, limitations and unit exits 70/75; CLI dictionary and contract unchanged");
     }
 
@@ -520,4 +535,34 @@ pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json
         "next_commands": next,
         "docs": "fbittorrent robot-docs",
     })
+}
+
+fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
+    use clap::CommandFactory;
+    fn walk(command:&clap::Command,prefix:&str,metadata:&[CommandDoc],out:&mut Vec<serde_json::Value>){
+        for child in command.get_subcommands().filter(|c|c.get_name()!="help"){
+            let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
+            let old=metadata.iter().find(|m|m.name==name);
+            let starts=matches!(name.as_str(),"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
+            out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":"1.2.0"}));
+            walk(child,&name,metadata,out);
+        }
+    }
+    let mut out=Vec::new();walk(&crate::Cli::command(),"",metadata,&mut out);
+    // robot-docs uses positional sections; keys is a documented command row.
+    out.push(serde_json::json!({"name":"robot-docs keys","aliases":[],"summary":"Keyboard catalogue","json":true,"mutating":false,"needs_backend":false,"starts":false,"since":"P4-02"}));
+    out
+}
+
+#[cfg(test)] mod clap_contract_tests {
+ use super::*;
+ use clap::CommandFactory;
+ #[test] fn commands_match_clap(){
+  fn names(command:&clap::Command,prefix:&str,out:&mut Vec<String>){for c in command.get_subcommands().filter(|c|c.get_name()!="help"){
+   let name=if prefix.is_empty(){c.get_name().to_owned()}else{format!("{prefix} {}",c.get_name())};out.push(name.clone());names(c,&name,out);
+  }}
+  let mut expected=Vec::new();names(&crate::Cli::command(),"",&mut expected);expected.push("robot-docs keys".into());expected.sort();
+  let caps=capabilities_json();let mut actual=caps["commands"].as_array().unwrap().iter().map(|v|v["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();actual.sort();assert_eq!(actual,expected);
+  for row in caps["commands"].as_array().unwrap(){assert!(row["starts"].is_boolean());assert!(row["since"].is_string());}
+ }
 }

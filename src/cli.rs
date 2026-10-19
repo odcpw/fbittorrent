@@ -1,5 +1,10 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
+pub mod shapes;
+mod native;
+mod offline;
+pub(super) mod settings;
+pub(super) use native::{handles as native_handles, run as run_native};
 
 #[derive(Parser)]
 #[command(
@@ -50,7 +55,11 @@ pub(super) enum Cmd {
         surface: String,
     },
     /// Transfer rates and torrent counts (used by the bar widget). Never starts the backend.
-    Status,
+    Status {
+        /// Print nothing; exit 0 when running and 4 when stopped.
+        #[arg(long)]
+        quiet: bool,
+    },
     /// Start the daemon; --ui also opens the dashboard or TUI
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
@@ -74,6 +83,9 @@ pub(super) enum Cmd {
     Add {
         /// magnet:?…, http(s) URL, or a local .torrent file (file:// accepted)
         source: String,
+        /// Attribution retained by the daemon.
+        #[arg(long, default_value="manual", value_parser=["manual","handler","agent"])]
+        origin: String,
         /// Do not enable sequential download
         #[arg(long)]
         no_seq: bool,
@@ -98,9 +110,6 @@ pub(super) enum Cmd {
         /// Show a plain notification even when stdout is not a TTY (never with --json)
         #[arg(long)]
         notify: bool,
-        /// Source of this add; browser handlers request daemon-owned Undo actions
-        #[arg(long, value_parser = ["manual", "handler", "agent"], default_value = "manual")]
-        origin: String,
         /// Block until the download completes (see `wait`)
         #[arg(long)]
         wait: bool,
@@ -225,6 +234,14 @@ pub(super) enum Cmd {
         /// List available network interface names
         #[arg(long)]
         interfaces: bool,
+        #[arg(long)]
+        idle_secs: Option<u64>,
+        #[arg(long)]
+        handler: Option<String>,
+        #[arg(long, num_args=0..=1, default_missing_value="true")]
+        clipboard_watch: Option<bool>,
+        #[arg(long)]
+        port: Option<u16>,
     },
     /// Look a release name up on IMDb (title, rating, blurb, poster)
     Imdb {
@@ -289,6 +306,7 @@ pub(super) enum ShowsCmd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn serve_idle_override_preserves_config_default_and_short_test_delays() {
         let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();
@@ -318,7 +336,7 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
             if json { println!("{}", tui::actions::keymap(surface)); }
             else { print!("{}", tui::actions::markdown(surface)); }
         }
-        "guide" => print!("{}", agent::ROBOT_GUIDE),
+        "guide" => if json { println!("{}", agent::with_warnings(serde_json::json!({"ok":true,"section":"guide","text":agent::ROBOT_GUIDE.to_string()}))); } else { print!("{}", agent::ROBOT_GUIDE); },
         _ => return Err(AppError::new(Code::Usage, format!("unknown docs section '{section}'"))
             .hint("fbittorrent robot-docs guide   # or: robot-docs keys --surface all").into()),
     }
