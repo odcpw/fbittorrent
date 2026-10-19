@@ -32,7 +32,7 @@ function meta(t,parked) {
   return parts.join(" · ")
 }
 function verb(action) {
-  return {"torrents.stop":"pausing…","torrents.start":"starting…","torrents.remove":"removing…","torrents.set_seed":"setting seed policy…"}[action.op] || "working…"
+  return {"torrents.stop":"pausing…","torrents.start":"starting…","torrents.remove":"removing…","torrents.set_seed":"setting upload permission…"}[action.op] || "working…"
 }
 
 function dashboardFilter(group) {return group==="live" ? "downloading" : group==="other" ? "all" : group}
