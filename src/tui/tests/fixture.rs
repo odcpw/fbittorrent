@@ -23,7 +23,6 @@ pub(super) fn app(surface: &str) -> TuiApp {
     // should affect the text baseline. No poster placement may reach the terminal.
     app.theme = Theme::default();
     app.kitty = None;
-    app.rss_initial_refresh_pending = false;
     app.rss_loaded = true;
     app.search_focus_input = false;
     app.search_input.set_value("Sintel");

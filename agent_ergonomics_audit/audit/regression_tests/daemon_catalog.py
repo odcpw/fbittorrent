@@ -52,6 +52,7 @@ def cli_search_both_paths_identical(binary,systemd):
             for args in commands:
                 _,result=cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
                 up.append(result.stdout)
+                if 'fail' in args:case.check('WARN search nova:' in result.stderr,'all-failed search retains provider diagnostic on stderr',result.stderr)
             def owned_events():
                 observer.call('app.info',{})
                 events=[entry for frame in observer.pushed for entry in frame.get('items',frame.get('added',[])) if entry.get('ev')=='search.done']
@@ -141,7 +142,7 @@ def cli_imdb_both_paths_identical(binary,systemd):
         outputs=[]
         for args in commands:
             _,result=cli(case,box,binary,*args,valid='--json' in args);outputs.append(result.stdout)
-        case.check(h.stderr().count('imdb index loaded')==1,'CLI lookups use the daemon index once',h.stderr())
+        h.wait_for(lambda:(h.stderr().count('imdb index loaded')==1,h.stderr()),'CLI lookups use the daemon index once',timeout=2)
         # The original helper owns this process; close it before local runs.
         h.stop_serve(original)
         for args,expected in zip(commands,outputs):
@@ -149,10 +150,12 @@ def cli_imdb_both_paths_identical(binary,systemd):
         h.notify.close();process=h.start_serve();h.receive_ready();h.wait_engine()
         try:
             cli(case,box,binary,'imdb','tt1234001','--json')
+            h.wait_for(lambda:(h.stderr().count('imdb index loaded')==2,h.stderr()),'new owner has loaded exactly one additional index before refresh',timeout=2)
             before=h.stderr().count('imdb index loaded')
             changed=b'tconst\taverageRating\tnumVotes\ntt1234001\t9.1\t4321\n'
             (directory/'ratings.tsv.gz').write_bytes(gzip.compress(changed,mtime=0))
             refreshed,result=cli(case,box,binary,'imdb','tt1234001','--refresh','--json')
+            h.wait_for(lambda:(h.stderr().count('imdb index loaded')==before+1,h.stderr()),'forced refresh log has reached the captured stderr',timeout=2)
             case.check(abs(refreshed['rating']-9.1)<.00001 and refreshed['votes']==4321 and h.stderr().count('imdb index loaded')==before+1,
                        '--refresh replaces the running daemon index exactly once',json.dumps(dict(result=refreshed,index_loads_before=before,index_loads_after=h.stderr().count('imdb index loaded'))))
         finally:

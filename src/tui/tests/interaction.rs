@@ -69,8 +69,7 @@
     fn app() -> TuiApp {
         let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
         app.kitty = None;
-        app.rss_initial_refresh_pending = false;
-        app
+            app
     }
 
     #[test]
@@ -619,13 +618,14 @@
     }
 
     #[test]
-    fn rss_refresh_and_download_dispatch_only_once() {
+    fn rss_no_initial_refresh() {
         let mut app = app();
         let feed:crate::api::Feed=serde_json::from_value(serde_json::json!({"id":"fixture-feed","name":"Example feed","url":"http://127.0.0.1/feed","unread":1,"loading":false})).unwrap();
         let item:crate::api::FeedItem=serde_json::from_value(serde_json::json!({"id":"item","title":"FeedItemAlpha","read":false,"grabbed":false})).unwrap();
         app.store.rss_feeds.insert(feed.id.clone(),feed);
         app.store.rss_items.insert("fixture-feed".into(),[(item.id.clone(),item)].into());
         app.sync_native_feeds();
+        assert!(!app.rss_busy);
         assert!(matches!(app.refresh_rss(),Cmd::Task(..)));
         assert!(app.rss_busy);
         assert!(matches!(app.refresh_rss(), Cmd::None));

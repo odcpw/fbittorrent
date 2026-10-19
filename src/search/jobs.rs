@@ -155,7 +155,9 @@ fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob)
             {
                 if let Ok(mut state) = job.state.lock() {
                     if state.error.is_empty() { state.error = if errors.trim().is_empty() {
-                        "search providers failed to finish".into()
+                        format!("search providers failed to finish: {}",match &status {
+                            Ok(status)=>status.to_string(),Err(error)=>error.to_string(),
+                        })
                     } else {
                         errors.trim().into()
                     }; }
