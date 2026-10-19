@@ -452,3 +452,43 @@ literal planned `wl-paste --watch cat` loses selection boundaries for ordinary
 newline-free magnets. Requested an explicit ruling for a NUL-delimited
 `wl-paste --watch sh -c 'cat; printf "\\0"'`, retaining one watcher and no
 fbittorrent CLI per change. No P6-13 source edits before that ruling.
+
+P6-13 ruling approved by the orchestrator: use
+`wl-paste --watch sh -c 'cat; printf "\0"'` with one bounded NUL record per
+selection, since magnets never contain NUL. Proceeding with the daemon half.
+
+## P6-13 — daemon/API/CLI (fbt-p6-13-dxe)
+
+Implemented one opt-in reader using the approved NUL wrapper, a 64 KiB record
+bound (oversize discarded through delimiter; no partial offers), hash/ledger
+deduplication, bounded offer names, notification Add/Dismiss over api.sock,
+clipboard origin and idempotent app.clipboard.dismiss. Only the last offered
+hash survives parsing; notification Add reconstructs a hash-only magnet, so
+clipboard tracker URLs are not retained. Off/drain kills the complete owned
+group; launch is serialized with disabling, signals are unblocked before exec,
+and idle reads block in poll rather than spinning. Clipboard child/notifier
+stderr is suppressed; no clipboard text enters daemon logs. Contract 1.2.9,
+clipboard cap/changes entry, new clipboard.ndjson, exact hello/error cap updates,
+and CLI on/off (also true/false) bookkeeping land together. Minimal neighbours:
+typed call/reply/catalogue, dispatch/server event-bus accessor, add-origin
+validation, CLI parser and notifier/lifecycle wiring.
+
+`FBT_BEAD=fbt-p6-13-dxe python3 /tmp/fbt-track-a-run.py check`, `units clipboard::`,
+`api`, `build` pass (two record/parser units, 89 API tests). `full` passes
+**381/0/3 ignored** (`full-final/`, one full cargo test --locked -- --nocapture).
+`cases clipboard_watch_offer clipboard_watch_add clipboard_watch_dedupe
+clipboard_watch_off_kills_child clipboard_never_logged contract_hello contract_errors`
+passes foreground (`final-foreground/`). Systemd offer/add/dedupe/privacy pass
+(`final-systemd/`); corrected production-valid 30 s idle/drain plus exact hello/error
+replay pass `idle-final-systemd/`, with the same idle case also passing
+`idle-final-foreground/`. Tests use fake wl-paste but execute the real sh/cat NUL
+wrapper, record selections/timestamps and notify argv, add a real ledger record,
+exercise idempotent dismiss and compare both stderr/app.log against fixed fixture
+text. Both reader and notifier deliberately emit that fixture text to stderr;
+final scans are empty. Earlier failures retain the in-flight old build's stderr
+leak and the short idle setup race; no verdicts were suppressed. All evidence
+is under `target/test-logs/fbt-p6-13-dxe/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p6-13-dxe/`. UI strips/banner/golden and a real
+Wayland clipboard/day-long owner evaluation remain deferred to tracks C/D/owner.
+No all.sh between track beads. Follow-up: hash-only notification adds rely on
+ordinary peer discovery rather than retaining clipboard tracker parameters.

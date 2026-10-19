@@ -9,6 +9,8 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name: "app.clipboard.dismiss", mutating: true, idempotent: true, since: "P6-13",
+        args: "`hash: hash`", result: "`{}`" },
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
         args: "`since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error|warn|info|debug)`, `source?: str`, `hash?: hash`", result: "`{entries: [LogEntry], next_seq: u64}`" },
     Operation { name: "app.stats", mutating: false, idempotent: false, since: "P1-14",

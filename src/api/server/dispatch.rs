@@ -90,7 +90,8 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppLog { .. }
+                Call::AppClipboardDismiss { .. }
+                | Call::AppLog { .. }
                 | Call::AppStats { .. }
                 | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }

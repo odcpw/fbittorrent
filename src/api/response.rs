@@ -209,6 +209,7 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
     AppSettingsGet(Settings),
@@ -240,6 +241,7 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),

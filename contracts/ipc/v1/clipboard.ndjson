@@ -1,0 +1,7 @@
+{"dir":"c2s","frame":{"id":1,"op":"hello","args":{"proto":1,"client":{"kind":"test","name":"clipboard-test","version":"0.2.0"}}}}
+{"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
+{"dir":"s2c","frame":{"ev":"clipboard.magnet","seq":1,"ts":1792396800,"hash":"1212121212121212121212121212121212121212","name":"Local fixture","already_added":false}}
+{"dir":"c2s","frame":{"id":2,"op":"app.clipboard.dismiss","args":{"hash":"1212121212121212121212121212121212121212"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{}}}
+{"dir":"c2s","frame":{"id":3,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:1212121212121212121212121212121212121212"},"origin":"clipboard"}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"pending","ref":"clipboard-add","hash":"1212121212121212121212121212121212121212","name":"Local fixture","duplicate":false}}}

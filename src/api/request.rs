@@ -292,6 +292,8 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "app.clipboard.dismiss")]
+    AppClipboardDismiss { args: HashArgs },
     #[serde(rename = "app.log")]
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
@@ -365,6 +367,7 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",
             Self::AppSettingsGet { .. } => "app.settings.get",

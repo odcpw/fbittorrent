@@ -37,7 +37,7 @@ regular file at most 16 MiB whose first byte is d (bencoded).
 - Idempotent operations (safe to resend with the same `ref` after a mid-request loss, or
   against a new instance after a crash): `torrents.start`, `torrents.stop`,
   `torrents.set_seed`, `torrents.set_files`, `torrents.set_upload_limit`, `torrents.add`,
-  `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
+  `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
   `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
@@ -157,6 +157,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
@@ -433,7 +434,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -697,3 +698,27 @@ the child's process group within five seconds. A failed launcher is cleaned
 and retried at most every five seconds while work remains; no child or polling
 worker runs while there is no eligible work. The session bus address is
 preserved independently of the child's XDG runtime directory.
+
+### P6-13: opt-in clipboard offers (contract 1.2.9)
+
+The `clipboard` capability adds `app.clipboard.dismiss {hash}` (idempotent),
+`clipboard.magnet {hash, name?, already_added}` and origin `clipboard` for adds.
+`settings --clipboard-watch on|off` accepts true/false too; default false starts
+no reader. Watcher activity never extends the idle deadline. The owner-approved
+2026-10-19 command is `wl-paste --watch sh -c 'cat; printf "\0"'`: one NUL-framed
+record per selection. Records over 64 KiB are discarded through the next NUL;
+incomplete records are never parsed. Turning off or draining kills the whole
+owned group, including shell/cat descendants. A failed reader retries at most
+once per five seconds while enabled.
+
+Only the last offered hash is retained by the watcher; existing ledger hashes
+and consecutive identical offers are suppressed. Clipboard text, selection names,
+and child stderr never enter daemon logs. The bounded event history and pending
+notification hold the offered name for display, as normal API/notification data.
+A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
+`torrents.add {source:{magnet:"magnet:?xt=urn:btih:<hash>"},origin:"clipboard"}` or
+`app.clipboard.dismiss {hash}` over api.sock. Add reconstructs the hash-only magnet
+(no clipboard history or tracker URLs retained); metadata uses ordinary DHT/peer
+discovery. No transfer starts before an explicit Add action. Hello/error fixtures
+now advertise the exact live caps including clipboard; changes[].cap records it.
+The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.

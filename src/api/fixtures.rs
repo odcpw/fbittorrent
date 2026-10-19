@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("clipboard", include_str!("../../contracts/ipc/v1/clipboard.ndjson")),
     ("peer-port", include_str!("../../contracts/ipc/v1/peer-port.ndjson")),
     ("disk", include_str!("../../contracts/ipc/v1/disk.ndjson")),
     ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
@@ -437,6 +438,7 @@ fn operation_event_error_and_document_coverage() {
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "app.clipboard.dismiss",
         "app.log",
         "app.stats",
         "app.settings.get",
