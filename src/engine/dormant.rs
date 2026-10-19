@@ -49,6 +49,7 @@ impl Inner {
         Ok(info.selection(record).0)
     }
 
+    #[cfg(test)]
     pub(super) fn saved_torrent(&self, record: &Record) -> Result<SavedTorrent> {
         self.saved_torrent_observed(record, true)
     }

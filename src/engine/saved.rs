@@ -115,11 +115,19 @@ struct Presence {
     present: bool,
 }
 
+struct LivePresence {
+    folder: PathBuf,
+    selection: Option<Vec<usize>>,
+    checked: Instant,
+    missing: bool,
+}
+
 /// Owned by one engine or parked ledger; dropped with it.
 #[derive(Default)]
 pub(crate) struct SavedCache {
     metadata: StdMutex<HashMap<String, (Stamp, std::result::Result<Arc<SavedInfo>, String>)>>,
     presence: StdMutex<HashMap<String, Presence>>,
+    live: StdMutex<HashMap<String, LivePresence>>,
 }
 
 impl SavedCache {
@@ -169,6 +177,42 @@ impl SavedCache {
             present,
         });
         present
+    }
+}
+
+impl SavedCache {
+    /// A handle claims bytes of a selected file that is gone from disk (or is
+    /// no longer a regular file, or is shorter than a complete file). Files
+    /// with no downloaded bytes are not expected to exist yet. Like dormant
+    /// rows: explicit reads stat now, the sampler at most every PRESENCE_TTL.
+    pub(super) fn live_missing(&self, hash: &str, handle: &ManagedTorrent, fresh: bool) -> bool {
+        let folder = handle.output_folder();
+        let selection = handle.only_files();
+        if let Some(seen) = self.live.lock().unwrap().get(hash) {
+            if !fresh && seen.folder == folder && seen.selection == selection && seen.checked.elapsed() < PRESENCE_TTL {
+                return seen.missing;
+            }
+        }
+        let missing = handle.metadata.load_full().is_some_and(|metadata| {
+            let have = handle.stats().file_progress;
+            metadata.file_infos.iter().enumerate().any(|(index, file)| {
+                let bytes = have.get(index).copied().unwrap_or(0);
+                selection.as_ref().is_none_or(|ids| ids.contains(&index))
+                    && !file.attrs.padding
+                    && bytes > 0
+                    && match std::fs::metadata(folder.join(&file.relative_filename)) {
+                        Ok(found) => !found.is_file() || (bytes >= file.len && found.len() < file.len),
+                        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+                    }
+            })
+        });
+        self.live.lock().unwrap().insert(hash.into(), LivePresence {
+            folder: folder.to_path_buf(),
+            selection,
+            checked: Instant::now(),
+            missing,
+        });
+        missing
     }
 }
 

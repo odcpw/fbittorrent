@@ -572,13 +572,14 @@ impl EngineDispatcher {
         let mut torrents = Vec::with_capacity(ledger.records.len());
         let mut queue_position=0;
         for record in &ledger.records {
-            let mut view = match self.inner.handle(&record.hash) {
-                Ok(handle) => TorrentView::handle(
+            let handle = self.inner.handle(&record.hash).ok();
+            let mut view = match &handle {
+                Some(handle) => TorrentView::handle(
                     record,
-                    &handle,
-                    self.inner.check_cancelled(&record.hash, &handle),
+                    handle,
+                    self.inner.check_cancelled(&record.hash, handle),
                 ),
-                Err(_) => self.inner.unrestored_view(record, fresh),
+                None => self.inner.unrestored_view(record, fresh),
             };
             if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
                 if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
@@ -609,6 +610,18 @@ impl EngineDispatcher {
                 else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited };
             view.origin=Some(record.origin.clone());
             view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
+            // A handle whose downloaded payload was deleted is 'Files missing'
+            // (dormant rows are checked by unrestored_view). Checks and moves
+            // own their files; an engine error already explains itself.
+            if let Some(handle) = &handle {
+                if !matches!(view.state, TorrentState::Checking | TorrentState::Metadata | TorrentState::Error)
+                    && !self.inner.rechecks.active(&record.hash)
+                    && !self.inner.moves.active(&record.hash)
+                    && self.inner.saved.live_missing(&record.hash, handle, fresh)
+                {
+                    view.files_missing();
+                }
+            }
             view.retain_restore_reason();
             torrents.push(view);
         }
