@@ -1514,18 +1514,6 @@ def api_collection_cap(binary, systemd):
             harness.lock_free()
 
 
-def api_subscriptions_deferred(binary, systemd):
-    with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
-        hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files"], "P1-06 advertises exactly its implemented capabilities", str(hello["caps"]))
-        for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
-            frame = client.call(op, args, error="unknown_op")
-            nearest = ["torrents.list"] if op == "torrents.lis" else []
-            case.check(frame["error"]["details"]["nearest"] == nearest and bool(frame["error"].get("hint")),
-                       "unknown_op includes only implemented nearby names and a hint", str(frame))
-        client.call("app.info")
-
-
 def api_start_results(binary, systemd):
     with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         client.hello()
@@ -2321,7 +2309,7 @@ def contract_group(group, binary, systemd):
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
-                        if cap in CAP_BEADS: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                        if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
                     if owners:
@@ -2966,8 +2954,17 @@ def install_atomic(binary, systemd):
             h.cli("down", start=True)
 
 
+if __name__ == "__main__":
+    sys.modules["daemon"] = sys.modules[__name__]
+from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
+                        structural_frame_within_100ms, detail_topic_released,
+                        engine_restart_keeps_connection, slow_client_closed_others_live,
+                        rev_soak_10min, state_watcher_cancellation_stress)
+
 CASES = {function.__name__: function for function in
-         (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (bus_subscriptions, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
+          engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
+          fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
@@ -2977,7 +2974,7 @@ CASES = {function.__name__: function for function in
           cap_change_no_check, seed_toggle_no_check,
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
-          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
+          api_concurrent_adds, api_collection_cap, api_replay_normalization, api_start_results,
           api_missing_completed_payload, api_loopback_seed_receives,
           contract_hello, contract_errors, contract_torrents)}
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",

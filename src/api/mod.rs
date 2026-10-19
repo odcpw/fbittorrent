@@ -4,6 +4,7 @@
 #![allow(dead_code, unused_imports)] // Contract types/reexports precede their consumers.
 
 pub mod client;
+pub mod bus;
 pub mod events;
 pub mod objects;
 pub mod ops;

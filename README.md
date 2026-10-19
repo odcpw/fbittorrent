@@ -155,8 +155,10 @@ It never enables or starts the unit. `setup --uninstall` removes the unit while
 keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
 harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
-stages; the current CLI uses the existing framed socket.
+unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
+`api.sock`: clients can subscribe to summary, torrents, files, network, settings
+and events, receive consistent snapshots, then pushed changes. The current CLI
+uses the framed compatibility socket; CLI migration and TUI attachment follow.
 
 ### For agents
 
@@ -299,6 +301,15 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
   --write-baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
   --output target/test-logs/resources/measurement.json
 ```
+
+The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
+It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
+three 60-second windows per configuration, plus matched CLI polling references
+(about 24 minutes total). The daemon entries share `baselines/resources.json`
+with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
+--seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
+against the same median and spread rule; `--write-baseline` records a complete
+matrix deliberately. Use the reference host and the release-lock/memory scope.
 
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.

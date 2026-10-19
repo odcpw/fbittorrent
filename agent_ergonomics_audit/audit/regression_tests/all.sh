@@ -19,6 +19,8 @@ Environment flags (opt-ins default to 0; set exactly 1 to enable):
                        unshare, iproute2 and permission to create namespaces.
   FBT_TEST_RESOURCES=1  Build release-perf, measure idle/active CPU and RSS, and
                        compare baselines/resources.json on its reference host.
+  FBT_TEST_DAEMON_RESOURCES=1  Build release-perf and compare the daemon 10/100-torrent,
+                       0/1/8-subscriber CPU/RSS matrix (three 60 s runs; ~24 min).
   FBT_TEST_VERBOSE=1    Mirror every JSONL line to stderr, including pane polls.
   FBT_TEST_FORCE_FAIL=<suite>/<case>
                        Force that case's first step to fail; retain its logs.
@@ -44,6 +46,7 @@ if [[ "${FBT_TEST_VISUAL:-0}" == 1 ]]; then summary_args+=(--suite gate_visual);
 if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then summary_args+=(--suite gate_widget); fi
 if [[ "${FBT_TEST_VPN:-0}" == 1 ]]; then summary_args+=(--suite gate_vpn); fi
 if [[ "${FBT_TEST_RESOURCES:-0}" == 1 ]]; then summary_args+=(--suite resources); fi
+if [[ "${FBT_TEST_DAEMON_RESOURCES:-0}" == 1 ]]; then summary_args+=(--suite daemon_budget); fi
 python3 scripts/testlog-summary.py --reset "${summary_args[@]}"
 test_log=$(mktemp)
 finish() {
@@ -103,11 +106,19 @@ if [[ "${FBT_TEST_VPN:-0}" == 1 ]]; then
   python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite gate_vpn --isolate-state -- \
     python3 agent_ergonomics_audit/audit/regression_tests/vpn.py target/release/fbittorrent
 fi
-if [[ "${FBT_TEST_RESOURCES:-0}" == 1 ]]; then
+if [[ "${FBT_TEST_RESOURCES:-0}" == 1 || "${FBT_TEST_DAEMON_RESOURCES:-0}" == 1 ]]; then
   RCH_BUILD_TIMEOUT_SEC="${RCH_BUILD_TIMEOUT_SEC:-1200}" cargo build --profile release-perf --locked
+fi
+if [[ "${FBT_TEST_RESOURCES:-0}" == 1 ]]; then
   python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
     --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
     --output target/test-logs/resources/measurement.json
+fi
+if [[ "${FBT_TEST_DAEMON_RESOURCES:-0}" == 1 ]]; then
+  python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
+    --daemon --matrix --runs 3 --seconds 60 \
+    --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
+    --output target/test-logs/daemon_budget/measurement.json
 fi
 if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
   echo "## Configured legacy CLI and TUI"

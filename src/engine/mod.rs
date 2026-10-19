@@ -33,6 +33,7 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+mod bus;
 mod queue;
 pub mod ops;
 mod restore;
@@ -79,6 +80,7 @@ struct RestoreTask {
 
 struct Inner {
     session: Arc<Session>,
+    bus_changed: rqbit_runtime::sync::Notify,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
     directory: PathBuf,
@@ -176,6 +178,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         .context("starting the native torrent engine")?;
     let inner = Arc::new(Inner {
         session,
+        bus_changed: rqbit_runtime::sync::Notify::new(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
         directory,

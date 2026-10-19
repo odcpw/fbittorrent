@@ -13,7 +13,7 @@ pub fn hello(daemon: &Daemon) -> HelloResult {
         info["state"] = json!("stopping");
     }
     info["proto"] = json!(PROTO);
-    info["caps"] = json!(["torrents", "files"]);
+    info["caps"] = json!(["torrents", "files", "subscribe"]);
     info["limits"] =
         json!({"line_in":LINE_IN,"line_out":LINE_OUT,"inflight":8,"subs":16,"hashes":256});
     serde_json::from_value(info).expect("daemon identity has the contract shape")
@@ -25,6 +25,7 @@ pub fn dispatch(
     reference: &str,
     counts: Value,
     uptime: u64,
+    subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
     Ok(match call {
         Call::AppInfo { .. } => {
@@ -32,7 +33,7 @@ pub fn dispatch(
             value["uptime_s"] = json!(uptime);
             value["upgrade_pending"] = json!(false);
             value["clients"] = counts;
-            value["subscriptions"] = json!({"total":0,"by_topic":{}});
+            value["subscriptions"] = serde_json::to_value(subscriptions).unwrap();
             Reply::AppInfo(serde_json::from_value(value).unwrap())
         }
         Call::AppNetwork { .. } => {

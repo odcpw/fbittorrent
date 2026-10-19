@@ -77,6 +77,7 @@
         let generation = ledger.generation.clone();
         let inner = Arc::new(Inner {
             session,
+            bus_changed: rqbit_runtime::sync::Notify::new(),
             ledger: Arc::new(Mutex::new(ledger)),
             additions: Arc::new(Mutex::new(())),
             directory: directory.to_path_buf(),
