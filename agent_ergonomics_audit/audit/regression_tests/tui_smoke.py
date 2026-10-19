@@ -29,7 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
-CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history')
+CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history','turtle_limits')
 
 
 class PaneUi(native.AttachedTui):
@@ -263,6 +263,32 @@ def low_chroma_theme_markers(binary,setup,sandbox,h,ui,process,torrent):
             cached.rmdir();cached.write_bytes(metainfo);cached.chmod(0o600)
 
 
+def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
+    with d.ApiConn(h)as client:
+        client.hello();client.call('transfer.set_limits',dict(alt_download_bps=65536,upload_bps=0));client.call('transfer.set_alt',dict(on=True))
+        ui.start_owned();ui.tmux('resize-window','-t',ui.target,'-x','80','-y','24')
+        with Case('tui_smoke','turtle_limits')as case:
+            ui.case=case
+            ui.observe('receive confirmed summary','the initial turtle indicator arrives by push',lambda pane:'󰢃 Turtle'in pane.splitlines()[0])
+            ui.tmux('send-keys','-t',ui.target,'-l','z')
+            ui.observe('toggle z off','the indicator disappears within the one-second TUI push interval',lambda pane:'󰢃 Turtle'not in pane.splitlines()[0]and'turtle limits off'in pane.splitlines()[-1],timeout=1)
+            ui.tmux('send-keys','-t',ui.target,'-l','z')
+            ui.observe('toggle z on','the indicator returns within the one-second TUI push interval',lambda pane:'󰢃 Turtle'in pane.splitlines()[0]and'turtle limits on'in pane.splitlines()[-1],timeout=1)
+            ui.contains('F6','Download settings',literal=False)
+            for _ in range(4):ui.press('Down','select next settings field',lambda pane:'Download settings'in pane,literal=False)
+            ui.contains('Right','Download limit · B/s',literal=False)
+            ui.press('128K','type a numeric rate with K suffix',lambda pane:'128K'in pane)
+            ui.contains('Enter','131072 B/s',literal=False)
+            ui.contains('Enter','[Torrents]',literal=False)
+            settings=client.call('app.settings.get')['result']
+            case.check(settings.get('download_limit_bps')==131072 and settings.get('alt_download_limit_bps')==65536 and settings['alt_limits_on'],
+                       'F6 saves only the edited rate over API v1',json.dumps(settings))
+            rows=client.call('torrents.list',{})['result']['torrents']
+            case.check(all(row.get('upload_limit_bps')==32768 for row in rows),'global unlimited never lifts the per-torrent default cap',json.dumps(rows))
+            ui.press('q','q detaches with the confirmed turtle still on',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
+        ui.case=setup
+
+
 def log_history(binary):
     """A real injected engine error and a failed open survive in the pushed log."""
     import shutil
@@ -315,7 +341,7 @@ def main():
         log_history(args.binary.resolve());return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
-            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
+            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers','turtle_limits')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
                 if index:
                     h.notify.close()
                     process=h.start_serve()
@@ -330,6 +356,8 @@ def main():
                     h.notify.close();process=h.start_serve()
                     if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('poster fixture owner did not restart')
                 poster_overlay_cleanup(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'turtle_limits'):
+                turtle_limits(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
             if args.case in(None,'low_chroma_theme_markers'):
                 low_chroma_theme_markers(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
 

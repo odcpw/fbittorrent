@@ -109,6 +109,7 @@ pub struct TuiApp {
     pub(super) status_success: bool,
     pub(super) feedback:super::feedback::Feedback,
     pub(super) log_open:bool,
+    pub(super) alt_busy:bool,
 }
 
 /// A row identity survives source reordering and the same episode key in another show.
@@ -125,7 +126,8 @@ pub enum Msg {
     SettingsSaved(Result<Config,String>),
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
-    LogAttached{connection:u64,result:Result<(),String>},
+    AltDone(Result<String,String>),
+    UiSubscribed{connection:u64,result:Result<(),String>},
     Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
     NativeSearchStarted {connection:u64,sequence:u64,result:Result<super::remote::search::Session,String>},
     SearchDisposed,
@@ -254,7 +256,7 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
-            status_success:false,feedback:Default::default(),log_open:false,
+            status_success:false,feedback:Default::default(),log_open:false,alt_busy:false,
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();

@@ -1,23 +1,6 @@
 //! One history view for the global modal and the torrent Details Log tab.
 use super::*;
 impl TuiApp {
-    pub(super) fn subscribe_log(&self) -> Cmd<Msg> {
-        let Some(connection) = self
-            .presence
-            .as_ref()
-            .filter(|c| c.hello.caps.iter().any(|cap| cap == "log"))
-            .cloned()
-        else {
-            return Cmd::none();
-        };
-        Cmd::task(move || Msg::LogAttached {
-            connection: connection.id,
-            result: connection
-                .request("subscribe", serde_json::json!({"topics":["log"]}))
-                .map(|_| ())
-                .map_err(|e| e.to_string()),
-        })
-    }
     pub(super) fn toggle_log(&mut self) -> Cmd<Msg> {
         self.log_open = !self.log_open;
         Cmd::none()

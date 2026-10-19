@@ -1,9 +1,10 @@
 [ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮iB/s  ↑ 1.0 KiB/s
 ╭ Torrents (3) ───│                                                                                  │─────────────────╮
 │  STATE     NAME │ GLOBAL                                                                           │   ↓    ETA PEERS│
-│▌ ↓ Down    The D│   (1) Torrents                                                                   │2.1M     4m     3│
-│  ✓ Done    Sinte│   (2) Search                                                                     │                 │
-│  ◌ Meta    Other│   (3) Shows                                                                      │                3│
+│▌ ↓ Down    The D│   (z) Turtle limits                                                              │2.1M     4m     3│
+│  ✓ Done    Sinte│   (1) Torrents                                                                   │                 │
+│  ◌ Meta    Other│   (2) Search                                                                     │                3│
+│                 │   (3) Shows                                                                      │                 │
 │                 │   (4) RSS                                                                        │                 │
 │                 │   (Tab) Next screen                                                              │                 │
 │                 │   (Shift+Tab) Previous screen                                                    │                 │
@@ -23,8 +24,7 @@
 │                 │   (g/Home) First                                                                 │                 │
 │                 │   (G/End) Last                                                                   │                 │
 │                 │   (PgDn) Page down                                                               │                 │
-│                 │   (PgUp) Page up                                                                 │                 │
-╰─────────────────│   (Enter) Details                                                                │─────────────────╯
+╰─────────────────│   (PgUp) Page up                                                                 │─────────────────╯
 ↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

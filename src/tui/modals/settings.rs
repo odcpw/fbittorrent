@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) struct SettingsModal {
     pub(super) cfg: Config,
+    pub(super) original:Config,
     pub(super) list: RefCell<ListState>,
     pub(super) connections: Vec<Option<String>>,
     pub(super) error: String,
@@ -11,7 +12,7 @@ pub(super) struct SettingsModal {
 
 impl TuiApp {
     pub(super) fn open_settings(&mut self) {
-        let cfg = Config::load().unwrap_or_else(|_| self.cfg.clone());
+        let mut cfg=self.cfg.clone();if let Some(settings)=&self.store.settings{if let Err(error)=settings_fields::native_settings(&mut cfg,settings){self.set_status(format!("Settings: {error}"),true);return;}}
         let mut connections = vec![Some("proton".into()), None];
         for name in crate::network_app::interfaces().unwrap_or_default() {
             if name != "lo" && !connections.contains(&Some(name.clone())) { connections.push(Some(name)); }
@@ -19,7 +20,7 @@ impl TuiApp {
         if !connections.contains(&cfg.network_interface) { connections.push(cfg.network_interface.clone()); }
         let mut list = ListState::default();
         list.select(Some(0));
-        self.settings = Some(SettingsModal { cfg, connections, list: RefCell::new(list), error: String::new(), saving:false });
+        self.settings = Some(SettingsModal { original:cfg.clone(),cfg, connections, list: RefCell::new(list), error: String::new(), saving:false });
     }
 
     pub(super) fn on_settings_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
@@ -33,33 +34,29 @@ impl TuiApp {
         if intent == actions::Intent::Primary {
             let values=self.settings.as_ref().unwrap().cfg.clone();
             self.settings.as_mut().unwrap().saving=true;
-            let presence=self.presence.clone();let previous=self.cfg.clone();
+            let patch=settings_fields::settings_patch(&self.settings.as_ref().unwrap().original,&values);
+            let presence=self.presence.clone();
             return Cmd::task(move|| {
                 let result=(||->Result<Config> {
-                    let mut latest=Config::load()?;
-                    let queue_changed=latest.max_active_downloads!=values.max_active_downloads;
-                    let reopen=latest.peer_encryption!=values.peer_encryption || latest.network_interface!=values.network_interface;
-                    latest.max_active_downloads=values.max_active_downloads;
-                    latest.peer_encryption=values.peer_encryption;latest.network_interface=values.network_interface;
-                    latest.reduce_motion=values.reduce_motion;latest.validate()?;
-                    if reopen {
-                        latest.save()?;
-                        presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?
-                            .request("app.restart",serde_json::json!({"scope":"engine"}))?;
-                    } else {
-                        if queue_changed {Client::from_config(&previous,presence.clone()).set_queue_limit(latest.max_active_downloads)?;}
-                        latest.save()?;
-                    }
-                    Ok(latest)
+                    let connection=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?;
+                    let reply:crate::api::SettingsSetResult=serde_json::from_value(connection.request("app.settings.set",patch)?)?;
+                    if reply.restart{connection.request("app.restart",serde_json::json!({"scope":"engine"}))?;}
+                    let settings:crate::api::Settings=serde_json::from_value(connection.request("app.settings.get",serde_json::json!({}))?)?;
+                    let mut cfg=values;settings_fields::native_settings(&mut cfg,&settings)?;Ok(cfg)
                 })();
                 Msg::SettingsSaved(result.map_err(|error|format!("{error:#}")))
             });
         }
+        if matches!(intent,actions::Intent::Left|actions::Intent::Right){
+            let selected=self.settings.as_ref().unwrap().list.borrow().selected().unwrap_or(0);
+            if selected>=4{return self.edit_limit(selected-4);}
+        }
+
         let modal = self.settings.as_mut().unwrap();
         let selected = modal.list.borrow().selected().unwrap_or(0);
         match intent {
-            actions::Intent::Down => modal.list.borrow_mut().select(Some((selected + 1) % 4)),
-            actions::Intent::Up => modal.list.borrow_mut().select(Some((selected + 3) % 4)),
+            actions::Intent::Down => modal.list.borrow_mut().select(Some((selected + 1) % settings_fields::SETTINGS_ROWS)),
+            actions::Intent::Up => modal.list.borrow_mut().select(Some((selected + settings_fields::SETTINGS_ROWS - 1) % settings_fields::SETTINGS_ROWS)),
             actions::Intent::Left | actions::Intent::Right => {
                 let forward = !matches!(intent, actions::Intent::Left);
                 match selected {
@@ -93,19 +90,20 @@ impl TuiApp {
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).padding(Sides::horizontal(1)).title(" Download settings ");
         let inner = block.inner(area);
         block.render(area, frame);
-        let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(4));
-        self.view_rows(MouseList::Settings,rows,4,
-            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion)),
+        let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(settings_fields::SETTINGS_ROWS as u16));
+        self.view_rows(MouseList::Settings,rows,settings_fields::SETTINGS_ROWS,
+            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion,settings_fields::limit(&modal.cfg,i.saturating_sub(4)))),
             |i|Line::raw(match i {
                 0=>format!("Simultaneous downloads   {}",modal.cfg.max_active_downloads),
                 1=>format!("Peer encryption          {}",match modal.cfg.peer_encryption.as_str(){"require"=>"Require encryption","off"=>"Off",_=>"Prefer encryption"}),
                 2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
-                _=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
+                3=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
+                _=>settings_fields::limit_label(&modal.cfg,i-4),
             }),frame);
         let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
-            format!("↑/↓ choose · ←/→ change · Enter save · Esc cancel\n\nExtra downloads wait their turn. Encryption protects peer traffic; your IP remains visible.\n\nA required VPN blocks torrent transfers when disconnected. Feed and search websites use your usual connection.\n\n{}\nChanging encryption or VPN reopens the app's engine.", crate::network_app::state(&modal.cfg).message)
+            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nChanging encryption or VPN reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
         };
-        let remaining = inner.height.saturating_sub(4);
-        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(4), inner.width, remaining), frame);
+        let remaining = inner.height.saturating_sub(settings_fields::SETTINGS_ROWS as u16);
+        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(settings_fields::SETTINGS_ROWS as u16), inner.width, remaining), frame);
     }
 }
