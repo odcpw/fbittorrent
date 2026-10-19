@@ -370,10 +370,6 @@ fn encode_file_size_frames(frames: &[Value]) -> String {
 
 fn file_size_frames(op: &str) -> (Vec<Value>, Vec<Value>) {
     let rows: Vec<Value> = GROUPS
-
-#[test]
-fn missing_files_restore_errors_require_the_matching_reason() {
-    let detail: Value = GROUPS
         .iter()
         .find(|(group, _)| *group == "torrents")
         .unwrap()
@@ -591,7 +587,17 @@ fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
         .unwrap_err();
         assert_eq!(error, format!("contracts/ipc/v1/reply-agreement-catalogue.ndjson:{line}: /frame/result/torrent/{field}: must agree with earlier list/get replies for the same hash"));
         println!("catalogue stale {field} rejected without files: {error}");
+    }
+}
 
+#[test]
+fn missing_files_restore_errors_require_the_matching_reason() {
+    let detail: Value = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1
+        .lines()
         .nth(54)
         .map(|line| {
             serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()
