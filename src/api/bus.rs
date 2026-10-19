@@ -54,7 +54,8 @@ struct TopicState {
     topic: Topic,
     interval: Duration,
     due: Instant,
-    sent: Option<Value>,
+    /// Shared with the sample that produced it; never deep-copied per client.
+    sent: Option<Arc<Value>>,
 }
 struct Subscription {
     sub: u64,
@@ -145,9 +146,21 @@ struct Sample {
     rss_feeds: Value,
     rss_items: BTreeMap<String,Value>,
     daemon: Value,
+    /// Each topic value is built once per sample, for every subscription.
+    memo: Memo,
 }
+#[derive(Default)]
+struct Memo(std::cell::RefCell<BTreeMap<Topic, Arc<Value>>>);
 impl Sample {
-    fn value(&self, topic: &Topic) -> Value {
+    fn value(&self, topic: &Topic) -> Arc<Value> {
+        if let Some(value) = self.memo.0.borrow().get(topic) {
+            return value.clone();
+        }
+        let value = Arc::new(self.build(topic));
+        self.memo.0.borrow_mut().insert(topic.clone(), value.clone());
+        value
+    }
+    fn build(&self, topic: &Topic) -> Value {
         match topic {
             Topic::Stats=>self.stats.clone(),
             Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
@@ -542,7 +555,9 @@ impl Bus {
             state,
             rows,
             completions,
-            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            // The log ring is copied only for a Log subscriber.
+            logs: if topics.contains(&Topic::Log) { serde_json::to_value(self.daemon.logs.all()).unwrap() } else { json!([]) },
+            memo: Memo::default(),
             searches,
             files,
             pieces,
@@ -557,7 +572,8 @@ impl Bus {
         let mut generation = None;
         let mut seen_generation = 0;
         let mut identity = None;
-        let mut previous_rows: BTreeMap<String, Torrent> = BTreeMap::new();
+        // Only what the added/error transitions compare: (staged, error).
+        let mut previous_rows: BTreeMap<String, (bool, Option<String>)> = BTreeMap::new();
         let mut ready_seen = false;
         let mut dirty = true;
         let mut generation_threads = Vec::new();
@@ -677,14 +693,14 @@ impl Bus {
                         ready_seen = true;
                         for row in &sample.rows {
                             let old = previous_rows.get(&row.hash.to_string());
-                            let event = if !row.staged && old.is_none_or(|previous| previous.staged)
+                            let event = if !row.staged && old.is_none_or(|previous| previous.0)
                                 && (old.is_some() || !restored_baseline
                                     || !self.initial_hashes.contains(&row.hash.to_string()))
                             {
                                 Some(
                                     json!({"ev":"torrent.added","hash":row.hash,"name":row.name,"origin":row.origin.as_deref().unwrap_or("manual")}),
                                 )
-                            } else if old.is_some_and(|o| o.error != row.error)
+                            } else if old.is_some_and(|o| o.1 != row.error)
                                 && row.error.is_some()
                             {
                                 Some(
@@ -705,8 +721,7 @@ impl Bus {
                         previous_rows = sample
                             .rows
                             .iter()
-                            .cloned()
-                            .map(|row| (row.hash.to_string(), row))
+                            .map(|row| (row.hash.to_string(), (row.staged, row.error.clone())))
                             .collect();
                     }
                     let needs_events = r
@@ -777,7 +792,9 @@ impl Bus {
 }
 mod update;
 mod diff;
-use diff::{diff, state_event, structural_projection};
+use diff::{diff, project, state_event};
+#[cfg(test)]
+use diff::structural_projection;
 
 #[cfg(test)]
 #[path = "bus/tests.rs"]

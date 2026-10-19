@@ -49,10 +49,10 @@ impl Subscription {
                 continue;
             }
             let mut value = if t.topic == Topic::Events {
-                json!(events
+                Arc::new(json!(events
                     .iter()
                     .filter(|e| self.since.is_none_or(|s| e["seq"].as_u64().unwrap() > s))
-                    .collect::<Vec<_>>())
+                    .collect::<Vec<_>>()))
             } else {
                 sample.value(&t.topic)
             };
@@ -65,14 +65,13 @@ impl Subscription {
                     let resync = t.topic == Topic::Events
                         && self.since.is_some_and(|s| s.saturating_add(1) < oldest);
                     if resync {
-                        value = json!(events);
+                        value = Arc::new(json!(events));
                     }
                     let items = value
                         .as_array()
                         .unwrap()
                         .iter()
-                        .cloned()
-                        .map(serde_json::from_value)
+                        .map(serde::Deserialize::deserialize)
                         .collect::<Result<Vec<Item>, _>>()
                         .map_err(|_| error(ErrorCode::Internal, "invalid snapshot", None))?;
                     self.rev = self.sink.snapshot_resync(
@@ -92,7 +91,7 @@ impl Subscription {
                 } else {
                     self.rev += 1;
                     self.sink
-                        .send(state_event(self.sub, &t.topic, self.rev, value.clone())?)?;
+                        .send(state_event(self.sub, &t.topic, self.rev, &value)?)?;
                 }
                 t.sent = Some(value);
                 t.due = Instant::now() + t.interval;
@@ -102,9 +101,9 @@ impl Subscription {
                 let next = if due {
                     value
                 } else {
-                    structural_projection(&t.topic, old, &value)
+                    project(&t.topic, old, value)
                 };
-                if &next != old {
+                if *next != **old {
                     if keyed {
                         let (changed, added, removed) = diff(&t.topic, old, &next);
                         if !changed.is_empty() || !added.is_empty() || !removed.is_empty() {
@@ -136,7 +135,7 @@ impl Subscription {
                     } else {
                         self.rev += 1;
                         self.sink
-                            .send(state_event(self.sub, &t.topic, self.rev, next.clone())?)?;
+                            .send(state_event(self.sub, &t.topic, self.rev, &next)?)?;
                     }
                     t.sent = Some(next);
                 }

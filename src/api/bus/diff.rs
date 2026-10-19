@@ -1,6 +1,7 @@
 use super::*;
-pub(super) fn state_event(sub: u64, topic: &Topic, rev: u64, value: Value) -> ApiResult<Event> {
-    let data = serde_json::from_value(value)
+pub(super) fn state_event(sub: u64, topic: &Topic, rev: u64, value: &Value) -> ApiResult<Event> {
+    // Deserialize from the shared sample value without copying it.
+    let data = serde::Deserialize::deserialize(value)
         .map_err(|_| error(ErrorCode::Internal, "invalid state sample", None))?;
     Ok(Event::State {
         sub,
@@ -97,6 +98,17 @@ const COALESCED: &[&str] = &[
     "seeds",
     "ratio",
 ];
+/// structural_projection over shared values: topics it returns unchanged (old
+/// or new) are passed through without a deep copy.
+pub(super) fn project(topic: &Topic, old: &Arc<Value>, new: Arc<Value>) -> Arc<Value> {
+    match topic {
+        Topic::Stats | Topic::Pieces(_) => old.clone(),
+        Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_) => {
+            Arc::new(structural_projection(topic, old, &new))
+        }
+        _ => new,
+    }
+}
 pub(super) fn structural_projection(topic: &Topic, old: &Value, new: &Value) -> Value {
     if *topic==Topic::Stats {return old.clone();}
     if matches!(topic, Topic::Summary) {
