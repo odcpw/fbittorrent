@@ -801,3 +801,23 @@ runs. The integrated default foreground selection is now 203 cases, versus the
 older reported 186; wall-budget work will measure every currently selected case.
 The previously recorded tracker-topic/UI follow-ups remain; this merge proves
 current-set RPC observations and announce control.
+
+### P5-01 / P0 truth gate — connected seeds versus unknown
+
+Updated `native/no_fake_seed_counts` to require the exact current capability
+note: connected seed counts are measured for live torrents, and optional
+`seeds` distinguishes unknown. Retained every pane assertion and added real
+CLI observations: a paused torrent omits `seeds`; the live trackerless fixture
+reports zero alongside an empty actual peer list. The terminal stream now
+honors `--log-root` (the initial run passed all assertions but failed at the old
+hardcoded artifact path). Private-XDG commands: `native.py
+target/debug/fbittorrent --case no_fake_seed_counts --log-root <root>` passed
+43/43 steps, with its terminal artifact retained, under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-native-final/processes/native/`;
+`daemon.py target/debug/fbittorrent --no-systemd --case peers_local_swarm
+--log-root <root>` passed 112/112 steps under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-swarm-foreground/processes/daemon/`
+(one actual seed plus an incomplete leecher; CLI count one; paused count absent).
+Python compilation and `git diff --check` passed. Test-only delta; no source or
+contract changes, full Cargo suite or umbrella rerun. The merge's unchanged
+Rust source already passed 547 tests in `fbt-p7-04-aq7/merge-full/`.
