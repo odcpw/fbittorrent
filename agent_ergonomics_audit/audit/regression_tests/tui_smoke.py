@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real native TUI smoke at 80/120/160 columns; private XDG, peers and tmux.
+"""Real native TUI smoke at 80/90/120/160 columns; private XDG, peers and tmux.
 
 Each UI step retains its complete captured pane, on success and failure. Setup
 has its own suite so forced failures in the UI suite always carry a real pane.
@@ -29,7 +29,7 @@ import private_net
 ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
-SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
+SIZES={'layout_80x24':(80,24),'layout_90x24':(90,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
 CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history','turtle_limits','peer_port')
 
 
@@ -161,7 +161,8 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
             ui.observe('resize terminal and read list',f'real fixture list at {width}x{height}',
                        lambda pane:resize.returncode==0 and len(pane.splitlines())==height and all(title in pane for title in(ACTIVE,DONE,META)))
             ui.observe('read state column','worded states remain visible without relying on colour',
-                       lambda pane:all(label in pane for label in('↓ Down','✓ Done','◌ Meta')))
+                       lambda pane:all(any(prefix in line and label in line for line in pane.splitlines())
+                                       for prefix,label in [('The Diplomat','↓ Down'),('Sintel','✓ Done'),('Other.Movie','◌ Meta')]))
             with d.ApiConn(h)as client:
                 client.hello();ui.select_active(client)
                 ui.contains('Enter','[Overview]  Files',literal=False)
@@ -204,8 +205,10 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
             ui.contains('Q','Stop fbittorrent?')
             ui.press('y','confirmed Q stops the daemon and exits the client cleanly',
                      lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()==0 and not d.DaemonContract.socket_path(sandbox).exists())
-            case.check(d.expected_daemon_stderr(h.stderr()),
-                       'confirmed Q emits healthy diagnostics and drains before unlinking sockets',h.stderr())
+            ui.context=h.stderr()
+            ui.observe('read shutdown diagnostics','confirmed Q emits healthy diagnostics and drains before unlinking sockets',
+                       lambda pane:d.expected_daemon_stderr(h.stderr()),timeout=0)
+            ui.context=''
         except Exception as error:
             ui.observe('finish UI actions','all actions complete without an exception',lambda pane:False,timeout=0)
             setup.check(False,'UI actions complete without exception',f'{type(error).__name__}: {error}')
@@ -312,7 +315,9 @@ def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
             case.check(settings.get('download_limit_bps')==131072 and settings.get('alt_download_limit_bps')==65536 and settings['alt_limits_on'],
                        'F6 saves only the edited rate over API v1',json.dumps(settings))
             rows=client.call('torrents.list',{})['result']['torrents']
-            case.check(all(row.get('upload_limit_bps')==32768 for row in rows),'global unlimited never lifts the per-torrent default cap',json.dumps(rows))
+            case.check(all(row['upload_enabled'] is False and row['upload_policy']=='off'
+                           and row.get('ul_bps',0)==0 and row.get('uploaded_bytes',0)==0 for row in rows),
+                       'global unlimited never enables payload upload for default-off torrents',json.dumps(rows))
             ui.press('q','q detaches with the confirmed turtle still on',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
         ui.case=setup
 

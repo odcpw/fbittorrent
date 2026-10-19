@@ -59,6 +59,8 @@ def add(ui,fixture,source):
     if not fixture.h.wait_for(lambda:(any(r['hash']==fixture.torrent.info_hash for r in fixture.rows()),ui.capture(ui.target)),'TUI '+source+' action admits the real fixture',timeout=15):raise RuntimeError('source did not add a torrent')
     row=fixture.row();expected=source if source in ('search','rss','shows')else'manual'
     fixture.case.check(row['origin']==expected,'source origin is retained',json.dumps(row))
+    fixture.case.check(row['upload_enabled'] is False and row['upload_policy']=='off' and row.get('uploaded_bytes',0)==0,
+                       'every add source defaults to zero payload upload',json.dumps(row))
     ui.press('1','return to Torrents',lambda p:'Torrents' in p)
 
 

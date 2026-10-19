@@ -23,6 +23,7 @@ mod search;
 mod shows;
 mod setup;
 mod tui;
+mod torrent_format;
 
 use agent::{AppError, Code};
 use anyhow::{Context, Result};

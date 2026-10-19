@@ -12,6 +12,7 @@ import daemon as d
 import fbtlog
 import fixtures
 import native
+from tui_smoke import private_net
 
 IMDB='tt1234001'
 
@@ -20,7 +21,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)
     parser.add_argument('--log-root',type=Path)
-    args=parser.parse_args();binary=args.binary.resolve()
+    args=parser.parse_args();private_net.enter();binary=args.binary.resolve()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
     with fbtlog.Case('tui_everyday','everyday_live') as case,d.Sandbox() as box:
         case.check(bool(d.private_environment(box)),'prove private XDG and download paths before any product starts',str(box.root))
