@@ -1,4 +1,4 @@
-  1 Torrents    2 Search    3 Shows (2)  [ 4 RSS ]↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
+  1 Torrents    2 Search    3 Shows (2)  [ 4 RSS ]     ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Feeds (1) ──────────────╮╭ Blender releases ─────────────────────────────────╮
 │                         ││                                                   │
 │ ▌ Blender releases  2/3 ││ ▌ ● Sintel.2010.1080p       512.0 MiB  2026-10-18 │

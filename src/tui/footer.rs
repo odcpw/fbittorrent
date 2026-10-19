@@ -27,6 +27,7 @@ impl TuiApp {
             },
             Scope::Modal(kind) => match kind {
                 ModalKind::Files => "Files",
+                ModalKind::Details => "Details",
                 ModalKind::Providers => "Providers",
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",

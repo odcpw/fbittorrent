@@ -1,4 +1,4 @@
-[ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮0 KiB/s  default
+[ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮iB/s  ↑ 1.0 KiB/s
 ╭ Torrents (3) ───│                                                                                  │─────────────────╮
 │  STATE     NAME │ GLOBAL                                                                           │   ↓    ETA PEERS│
 │▌ ↓ Down    The D│   (1) Torrents                                                                   │2.1M     4m     3│
@@ -22,9 +22,9 @@
 │                 │   (G/End) Last                                                                   │                 │
 │                 │   (PgDn) Page down                                                               │                 │
 │                 │   (PgUp) Page up                                                                 │                 │
-│                 │   (Enter) Files                                                                  │                 │
+│                 │   (Enter) Details                                                                │                 │
 │                 │   (o) Open                                                                       │                 │
-│                 │   (p/Space) Pause/resume                                                         │                 │
-╰─────────────────│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │─────────────────╯
+╰─────────────────│   (p/Space) Pause/resume                                                         │─────────────────╯
+↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

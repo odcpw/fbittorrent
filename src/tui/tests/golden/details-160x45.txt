@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│  STATE     NAME                                             SIZE     %      ↓    ETA PEERS││                                                                 │
+│▌ ↓ Down    The Diplomat S04E01 1080p WEB-DL H264-GROUP   1.0 GiB   42%   2.1M     4m     3││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
+│  ✓ Done    Sintel.2010.1080p                             1.0 GiB  100%                    ││                                                                 │
+│  ◌ Meta    Other.Movie.2026.1080p                              —     —                   3││  state     ↓ Down · downloading                                 │
+│                                                                                           ││  progress  42.0%  430.1 MiB of 1.0 GiB                          │
+│                             ╭ The Diplomat S04E01 1080p WEB-DL H264-GROUP ─────────────────────────────────────────────────────╮s                            │
+│                             │ [Overview]  Files    [ / ] tabs                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │ state     ↓ Down · downloading                                                                   │                             │
+│                             │ progress  42.0%  430.1 MiB of 1.0 GiB                                                            │atic                         │
+│                             │ speed     ↓ 2.0 MiB/s   ↑ 1.0 KiB/s · ETA 4m57s                                                  │n complete  (u to seed)      │
+│                             │ peers     3 peers connected                                                                      │                             │
+│                             │ upload    32 KiB/s cap · stops when complete  (u to seed)                                        │                             │
+│                             │ path      /fixture/downloads                                                                     │                             │
+│                             │ added     just now                                                                               │rests here                   │
+│                             │                                                                                                  │                             │
+│                             │ IMDb card appears when the cursor rests here                                                     │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             │                                                                                                  │                             │
+│                             ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯                             │
+│                             [Details] (Esc) Back  (o) Open  (p) Pause  (u) Seed on  (d) Remove  (D) Delete files …      (?) Help                             │
+│                             The Diplomat S04E01 1080p WEB-DL H264-GROUP                                                                                      │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+[Details] (Esc) Back  (o) Open  (p) Pause  (u) Seed on  (d) Remove  (D) Delete files  (i) IMDb  (w) Wikipedia  (]) Next tab  ([) Previous tab           (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

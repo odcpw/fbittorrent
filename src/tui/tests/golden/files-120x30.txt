@@ -1,4 +1,4 @@
-[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                     ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                               ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Torrents (3) ────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  STATE     NAME                                                                        SIZE     %      ↓    ETA PEERS│
 │▌ ↓ D╭ Files · The Diplomat S04E01 1080p WEB-DL H264-GROUP ─────────────────────────────────────────────────────╮    3│
@@ -24,7 +24,7 @@
 │     │                                                                                                          │     │
 │     │                                                                                                          │     │
 │     │ 2/3 · 512.0 MiB · Space include/skip · a/n all/none · Esc close                                          │     │
-│     ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯     │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╰─────╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯─────╯
+↓ Down · downloading · 32 KiB/s cap · stops when complete (u to seed) · /fixture/downloads
 [Files] (Esc) Close  (Space) Include/skip  (a) All  (n) None  (g) First  (G) Last  (1) Include  (j) Next …      (?) Help
 The.Diplomat.S04E01.mkv

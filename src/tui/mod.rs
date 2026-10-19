@@ -23,6 +23,9 @@ mod screens_shows;
 #[path = "modals/files.rs"]
 mod modals_files;
 use modals_files::*;
+#[path = "modals/details.rs"]
+mod modals_details;
+use modals_details::*;
 #[path = "modals/providers.rs"]
 mod modals_providers;
 use modals_providers::*;
@@ -398,8 +401,10 @@ impl Model for TuiApp {
         self.last_bounds.set(frame.bounds());
         self.rects.borrow_mut().begin();
         self.poster_drawn.set(false);
+        let banner=self.priority_banner();
+        let strip=self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
-            .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(2)])
+            .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(u16::from(strip)),Constraint::Fixed(u16::from(banner.is_some())),Constraint::Fixed(2)])
             .split(frame.bounds());
         self.view_tabs(root[0], frame);
         match self.screen {
@@ -408,6 +413,15 @@ impl Model for TuiApp {
             Screen::Rss => self.view_rss(root[1], frame),
             Screen::Shows => self.view_shows(root[1], frame),
         }
+        if strip {self.view_selected_strip(root[3],frame);}
+        if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
+        self.rects.borrow_mut().footer=root[5];
+        self.view_status(root[5], frame);
+        if self.details.is_some() { self.view_details(frame); }
+        else if self.files.is_some() { self.view_files(frame); }
+        if self.providers.is_some() { self.view_providers(frame); }
+        if self.settings.is_some() { self.view_settings(frame); }
+        if self.show_help { self.view_help(frame); }
         if let Some(p) = &self.prompt {
             let title = p.title();
             let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title).padding(Sides::horizontal(1));
@@ -419,16 +433,11 @@ impl Model for TuiApp {
                 p.input.render(inner, frame);
             }
         }
-        self.rects.borrow_mut().footer=root[3];
-        self.view_status(root[3], frame);
-        if self.files.is_some() { self.view_files(frame); }
-        if self.providers.is_some() { self.view_providers(frame); }
-        if self.settings.is_some() { self.view_settings(frame); }
-        if self.show_help { self.view_help(frame); }
+
         // Graphics-layer posters sit above text, so anything drawn over the card
         // (modals, other screens) needs the placement gone.
         if let Some(k) = &self.kitty {
-            let overlay = self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
+            let overlay = self.details.is_some() || self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
             if !self.poster_drawn.get() || overlay { k.borrow_mut().clear(); }
         }
     }

@@ -437,6 +437,18 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Back | `Esc`, `h` | — | — |  |
+| `modal:details` | Next tab | `]` | — | — |  |
+| `modal:details` | Previous tab | `[` | — | — |  |
+| `modal:files` | Next tab | `]` | — | — |  |
+| `modal:files` | Overview | `[` | — | — |  |
+| `modal:details` | Open | `o` | — | — |  |
+| `modal:details` | Pause/resume | `p` | — | — |  |
+| `modal:details` | Seed | `u` | — | — |  |
+| `modal:details` | Remove | `d` | — | — |  |
+| `modal:details` | Delete files | `D` | — | — |  |
+| `modal:details` | IMDb | `i` | — | — |  |
+| `modal:details` | Wikipedia | `w` | — | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
@@ -444,7 +456,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Last | `G`, `End` | `G`, `End` | — |  |
 | `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
 | `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
-| `screen:torrents` | Files | `Enter` | `Enter` | — |  |
+| `screen:torrents` | Details | `Enter` | `Enter` | — |  |
 | `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
 | `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
 | `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
@@ -509,7 +521,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | Wikipedia | `w` | `w` | — |  |
 | `screen:shows` | EZTV | `O` | `O` | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
-| `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
 | `modal:files` | Next | `j`, `↓` | — | — |  |
 | `modal:files` | Previous | `k`, `↑` | — | — |  |
 | `modal:files` | Include/skip | `Space` | — | — |  |

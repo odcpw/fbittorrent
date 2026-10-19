@@ -10,6 +10,8 @@ struct Definition {
     text_glyph: &'static str,
     short: &'static str,
     word: &'static str,
+    #[serde(default)]
+    phrases: std::collections::BTreeMap<&'static str, &'static str>,
 }
 struct StateCell { definition: Definition, padded: String }
 fn definitions() -> &'static [StateCell] {
@@ -53,6 +55,11 @@ pub(in crate::tui) fn state_cell(legacy: &Torrent, row: Option<&api::Torrent>) -
 pub(in crate::tui) fn state_word(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
     let key=key(legacy,row);
     definitions().iter().find(|s|s.definition.state==key).map_or("Unknown",|s|s.definition.word)
+}
+
+pub(in crate::tui) fn reason(code: &str) -> &str {
+    definitions().iter().find(|s|s.definition.state=="reason")
+        .and_then(|s|s.definition.phrases.get(code).copied()).unwrap_or(code)
 }
 
 #[cfg(test)]

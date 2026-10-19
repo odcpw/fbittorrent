@@ -5,6 +5,7 @@ pub(super) const ACTIONS: &[Action] = &[
         Scope::Modal(ModalKind::Files),
         &[
             KeyChord::plain(KeyCode::Escape),
+            KeyChord::plain(KeyCode::Char('h')),
             KeyChord::plain(KeyCode::Char('q')),
             KeyChord::plain(KeyCode::Enter)
         ],

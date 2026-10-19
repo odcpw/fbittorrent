@@ -3,7 +3,9 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn selected_torrent(&self) -> Option<&Torrent> {
-        self.tor_list.borrow().selected().and_then(|i| self.torrents.get(i))
+        if let Some(details) = &self.details {
+            self.torrents.iter().find(|t| t.hash == details.hash)
+        } else { self.tor_list.borrow().selected().and_then(|i| self.torrents.get(i)) }
     }
 
     #[cfg(test)]
@@ -63,7 +65,7 @@ impl TuiApp {
                 return self.follow(name, None);
             },
             actions::Intent::Primary => if let Some(t) = self.selected_torrent().cloned() {
-                return self.open_files(&t);
+                return self.open_details(&t);
             },
             _ => {}
         }

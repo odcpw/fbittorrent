@@ -14,6 +14,9 @@ impl TuiApp {
             let rows = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(1)]).split(inner);
             return rows[0].contains(x, y).then_some((MouseList::Providers, rows[0]));
         }
+        if self.details.is_some() {
+            return self.rects.borrow().files.filter(|area|area.contains(x,y)).map(|area|(MouseList::Files,area));
+        }
         if self.files.is_some() {
             let area = files_area(b);
             let inner = Block::bordered().padding(Sides::horizontal(1)).inner(area);
@@ -159,19 +162,20 @@ impl TuiApp {
                 self.providers = None;
                 return Cmd::none();
             }
-            if self.files.is_some() && !files_area(b).contains(m.x, m.y) {
+            if self.details.is_none() && self.files.is_some() && !files_area(b).contains(m.x, m.y) {
                 self.files = None;
                 return Cmd::none();
             }
         }
+        if self.details.is_some() && self.files.is_none() {return Cmd::none();}
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && m.y == 0
-            && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() && !self.show_help {
+            && self.details.is_none() && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() && !self.show_help {
             let Some(index) = self.tab_rects.get().iter().position(|area| area.contains(m.x, m.y)) else { return Cmd::none() };
             let s = Screen::from_index(index);
             self.last_click = None;
             return self.set_screen(s);
         }
-        if self.screen == Screen::Search && self.files.is_none() && self.providers.is_none()
+        if self.screen == Screen::Search && self.details.is_none() && self.files.is_none() && self.providers.is_none()
             && self.prompt.is_none() && !self.show_help
             && matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && (1..4).contains(&m.y) {
             self.search_focus_input = true;

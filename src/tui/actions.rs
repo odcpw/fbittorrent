@@ -79,6 +79,7 @@ pub enum Pane {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalKind {
+    Details,
     Files,
     Providers,
     Settings,

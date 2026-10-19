@@ -60,7 +60,7 @@ impl TuiApp {
         let cur = sel.and_then(|i| m.files.get(i)).cloned();
         let all_ids: Vec<i64> = m.files.iter().map(|f| f.index).collect();
         match intent {
-            actions::Intent::Cancel => { self.files = None; }
+            actions::Intent::Cancel => { self.files = None; self.details = None; }
             actions::Intent::Down => { if n > 0 { m.list.borrow_mut().select_next(n); } }
             actions::Intent::Up => m.list.borrow_mut().select_previous(),
             actions::Intent::First => m.list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
@@ -91,6 +91,12 @@ impl TuiApp {
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title).padding(Sides::horizontal(1));
         let inner = block.inner(area);
         block.render(area, frame);
+        self.view_file_contents(inner,frame);
+    }
+
+    pub(super) fn view_file_contents(&self, inner: Rect, frame: &mut Frame) {
+        let Some(m) = &self.files else { return };
+        let th = &self.theme;
         let bg = Style::new().bg(th.selection);
         if m.loading {
             Paragraph::new(format!("{} loading file list…", SPINNER[self.tick % 4])).style(bg.fg(th.dim)).render(inner, frame);
@@ -105,6 +111,7 @@ impl TuiApp {
             return;
         }
         let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(1)]).split(inner);
+        self.rects.borrow_mut().files=Some(rows[1]);
         let iw = inner.width.saturating_sub(2) as usize;
         let tail_w = 1 + 9 + 1 + 6 + 1 + 7;
         let name_w = iw.saturating_sub(4 + tail_w);
