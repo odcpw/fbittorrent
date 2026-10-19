@@ -1,10 +1,10 @@
 [ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
 ╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
 │                                                                                           ││                                                                 │
-│   NAME                                                       DONE       SPEED     ETA SFU ││  Sintel.2010.1080p                                              │
-│   The Diplomat S04E01 1080p WEB-DL H264-GROUP ████░░░░░░   42.0%   2.0 MiB/s   4m57s SF·  ││                                                                 │
-│ ▌ Sintel.2010.1080p                           ██████████  100.0%     1.0 GiB         SF·  ││  state     done                                                 │
-│   Other.Movie.2026.1080p                    ░░░░░░░░░░       —       0 B/s      0s SF·    ││  progress  100.0%  1.0 GiB of 1.0 GiB                           │
+│   STATE     NAME                                           SIZE     %      ↓    ETA PEERS ││  Sintel.2010.1080p                                              │
+│   ↓ Down    The Diplomat S04E01 1080p …-DL H264-GROUP   1.0 GiB   42%   2.1M     4m     3 ││                                                                 │
+│ ▌ ✓ Done    Sintel.2010.1080p                           1.0 GiB  100%                     ││  state     ✓ Done · done                                        │
+│   ◌ Meta    Other.Movie.2026.1080p                            —     —                   3 ││  progress  100.0%  1.0 GiB of 1.0 GiB                           │
 │                                                                                           ││  speed     ↓ 0 B/s   ↑ 0 B/s                                    │
 │                                                                                           ││  eta       0s                                                   │
 │                                                                                           ││  peers     3 peers connected                                    │

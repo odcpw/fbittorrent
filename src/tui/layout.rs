@@ -1,6 +1,15 @@
 //! Existing layout behavior.
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Tier { Narrow, Medium, Wide }
+impl Tier {
+    pub fn at(width: u16) -> Self {
+        if width < 100 { Self::Narrow } else if width < 140 { Self::Medium } else { Self::Wide }
+    }
+    pub fn extended(self) -> bool { self != Self::Narrow }
+}
+
 impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;

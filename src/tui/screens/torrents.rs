@@ -93,10 +93,10 @@ impl TuiApp {
         } else {
             let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill]).split(inner);
             let hdr = Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), 1);
-            Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
+            Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th,Tier::at(frame.bounds().width)))).wrap(WrapMode::None).render(hdr, frame);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.torrents.iter().enumerate().map(|(i, t)|
-                li(torrent_line(t, self.store.torrents.get(&t.hash), self.store.pending_for_key(&t.hash), self.recovery.active&&self.store.stale, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
+                li(torrent_line(t, self.store.torrents.get(&t.hash), self.store.pending_for_key(&t.hash), self.recovery.active&&self.store.stale, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed),Tier::at(frame.bounds().width)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.tor_list.borrow_mut());
         }
@@ -119,7 +119,7 @@ impl TuiApp {
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
-            kv("state", self.store.pending_for_key(&t.hash).map_or_else(||state_label(t),|op|format!("{}…",remote::mutation_verb(op)))),
+            kv("state", self.store.pending_for_key(&t.hash).map_or_else(||format!("{} · {}",format::state_cell(t,self.store.torrents.get(&t.hash)).trim_end(),format::state_word(t,self.store.torrents.get(&t.hash)).to_lowercase()),|op|format!("{}…",remote::mutation_verb(op)))),
             kv("progress", metrics.progress()),
             kv("speed", metrics.speed()),
             kv("eta", metrics.eta()),
@@ -161,32 +161,22 @@ pub(super) fn state_label(t: &Torrent) -> String {
     }.to_string()
 }
 
-pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pending:Option<&str>, stale:bool, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
-    let bar_w: u16 = 10;
-    let percent = if t.progress_known { format!("{:>6.1}%", t.progress * 100.0) } else { "      —".into() };
-    let right = format!(" {percent} {:>11} {:>7} {}{}{}", if t.is_active() { api.map_or_else(||human_rate(t.dlspeed),|row|row.dl_bps.map_or_else(||"—".into(),|rate|human_rate(i64::try_from(rate).unwrap_or(i64::MAX)))) } else { api.map_or_else(||human_bytes(t.size),|row|row.size.map_or_else(||"—".into(),|size|human_bytes(i64::try_from(size).unwrap_or(i64::MAX)))) },
-        if t.is_active() { api.map_or_else(||human_eta(t.eta),|row|row.eta_s.map_or_else(||"—".into(),|seconds|human_eta(i64::try_from(seconds).unwrap_or(i64::MAX)))) } else { "".into() }, if t.seq_dl { "S" } else { "·" }, if t.f_l_piece_prio { "F" } else { "·" },
-        if api.map_or_else(||t.seed_allowed(),|row|row.seed) { "U" } else { "·" });
-    let name_w = (width as usize).saturating_sub(bar_w as usize + 1 + right.len());
-    let name = readable_cell(&t.name, name_w, selected_for);
-    let padn = 0;
-    let bar = if let Some(op)=pending {cell(remote::mutation_verb(op),bar_w as usize)}
-        else if api.is_some()&&!t.progress_known&&t.state!="waitingVPN" {cell(if t.state=="metaDL" {"Metadata"} else {"—"},bar_w as usize)}
-        else if t.is_queued() { "  Queued  ".into() }
-        else if t.state == "waitingVPN" { " Wait VPN ".into() }
-        else { MiniBar::new(t.progress, bar_w).show_percent(false).filled_char('█').empty_char('░').render_string() };
-    let bar_style = if stale||pending.is_some() {th.dimmed()} else if t.is_active() { Style::new().fg(th.accent) } else if t.is_stopped() { th.dimmed() } else { th.ok() };
-    let name_style = if stale||pending.is_some()||t.is_stopped() { th.dimmed() } else if t.state == "error" || t.state == "missingFiles" { th.err() } else { th.text() };
+pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pending:Option<&str>, stale:bool, width: u16, th: &Theme, selected_for: Option<Duration>,tier:Tier) -> Line<'static> {
+    let right=format::Columns::of(t,api).tail(tier.extended());
+    let name_w=(width as usize).saturating_sub(format::STATE_WIDTH+1+dw(&right));
+    let name=match pending {Some(op)=>format!("{}… {}",remote::mutation_verb(op),t.name),None=>t.name.clone()};
+    let name_style=if stale||pending.is_some()||t.is_stopped(){th.dimmed()}else if t.state=="error"||t.state=="missingFiles"{th.err()}else{th.text()};
     Line::from_spans([
-        Span::styled(name, name_style),
-        Span::raw(" ".repeat(padn + 1)),
-        Span::styled(bar, bar_style),
-        Span::styled(right, th.dimmed()),
+        Span::styled(format::state_cell(t,api),if t.state=="error"||t.state=="missingFiles"{th.err().bold()}else{name_style}),
+        Span::raw(" "),Span::styled(readable_cell(&name,name_w,selected_for),name_style),
+        Span::styled(right,th.dimmed()),
     ])
 }
 
-pub(super) fn torrent_header(width: u16, th: &Theme) -> Line<'static> {
-    let right = format!(" {:>7} {:>11} {:>7} {}", "DONE", "SPEED", "ETA", "SFU");
-    let name_w = (width as usize).saturating_sub(10 + 1 + right.len());
-    Line::from_spans([Span::styled(cell("NAME", name_w), th.dimmed().bold()), Span::raw(" ".repeat(11)), Span::styled(right, th.dimmed().bold())])
+pub(super) fn torrent_header(width: u16, th: &Theme,tier:Tier) -> Line<'static> {
+    let right=if tier.extended(){format!(" {:>9} {:>5} {:>6} {:>6} {:>5}","SIZE","%","↓","ETA","PEERS")}
+        else{format!(" {:>5} {:>6} {:>6}","%","↓","ETA")};
+    let name_w=(width as usize).saturating_sub(format::STATE_WIDTH+1+dw(&right));
+    Line::from_spans([Span::styled(cell("STATE",format::STATE_WIDTH),th.dimmed().bold()),Span::raw(" "),
+        Span::styled(cell("NAME",name_w),th.dimmed().bold()),Span::styled(right,th.dimmed().bold())])
 }
