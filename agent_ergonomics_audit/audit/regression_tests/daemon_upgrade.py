@@ -1,6 +1,7 @@
 """P1-17: two real builds, atomic replacement, busy deferral and explicit restart."""
 from contextlib import contextmanager
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -16,12 +17,15 @@ import tomllib
 import daemon as d
 import fixtures
 from daemon_policy import fresh
+from upgrade_artifacts import IDS, executable, valid_cache
 
 _pair = None
 
 
 def fingerprint():
     digest=hashlib.sha256()
+    for helper in (Path(__file__),Path(__file__).with_name("upgrade_artifacts.py")):
+        digest.update(helper.read_bytes())
     for path in sorted([*d.REPO.joinpath('src').rglob('*.rs'),*[d.REPO/name for name in ('Cargo.toml','Cargo.lock','build.rs','rust-toolchain.toml')]]):
         digest.update(str(path.relative_to(d.REPO)).encode());digest.update(path.read_bytes())
     # Vendor changes are rare; their git tree plus a local patch identifies the
@@ -36,6 +40,14 @@ def binary_digest(path):
 
 
 def binaries(case, box):
+    lock=d.REPO/'target/test-logs/upgrade-fixtures/.compile.lock'
+    lock.parent.mkdir(parents=True,exist_ok=True)
+    with lock.open('a') as owned:
+        fcntl.flock(owned,fcntl.LOCK_EX)
+        return _binaries_unlocked(case,box)
+
+
+def _binaries_unlocked(case, box):
     global _pair
     if _pair is not None:
         return _pair
@@ -49,7 +61,7 @@ def binaries(case, box):
     if manifest.exists():
         saved=json.loads(manifest.read_text())
         paths=[cache/(tag+'.binary') for tag in ('old','new')]
-        if all(path.is_file() and binary_digest(path)==saved[tag] for path,tag in zip(paths,('old','new'))):
+        if valid_cache(saved,paths,binary_digest):
             _pair=tuple(paths)
             case.step('reuse real compiled upgrade fixtures','source fingerprint and both binary SHA256 values match').ok(source,[manifest])
             return _pair
@@ -60,20 +72,37 @@ def binaries(case, box):
     for tag in ('old', 'new'):
         path = cache/(tag+'.binary')
         output = case.path.with_suffix('.build-' + tag + '.log')
-        env = dict(box.env, CARGO_BUILD_JOBS='4', FBT_BUILD_ID_OVERRIDE='p1-17-' + tag,
+        env = dict(box.env, CARGO_BUILD_JOBS='4',
                    RUSTUP_HOME=os.environ.get('RUSTUP_HOME', str(home / '.rustup')),
                    CARGO_HOME=os.environ.get('CARGO_HOME', str(home / '.cargo')))
         step = case.step('compile real upgrade fixture ' + tag, 'locked debug build succeeds in private XDG')
         with output.open('w') as stream:
-            child = case.popen(['cargo', 'build', '--locked', '--bin', 'fbittorrent'], env=env,
+            child = case.popen(['cargo', 'build', '--locked', '--bin', 'fbittorrent', '--message-format=json',
+                                '--config', f'env.FBT_BUILD_ID_OVERRIDE.value="{IDS[tag]}"',
+                                '--config', 'env.FBT_BUILD_ID_OVERRIDE.force=true'], env=env,
                                cwd=d.REPO, stdout=stream)
             code = child.wait()
         if not step.close(code == 0, f'exit={code}; build id=p1-17-{tag}', [output]):
             raise RuntimeError('upgrade fixture build failed')
-        shutil.copy2(d.REPO / 'target/debug/fbittorrent', path)
+        shutil.copy2(executable(output,env,d.REPO),path)
+        # Compilation success alone cannot validate a stale delivery or cache.
+        # Probe the copied artifact through its real private API before reuse.
+        with d.Sandbox() as probe,d.Harness(case,path,probe,False) as owner:
+            process=owner.start_serve(idle_exit_secs=0)
+            try:
+                if not(owner.receive_ready() and owner.wait_engine()):raise RuntimeError('compiled fixture did not start')
+                with d.ApiConn(owner) as client:
+                    build=client.hello()['result']['server']['build']
+                    case.check(build==IDS[tag],'copied fixture reports its compiled build identity',build)
+                    if build!=IDS[tag]:raise RuntimeError('stale or incorrectly identified fixture executable')
+            finally:
+                if process.child.poll() is None:owner.stop_serve(process)
         paths.append(path)
     if source!=fingerprint():raise RuntimeError('source changed while building upgrade fixtures')
-    manifest.write_text(json.dumps({tag:binary_digest(path) for tag,path in zip(('old','new'),paths)},indent=2)+'\n')
+    saved={tag:binary_digest(path) for tag,path in zip(IDS,paths)}
+    saved['ids']=IDS
+    if not valid_cache(saved,paths,binary_digest):raise RuntimeError('upgrade fixtures must be distinct validated executables')
+    manifest.write_text(json.dumps(saved,indent=2)+'\n')
     _pair = tuple(paths)
     return _pair
 
