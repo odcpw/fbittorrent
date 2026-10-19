@@ -397,58 +397,44 @@ fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
 
 
-**Live replay (P1-06, orchestrator ruling 3).** Under the standing owner authority of 2026-10-19, computed `*_at`/`*_until` timestamps compare by type and validity; an undo deadline must be future and within ten seconds of the keep-files removal that created it. Contradictory fixture sequences are repaired minimally with exact before/after byte evidence; operation semantics and types remain unchanged. The hello/errors/torrents runner
-generates real payloads and metainfo from transcript names, sizes, files and
-selection, adds them through the API, and drives the available state/error
-preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
-user/network namespace; it never adopts an existing directory or edits a ledger.
-The following single table is defined in daemon.py and reproduced verbatim here
-and in the P1-06 receipt. Identity bindings are bijective and checked at every
-occurrence. Volatile fields retain their presence/type/validity checks. All other
-fields asserted by the fixture compare byte-for-byte after canonical P1-05
-typed re-serialization. Under ruling 4C an optional member absent in the
-fixture may be present live: the frozen Rust checker validates the live frame
-and its form with that member removed. Every occurrence is logged as "extra
-optional field" with its JSON pointer and reproduced verbatim in the receipt.
-Missing or changed fixture-asserted members still fail. A
-future-capability/proto-2/unreachable-error frame is validated with the frozen
-P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
-mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
-Ruling 6 accepts the ruling-5 server behavior. P1-05b/P1-05c's fixture corrections
-are integrated: exact payload/file sizes feed the generator, and the opted-in
-network replay explicitly binds fixture0, yielding selection/interface `fixture0`,
-ready true and message `VPN bound: fixture0` inside the owned VPN namespace
-(`vpn.py`, `FBT_TEST_VPN=1`). Without that opt-in, the environment-conditional
-deferral remains accepted. Recheck/query attempts are bounded and logged;
-downloading uses a real loopback native seed and tracker. When receiving geometry
-is unspecified and the fixture asserts zero verified bytes, 1 MiB pieces allow a
-positive measured chunk rate before the first piece verifies. Missing-file restore
-preconditions complete the payload, delete it, restart dormant history and
-explicitly activate it, preserving startup's lazy restore policy. The diagnostic
-remains `<name> restore failed: missing files`, with reason `missing_files`.
-Ruling 7 treats checking measurements as state-conditioned volatile values:
-when the live torrent is checking, completed_bytes must be a u64 no greater than
-size, and finite progress must equal completed_bytes/size within 1e-9 absolute
-(zero size requires both zero). Presence is preserved. Checked and size remain
-exact; other states still compare completed_bytes/progress exactly. P1-05d's
-fixture correction to checked=false for an active check is integrated.
-Live validation checks every original frame against the frozen types, bounds,
-capabilities and canonical round trips, and retains revision checks. Its
-cross-reply agreement still checks static sizes and file totals. For any hash
-observed checking, its measurements are excluded from that history's agreement,
-including earlier samples and later cancellation; their raw values remain
-validated and non-checking fixture comparisons remain exact. A confirmed completed
-removal clears only that hash's completion history: a later re-add is a new torrent
-instance. Pending or failed removals do not clear it, and static size/file totals
-remain checked across re-adds. Fixture transcripts continue to use the unchanged
-strict whole-group agreement hook. Deferrals record
-file:line, pointer, class, target bead and reason. Capability/protocol deferrals
-apply only while that feature is unavailable; advertised features stay under
-active comparison. The receipt distinguishes undrivable catalogue frames from
-error codes that can be produced with a different shape and retains the bounded
-starting-window retry evidence. A retained missing-files restore error keeps its
-missing_files reason through Stop and retry until the error clears. Nonvolatile
-validation failures are recorded without a new mask or deferral.
+**Live contract checks.** `contract_hello` and `contract_errors` replay their
+scenarios with the normalization table below. Identity bindings are bijective;
+volatile fields retain presence, type and validity checks. Other asserted fields
+compare canonically. Additional optional members pass the frozen Rust checker
+both present and absent, with each occurrence recorded. Capability/protocol
+scenarios remain explicitly attributed until their feature exists.
+
+`contract_torrents` validates `torrents.ndjson` unchanged as a strict **field
+catalogue**, then records a separate real-daemon transcript. The catalogue's
+single list combines active downloads with a globally parked VPN state; its
+4 KiB video also claims readiness below DL-26's 32 MiB minimum. Those values
+exercise the wire types but cannot all describe one physical session. Enabling
+P5-05's `watch` capability exposed this distinction by activating previously
+deferred catalogue frames.
+
+The live case owns its literal `/tmp/fbt-fixture` directory and a private
+user/network namespace with a real seed and tracker. An 8 MiB payload throttled
+to 32 KiB/s stays incomplete across list/get/start observations. Both list and
+detail must report a positive measured rate, consistent progress and the ETA
+computed from remaining bytes and that rate. An already-running incomplete start
+has the exact skipped result; a completed torrent with seeding off must instead
+return `invalid_state` / `complete_no_seed`. The case also checks duplicate add,
+Stop, file sizes/progress, keep-files removal and undo, file selection, seed and
+upload policy changes, and `open_target`. All ten torrent states are observed in
+real transitions, including a separate parked engine epoch and missing-payload
+activation after restart. It never fabricates a response or changes a ledger.
+
+Every captured original frame round-trips through the frozen Rust types and
+passes bounds, capability and revision checks. The catalogue retains its strict
+whole-group size/completion agreement. Live captures retain static size/file
+geometry agreement while allowing completed bytes to advance during receiving.
+Raw progress must agree with completed bytes and size; backwards movement and
+paused drift fail unless a real verification phase or confirmed removal explains
+the transition. Pending/failed removal does not reset the history. Checking
+measurements retain their existing raw tuple validation. No optional field is
+made mandatory by this distinction, and no protocol version changes.
+
+The hello/error replay normalization table remains:
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|

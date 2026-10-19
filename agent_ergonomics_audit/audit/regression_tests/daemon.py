@@ -2648,7 +2648,8 @@ def contract_errors(binary, systemd):
 
 
 def contract_torrents(binary, systemd):
-    contract_group("torrents", binary, systemd)
+    from daemon_torrent_contract import run
+    run(binary, systemd)
 
 
 class InstalledUnit:
