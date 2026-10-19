@@ -61,8 +61,10 @@ fn assert_redacted(log: Log) {
             && !text.contains("private-secondary")
             && !text.contains("private-unsupported")
             && !text.contains("passkey=")
-            && !text.contains("?key="),
-        "tracker TRACE diagnostics must redact all queries"
+            && !text.contains("?key=")
+            && !text.contains("0123456789abcdef0123456789abcdef")
+            && !text.contains("QUJDREVGR0hJSktMTU5PUFFS"),
+        "tracker TRACE diagnostics must redact query and path credentials"
     );
     assert!(
         text.contains("?…"),
@@ -81,7 +83,7 @@ impl Fixture {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let url = format!(
-            "http://{}/announce?passkey=fixture-secret",
+            "http://{}/0123456789abcdef0123456789abcdef/announce?passkey=fixture-secret",
             listener.local_addr().unwrap()
         );
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -110,13 +112,14 @@ impl Fixture {
                 }
                 let request = String::from_utf8(bytes).unwrap();
                 assert!(request.contains("passkey=fixture-secret"));
+                assert!(request.contains("/0123456789abcdef0123456789abcdef/announce"));
                 let failed = {
                     let mut requests = observed.lock().unwrap();
                     requests.push((Instant::now(), request.contains("event=")));
                     requests.len() == 1
                 };
                 let body = if failed {
-                    b"d14:failure reason16:fixture: not yete".to_vec()
+                    format!("d14:failure reason{}:{}e", "fixture: not yet 0123456789abcdef0123456789abcdef".len(),"fixture: not yet 0123456789abcdef0123456789abcdef").into_bytes()
                 } else {
                     b"d8:intervali600e5:peers6:\x7f\x00\x00\x01\x00\x01e".to_vec()
                 };
@@ -278,7 +281,7 @@ fn tracker_stats_udp_force_wakes_error_backoff() {
         .set_read_timeout(Some(Duration::from_millis(50)))
         .unwrap();
     let url = format!(
-        "udp://{}/announce?passkey=udp-fixture-secret",
+        "udp://{}/QUJDREVGR0hJSktMTU5PUFFS/announce?passkey=udp-fixture-secret",
         socket.local_addr().unwrap()
     );
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -319,7 +322,7 @@ fn tracker_stats_udp_force_wakes_error_backoff() {
                     response.extend(3u32.to_be_bytes());
                     response.extend(&packet[12..16]);
                     response.extend(
-                        b"fixture: not yet udp://other/announce?passkey=udp-fixture-secret",
+                        b"fixture: not yet QUJDREVGR0hJSktMTU5PUFFS udp://other/QUJDREVGR0hJSktMTU5PUFFS/announce?passkey=udp-fixture-secret",
                     );
                 } else {
                     response.extend(1u32.to_be_bytes());

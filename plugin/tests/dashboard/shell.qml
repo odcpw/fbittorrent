@@ -143,7 +143,7 @@ ShellRoot {
     }
     function trackerEditorState():string {
       var editor=dashboard.item ? root.find(dashboard.item.torrents,"tracker-editor") : null,input=editor ? root.find(editor,"tracker-url-input") : null
-      return JSON.stringify(editor ? {mode:editor.mode,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
+      return JSON.stringify(editor ? {mode:editor.mode,confirmation:editor.confirmationText,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
     }
     function clickDetailTab(tab:string):bool {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false

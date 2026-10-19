@@ -30,7 +30,7 @@ def run(binary):
                 return p
             def rows(client):return d.tracker_rows(client,hash_)
             def urls(client,expected):
-                values=rows(client);return sorted(v['url'] for v in values)==sorted(expected),client.diagnostic(values)
+                values=rows(client);return sorted(v['url'].split('#')[0] for v in values)==sorted(v.split('?')[0] for v in expected),client.diagnostic(values)
             process=start()
             with d.ApiConn(h,redact_urls=True) as client:
                 client.hello();client.call('torrents.add',dict(source=dict(path=str(fixture.torrent))))

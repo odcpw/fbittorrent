@@ -360,7 +360,7 @@ class Harness:
                 return response.get("result",{}).get("state") in ("running","parked"),json.dumps(response)
         return self.wait_for(observed,"daemon API reports a ready engine slot")
 
-    def stop_serve(self, process, number=signal.SIGTERM, code=0):
+    def stop_serve(self, process, number=signal.SIGTERM, code=0, *, empty_slot=False):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
         if code == 0:
@@ -385,8 +385,12 @@ class Harness:
 
         if code == 0:
             diagnostics = self.stderr()[stderr_offset:]
-            self.case.check(expected_daemon_stderr(diagnostics),
-                            "owned shutdown has healthy diagnostics and drains before socket unlink", diagnostics)
+            if empty_slot:
+                history=self.stderr()
+                self.case.check("state=parked" in history and "engine session exists" not in history,
+                                "empty parked-slot control never admitted an engine session", history)
+            self.case.check(expected_daemon_stderr(diagnostics, empty_slot=empty_slot),
+                            "owned shutdown releases its drained or verified empty slot before socket unlink", diagnostics)
 
     def lock_free(self):
         path = self.engine_path.with_name("engine.lock")
@@ -2901,7 +2905,12 @@ def add_starts_unit_no_launcher(binary, systemd):
                 magnet = "magnet:?" + urllib.parse.urlencode(dict(xt="urn:btih:" + fixture.info_hash,
                             tr=tracker_server.base + "/announce", dn=fixture.info["name"]))
                 value = h.cli("add", magnet, start=True, timeout=30)
-                case.check(bool(tracker_server.requests), "real loopback tracker receives metadata-discovery requests", str(tracker_server.requests))
+                h.wait_for(lambda:(bool(tracker_server.requests),str(tracker_server.requests)),
+                           "real loopback tracker receives metadata-discovery requests")
+                with ApiConn(h) as client:
+                    client.hello()
+                    h.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]).get("file_count",0)>0,json.dumps(row)),
+                               "real local peer supplies the magnet metadata")
                 case.check(value.get("hash") == fixture.info_hash and unit.state() == "active", "magnet add starts the static unit and resolves real local peer metadata", str(value))
                 saved = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
                 records = json.loads(saved.read_text())["records"] if saved.exists() else []
@@ -4666,8 +4675,8 @@ def tracker_flow(name,binary,systemd,redacted=False):
         case.check(before[0]["status"]=="error" and "fixture: not yet" in before[0].get("message","") and "peers" not in before[0],
                    "failure has a reason and no fabricated peer count",client.diagnostic(before))
         if redacted:
-            case.check(before[0]["url"]==url and "?…" in before[0]["message"] and "fixture-private-token" not in before[0]["message"],
-                       "private wire URL is complete and failure diagnostics redact the query",client.diagnostic(before))
+            case.check(before[0]["url"].split("#")[0]==tracker.url and "#fbt-tracker=" in before[0]["url"] and "?…" in before[0]["message"] and "fixture-private-token" not in before[0]["message"],
+                       "wire URL contains a redacted endpoint and opaque identity; failure diagnostics redact the query",client.diagnostic(before))
         started=time.time()
         client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]))
         h.wait_for(lambda: ((rows:=tracker_rows(client,fixture.info_hash))[0]["status"]=="ok",client.diagnostic(rows)),"forced announce bypasses the ten-second error backoff",timeout=2)
@@ -4718,14 +4727,14 @@ def tracker_saved_views(binary,systemd):
                 client.hello();fixture=tracker_live_fixture(sandbox,tracker.url)
                 client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True))
                 rows=tracker_rows(client,fixture.info_hash)
-                case.check(rows==[dict(url=tracker.url,status="not_contacted")],"parked metainfo reads every saved URL without a session",json.dumps(rows))
+                case.check(len(rows)==1 and "#fbt-tracker=" in rows[0]["url"] and [{**row,"url":row["url"].split("#")[0]} for row in rows]==[dict(url=tracker.url,status="not_contacted")],"parked metainfo reads every saved URL without a session",json.dumps(rows))
                 client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]),error="engine_unavailable")
                 magnet="magnet:?xt=urn:btih:"+"ab"*20+"&tr="+urllib.parse.quote(tracker.url,safe="")
                 client.call("torrents.add",dict(source=dict(magnet=magnet),stopped=True))
                 rows=tracker_rows(client,"ab"*20)
-                case.check(rows==[dict(url=tracker.url,status="not_contacted")] and not tracker.snapshot(),"unresolved magnet read retains its saved tracker without network contact",json.dumps(rows))
+                case.check(len(rows)==1 and "#fbt-tracker=" in rows[0]["url"] and [{**row,"url":row["url"].split("#")[0]} for row in rows]==[dict(url=tracker.url,status="not_contacted")] and not tracker.snapshot(),"unresolved magnet read retains its saved tracker without network contact",json.dumps(rows))
         finally:
-            if process.child.poll() is None:h.stop_serve(process)
+            if process.child.poll() is None:h.stop_serve(process,empty_slot=True)
 
 
 def move_receive(client,h,hash_,destination,ref):

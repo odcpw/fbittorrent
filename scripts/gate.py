@@ -331,6 +331,8 @@ def full_checks(env, binary):
             Check('hygiene', ['bash', 'scripts/check-gitignore.sh']),
             Check('licences', ['bash', 'scripts/check-nova3-licences.sh']),
             Check('widget_model', ['bash', 'plugin/tests/lint.sh']),
+            Check('tracker_text', ['node','--test','plugin/tests/tracker-text.test.js']),
+            python_check('tracker_privacy','plugin/tests/tracker_privacy.py','--binary',str(binary),'--log-root','{logs}'),
             python_check('widget_online', 'scripts/check-widget-online.py', '--self-test'),
             python_check('tui_controls', 'agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py', str(binary)),
             python_check('ci_gates', 'agent_ergonomics_audit/audit/regression_tests/ci_test.py'),
