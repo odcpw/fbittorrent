@@ -1,32 +1,17 @@
 //! Existing screens search behavior.
 use super::*;
 
-pub(super) struct SearchSub { pub(super) id: SubId, pub(super) query: String, pub(super) cfg: Config, pub(super) presence:Option<Arc<attach::Presence>> }
-
 impl TuiApp {
     pub(super) fn selected_result(&self) -> Option<&SearchResult> {
         self.search_list.borrow().selected().and_then(|i| self.search_results.get(i))
     }
 
     pub(super) fn add_search_result(&self, result: SearchResult) -> Cmd<Msg> {
-        if self.cfg.native() {return self.native_search_grab(&result);}
-        let opts = self.add_opts();
-        let label = short(&result.file_name, 40);
-        self.action(format!("added {label}"), move |c| c.add_search_result(&result, &opts))
+        self.native_search_grab(&result)
     }
 
     pub(super) fn load_browse(&mut self, entry: browse::Entry) -> Cmd<Msg> {
-        if self.cfg.native() {return self.native_browse(entry);}
-        if let browse::Source::Site(url) = &entry.source {
-            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-            self.set_status(format!("opened {} in browser", entry.provider), false);
-            return Cmd::none();
-        }
-        let label = format!("{} · {}", entry.provider, entry.label);
-        self.browse_loading = Some(label.clone());
-        self.set_status(format!("loading {label}…"), false);
-        let source = entry.source.clone();
-        Cmd::task(move || Msg::Browse(label, browse::fetch(&source).map_err(|e| format!("{e:#}"))))
+        self.native_browse(entry)
     }
 
     pub(super) fn start_search(&mut self) -> Cmd<Msg> {
@@ -39,8 +24,7 @@ impl TuiApp {
         self.search_running = true;
         self.search_sub = Some((1000 + self.search_seq, q.clone()));
         self.set_status(format!("searching \"{q}\"…"), false);
-        if self.cfg.native() {return self.native_search_start(q);}
-        Cmd::none()
+        self.native_search_start(q)
     }
 
     #[cfg(test)]
@@ -74,7 +58,7 @@ impl TuiApp {
                 if self.browse_list.borrow().selected().is_none() { self.browse_list.borrow_mut().select(Some(0)); }
             }
             actions::Intent::Query => { self.search_focus_input = true; self.search_input.set_focused(true); }
-            actions::Intent::Cancel => { if self.cfg.native(){return self.native_search_cancel();} self.search_sub = None; self.search_running = false; }
+            actions::Intent::Cancel => return self.native_search_cancel(),
             actions::Intent::Down => { if n > 0 { self.search_list.borrow_mut().select_next(n); } }
             actions::Intent::Up => {
                 if self.search_list.borrow().selected() == Some(0) { self.search_focus_input = true; self.search_input.set_focused(true); }
@@ -109,47 +93,6 @@ impl TuiApp {
 
 }
 
-
-impl Subscription<Msg> for SearchSub {
-    fn id(&self) -> SubId { self.id }
-    fn run(&self, sender: Sender<Msg>, stop: StopSignal) {
-        let id = self.id;
-        let fail = |e: String| Msg::SearchBatch { id, results: vec![], done: true, error: Some(e) };
-        let c = Client::from_config(&self.cfg,self.presence.clone());
-        if let Err(e) = c.login() { let _ = sender.send(fail(e.to_string())); return; }
-        let sid = match c.search_start(&self.query) {
-            Ok(i) => i,
-            Err(e) => { let _ = sender.send(fail(e.to_string())); return; }
-        };
-        let mut misses = 0;
-        // One straggling plugin can keep a job "Running" for a minute; the useful
-        // results are in long before that, so cut it off.
-        let started = std::time::Instant::now();
-        let budget = Duration::from_secs(30);
-        loop {
-            if stop.wait_timeout(Duration::from_millis(700)) {
-                let _ = c.search_stop(sid);
-                let _ = c.search_delete(sid);
-                return;
-            }
-            let timed_out = started.elapsed() > budget;
-            if timed_out { let _ = c.search_stop(sid); }
-            match c.search_results(sid, 1000, 0) {
-                Ok(r) => {
-                    let done = r.status != "Running" || timed_out;
-                    if sender.send(Msg::SearchBatch { id, results: r.results, done, error: r.error }).is_err() || done {
-                        let _ = c.search_delete(sid);
-                        return;
-                    }
-                }
-                Err(e) => {
-                    misses += 1;
-                    if misses > 6 { let _ = sender.send(fail(e.to_string())); return; }
-                }
-            }
-        }
-    }
-}
 
 /// Collapse the same torrent reported by several providers (same info hash),
 /// keeping the copy with the most seeders.

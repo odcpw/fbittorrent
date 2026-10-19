@@ -3,56 +3,11 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn load_rss(&mut self) -> Cmd<Msg> {
-        if self.cfg.native(){return self.sync_topics();}
-        if self.rss_busy || self.rss_loading { return Cmd::none(); }
-        self.rss_loading = true;
-        let revision = self.rss_revision;
-        let cfg = self.cfg.clone();
-        let presence = self.presence.clone();
-        Cmd::task(move || {
-            let c = Client::from_config(&cfg, presence.clone());
-            Msg::Rss { revision, result: c.login().and_then(|_| c.rss_feeds()).map_err(|e| e.to_string()) }
-        })
-    }
-
-    /// Execute the feed mutation and subsequent reload in the same task.
-    pub(super) fn rss_action<F>(&mut self, label: impl Into<String>, action: F) -> Cmd<Msg>
-    where F: FnOnce(&Client) -> Result<()> + Send + 'static {
-        if self.rss_busy { return Cmd::none(); }
-        self.rss_busy = true;
-        self.rss_loading = false;
-        self.rss_revision += 1;
-        self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45));
-        let revision = self.rss_revision;
-        let cfg = self.cfg.clone();
-        let presence = self.presence.clone();
-        let label = label.into();
-        Cmd::task(move || {
-            let c = Client::from_config(&cfg, presence.clone());
-            let (result, error) = match c.login() {
-                Ok(()) => {
-                    let error = action(&c).err().map(|error| error.to_string());
-                    (c.rss_feeds().map_err(|error| error.to_string()), error)
-                }
-                Err(error) => (Err(error.to_string()), None),
-            };
-            Msg::RssAction { revision, label, result, error }
-        })
+        self.sync_topics()
     }
 
     pub(super) fn refresh_rss(&mut self) -> Cmd<Msg> {
-        if self.cfg.native(){return self.service_action("rss.refresh",serde_json::json!({}),"feeds refreshed");}
-        if self.rss_busy { return Cmd::none(); }
-        let names: Vec<String> = self.feeds.iter().map(|f| f.name.clone()).collect();
-        if names.is_empty() { return Cmd::none(); }
-        self.set_status("refreshing feeds…", false);
-        self.rss_action("feeds refreshed", move |c| {
-            let mut errors = Vec::new();
-            for name in names {
-                if let Err(error) = c.rss_refresh(&name) { errors.push(format!("{name}: {error}")); }
-            }
-            if errors.is_empty() { Ok(()) } else { anyhow::bail!(errors.join("; ")) }
-        })
+        self.service_action("rss.refresh",serde_json::json!({}),"feeds refreshed")
     }
 
     pub(super) fn selected_feed(&self) -> Option<&RssFeed> {
@@ -93,15 +48,13 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.rss_focus_items {
                     self.set_status("Enter opens items · Shift+M marks this feed's items read", false);
-                } else if let Some((feed, id, read)) = self.selected_feed().and_then(|f| self.item_list.borrow().selected().and_then(|i| f.articles.get(i)).map(|a| (f.name.clone(), a.id.clone(), !self.cfg.native() || !a.is_read))) {
-                    if self.cfg.native(){return self.native_feed_action("rss.set_read",&feed,Some(&id),Some(read),format!("item marked {}",if read{"read"}else{"unread"}));}
-                    return self.rss_action(format!("item marked {}", if read { "read" } else { "unread" }), move |c| c.rss_set_read(&feed, &id, read));
+                } else if let Some((feed, id, read)) = self.selected_feed().and_then(|f| self.item_list.borrow().selected().and_then(|i| f.articles.get(i)).map(|a| (f.name.clone(), a.id.clone(), !a.is_read))) {
+                    return self.native_feed_action("rss.set_read",&feed,Some(&id),Some(read),format!("item marked {}",if read{"read"}else{"unread"}));
                 }
             },
             actions::Intent::MarkAll => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
-                if self.cfg.native(){return self.native_feed_action("rss.mark_feed_read",&name,None,None,format!("marked {name} as read"));}
-                return self.rss_action(format!("marked {name} as read"), move |c| c.rss_mark_read(&name, None));
+                return self.native_feed_action("rss.mark_feed_read",&name,None,None,format!("marked {name} as read"));
             },
             actions::Intent::Primary if !self.rss_focus_items => {
                 if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } }
@@ -110,11 +63,8 @@ impl TuiApp {
                 let selected = self.item_list.borrow().selected();
                 if let (Some(f), Some(i)) = (self.selected_feed(), selected) {
                     if let Some(a) = f.articles.get(i) {
-                        let url = if a.torrent_url.is_empty() { a.link.clone() } else { a.torrent_url.clone() };
                         let (feed, id, label) = (f.name.clone(), a.id.clone(), short(&a.title, 40));
-                        let opts = self.add_opts();
-                        if self.cfg.native(){return self.native_feed_action("rss.grab",&feed,Some(&id),None,format!("added {label}"));}
-                        return self.rss_action(format!("added {label}"), move |c| { c.add_url(&url, &opts)?; c.rss_mark_read(&feed, Some(&id)) });
+                        return self.native_feed_action("rss.grab",&feed,Some(&id),None,format!("added {label}"));
                     }
                 }
             },

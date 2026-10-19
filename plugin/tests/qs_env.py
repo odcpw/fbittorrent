@@ -13,6 +13,8 @@ def prepare(sandbox, recipe, source=None, wayland=False):
     shutil.copytree(recipe, config)
     source = Path(source or os.environ.get('FBT_PLUGIN_SOURCE', ROOT / 'plugin/oliver.torrents')).resolve()
     shutil.copytree(source, config / 'Plugin')
+    if recipe.name in ('quick-flow', 'quick-live'):
+        shutil.copytree(ROOT / 'plugin/oliver.torrents-quick', config / 'QuickPlugin')
     fixtures = ROOT / 'contracts/ipc/v1'
     shutil.copytree(fixtures, config / 'Fixtures')
     states=ROOT/'contracts/ui/states.json'

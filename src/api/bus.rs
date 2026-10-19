@@ -71,6 +71,15 @@ struct Registry {
     subscriptions: BTreeMap<(u64, u64), Subscription>,
     events: EventRing,
 }
+impl Registry {
+    fn engine_changed(&mut self,epoch:u64,state:&str) {
+        let event=self.events.append(json!({"ev":"engine.changed","epoch":epoch,"state":state,"reason":"engine_restart"}));
+        let mut connections=BTreeSet::new();
+        for sub in self.subscriptions.values().filter(|sub|sub.active) {
+            if connections.insert(sub.sink.id()) {let _=sub.sink.send(serde_json::from_value(event.clone()).unwrap());}
+        }
+    }
+}
 #[derive(Default)]
 struct EventRing {
     next: u64,
@@ -114,6 +123,7 @@ impl EventRing {
     }
 }
 struct Sample {
+    history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
     rows: Vec<Torrent>,
@@ -123,6 +133,7 @@ struct Sample {
     files: BTreeMap<String, Value>,
     peers: BTreeMap<String, Value>,
     pieces: BTreeMap<String, Value>,
+    trackers: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
     disk: Disk,
@@ -135,10 +146,12 @@ struct Sample {
 impl Sample {
     fn value(&self, topic: &Topic) -> Value {
         match topic {
+            Topic::Stats=>self.stats.clone(),
             Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
             Topic::RssFeeds=>self.rss_feeds.clone(),
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
+            Topic::Trackers(h) => self.trackers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Pieces(h) => self.pieces.get(h.as_str()).cloned().unwrap_or(Value::Null),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
@@ -152,26 +165,9 @@ impl Sample {
     }
     fn summary(&self) -> Value {
         let counts = summary_counts(&self.rows);
-        let top: Vec<_> = self
-            .rows
-            .iter()
-            .filter(|row| !row.staged)
-            .take(5)
-            .map(|r| {
-                let mut v = json!({"hash":r.hash,"name":r.name,"state":r.state});
-                for (key, value) in [
-                    ("progress", json!(r.progress)),
-                    ("dl_bps", json!(r.dl_bps)),
-                    ("eta_s", json!(r.eta_s)),
-                ] {
-                    if !value.is_null() {
-                        v[key] = value;
-                    }
-                }
-                v
-            })
-            .collect();
+        let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
+        result["history"]=json!(self.history);
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -193,6 +189,8 @@ pub(crate) struct Bus {
 }
 impl Bus {
     pub(crate) fn refresh(&self) { self.wake.signal(); }
+    pub(crate) fn new_episodes(&self,count:u64,names:&[String]) {self.daemon.notifier.new_episodes(count,names);}
+    pub(crate) fn engine_changed(&self,epoch:u64,state:&str) {self.registry.lock().unwrap().engine_changed(epoch,state);self.wake.signal();}
     pub fn new(daemon: Arc<Daemon>) -> Arc<Self> {
         Arc::new(Self {
             daemon,
@@ -262,7 +260,7 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
             if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
-            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Pieces(hash) = topic {
+            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Pieces(hash) | Topic::Trackers(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
@@ -301,6 +299,7 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
+                            Topic::Stats=>Duration::from_secs(5),
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
@@ -477,8 +476,17 @@ impl Bus {
         for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
             if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
         }
+        let mut trackers=BTreeMap::new();
+        for hash in topics.iter().filter_map(|t|if let Topic::Trackers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
+            if rows.iter().any(|r|&r.hash==hash) {trackers.insert(hash.to_string(),serde_json::to_value(ops::trackers::read(&self.daemon,hash)?).unwrap());}
+        }
+        let (session,all_time)=self.daemon.statistics();
+        let (history,stats)={let mut ring=self.daemon.history.lock().unwrap();
+            ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
+            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
-            peers,
+            history,stats,
+            peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
             show_releases,
 
@@ -504,7 +512,6 @@ impl Bus {
         let mut seen_generation = 0;
         let mut identity = None;
         let mut previous_rows: BTreeMap<String, Torrent> = BTreeMap::new();
-        let mut previous_engine = None;
         let mut ready_seen = false;
         let mut dirty = true;
         let mut generation_threads = Vec::new();
@@ -602,7 +609,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
-            if self.daemon.watch.lock().unwrap().due() { dirty = true; }
+            if self.daemon.watch.lock().unwrap().due() || self.daemon.history.lock().unwrap().due(Instant::now()) { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;
@@ -619,18 +626,7 @@ impl Bus {
             match self.sample(&topics) {
                 Ok(sample) => {
                     let mut r = self.registry.lock().unwrap();
-                    let engine = (sample.epoch, sample.state.clone());
-                    if ready_seen && previous_engine.as_ref().is_some_and(|p| p != &engine) {
-                        let event=r.events.append(json!({"ev":"engine.changed","epoch":sample.epoch,"state":sample.state,"reason":"engine_restart"}));
-                        let mut connections = BTreeSet::new();
-                        for s in r.subscriptions.values() {
-                            if connections.insert(s.sink.id()) {
-                                let _ = s.sink.send(serde_json::from_value(event.clone()).unwrap());
-                            }
-                        }
-                    }
                     let restored_baseline = !ready_seen;
-                    previous_engine = Some(engine);
                     if !matches!(sample.state.as_str(), "starting" | "stopping") {
                         ready_seen = true;
                         for row in &sample.rows {
@@ -737,7 +733,11 @@ impl Subscription {
     fn update(&mut self, sample: &Sample, events: &[Value], oldest: u64) -> ApiResult<()> {
         // A slot without a usable ledger is transitional, not an empty saved
         // history. Keep detail subscriptions until the replacement is ready.
-        if matches!(sample.state.as_str(), "starting" | "stopping") {
+        // A new stats subscription can arrive while the worker samples an
+        // older topic set. Wait for its first actual sample, rather than emit
+        // null and tear down the shared UI connection.
+        if matches!(sample.state.as_str(), "starting" | "stopping")
+            || (sample.stats.is_null() && self.topics.iter().any(|t|t.topic==Topic::Stats)) {
             // An initial snapshot stays pending, but must not leave a past-due
             // deadline spinning the sampler while the engine opens/drains.
             for topic in &mut self.topics {
@@ -752,7 +752,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
+                Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
             )
         });
         for index in order {
@@ -767,9 +767,9 @@ impl Subscription {
                 sample.value(&t.topic)
             };
             if matches!(t.topic,Topic::Pieces(_)) && value.is_null() {if t.due<=Instant::now() {t.due=Instant::now()+t.interval;}continue;}
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
-                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_));
+                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_));
             if t.sent.is_none() || reset {
                 if keyed {
                     let resync = t.topic == Topic::Events
@@ -859,7 +859,7 @@ impl Subscription {
         // sampling is then released while the owning connection remains open.
         if restart {
             self.topics.retain(
-                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
+                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) | Topic::Trackers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
             );
         }
         self.topics.retain(|t|!matches!(&t.topic,Topic::Pieces(h) if !sample.rows.iter().any(|r|&r.hash==h)));

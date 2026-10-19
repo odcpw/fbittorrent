@@ -4,7 +4,7 @@
 function create(service, changed) {
   var settingsInstance="", engineEpoch=0, metadataKnown=false
   var extras=Object.create(null), looked=Object.create(null), cards=Object.create(null)
-  var d={hash:"",tab:"overview",query:"",files:[],cursor:0,card:null,loading:false}
+  var d={hash:"",tab:"overview",query:"",files:[],cursor:0,card:null,loading:false,trackerBusy:false,trackerRequest:0}
   function keep(cache,key,value){if(!Object.prototype.hasOwnProperty.call(cache,key) && Object.keys(cache).length>=128)delete cache[Object.keys(cache)[0]];cache[key]=value}
   function cap(name){return !!service.client && service.client.caps.indexOf(name)>=0}
   d.tabs=function(){var tabs=["overview","files"];["peers","trackers","pieces"].forEach(function(c){if(cap(c))tabs.push(c)});tabs.push("log");return tabs}
@@ -15,7 +15,7 @@ function create(service, changed) {
     service.client.request("torrents.get",{hash:hash},{callback:function(result){
       if(!result)return
       var extra={},row=result.torrent
-      ;["file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
+      ;["original_name","file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
       keep(extras,hash,extra);changed()
     }})
   }
@@ -40,7 +40,7 @@ function create(service, changed) {
   d.begin=function(hash){
     if(hash===d.hash)return
     service.unsubscribeDetail();service.logConsumer("details",false)
-    d.hash=hash || "";d.card=null;d.files=[];d.query="";d.cursor=0;d.loading=false
+    d.trackerRequest++;d.trackerBusy=false;d.hash=hash || "";d.card=null;d.files=[];d.query="";d.cursor=0;d.loading=false
     if(d.hash){
       var live=service.store.torrents[d.hash];metadataKnown=!!(live && live.size!==undefined)
       engineEpoch=Number(service.store.info.engine_epoch || 0)
@@ -56,11 +56,26 @@ function create(service, changed) {
     if(d.hash && topic){
       service.subscribeDetail(d.hash,[topic]);d.loading=topic==="files" && !service.store.topics["torrent:"+d.hash+".files"]
       if(topic==="files" && (!cap("subscribe") || service.client.mode==="poll"))d.fetchFiles()
-      // Tracker observations predate their pushed topic; one real read also
-      // populates that tab against a daemon without the optional sampler.
-      if(topic==="trackers")service.client.request("torrents.trackers",{hash:d.hash})
+
     }else service.unsubscribeDetail()
     d.refreshFiles()
+  }
+  d.reannounce=function(){
+    if(!d.hash || d.tab!=="trackers")return false
+    if(d.trackerBusy)return true
+    var hash=d.hash,request=++d.trackerRequest;d.trackerBusy=true;changed()
+    var sent=service.mutate("torrents.reannounce",{hashes:[hash]},"trackers",function(){if(d.hash===hash && d.trackerRequest===request){d.trackerBusy=false;changed()}})
+    if(!sent){d.trackerBusy=false;changed()}
+    return !!sent
+  }
+  d.editTracker=function(url,add,done){
+    if(!d.hash || d.tab!=="trackers" || d.trackerBusy)return false
+    var hash=d.hash,request=++d.trackerRequest;d.trackerBusy=true;changed()
+    var sent=service.mutate(add ? "torrents.add_tracker" : "torrents.remove_tracker",{hash:hash,url:url},"tracker_edit",function(result,failure){
+      if(d.hash===hash && d.trackerRequest===request){d.trackerBusy=false;changed();if(done)done(result,failure)}
+    })
+    if(!sent){d.trackerBusy=false;changed()}
+    return !!sent
   }
   d.selectTab=function(tab){if(d.tabs().indexOf(tab)<0)return;d.tab=tab;d.query="";d.cursor=0;if(d.hash)d.topics();changed()}
   d.cycle=function(delta){var tabs=d.tabs();d.selectTab(tabs[(tabs.indexOf(d.tab)+delta+tabs.length)%tabs.length])}

@@ -1,4 +1,19 @@
+//! Test fixture notation translated to typed engine operations; no socket transport.
 use super::*;
+use serde::{Serialize, Deserialize};
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Upload { pub name: String, pub bytes: Vec<u8> }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Request {
+    pub method: String, pub path: String, pub args: Vec<(String,String)>, pub file: Option<Upload>,
+}
+impl Request {
+    pub fn arg(&self, name: &str) -> Option<&str> {
+        self.args.iter().find(|(key,_)| key==name).map(|(_,value)|value.as_str())
+    }
+}
+use crate::engine::ops::*;
+use crate::engine::ops::required;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
@@ -26,8 +41,7 @@ pub enum Route {
     ToggleFirstLastPiecePrio,
 }
 
-/// The single server-side list of legacy route names. Execution matches typed
-/// operations, never route strings. Feature/client routes stay at their boundary.
+/// Names used by the historical characterization fixtures, confined to tests.
 pub const LEGACY_ROUTES: &[(&str, Route)] = &[
     ("app/version", Route::Version),
     ("app/shutdown", Route::Shutdown),
@@ -60,13 +74,13 @@ pub const LEGACY_ROUTES: &[(&str, Route)] = &[
 ];
 impl Route {
     pub fn from_name(name: &str) -> Option<Self> {
-        super::LEGACY_ROUTES
+        LEGACY_ROUTES
             .iter()
             .find(|(route, _)| *route == name)
             .map(|(_, route)| *route)
     }
     pub fn name(self) -> &'static str {
-        super::LEGACY_ROUTES
+        LEGACY_ROUTES
             .iter()
             .find(|(_, route)| *route == self)
             .expect("every route has a name")
@@ -253,5 +267,51 @@ impl EngineOp {
                 })
             }
         }))
+    }
+}
+
+impl EngineDispatcher {
+    /// Execute a saved test fixture through the typed engine.
+    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
+        match EngineOp::parse(&request.path, request) {
+            Ok(Some(op)) => Some(self.execute(op).and_then(|result| result.to_cli_json())),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        }
+    }
+}
+
+impl ParkedLedger {
+    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
+        match EngineOp::parse(&request.path, request) {
+            Ok(Some(op)) => Some(self.execute(op).and_then(|result| {
+                let legacy = result.to_cli_json()?;
+                match result {
+                    // Parked lists used Vec<Value>, unlike the live lists of
+                    // structs. Retain that wire ordering at this legacy facade.
+                    EngineResult::Torrents(_) | EngineResult::Files(_) => {
+                        json(&serde_json::from_str::<serde_json::Value>(&legacy)?)
+                    }
+                    _ => Ok(legacy),
+                }
+            })),
+            Ok(None) if request.path.starts_with("torrents/") => Some(Err(anyhow!(
+                "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
+            ))),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        }
+    }
+}
+pub(super) fn dispatch_parked_in(request: &Request, directory: &Path, lifecycle: &Lifecycle) -> Option<Result<String>> {
+    ParkedLedger::new(directory.into(), lifecycle.clone()).dispatch(request)
+}
+
+pub(super) fn controls(request: &Request, snapshot: &crate::network_app::NetworkState, lifecycle: &Lifecycle) -> Option<Result<String>> {
+    let route = Route::from_name(&request.path)?;
+    if !route.is_control() || (matches!(route, Route::Restart | Route::Shutdown) && request.method != "POST") { return None; }
+    match EngineOp::parse(&request.path, request) {
+        Ok(Some(op)) => op.control(snapshot,lifecycle).map(|r|r.and_then(|r|r.to_cli_json())),
+        Ok(None) => None, Err(error) => Some(Err(error)),
     }
 }

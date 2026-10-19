@@ -149,21 +149,12 @@ impl Presence {
         .map_err(anyhow::Error::msg)?;
         self.confirmations.wait(&reference, deadline, &self.closed)
     }
-    pub(in crate::tui) fn next_update(&self) -> Result<Option<Update>> {
-        let result = self
-            .updates
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .recv_timeout(Duration::from_millis(100));
+    pub(in crate::tui) fn next_updates(&self) -> Result<Option<Vec<Update>>> {
+        let result=receive_batch(&self.updates.lock().unwrap_or_else(|error|error.into_inner()));
         match result {
-            Ok(update) => Ok(Some(update)),
-            Err(mpsc::RecvTimeoutError::Timeout) if self.alive() => Ok(None),
-            Err(_) => bail!(
-                "{}",
-                self.reason
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-            ),
+            Ok(updates)=>Ok(Some(updates)),
+            Err(mpsc::RecvTimeoutError::Timeout) if self.alive()=>Ok(None),
+            Err(_)=>bail!("{}",self.reason.lock().unwrap_or_else(|error|error.into_inner())),
         }
     }
     pub(in crate::tui) fn close(&self) {
@@ -181,5 +172,32 @@ impl Drop for Presence {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+// A single pending ftui message owns at most 16 updates. Draining already-ready
+// frames avoids a render-loop wakeup/ack round trip for each snapshot fragment.
+fn receive_batch(receiver:&mpsc::Receiver<Update>)->std::result::Result<Vec<Update>,mpsc::RecvTimeoutError> {
+    let first=receiver.recv_timeout(Duration::from_millis(100))?;
+    let mut batch=Vec::with_capacity(16);
+    batch.push(first);
+    batch.extend(receiver.try_iter().take(15));
+    Ok(batch)
+}
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    #[test]
+    fn snapshot_backlog_drains_in_bounded_ordered_batches() {
+        let (sender,receiver)=mpsc::sync_channel(128);
+        for n in 0..36 {sender.send(Update::Closed(n.to_string())).unwrap();}
+        drop(sender);
+        let mut seen=Vec::new();
+        for count in [16,16,4] {
+            let batch=receive_batch(&receiver).unwrap();assert_eq!(batch.len(),count);
+            for row in batch {let Update::Closed(text)=row else{panic!("unexpected update")};seen.push(text);}
+        }
+        assert_eq!(seen,(0..36).map(|n|n.to_string()).collect::<Vec<_>>());
+        assert!(matches!(receive_batch(&receiver),Err(mpsc::RecvTimeoutError::Disconnected)));
     }
 }

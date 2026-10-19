@@ -36,6 +36,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   app is open. Hover clipped names or details to see their full text.
 - **TUI** with four screens: (1) Torrents, (2) Search (streamed provider results),
   (3) Shows (your local show list and releases), and (4) RSS (feeds and items).
+  All four screens, provider lists and IMDb cards use one daemon API connection.
+  Updates arrive as pushed changes; a disconnected screen retains dimmed rows
+  while it reconnects.
   IMDb card per title:
   rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
   a row to preview its full name; click selects it, double-click activates it,
@@ -46,6 +49,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   The bottom rows show contextual commands such as `(o) Open`; uppercase keys
   use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.
+  Live speed history appears in the TUI tab bar and dashboard/popup status row.
+  Dashboard Settings shows session and all-time transfer totals; press `L` in
+  the TUI for the same totals below the Log. All-time totals survive daemon restarts.
 - **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
   a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
   season packs, with no account or external watchlist. Checks run on app opening
@@ -137,8 +143,23 @@ Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activ
 o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
 ```
 
-Add it to your own bindings file if desired. Setup does not change keybindings
-or reload your shell.
+Add it to your own bindings file if desired. Normal setup keeps keybindings unchanged.
+
+The quick-add/search palette is a separate, optional overlay. To install it and
+an unused shortcut, opt in explicitly (the default chord below can be replaced):
+
+```bash
+fbittorrent setup --plugin copy --quick 'SUPER + CTRL + ALT + T'
+```
+
+Setup adds the `oliver.torrents-quick` plugin and an owned block in
+`hypr/bindings.lua`, preserving the bar route and unrelated bindings. Repeating
+setup is idempotent; `setup --uninstall` removes that block. Hyprland reloads Lua
+changes automatically. Choose a chord that is not already used by your desktop.
+The palette shares the existing Torrents daemon connection. Paste a magnet or
+absolute `.torrent` path and press Enter to add directly; ordinary text searches
+after a short pause. Use ↑/↓ and Enter to send a result to dashboard review.
+Esc closes only the palette and leaves transfers running.
 
 ## Lifecycle
 
@@ -267,7 +288,7 @@ Exit codes: 0 ok · 1 failure · 2 usage · 3 safety (needs `--yes`) · 4 backen
 5 upstream · 6 not found · 7 ambiguous · 8 timeout.
 
 `fbittorrent serve` keeps the native engine available to the CLI without a TUI
-or a terminal window hosting it. It owns the same private `engine.sock` and
+or a terminal window hosting it. It owns the private API v1 `api.sock` and
 instance lock as the current app; a second owner is refused. `down`, SIGTERM,
 SIGINT or SIGHUP drains the engine and removes its socket. A missing configured
 interface starts it parked, with saved history and start/stop/remove-keeping-files
@@ -293,6 +314,15 @@ unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
 
 The daemon posts completion notifications with Open File / Open Folder actions.
+Give a torrent a display name with `fbittorrent rename <selector> 'My title'`,
+`N` in the TUI/dashboard, or a double-click on its dashboard Overview title.
+An empty name clears the override. Display names survive restart and metadata
+refresh; payload file names and the info hash stay unchanged. Filters, sorting
+and CLI name selectors use the display name.
+
+A Shows check that finds unread releases posts one notification about new episodes,
+listing up to three names; Open Shows opens the Shows dashboard. Unchanged
+checks stay silent, and an interactive dashboard or TUI suppresses this notice.
 Browser handlers use `add --origin handler`: the daemon posts Added with Undo
 (keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
 or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
@@ -345,14 +375,12 @@ autostart = true
 ```
 
 `--no-start` (a global flag) or `FBITTORRENT_NO_START=1` prevents commands from
-starting the daemon or legacy service. Commands that need a closed engine return
+starting the daemon. Commands that need a closed engine return
 exit 4 with an opening hint. This also prevents explicit `up`, `dashboard`, `tui` and `serve` startup;
-legacy `setup` refuses because its workflow requests a service start. The widget uses
+Setup installs the native daemon for explicit, on-demand startup. The widget uses
 `--no-start` for status polling and every torrent action. Explicit Open TUI
 requests may launch the app: middle-click, `t`/`T`, the TUI header button
-(including keyboard activation), and the panel's `tui()` IPC method. Native
-`reconcile` is a no-op: it reports that scheduling is intrinsic without connecting.
-`autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
+(including keyboard activation), and the panel's `tui()` IPC method. `autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
 read markers, provider choices, and torrent records live in
 `~/.local/share/fbittorrent`; none needs a third-party account.
 
@@ -363,22 +391,23 @@ drain and reopen the engine. `settings --vpn off` disables interface binding.
 While waiting for a required VPN, saved file names and pause choices remain
 available; percentages are unknown until the engine can check files again.
 
-For explicit legacy mode, set `engine = "qbittorrent"`, install
-`qbittorrent-nox`, and run `setup`. Its loopback WebUI defaults to
-`url = "http://127.0.0.1:8080"`, with `backend_unit = "qbittorrent-nox.service"`.
-Legacy mode supports `seq`/`first-last`, F2/F3 add flags, and normal/high/max file
-priorities. Native mode always applies streaming priority and supports file
-inclusion/skipping.
+The native daemon is the only backend (`engine = "native"`). Streaming
+priority is intrinsic and files support include/skip. Today's native ledger,
+RSS, Shows and settings files load directly; no source application is launched.
+
+With opt-in clipboard watching enabled, the TUI offers each new magnet in its
+footer: `Add '<name>'? (y/Esc)`. Press `y` to add or Esc to dismiss. An open text
+input or dialog keeps its keys; clipboard text is not saved in message history.
 
 ## Layout
 
 ```
 src/main.rs        CLI (clap)
-src/engine/        embedded librqbit engine, durable torrent records, legacy import
+src/engine/        embedded librqbit engine, durable torrent records
 src/daemon/        headless owner, lifecycle, replaceable engine slot, signals, sd_notify
 src/ipc.rs         local Unix socket connecting CLI/widget to the open app
-src/qbt.rs         common client contract; native IPC or legacy WebUI
-src/backend.rs     open/focus/close the app; explicit legacy service control
+src/qbt.rs         CLI output shapes and display helpers
+src/backend.rs     open/focus the app; stop its daemon
 src/search.rs      local provider preferences and bounded Nova/Python searches
 src/rss.rs         local RSS/Atom subscriptions, cache, and durable read ids
 src/shows.rs       local watchlist, EZTV checks, episode/season release history
@@ -412,14 +441,10 @@ challenge blocks scripted requests; its entries open in your browser.
 
 ## Security
 
-The native app uses a local Unix socket restricted to the current user; it does
-not expose a WebUI. In explicit legacy mode, the WebUI listens on 127.0.0.1 only
-and skips authentication for localhost, which
-is what makes the CLI and widget instant. Two qBittorrent protections stay ON and
-`setup` enforces them on every run: CSRF protection and host-header validation.
-Without them any web page you visit could POST to `localhost:8080` and add or
-delete torrents. fbittorrent sends no `Origin` header and talks to the loopback
-host, so both checks pass for it while a browser-originated request gets 401.
+The native daemon uses a Unix socket restricted to the current user (0600 in
+a private 0700 runtime directory). It exposes no WebUI, TCP listener, credentials
+or second IPC protocol. Clients negotiate API v1 and stay attached while the
+engine slot restarts.
 
 ## Tests
 
@@ -468,14 +493,14 @@ dependency graph and screen mockups. They run by hand, outside CI.
 
 ```
 agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; live suites below require opt-in
-cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
+cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, API client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
 python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
 …/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
 ```
 
-The existing legacy CLI/TUI scripts need a startable qbittorrent-nox. The widget
+The CLI/TUI cases use disposable native daemons. The widget
 test also needs the Omarchy shell running with the plugin enabled.
 
 ## Notes
@@ -496,8 +521,6 @@ test also needs the Omarchy shell running with the plugin enabled.
   catalogue and preserve old releases even if the source removes them. A first
   show check has a 30-second/page budget and reports incomplete history instead
   of presenting it as complete.
-- In legacy mode, search jobs in qBittorrent are bound to the WebUI session
-  cookie; the client keeps one session per process for that reason.
 - Personal use is legal in Switzerland. Mind your local law elsewhere.
 
 ## Keys
@@ -524,7 +547,18 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `modal:clipboard` | Add | `y` | — | — |  |
+| `modal:clipboard` | Dismiss | `Esc` | — | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Rename | `N` | — | — |  |
+| `modal:details` | Add | `+` | `+` | — |  |
+| `modal:details` | Remove | `x` | `x` | — |  |
+| `modal:details` | Reannounce | `e` | `e` | — |  |
+| `modal:details` | Refresh | `r` | — | — |  |
+| `modal:details` | Next tracker | `↓`, `j` | — | — |  |
+| `modal:details` | Previous tracker | `↑`, `k` | — | — |  |
+| `modal:details` | Next peer | `↓`, `j` | — | — |  |
+| `modal:details` | Previous peer | `↑`, `k` | — | — |  |
 | `modal:details` | Back | `Esc`, `h` | — | — |  |
 | `modal:details` | Next tab | `]` | — | — |  |
 | `modal:details` | Previous tab | `[` | — | — |  |
@@ -548,6 +582,10 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Rename | `N` | `N` | — |  |
+| `screen:torrents` | Undo removal | `U` | — | — |  |
+| `screen:torrents` | Sort | `s` | `s` | — |  |
+| `screen:torrents` | Reverse sort | `S` | `S` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
 | `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
@@ -565,14 +603,11 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Delete with files | `D` | `D` | — |  |
 | `screen:torrents` | IMDb | `i` | `i` | — |  |
 | `screen:torrents` | Wikipedia | `w` | `w` | — |  |
-| `screen:torrents` | Follow show | `f`, `F` | `f` | — | Native TUI; legacy uses F while f is first/last priority. |
-| `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
-| `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
-| `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:torrents` | Follow show | `f`, `F` | `f` | — |  |
 | `screen:search` | Browse grid/rows | — | `v` | — | Browse lists only. |
-| `screen:search` | Sort results | — | `s` | — |  |
-| `screen:search` | Reverse results sort | — | `S` | — |  |
-| `pane:search.results` | Copy magnet | — | `y` | — |  |
+| `screen:search` | Sort results | `s` | `s` | — |  |
+| `screen:search` | Reverse results sort | `S` | `S` | — |  |
+| `pane:search.results` | Copy magnet | `y` | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -609,6 +644,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
 | `screen:shows` | Show quality | `=` | `=` | — |  |
 | `screen:shows` | Inbox filters | `F` | — | — |  |
+| `screen:shows` | Sort releases | `s` | — | — |  |
+| `screen:shows` | Reverse releases sort | `S` | — | — |  |
+| `pane:shows.releases` | Copy magnet | `y` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -638,8 +676,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:files` | First | `g`, `Home` | — | — |  |
 | `modal:files` | Last | `G`, `End` | — | — |  |
 | `modal:files` | Include | `1` | — | — |  |
-| `modal:files` | High (legacy) | `2` | — | — |  |
-| `modal:files` | Max (legacy) | `3` | — | — |  |
 | `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
 | `modal:providers` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `modal:providers` | Previous | `k`, `↑` | `k`, `↑` | — |  |
@@ -664,8 +700,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | Remove | `y` | `y` | `y` |  |
 | `prompt` | Cancel | `Esc` | `Esc` | `Esc` |  |
 | `prompt` | Submit | `Enter` | `Enter` | — |  |
-| `prompt` | Sequential (legacy) | `F2` | — | — |  |
-| `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
 | `global` | Card | `v` | — | — |  |
 | `modal:poster` | Back | `Esc`, `v` | — | — |  |

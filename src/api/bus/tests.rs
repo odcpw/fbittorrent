@@ -1,7 +1,16 @@
 use super::*;
 #[test]
+fn history_state_waits_for_its_tick() {
+    let old=json!({"history":{"download":[1],"upload":[0],"interval_s":1}});
+    let new=json!({"history":{"download":[1,2],"upload":[0,0],"interval_s":1}});
+    assert_eq!(structural_projection(&Topic::Stats,&old,&new),old);
+    let old=json!({"history":[1],"counts":{},"top":[]});
+    let new=json!({"history":[1,2],"counts":{},"top":[]});
+    assert_eq!(structural_projection(&Topic::Summary,&old,&new),old);
+}
+#[test]
 fn rev_monotonic() {
-    let sink = EventSink::testing();
+    let sink = EventSink::testing_with_hello();
     let mut subscription = Subscription {
         sub: 1,
         sink: sink.clone(),
@@ -20,6 +29,7 @@ fn rev_monotonic() {
         active: true,
     };
     let mut sample = Sample {
+        history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
         rows: vec![],
@@ -27,8 +37,7 @@ fn rev_monotonic() {
         logs: json!([]),
         searches: BTreeMap::new(),
         files: BTreeMap::new(),
-        peers: BTreeMap::new(),
-        pieces:BTreeMap::new(),
+        peers:BTreeMap::new(),pieces:BTreeMap::new(),trackers:BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
@@ -120,6 +129,24 @@ fn merged_search_and_show_inbox_keep_distinct_removal_keys() {
 }
 
 #[test]
+fn fast_engine_transitions_are_delivered_once_per_connection_without_sampling() {
+    let sink=EventSink::testing();
+    let mut registry=Registry::default();
+    for sub in [1,2] {
+        registry.subscriptions.insert((sink.id(),sub),Subscription {
+            sub,sink:sink.clone(),rev:0,topics:vec![],since:None,epoch:None,active:true,
+        });
+    }
+    registry.engine_changed(2,"starting");
+    registry.engine_changed(2,"running");
+    let frames=sink.take_frames();
+    assert_eq!(frames.len(),2,"two topics on one connection cannot duplicate phases");
+    assert_eq!(frames.iter().map(|f|f["state"].as_str().unwrap()).collect::<Vec<_>>(),["starting","running"]);
+    assert!(frames.iter().all(|f|f["epoch"]==2&&f["reason"]=="engine_restart"));
+    assert_eq!(registry.events.replay(None).2,frames,"both phases remain replayable even without a sampler tick");
+}
+
+#[test]
 fn peer_counters_coalesce_but_seed_and_direction_are_structural(){
     let topic=Topic::Peers(Hash::new("12".repeat(20)).unwrap());
     let old=json!([{"addr":"127.0.0.1:1","seed":false,"downloaded":1,"uploaded":2,"dl_bps":3,"ul_bps":4}]);
@@ -149,7 +176,7 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
@@ -159,4 +186,27 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     sample.epoch=2;sub.update(&sample,&[],1).unwrap();assert!(sub.topics[0].sent.is_none());
     sample.pieces.insert(hash.to_string(),data);sub.topics[0].due=Instant::now();
     sub.update(&sample,&[],1).unwrap();assert_eq!(sink.take_frames().len(),1,"new engine must republish even an identical bitfield");
+}
+
+#[test]
+fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
+    let sink=EventSink::testing_with_hello();
+    let mut subscription=Subscription {sub:1,sink:sink.clone(),rev:0,
+        topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
+        since:None,epoch:None,active:true};
+    // The worker collected its topic set before this subscription arrived.
+    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+        rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
+        network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
+        shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),
+        daemon:json!({"state":"running","busy_reasons":[],"upgrade_pending":false})};
+    subscription.update(&sample,&[],1).unwrap();
+    assert!(sink.take_frames().is_empty());assert_eq!(subscription.rev,0);
+    assert!(subscription.topics[0].sent.is_none() && subscription.topics[0].due>Instant::now());
+    sample.stats=json!({"history":{"download":[0],"upload":[0],"interval_s":1}});
+    subscription.update(&sample,&[],1).unwrap();
+    let frames=sink.take_frames();assert_eq!(frames.len(),1);
+    assert_eq!(frames[0]["ev"],"state");assert_eq!(frames[0]["rev"],1);
+    assert_eq!(frames[0]["data"]["history"]["download"],json!([0]));
+    assert!(!sink.closed());
 }

@@ -136,32 +136,6 @@ pub(super) const ACTIONS: &[Action] = &[
         None
     ),
     action!(
-        "files.high",
-        Scope::Modal(ModalKind::Files),
-        &[KeyChord::plain(KeyCode::Char('2'))],
-        "High (legacy)",
-        40,
-        |a| !a.cfg.native(),
-        Some(|a| a.on_files_action(Intent::High)),
-        T,
-        None,
-        None,
-        None
-    ),
-    action!(
-        "files.max",
-        Scope::Modal(ModalKind::Files),
-        &[KeyChord::plain(KeyCode::Char('3'))],
-        "Max (legacy)",
-        40,
-        |a| !a.cfg.native(),
-        Some(|a| a.on_files_action(Intent::Max)),
-        T,
-        None,
-        None,
-        None
-    ),
-    action!(
         "providers.close",
         Scope::Modal(ModalKind::Providers),
         &[

@@ -158,6 +158,9 @@ pub struct AppClientArgs {
     /// The shared bar socket explicitly declares an open dashboard.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dashboard_visible: Option<bool>,
+    /// An interactive quick palette sharing the bar socket.
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub overlay_visible:Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -356,6 +359,7 @@ pub enum Call {
     TorrentsRecheck { args: HashesArgs },
     #[serde(rename="shows.list")] ShowsList {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
     #[serde(rename="shows.follow")] ShowsFollow {args:ShowFollowArgs},
+    #[serde(rename="shows.set_quality")] ShowsSetQuality {args:ShowQualityArgs},
     #[serde(rename="shows.unfollow")] ShowsUnfollow {args:ShowArgs},
     #[serde(rename="shows.check")] ShowsCheck {#[serde(skip_serializing_if="Option::is_none")] args:Option<ShowCheckArgs>},
     #[serde(rename="shows.releases")] ShowsReleases {args:ShowReleasesArgs},
@@ -377,7 +381,7 @@ pub enum Call {
     #[serde(rename = "app.log")]
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
-    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
+    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<super::StatsArgs> },
     #[serde(rename = "app.free_space")]
     AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]
@@ -433,6 +437,8 @@ pub enum Call {
     TorrentsRemove { args: RemoveArgs },
     #[serde(rename = "torrents.files")]
     TorrentsFiles { args: HashArgs },
+    #[serde(rename="torrents.rename")]
+    TorrentsRename {args:RenameArgs},
     #[serde(rename = "torrents.add_tracker")]
     TorrentsAddTracker { args: TrackerEditArgs },
     #[serde(rename = "torrents.remove_tracker")]
@@ -475,7 +481,7 @@ impl Call {
             Self::SearchGrab { .. } => "search.grab",
 
             Self::TorrentsRecheck { .. } => "torrents.recheck",
-            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
+            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsSetQuality {..}=>"shows.set_quality",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
             Self::ShowsReleases {..}=>"shows.releases",Self::ShowsSetRead {..}=>"shows.set_read",Self::ShowsMarkShowRead {..}=>"shows.mark_show_read",Self::ShowsUndoRead {..}=>"shows.undo_read",Self::ShowsGrab {..}=>"shows.grab",
             Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
             Self::RssItems { .. }=>"rss.items", Self::RssSetRead { .. }=>"rss.set_read", Self::RssMarkFeedRead { .. }=>"rss.mark_feed_read", Self::RssGrab { .. }=>"rss.grab",
@@ -503,6 +509,7 @@ impl Call {
             Self::TorrentsRemove { .. } => "torrents.remove",
             Self::TorrentsFiles { .. } => "torrents.files",
             Self::TorrentsPeers { .. } => "torrents.peers",
+            Self::TorrentsRename {..}=>"torrents.rename",
             Self::TorrentsAddTracker { .. } => "torrents.add_tracker",
             Self::TorrentsRemoveTracker { .. } => "torrents.remove_tracker",
             Self::TorrentsSetFiles { .. } => "torrents.set_files",
@@ -556,3 +563,7 @@ pub struct CommitArgs {
     #[serde(skip_serializing_if="Option::is_none")]
     pub save_path: Option<String>,
 }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameArgs {pub hash:Hash,pub name:String}

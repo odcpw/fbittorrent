@@ -66,6 +66,7 @@ impl Inner {
         *self.queue_pins.lock().unwrap()=retained;
         if changed {
             self.save(cx, ledger).await?;
+            self.completed_count.fetch_add(completed.len() as u64,Ordering::AcqRel);
             let mut events = self.completions.lock().unwrap();
             for event in completed {
                 if events.len() == 1024 { eprintln!("WARN engine completion queue full capacity=1024"); events.pop_front(); }

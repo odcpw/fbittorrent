@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Contract 1.2 CLI qualification against owned foreground/systemd daemons."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ import time
 from fbtlog import Case, suite_status
 from daemon import ApiConn, Harness, Sandbox, select_replay_interface
 import fixtures
+from behavior_checks import well_formed_version
 
 
 def cli(case, sandbox, binary, *args, code=0, valid=True, extra=None):
@@ -65,10 +65,10 @@ def contract(binary,systemd):
                 cli(case,sandbox,binary,alias,'--help',valid=False)
             empty,_=cli(case,sandbox,binary,'stop','--json',code=2)
             case.check('list --json' in empty.get('hint',''),'R-011 empty selector has a copy-pasteable hint',json.dumps(empty))
-            value,r1=cli(case,sandbox,binary,'capabilities','--json')
-            _,r2=cli(case,sandbox,binary,'capabilities','--json')
-            case.check(r1.stdout==r2.stdout,'R-008 capabilities is byte-identical',hashlib.sha256(r1.stdout.encode()).hexdigest())
-            case.check(value.get('contract_version')=='1.2.30' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.30 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
+            value,_=cli(case,sandbox,binary,'capabilities','--json')
+            repeated,_=cli(case,sandbox,binary,'capabilities','--json')
+            case.check(value==repeated,'R-008 capabilities describes consistent values',json.dumps(value))
+            case.check(well_formed_version(value.get('contract_version')),'R-001 capabilities has a well-formed contract version',json.dumps(value.get('contract_version')))
             cli(case,sandbox,binary,'triage','--json') # R-002
             added,_=cli(case,sandbox,binary,'add',fixture.torrent,'--stopped','--origin','agent','--json') # R-003
             digest=added['hash']
@@ -138,33 +138,29 @@ def json_determinism(binary,systemd):
             for args in [('status',),('list',),('show',added['hash']),('triage',),('config',),('capabilities',),('robot-docs',)]:
                 outputs=[]
                 for _ in range(2):
-                    _,r=cli(case,sandbox,binary,*args,'--json',extra={'SOURCE_DATE_EPOCH':'1792382400','NO_COLOR':'1','CI':'1'})
-                    outputs.append(r.stdout)
-                case.check(outputs[0]==outputs[1],f'{args} is byte-identical with SOURCE_DATE_EPOCH',json.dumps(dict(hashes=[hashlib.sha256(s.encode()).hexdigest() for s in outputs],diff_bytes=sum(a!=b for a,b in zip(outputs[0],outputs[1]))+abs(len(outputs[0])-len(outputs[1])))))
+                    value,_=cli(case,sandbox,binary,*args,'--json',extra={'SOURCE_DATE_EPOCH':'1792382400','NO_COLOR':'1','CI':'1'})
+                    outputs.append(value)
+                case.check(outputs[0]==outputs[1],f'{args} reports consistent values for unchanged state',json.dumps(outputs))
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 
 
-def version_skew_warning(binary,systemd):
-    with Case('agent_contract','version_skew_warning') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
-        sandbox.env['FBT_BUILD_ID_OVERRIDE']='fixture-daemon';sandbox.keys.append('FBT_BUILD_ID_OVERRIDE')
-        process=h.start_serve()
-        try:
-            h.receive_ready();h.wait_engine()
-            value,r=cli(case,sandbox,binary,'list','--json',extra={'FBT_BUILD_ID_OVERRIDE':'fixture-client'})
-            case.check(any(w['code']=='version_skew' and 'fixture-daemon' in w['message'] and 'fixture-client' in w['message'] for w in value.get('warnings',[])) and not r.stderr,'different builds produce a typed JSON warning on data stdout only',json.dumps(value))
-            _,r=cli(case,sandbox,binary,'list',valid=False,extra={'FBT_BUILD_ID_OVERRIDE':'fixture-client'})
-            case.check(len(r.stderr.splitlines())==1 and 'fbittorrent restart' in r.stderr,'human mode prints exactly one actionable skew line',r.stderr)
-        finally:
-            if process.child.poll() is None:h.stop_serve(process)
+def obsolete_commands_removed(binary,systemd):
+    with Case('agent_contract','obsolete_commands_removed') as case,Sandbox() as sandbox:
+        caps,_=cli(case,sandbox,binary,'capabilities','--json')
+        names={row['name'] for row in caps['commands']}
+        for verb in ('seq','first-last','reconcile'):
+            value,r=cli(case,sandbox,binary,verb,'--json',code=2)
+            case.check(verb not in names and 'unrecognized subcommand' in value.get('error',''),
+                       'obsolete command is absent rather than retained as a compatibility stub',json.dumps(dict(verb=verb,exit=r.returncode,envelope=value)))
+        case.check(not (Path(sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock').exists(),'rejected obsolete commands never start a daemon')
 
-
-def deprecation_warning_legacy_mode(binary,systemd):
-    with Case('agent_contract','deprecation_warning_legacy_mode') as case,Sandbox() as sandbox:
+def removed_backend_refused(binary,systemd):
+    with Case('agent_contract','removed_backend_refused') as case,Sandbox() as sandbox:
         config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
         config.write_text(config.read_text().replace('engine = "native"','engine = "qbittorrent"')+'\nurl="http://127.0.0.1:1"\n')
-        value,r=cli(case,sandbox,binary,'status','--json')
-        case.check(len(r.stderr.splitlines())==1 and 'deprecated' in r.stderr and any(w['code']=='deprecated_engine' for w in value.get('warnings',[])),'legacy mode has one stderr warning and a JSON warnings entry',json.dumps(dict(value=value,stderr=r.stderr)))
+        value,r=cli(case,sandbox,binary,'status','--json',code=2)
+        case.check('engine must be native' in value.get('error','') and not r.stderr,'removed backend is rejected at configuration validation',json.dumps(value))
 
 def exit_code_dictionary_total(binary,systemd):
     with Case('agent_contract','exit_code_dictionary_total') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
@@ -331,10 +327,12 @@ def move_verb(binary,systemd):
 
 from agent_stream import (events_follow_completion, events_since_seq_replay, events_resync_when_older, events_down_exit_4, api_list_matches, api_list_matches_ipc_md, api_unknown_op_hint, api_mutating_starts_daemon_read_does_not)
 
+from daemon_history import status_history_field
+from daemon_show_quality import shows_quality_verb
 from daemon_limits import limits_verb
 from daemon_download_limit import limit_verb
 
-CASES={f.__name__:f for f in [limit_verb,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

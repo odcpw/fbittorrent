@@ -54,7 +54,7 @@ fn state_rank(state:api::TorrentState)->u8 {
         api::TorrentState::Stalled=>3,api::TorrentState::Queued=>4,api::TorrentState::Paused=>5,api::TorrentState::Done=>6,
         api::TorrentState::Seeding=>7,api::TorrentState::WaitingVpn=>8,api::TorrentState::Error=>9}
 }
-pub(in crate::tui) fn legacy_order(left:&crate::qbt::Torrent,right:&crate::qbt::Torrent,field:TorrentSort,descending:bool)->Ordering {
+pub(in crate::tui) fn display_order(left:&crate::qbt::Torrent,right:&crate::qbt::Torrent,field:TorrentSort,descending:bool)->Ordering {
     let state=|t:&crate::qbt::Torrent|match t.state.as_str(){"metaDL"|"forcedMetaDL"=>0,"checkingDL"|"checkingUP"|"checkingResumeData"=>1,
         "downloading"|"forcedDL"=>2,"stalledDL"=>3,"queuedDL"|"queuedUP"=>4,"stoppedDL"|"pausedDL"=>5,
         "stoppedUP"|"pausedUP"=>6,"uploading"|"stalledUP"|"forcedUP"=>7,"waitingVPN"=>8,_=>9};

@@ -11,7 +11,7 @@ mod tests;
 
 pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
     // An existing owner can answer hello while its engine is busy checking files.
-    // Do not turn a slow legacy version probe into an attempted manager start.
+    // Hello readiness is independent of torrent verification.
     match Presence::connect() {
         Ok(presence) => return Ok(presence),
         Err(error) if error.downcast_ref::<wire::RemoteError>().is_some_and(|error|error.0.code==crate::api::ErrorCode::ProtoUnsupported) => return Err(error),
@@ -24,7 +24,7 @@ pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
 fn ensure(cfg: &Config) -> Result<()> {
     let mut explicit = cfg.clone();
     explicit.autostart = true;
-    crate::backend::ensure_running(&explicit, &LegacyClient::from_config(&explicit))?;
+    crate::api::client::ensure_daemon(&explicit, crate::backend::start_prevented())?;
     Ok(())
 }
 
@@ -94,6 +94,7 @@ impl TuiApp {
 impl TuiApp {
     pub(in crate::tui) fn connection_lost(&mut self, intentional: bool) {
         if !self.recovery.lost(std::time::Instant::now(),intentional) {return;}
+        self.clipboard=Default::default();
         let pending = !self.store.pending.is_empty();
         self.store.disconnected();
         self.online=false;

@@ -53,7 +53,7 @@ CursorSurface {
       id:meta;objectName:"popup-row-meta";width:parent.width;textFormat:Text.PlainText
       text:root.pending && root.action ? svc.pendingGlyph(root.torrent.hash)+" "+PopupState.verb(root.action) : PopupState.meta(root.torrent,root.parked)
       color:root.torrent.playable && root.torrent.playable.ready ? root.accentSpec.color : host.dim
-      font.family:Style.font.family;font.pixelSize:Style.font.caption;font.italic:root.pending;font.bold:!!root.torrent.playable && root.torrent.playable.ready && root.accentSpec.bold;elide:Text.ElideRight
+      font.family:Style.font.family;font.pixelSize:Style.font.caption;font.italic:root.pending;font.bold:!!root.torrent.playable && root.torrent.playable.ready && root.accentSpec.bold;wrapMode:Text.Wrap;maximumLineCount:3;elide:Text.ElideRight
     }
     ConfirmStrip {
       id:removeStrip

@@ -5,7 +5,6 @@ mod services;
 pub(super) mod topics;
 pub(super) mod search;
 pub(super) mod imdb;
-mod metadata;
 pub(super) use client::ScreenClient;
 mod subscription;
 use crate::api;

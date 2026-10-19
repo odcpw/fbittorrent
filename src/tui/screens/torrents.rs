@@ -30,12 +30,6 @@ impl TuiApp {
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }
-            actions::Intent::Sequential if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
-                return self.action("toggled sequential", move |c| c.toggle_sequential(&[t.hash]));
-            },
-            actions::Intent::FirstLast if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
-                return self.action("toggled first/last", move |c| c.toggle_first_last(&[t.hash]));
-            },
             actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
                 let allow = !self.seed_allowed(&t);
                 return self.action(if allow { "seeding allowed" } else { "seeding off · upload capped" },
@@ -107,9 +101,7 @@ impl TuiApp {
     pub(super) fn view_torrent_details(&self, t: &Torrent, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let kv = |k: &str, v: String| Line::from_spans([Span::styled(format!("{k:<10}"), th.dimmed()), Span::styled(v, th.text())]);
-        let flags = if self.cfg.native() { "streaming priority automatic".to_string() } else {
-            format!("{}sequential  {}first/last", if t.seq_dl { "✓ " } else { "✗ " }, if t.f_l_piece_prio { "✓ " } else { "✗ " })
-        };
+        let flags = "streaming priority automatic".to_string();
         let metrics = format::Metrics {legacy:t,api:self.store.torrents.get(&t.hash)};
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),

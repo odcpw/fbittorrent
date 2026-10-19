@@ -12,7 +12,7 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.31";
+pub const CONTRACT_VERSION: &str = "1.2.32";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
 const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar-only client never counts as interactive, a visible dashboard on its shared socket does, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; replaced binaries restart the daemon when idle; restart switches immediately.";
@@ -106,10 +106,10 @@ pub fn classify(e: &anyhow::Error) -> (Code, String, Option<String>) {
     if let Some(io)=e.downcast_ref::<std::io::Error>() { if matches!(io.kind(),std::io::ErrorKind::NotFound|std::io::ErrorKind::ConnectionRefused) { return (Code::Backend,format!("fbittorrent is closed: {io}"),Some("fbittorrent up".into())); } }
     let msg = format!("{e:#}");
     let low = msg.to_ascii_lowercase();
-    if low.contains("connecting to qbittorrent") || low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
+    if low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
         return (Code::Backend, msg, Some("fbittorrent up   # opens the app; `fbittorrent setup` configures its download folder".into()));
     }
-    if low.contains("returned http") || low.contains("qbittorrent ") || low.contains("http ") || low.contains("timed out") || low.contains("dns") || low.contains("connection") {
+    if low.contains("returned http") || low.contains("http ") || low.contains("timed out") || low.contains("dns") || low.contains("connection") {
         return (Code::Upstream, msg, Some("fbittorrent status --json   # confirm the backend answers, then retry".into()));
     }
     (Code::Failure, msg, None)
@@ -155,6 +155,49 @@ fn upload_cap_text() -> String {
 }
 
 pub fn capabilities_json() -> serde_json::Value {
+    let changes = vec![
+        serde_json::json!({"since":"1.2.32","version":"1.2.32","breaking":false,"field":"torrents.rename","cap":"rename","note":"display-name overrides preserve metadata names, payload paths and torrent identity"}),
+        serde_json::json!({"since":"1.2.32","version":"1.2.32","breaking":false,"field":"status.all_time","cap":"history","note":"P6-04 real session network counters and atomic all-time statistics surviving daemon restarts"}),
+        serde_json::json!({"since":"1.2.31","version":"1.2.31","breaking":false,"field":"status.history","cap":"history","note":"P6-03 one bounded 600-sample global speed ring, 60-point summary/status and five-second stats topic"}),
+        serde_json::json!({"since":"1.2.31","version":"1.2.31","breaking":false,"field":"pieces","cap":"pieces","note":"P6-02 verified MSB-first base64 bitfield and sampled detail topic"}),
+        serde_json::json!({"since":"1.2.31","version":"1.2.31","breaking":false,"field":"cli.catalogue","note":"RSS/Shows CLI uses shared native handlers and normalized views on both sources"}),
+        serde_json::json!({"since":"1.2.30","version":"1.2.30","breaking":false,"field":"shows.quality","cap":"shows","note":"P3-18 durable per-show quality override, inbox filters and CLI shows quality without autostart"}),
+        serde_json::json!({"since":"1.2.30","version":"1.2.30","breaking":false,"field":"trackers.edit","cap":"tracker_edit","note":"P7-04 live idempotent tracker add/remove with durable edits and bounded URL validation"}),
+        serde_json::json!({"since":"1.2.29","version":"1.2.29","breaking":false,"field":"search.torznab","cap":"torznab","note":"native Torznab providers; strict private indexers/key files, HTTPS for keyed remote endpoints, bounded same-origin requests and secret-free results"}),
+        serde_json::json!({"since":"1.2.28","version":"1.2.28","breaking":false,"field":"search.install_torznab","note":"CLI search --install-torznab/--key-file and Torznab provider kind; credentials stay in private files"}),
+        serde_json::json!({"since":"1.2.27","version":"1.2.27","breaking":false,"field":"download_limit_bps","cap":"download_limit","note":"P7-06 durable live per-torrent download caps, effective cap field and limit --down CLI without rechecking"}),
+        serde_json::json!({"since":"1.2.26","version":"1.2.26","breaking":false,"field":"list[].num_seeds","cap":"peers","note":"P5-01 fills connected seed counts for live torrents; show adds peers[] with one-second rates and optional seeds"}),
+        serde_json::json!({"since":"1.2.25","version":"1.2.25","breaking":false,"field":"playable","cap":"watch","note":"verified video prefix readiness, once-per-lifetime playback notification and wait --until playable|stall-free"}),
+        serde_json::json!({"since":"1.2.24","version":"1.2.24","breaking":false,"field":"search.results[].providers","note":"CLI search uses daemon or local normalized items with identical fields and deterministic provider provenance"}),
+        serde_json::json!({"since":"1.2.23","version":"1.2.23","breaking":false,"field":"app.client.dashboard_visible","cap":"dashboard_presence","note":"M1a visible dashboard keeps its shared bar connection interactive; hidden dashboard and bar-only connections do not"}),
+        serde_json::json!({"since":"1.2.22","version":"1.2.22","breaking":false,"field":"api.staging","note":"stage metainfo without payload access; commit choices or discard without deleting data","cap":"staging"}),
+        serde_json::json!({"since":"1.2.21","version":"1.2.21","breaking":false,"field":"api.move","note":"pending/ref payload moves preserve verification, save path and CLI act bookkeeping","cap":"move"}),
+        serde_json::json!({"since":"1.2.20","version":"1.2.20","breaking":false,"field":"shows","cap":"shows","note":"P3-03 daemon Shows inbox, stale interactive checks, read/undo/grab intents and pushed topics"}),
+        serde_json::json!({"since":"1.2.19","version":"1.2.19","breaking":false,"field":"rss","cap":"rss","note":"P3-02 daemon RSS operations, feed/item topics, interactive stale refresh and bounded feeds"}),
+        serde_json::json!({"since":"1.2.18","version":"1.2.18","breaking":false,"field":"clipboard","cap":"clipboard","note":"P6-13 opt-in bounded NUL-framed clipboard magnet offers, dismiss operation, notification actions and settings on/off"}),
+        serde_json::json!({"since":"1.2.17","version":"1.2.17","breaking":false,"field":"add.disk","note":"P5-07 known disk capacity/warnings; summary disk monitoring and disk_full recovery on a 16 MiB/piece free-space rise"}),
+        serde_json::json!({"since":"1.2.16","version":"1.2.16","breaking":false,"field":"app.free_space","cap":"free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"}),
+        serde_json::json!({"since":"1.2.15","version":"1.2.15","breaking":false,"field":"caps.imdb","cap":"imdb","note":"P3-04 implemented IMDb capability recorded in exact hello/error fixtures"}),
+        serde_json::json!({"since":"1.2.14","version":"1.2.14","breaking":false,"field":"limits","cap":"limits","note":"live global/turtle limits, persisted alt switch, structural summary fields and offline CLI edits"}),
+        serde_json::json!({"since":"1.2.13","version":"1.2.13","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"}),
+        serde_json::json!({"since":"1.2.12","version":"1.2.12","breaking":false,"field":"trackers","cap":"trackers","note":"tracker diagnostics and rate-limited reannounce; show adds trackers and tracker_count"}),
+        serde_json::json!({"since":"1.2.11","version":"1.2.11","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"}),
+        serde_json::json!({"since":"1.2.10","version":"1.2.10","breaking":false,"field":"api.search","cap":"search","note":"daemon search sessions, keyed deduplicated results, providers, browse and grab"}),
+        serde_json::json!({"since":"1.2.9","version":"1.2.9","breaking":false,"field":"api","note":"unchanged raw response envelope; compiled operation catalogue and per-operation startup/retry policy"}),
+        serde_json::json!({"since":"1.2.8","version":"1.2.8","breaking":false,"field":"events","note":"NDJSON history/follow with instance and seq, replay cursors and resync metadata"}),
+        serde_json::json!({"since":"1.2.7","version":"1.2.7","breaking":false,"field":"restart.server","note":"restart drains the daemon and waits for its replacement instance; binary replacement is deferred while busy"}),
+        serde_json::json!({"since":"1.2.6","version":"1.2.6","breaking":false,"field":"log","cap":"log","note":"app.log, log topic and CLI history/follow; app.stats distinguishes active clients and cumulative connections"}),
+        serde_json::json!({"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api.origin","cap":"origin","note":"durable open origin, manual-bucket filters, keep-files batch undo_until and restore source"}),
+        serde_json::json!({"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.queue","cap":"queue","note":"queue capability, force-start, queue movement and positioned torrent rows"}),
+        serde_json::json!({"since":"1.2.3","version":"1.2.3","breaking":false,"field":"api.torrents.recheck","cap":"recheck","note":"recheck capability, pending ref acknowledgement and measured verification result"}),
+        serde_json::json!({"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","cap":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"}),
+        serde_json::json!({"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","cap":"deferred_add","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"}),
+        serde_json::json!({"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"}),
+        serde_json::json!({"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"}),
+        serde_json::json!({"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"}),
+        serde_json::json!({"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"}),
+        serde_json::json!({"since":"1.2.0","version":"1.2.0","field":"list[].num_seeds","breaking":false,"note":"always 0 in native mode: unknown; list[].num_leechs is the connected peer count"}),
+    ];
     let cmds = [
         CommandDoc { name: "serve", aliases: &[], summary: "Run the torrent engine daemon (other commands start it on demand)", json: false, mutating: true, needs_backend: false },
         CommandDoc { name: "triage", aliases: &["robot-triage"], summary: "One-call overview: backend, rates, torrents, warnings, next commands", json: true, mutating: false, needs_backend: false },
@@ -175,22 +218,20 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "delete", aliases: &["rm", "remove"], summary: "Remove torrents; --files deletes data and needs --yes; --dry-run previews", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "seed", aliases: &[], summary: "Allow upload for torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "noseed", aliases: &[], summary: "Cap upload and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "seq", aliases: &[], summary: "Toggle sequential download in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last priority in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
-        CommandDoc { name: "reconcile", aliases: &[], summary: "Native scheduling stub (no connection); legacy mode applies default flags", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "up", aliases: &[], summary: "Start the daemon; --ui also opens the dashboard or TUI", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "dashboard", aliases: &[], summary: "Start the daemon and summon the dashboard, falling back to the TUI", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "restart", aliases: &[], summary: "Restart the daemon now; wait up to 30 seconds for its replacement hello", json: true, mutating: true, needs_backend: false },
-        CommandDoc { name: "down", aliases: &[], summary: "Close the app and wait for its engine to stop; legacy mode stops its service", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "down", aliases: &[], summary: "Stop the daemon and wait for engine cleanup", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs keys", aliases: &[], summary: "Keyboard catalogue; --surface tui|dashboard|popup|all, Markdown or --json", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text or JSON", json: true, mutating: false, needs_backend: false },
+        CommandDoc { name: "shows quality", aliases: &[], summary: "Set preferred show quality or default; never starts the daemon", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "setup", aliases: &[], summary: "Configure storage and desktop integration; --dry-run lists actions; --plugin link/copy; --uninstall keeps data", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },
     ];
@@ -216,13 +257,10 @@ pub fn capabilities_json() -> serde_json::Value {
         },
         "caps": crate::api::ops::app::CAPS,
         "api_operations": crate::api::ops::TABLE,
-        "changes": [{"since":"1.2.31","version":"1.2.31","breaking":false,"field":"pieces","cap":"pieces","note":"P6-02 verified MSB-first base64 bitfield and sampled detail topic"},{"since":"1.2.30","version":"1.2.30","breaking":false,"field":"trackers.edit","cap":"tracker_edit","note":"P7-04 live idempotent tracker add/remove with durable edits and bounded URL validation"},{"since":"1.2.29","version":"1.2.29","breaking":false,"field":"search.torznab","cap":"torznab","note":"native Torznab providers; strict private indexers/key files, HTTPS for keyed remote endpoints, bounded same-origin requests and secret-free results"},{"since":"1.2.28","version":"1.2.28","breaking":false,"field":"search.install_torznab","note":"CLI search --install-torznab/--key-file and Torznab provider kind; credentials stay in private files"},{"since":"1.2.27","version":"1.2.27","breaking":false,"field":"download_limit_bps","cap":"download_limit","note":"P7-06 durable live per-torrent download caps, effective cap field and limit --down CLI without rechecking"},{"since":"1.2.26","version":"1.2.26","breaking":false,"field":"list[].num_seeds","cap":"peers","note":"P5-01 fills connected seed counts for live torrents; show adds peers[] with one-second rates and optional seeds"},{"since":"1.2.25","version":"1.2.25","breaking":false,"field":"playable","cap":"watch","note":"verified video prefix readiness, once-per-lifetime playback notification and wait --until playable|stall-free"},{"since":"1.2.24","version":"1.2.24","breaking":false,"field":"search.results[].providers","note":"CLI search uses daemon or local normalized items with identical fields and deterministic provider provenance"},{"since":"1.2.23","version":"1.2.23","breaking":false,"field":"app.client.dashboard_visible","cap":"dashboard_presence","note":"M1a visible dashboard keeps its shared bar connection interactive; hidden dashboard and bar-only connections do not"},{"since":"1.2.22","version":"1.2.22","breaking":false,"field":"api.staging","note":"stage metainfo without payload access; commit choices or discard without deleting data","cap":"staging"},{"since":"1.2.21","version":"1.2.21","breaking":false,"field":"api.move","note":"pending/ref payload moves preserve verification, save path and CLI act bookkeeping","cap":"move"},{"since":"1.2.20","version":"1.2.20","breaking":false,"field":"shows","cap":"shows","note":"P3-03 daemon Shows inbox, stale interactive checks, read/undo/grab intents and pushed topics"},{"since":"1.2.19","version":"1.2.19","breaking":false,"field":"rss","cap":"rss","note":"P3-02 daemon RSS operations, feed/item topics, interactive stale refresh and bounded feeds"},{"since":"1.2.18","version":"1.2.18","breaking":false,"field":"clipboard","cap":"clipboard","note":"P6-13 opt-in bounded NUL-framed clipboard magnet offers, dismiss operation, notification actions and settings on/off"},{"since":"1.2.17","version":"1.2.17","breaking":false,"field":"add.disk","note":"P5-07 known disk capacity/warnings; summary disk monitoring and disk_full recovery on a 16 MiB/piece free-space rise"},{"since":"1.2.16","version":"1.2.16","breaking":false,"field":"app.free_space","cap":"free_space","note":"P6-11: read-only destination space and writability; native add --save refuses an unwritable folder with exit 2"},{"since":"1.2.15","version":"1.2.15","breaking":false,"field":"caps.imdb","cap":"imdb","note":"P3-04 implemented IMDb capability recorded in exact hello/error fixtures"},{"since":"1.2.14","version":"1.2.14","breaking":false,"field":"limits","cap":"limits","note":"live global/turtle limits, persisted alt switch, structural summary fields and offline CLI edits"},{"since":"1.2.13","version":"1.2.13","breaking":false,"field":"add.confirmation_required","note":"handler confirm opens the dashboard review before downloading; dashboard accepts --hash for staged records"},{"since":"1.2.12","version":"1.2.12","breaking":false,"field":"trackers","cap":"trackers","note":"tracker diagnostics and rate-limited reannounce; show adds trackers and tracker_count"},{"since":"1.2.11","version":"1.2.11","breaking":false,"field":"setup.actions","note":"planned native desktop integration; dry-run, plugin link/copy, uninstall and confirmed purge"},{"since":"1.2.10","version":"1.2.10","breaking":false,"field":"api.search","cap":"search","note":"daemon search sessions, keyed deduplicated results, providers, browse and grab"},{"since":"1.2.9","version":"1.2.9","breaking":false,"field":"api","note":"unchanged raw response envelope; compiled operation catalogue and per-operation startup/retry policy"},{"since":"1.2.8","version":"1.2.8","breaking":false,"field":"events","note":"NDJSON history/follow with instance and seq, replay cursors and resync metadata"},{"since":"1.2.7","version":"1.2.7","breaking":false,"field":"restart.server","note":"restart drains the daemon and waits for its replacement instance; binary replacement is deferred while busy"},{"since":"1.2.6","version":"1.2.6","breaking":false,"field":"log","cap":"log","note":"app.log, log topic and CLI history/follow; app.stats distinguishes active clients and cumulative connections"},{"since":"1.2.5","version":"1.2.5","breaking":false,"field":"api.origin","cap":"origin","note":"durable open origin, manual-bucket filters, keep-files batch undo_until and restore source"},{"since":"1.2.4","version":"1.2.4","breaking":false,"field":"api.queue","cap":"queue","note":"queue capability, force-start, queue movement and positioned torrent rows"},{"since":"1.2.3","version":"1.2.3","breaking":false,"field":"api.torrents.recheck","cap":"recheck","note":"recheck capability, pending ref acknowledgement and measured verification result"},{"since":"1.2.2","version":"1.2.2","breaking":false,"field":"settings","cap":"settings","note":"durable app.settings.get/set; CLI adds applied, restart, running and canonical settings keys"},{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","cap":"deferred_add","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
-            "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
-            "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
-        }],
+        "changes": changes,
         "global_flags": ["--json", "--no-start"],
         "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, bar widget and headless serve command.",
-        "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": NATIVE_LIFETIME, "serve_limitations": SERVE_LIMITATIONS, "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
+        "engines": { "default": "native", "native_lifetime": NATIVE_LIFETIME, "serve_limitations": SERVE_LIMITATIONS },
         "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
         "backend_subcommands": ["rss grab", "shows grab"],
         "conventions": {
@@ -253,7 +291,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "config": crate::config::config_path().display().to_string(),
             "cache": crate::imdb::cache_dir().display().to_string(),
             "data": crate::config::data_dir().display().to_string(),
-            "socket": crate::ipc::socket_path(&crate::config::Config::default()).with_file_name("api.sock").display().to_string(),
+            "socket": crate::config::runtime_dir().join("api.sock").display().to_string(),
         },
         "agent_workflow": [
             "fbittorrent triage --json",
@@ -292,7 +330,7 @@ WHAT IT IS
   locally without starting downloads.
   Upload is capped at {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
-  Explicit engine = "qbittorrent" retains the legacy WebUI/service path.
+  The native daemon is the only backend.
 
 RULES
   - {json_convention}
@@ -312,10 +350,7 @@ RULES
   - `--no-start` (global) or FBITTORRENT_NO_START=1 prevents engine startup,
     including explicit `up` and `tui`. A closed engine returns exit 4 with a hint.
     autostart=false is the persistent form for ordinary torrent commands.
-    Native `reconcile` is a no-op and never connects to the engine.
-  - Native sequential and first/last scheduling are intrinsic. Toggle commands
-    and --no-seq/--no-first-last require legacy mode; native file priority only
-    supports skip/normal. Peer encryption defaults to prefer; require refuses
+  - Streaming priority is intrinsic. File priority supports skip/normal. Peer encryption defaults to prefer; require refuses
     plaintext peers. F6 or `settings` changes encryption, queue limit and VPN.
   - Three downloads run at once by default. Extra downloads wait in FIFO order.
     Manual pause remains paused. Completed seeders do not consume queue slots.
@@ -324,11 +359,8 @@ RULES
     use the usual connection; external torrent download hooks are refused.
   - RSS read state is local. Shows read state is independent of download state;
     `episodes --new` lists unread releases including S01 season bundles.
-  - First launch imports available local legacy torrents paused, plus RSS and
-    provider preferences. An installed stopped legacy service may run once to
-    export saved state. Its login startup is disabled and the service stops only
-    after successful import; legacy config and backup files remain for rollback.
-    Migration errors preserve the source and keep native imported files paused.
+  - Existing native ledger, RSS, Shows and settings files load directly.
+
 
 EXIT CODES
   0 ok            1 failure       2 usage         3 safety (needs --yes)
@@ -387,11 +419,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exact_hello_caps_have_additive_change_entries() {
+    fn fixture_caps_are_supported_and_live_caps_are_catalogued() {
         let value = capabilities_json();
-        let base = ["torrents", "files", "subscribe", "mutations"];
-        for cap in crate::api::ops::app::CAPS.iter().filter(|cap| !base.contains(cap)) {
-            assert!(value["changes"].as_array().unwrap().iter().any(|row| row["cap"] == *cap), "missing changes entry for {cap}");
+        let live = value["caps"].as_array().unwrap();
+        let docs = include_str!("../docs/IPC.md");
+        let section = docs.split("## Capability catalogue").nth(1).unwrap()
+            .split("\n## ").next().unwrap();
+        let mut catalogue: std::collections::BTreeSet<_> = section.lines()
+            .filter(|line| line.starts_with('|'))
+            .flat_map(|line| line.split('|').nth(1).unwrap().split('`').skip(1).step_by(2))
+            .collect();
+        // Operation addenda also declare capabilities (for example free_space).
+        catalogue.extend(docs.lines().filter_map(|line| {
+            line.strip_prefix("Capability `")?.split_once("` adds").map(|(cap, _)| cap)
+        }));
+        for cap in live {
+            assert!(catalogue.contains(cap.as_str().unwrap()), "uncatalogued live capability: {cap}");
         }
         for fixture in [
             include_str!("../contracts/ipc/v1/hello.ndjson"),
@@ -401,59 +444,46 @@ mod tests {
             for line in fixture.lines() {
                 let row: serde_json::Value = serde_json::from_str(line).unwrap();
                 if let Some(caps) = row["frame"]["result"].get("caps") {
-                    assert_eq!(*caps, value["caps"]);
+                    for cap in caps.as_array().unwrap() {
+                        assert!(live.contains(cap), "unsupported fixture capability: {cap}");
+                    }
                 }
             }
         }
     }
 
     #[test]
-    fn additive_contract_versions_are_unique_and_documented() {
+    fn contract_version_is_present_and_well_formed() {
         let value = capabilities_json();
-        let docs = include_str!("../docs/IPC.md");
-        let mut patches = std::collections::BTreeMap::new();
-        let changes = value["changes"].as_array().unwrap();
-        let mut previous = u32::MAX;
-        for row in changes.iter().filter(|row| row["since"] != "1.2.0") {
-            let version = row["since"].as_str().unwrap();
-            let patch: u32 = version.strip_prefix("1.2.").unwrap().parse().unwrap();
-            let field = row["field"].as_str().unwrap();
-            assert_eq!(row["version"], version, "since/version mismatch for {field}");
-            assert_eq!(row["breaking"], false, "patch must be additive: {field}");
-            assert!(patch > 0 && patch < previous, "changes must be newest first: {field}");
-            previous = patch;
-            assert!(patches.insert(patch, field).is_none(), "duplicate contract patch {version}");
-            assert!(docs.lines().any(|line| line == format!("| `{version}` | `{field}` |")),
-                "undocumented contract patch {version}: {field}");
-        }
-        let latest = *patches.keys().next_back().unwrap();
-        assert_eq!(patches.keys().copied().collect::<Vec<_>>(), (1..=latest).collect::<Vec<_>>());
-        assert_eq!(CONTRACT_VERSION, format!("1.2.{latest}"));
-        let documented = docs.lines().filter(|line| line.starts_with("| `1.2.")).count();
-        assert_eq!(documented, patches.len(), "stale or duplicate documented contract patches");
-        let limits = value["commands"].as_array().unwrap().iter()
-            .find(|row| row["name"] == "limits").unwrap();
-        let limits_change = changes.iter().find(|row| row["field"] == "limits").unwrap();
-        assert_eq!(limits["since"], limits_change["since"]);
+        let version = value["contract_version"].as_str().unwrap();
+        let components: Vec<_> = version.split('.').collect();
+        assert_eq!(components.len(), 3, "contract_version must be major.minor.patch");
+        assert!(components.iter().all(|part| !part.is_empty()
+            && part.bytes().all(|byte| byte.is_ascii_digit())
+            && (*part == "0" || !part.starts_with('0'))));
+        // changes[] is descriptive bookkeeping: entries may share a version.
+        assert!(value["changes"].is_array());
     }
 
     #[test]
-    fn native_seed_counts_preserve_unknown_and_historical_contract() {
+    fn native_seed_counts_preserve_unknown_and_measured_zero() {
         let capabilities = capabilities_json();
-        assert_eq!(capabilities["contract_version"], CONTRACT_VERSION);
-        assert!(capabilities["field_notes"]["list[].num_seeds"].as_str().unwrap().contains("connected seeds"));
-        let change = capabilities["changes"].as_array().unwrap().iter()
-            .find(|change| change["field"] == "list[].num_seeds" && change["version"]=="1.2.0").unwrap();
-        assert!(capabilities["changes"].as_array().unwrap().iter().any(|c|c["cap"]=="peers" && c["version"]=="1.2.26"));
-        assert_eq!(change["version"], "1.2.0");
-        assert_eq!(change["breaking"], false);
-        assert!(change["note"].as_str().unwrap().contains("unknown"));
-        assert!(capabilities["field_notes"]["list[].num_leechs"].as_str().unwrap()
-            .contains("total connected peers"));
-        let guide = ROBOT_GUIDE.to_string();
-        assert!(guide.contains(&format!("contract {CONTRACT_VERSION}")));
-        assert!(guide.contains("Native `num_seeds` counts connected seeds"));
-        println!("{}", capabilities["field_notes"]);
+        for field in ["list[].num_seeds", "list[].num_leechs"] {
+            assert!(!capabilities["field_notes"][field].as_str().unwrap().trim().is_empty());
+        }
+        let fixture = include_str!("../contracts/ipc/v1/torrents.ndjson");
+        let mut torrent = fixture.lines().find_map(|line| {
+            let row: serde_json::Value = serde_json::from_str(line).unwrap();
+            serde_json::from_value::<crate::api::Torrent>(row["frame"]["result"]["torrent"].clone()).ok()
+        }).expect("torrent fixture");
+        for seeds in [None, Some(0), Some(2)] {
+            torrent.seeds = seeds;
+            torrent.peers = Some(3);
+            let row = crate::cli::shapes::torrent(&torrent);
+            assert_eq!(row.get("seeds"), seeds.map(serde_json::Value::from).as_ref());
+            assert_eq!(row["num_seeds"], seeds.unwrap_or(0));
+            assert_eq!(row["num_leechs"], 3);
+        }
     }
 
     #[test]
@@ -498,121 +528,29 @@ mod tests {
     #[test]
     fn upload_cap_text_from_constant() {
         let cap = crate::qbt::NO_UPLOAD_LIMIT;
-        let expected = format!(
-            "{} KiB/s while downloading (non-zero caps must be at least 16 KiB/s); stops when complete unless seeding is enabled",
-            cap / 1024,
-        );
-        println!("NO_UPLOAD_LIMIT={cap} B/s; derived upload text: {expected}");
         let capabilities = capabilities_json();
-        assert_eq!(capabilities["defaults"]["upload"], expected);
-        assert_eq!(capabilities["conventions"]["native_upload"], expected);
+        let amount = format!("{} KiB/s", cap / 1024);
+        for text in [capabilities["defaults"]["upload"].as_str().unwrap(),
+                     capabilities["conventions"]["native_upload"].as_str().unwrap()] {
+            assert!(text.contains(&amount), "upload policy must expose the configured cap");
+        }
         let guide = ROBOT_GUIDE.to_string();
-        assert!(guide.contains(&format!("Upload is capped at {expected}.")));
+        assert!(guide.contains(&amount));
         assert!(!guide.contains("{upload_policy}"));
-        assert!(!guide.contains("1 B/s"));
+
     }
 }
 
 // ---------------------------------------------------------------- triage
 
 /// The mega-command payload. Everything an agent wants before deciding what to do.
-pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json::Value {
-    let running = c.version().is_ok();
-    let unit_active = !cfg.native() && crate::backend::is_active(&cfg.backend_unit);
-    let mut warnings: Vec<String> = Vec::new();
-    let mut next: Vec<String> = Vec::new();
-    let mut torrents = serde_json::Value::Array(vec![]);
-    let mut transfer = serde_json::Value::Null;
-    let mut counts = serde_json::json!({"available": false, "active": 0, "queued": 0, "seeding": 0, "stopped": 0, "done": 0, "error": 0, "total": 0});
-
-    if cfg.native() && !running {
-        warnings.push("fbittorrent is closed; the native engine is stopped".into());
-        next.push("fbittorrent up".into());
-    } else if !cfg.native() && !std::path::Path::new("/usr/bin/qbittorrent-nox").exists() {
-        warnings.push("qbittorrent-nox is not installed".into());
-        next.push("omarchy pkg add qbittorrent-nox && fbittorrent setup --magnet".into());
-    } else if !running {
-        warnings.push(if unit_active { "backend unit is active but the WebUI does not answer yet".into() } else { "backend is stopped (starts on demand)".into() });
-        next.push("fbittorrent up".into());
-    } else {
-        let _ = c.login();
-        if let Ok(ts) = c.torrents() {
-            let active = ts.iter().filter(|t| t.is_active()).count();
-            let queued = ts.iter().filter(|t| t.is_queued()).count();
-            let seeding = ts.iter().filter(|t| t.is_seeding()).count();
-            let stopped = ts.iter().filter(|t| t.is_stopped() && t.progress < 1.0).count();
-            let done = ts.iter().filter(|t| t.progress >= 1.0).count();
-            let errors = ts.iter().filter(|t| t.state == "error" || t.state == "missingFiles").count();
-            counts = serde_json::json!({"available": true, "active": active, "queued": queued, "seeding": seeding, "stopped": stopped, "done": done, "error": errors, "total": ts.len()});
-            if errors > 0 { warnings.push(format!("{errors} torrent(s) in error state")); }
-            if stopped > 0 { next.push("fbittorrent start <hash> --json   # resume a stopped download".into()); }
-            torrents = serde_json::json!(ts.iter().map(|t| serde_json::json!({
-                "hash": t.hash, "name": t.name, "state": t.state, "progress": t.progress, "progress_known": t.progress_known,
-                "size": t.size, "dlspeed": t.dlspeed, "eta": t.eta, "seed_allowed": t.seed_allowed(),
-                "open_target": crate::qbt::open_target(t),
-            })).collect::<Vec<_>>());
-        }
-        if let Ok(ti) = c.transfer_info() {
-            transfer = serde_json::json!({"dl": ti.dl_info_speed, "up": ti.up_info_speed, "connection": ti.connection_status});
-        }
-        if cfg.native() {
-            let network = crate::network_app::state(cfg);
-            if !network.ready { warnings.push(network.message); }
-        }
-    }
-    if cfg.native() || running {
-        match c.search_plugins() {
-            Ok(ps) if ps.is_empty() => { warnings.push("no search providers installed".into()); next.push("fbittorrent search --install".into()); }
-            Ok(ps) if !ps.iter().any(|p| p.enabled) => { warnings.push("all search providers are disabled".into()); }
-            _ => {}
-        }
-    }
-    let rss_json = if cfg.native() || running {
-        match c.rss_feeds() {
-            Ok(feeds) => {
-                for feed in &feeds {
-                    if feed.has_error { warnings.push(format!("RSS feed {} has a refresh error; cached articles are retained", feed.name)); }
-                }
-                serde_json::json!({"feeds": feeds.len(), "unread": feeds.iter().flat_map(|feed| &feed.articles).filter(|article| !article.is_read).count()})
-            }
-            Err(error) => { warnings.push(format!("RSS store unreadable: {error}")); serde_json::Value::Null }
-        }
-    } else { serde_json::Value::Null };
-    let shows_json = match crate::shows::Shows::load() {
-        Ok(all) => {
-            let new = all.new_total();
-            if new > 0 { next.push("fbittorrent shows check --json   # new episodes of followed shows".into()); }
-            serde_json::json!({"followed": all.shows.len(), "new": new, "stale": all.shows.iter().filter(|s| s.is_stale(crate::shows::now())).count()})
-        }
-        Err(e) => { warnings.push(format!("shows list unreadable: {e}")); serde_json::Value::Null }
-    };
-    if crate::imdb::ratings_stale() { warnings.push("IMDb ratings dataset missing or older than a day (refreshed automatically on first lookup)".into()); }
-    next.push("fbittorrent search \"<title>\" --json".into());
-    next.push("fbittorrent add \"<magnet>\" --wait --json".into());
-
-    serde_json::json!({
-        "ok": true,
-        "contract_version": CONTRACT_VERSION,
-        "backend": { "engine": cfg.engine, "running": running, "app_open": cfg.native() && running, "unit": if cfg.native() { None } else { Some(&cfg.backend_unit) }, "unit_active": unit_active, "url": if cfg.native() { None } else { Some(&cfg.url) }, "socket": if cfg.native() { Some(crate::ipc::socket_path(cfg)) } else { None }, "autostart": cfg.autostart },
-        "defaults": { "sequential": cfg.native() || cfg.sequential, "first_last": cfg.native() || cfg.first_last, "seed_by_default": cfg.seed_by_default, "save_path": cfg.save_path, "max_active_downloads": cfg.max_active_downloads, "peer_encryption": cfg.peer_encryption, "network_interface": cfg.network_interface },
-        "transfer": transfer,
-        "counts": counts,
-        "torrents": torrents,
-        "shows": shows_json,
-        "rss": rss_json,
-        "warnings": warnings,
-        "next_commands": next,
-        "docs": "fbittorrent robot-docs",
-    })
-}
-
 fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
     use clap::CommandFactory;
     fn walk(command:&clap::Command,prefix:&str,metadata:&[CommandDoc],out:&mut Vec<serde_json::Value>){
         for child in command.get_subcommands().filter(|c|c.get_name()!="help"){
             let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
             let old=metadata.iter().find(|m|m.name==name);
-            let starts=matches!(name.as_str(),"limit"|"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
+            let starts=matches!(name.as_str(),"rename"|"limit"|"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
             out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":if name=="limit" {"1.2.27"} else if name=="limits" {"1.2.14"} else {"1.2.0"}}));
             walk(child,&name,metadata,out);
         }

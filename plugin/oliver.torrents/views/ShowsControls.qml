@@ -10,6 +10,11 @@ Flow {
   readonly property var state:({read:read.value,readOpen:read.popupOpen,quality:quality.value,qualityOpen:quality.popupOpen,preference:preference.value,preferenceOpen:preference.popupOpen})
   signal focusRequested()
   onPopupOpenChanged:if(!popupOpen)Qt.callLater(root.focusRequested)
+  // Dropdown selection writes its own value. Reapply confirmed model values
+  // when a CLI edit, another show, or a mutation result changes that model.
+  function syncValues(){read.value=model.readFilter;quality.value=model.qualityFilter;preference.value=model.preference}
+  onModelChanged:Qt.callLater(syncValues)
+  Component.onCompleted:syncValues()
   spacing:Commons.Style.spacing.md
   function openPreference(){if(preference.enabled)preference.open()}
   Ui.Dropdown {

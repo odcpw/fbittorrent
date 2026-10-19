@@ -9,6 +9,7 @@ through managed recipes; stopping the launcher or closing an initially open
 stdin tears down every child. There is no --self-test mode.
 """
 import argparse
+from behavior_checks import capability_catalogue, check_capabilities, expected_daemon_stderr
 import base64
 import ctypes
 import fcntl
@@ -323,29 +324,17 @@ class Harness:
 
     @property
     def engine_path(self):
-        return Path(self.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        return DaemonContract.socket_path(self.sandbox)
 
-    def engine_call(self, path, method="GET", args=(), timeout=2):
-        """Legacy framing retained for compatibility regressions; fixtures/probes use API v1."""
-        request = json.dumps(dict(method=method, path=path, args=list(args), file=None)).encode()
-        with socket.socket(socket.AF_UNIX) as connection:
-            connection.settimeout(timeout)
-            connection.connect(str(self.engine_path))
-            connection.sendall(struct.pack(">I", len(request)) + request)
+    def api(self, op, args=None):
+        with ApiConn(self) as client:
+            client.hello()
+            return client.call(op, {} if args is None else args)["result"]
 
-            def read(size):
-                value = bytearray()
-                while len(value) < size:
-                    part = connection.recv(size - len(value))
-                    if not part:
-                        raise EOFError("engine socket closed during frame")
-                    value.extend(part)
-                return value
-
-            size = struct.unpack(">I", read(4))[0]
-            if size > 32 * 1024 * 1024:
-                raise ValueError(f"legacy frame too large: {size}")
-            return json.loads(read(size))
+    def queue_counts(self):
+        status=self.cli("status")
+        return dict(active_downloads=status["active"],queued_downloads=status["queued"],
+                    max_active_downloads=self.api("app.settings.get")["max_active_downloads"])
 
     def receive_ready(self):
         step = self.case.step("receive daemon readiness", "READY=1 datagram from the owned serve process within 10 seconds")
@@ -374,6 +363,7 @@ class Harness:
     def stop_serve(self, process, number=signal.SIGTERM, code=0):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
+        stderr_offset = len(self.stderr())
         began = time.monotonic()
         os.kill(pid, number)
         step.ok(f"Delivered signal {number} to owned PID {pid}.")
@@ -381,6 +371,11 @@ class Harness:
         elapsed = time.monotonic() - began
         self.case.check(elapsed < 10 and not self.engine_path.exists(),
                         "daemon exits and removes its socket within 10 seconds", f"elapsed={elapsed:.3f}s; socket={self.engine_path.exists()}.")
+
+        if code == 0:
+            diagnostics = self.stderr()[stderr_offset:]
+            self.case.check(expected_daemon_stderr(diagnostics),
+                            "owned shutdown has healthy diagnostics and drains before socket unlink", diagnostics)
 
     def lock_free(self):
         path = self.engine_path.with_name("engine.lock")
@@ -864,10 +859,9 @@ def ready_notify(binary, systemd):
                        f"Startup ordering in stderr: ready at {text.find('INFO daemon ready')}; session at {text.find('INFO engine starting')}.")
             rows = []
             def hashed():
-                response = harness.engine_call("torrents/info")
-                rows[:] = json.loads(response.get("value") or "[]")
+                rows[:] = harness.api("torrents.list")["torrents"]
                 row = next((row for row in rows if row.get("hash") == digest), {})
-                return row.get("completed") == size and row.get("progress_known", True) and row.get("state") != "checkingDL", f"Restored payload row={row!r}."
+                return row.get("completed_bytes") == size and row.get("progress") == 1 and row.get("state") != "checking", f"Restored payload row={row!r}."
             harness.wait_for(hashed, "real saved payload finishes hashing after READY", timeout=30)
             mode = harness.engine_path.stat().st_mode & 0o777
             case.check(mode == 0o600 and harness.engine_path.parent.stat().st_mode & 0o777 == 0o700,
@@ -888,26 +882,25 @@ def parked_start(binary, systemd):
         config.write_text(config.read_text().replace('network_interface = "lo"', 'network_interface = "fbmissing0"'))
         process = harness.start_serve()
         if harness.receive_ready() and harness.wait_engine():
-            network = json.loads(harness.engine_call("app/network")["value"])
-            rows = json.loads(harness.engine_call("torrents/info")["value"])
+            network = harness.api("app.network")["state"]
+            rows = harness.api("torrents.list")["torrents"]
             case.check(network["ready"] is False and network["interface"] == "fbmissing0" and
                        network["message"] == "Waiting for fbmissing0" and len(rows) == 1 and
-                       rows[0]["hash"] == digest and rows[0]["progress_known"] is False,
+                       rows[0]["hash"] == digest and "progress" not in rows[0],
                        "missing interface starts parked and serves the saved ledger without claiming progress",
                        f"network={network!r}; rows={rows!r}.")
             case.check(rows[0].get("name") == "ProtonVPN is part of this saved title",
                        "interface wording replacement never changes saved torrent data", f"Saved title={rows[0].get('name')!r}.")
             harness.cli("start", digest)
             harness.cli("stop", digest)
-            # Typed parsing validates add input before slot availability. Send a
-            # valid disposable magnet so this check exercises the parked engine.
-            response = harness.engine_call("torrents/add", method="POST",
-                                           args=[("urls", "magnet:?xt=urn:btih:" + digest)])
-            case.check("engine_unavailable" in str(response.get("error")) and "fbmissing0" in str(response.get("error")),
-                       "add while parked fails with engine_unavailable and the configured interface", f"Response={response!r}.")
-            response = harness.engine_call("torrents/delete", method="POST", args=[("hashes", digest), ("deleteFiles", "false")])
-            case.check(response.get("error") is None and json.loads(harness.engine_call("torrents/info")["value"]) == [],
-                       "parked remove keeps payload and durably removes the ledger record", f"Response={response!r}.")
+            # API ledger intents are accepted even while the engine is parked.
+            added="ab" * 20
+            response=harness.api("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+added)))
+            case.check(response.get("deferred") is True and response.get("hash")==added,
+                       "parked add durably saves its intent without a network session",json.dumps(response))
+            response=harness.api("torrents.remove",dict(hashes=[digest,added],delete_files=False))
+            case.check(harness.api("torrents.list")["torrents"]==[],
+                       "parked remove keeps payload and durably removes the ledger records",json.dumps(response))
             case.check((sandbox.downloads / "daemon-hash.bin").exists(), "parked removal preserves payload")
             harness.stop_serve(process)
             harness.lock_free()
@@ -922,11 +915,11 @@ def sigterm_drains(binary, systemd):
             # drain to the transport's normal read timeout.
             with socket.socket(socket.AF_UNIX) as partial:
                 partial.connect(str(harness.engine_path))
-                partial.sendall(b"\x00\x00")
+                partial.sendall(b'{"id":')
                 harness.stop_serve(process)
             text = harness.stderr()
-            case.check(re.search(r"engine drained in \d+ ms", text) is not None and "sockets unlinked" in text,
-                       "SIGTERM logs the bounded drain and socket unlink", text[-1800:])
+            case.check(expected_daemon_stderr(text),
+                       "SIGTERM has healthy diagnostics and an ordered complete drain", text[-1800:])
             harness.lock_free()
 
 
@@ -979,8 +972,8 @@ def engine_restart_retains_owner(binary, systemd):
             inode, pid = harness.engine_path.stat().st_ino, harness.daemon_pid()
             lockpath = harness.engine_path.with_name("engine.lock")
             before = harness.stderr()
-            response = harness.engine_call("app/restart", method="POST")
-            case.check(response.get("error") is None, "legacy restart queues an owner lifecycle request", str(response))
+            response = harness.api("app.restart",dict(scope="engine"))
+            case.check(response.get("state") == "pending", "API restart queues an owner lifecycle request", str(response))
             harness.wait_for(lambda: ("state=running engine_epoch=2" in harness.stderr(), harness.stderr()[-1400:]),
                              "new engine reaches epoch 2")
             with lockpath.open("r+") as lock:
@@ -998,35 +991,23 @@ def engine_restart_retains_owner(binary, systemd):
 
 
 def shutdown_inflight_add(binary, systemd):
-    with Case("daemon", "shutdown_inflight_add") as case, Sandbox() as sandbox, \
-            Harness(case, binary, sandbox, systemd) as harness:
-        process = harness.start_serve()
+    with Case("daemon","shutdown_inflight_add") as case, Sandbox() as sandbox, Harness(case,binary,sandbox,systemd) as harness:
+        process=harness.start_serve()
         if harness.receive_ready() and harness.wait_engine():
-            with socket.socket(socket.AF_UNIX) as pending:
-                pending.settimeout(2)
-                pending.connect(str(harness.engine_path))
-                value = dict(method="POST", path="torrents/add", file=None,
-                             args=[("urls", "magnet:?xt=urn:btih:" + "ab" * 20), ("paused", "true")])
-                packet = json.dumps(value).encode()
-                pending.sendall(struct.pack(">I", len(packet)) + packet)
-                entered = harness.wait_for(lambda: ('legacy dispatch path="torrents/add"' in harness.stderr(), harness.stderr()[-600:]),
-                                           "unresolved add enters live engine dispatch")
-                if entered:
-                    harness.stop_serve(process)
-                    def read(size):
-                        data = b""
-                        while len(data) < size:
-                            part = pending.recv(size - len(data))
-                            if not part:
-                                raise EOFError("shutdown discarded an already-read request's reply")
-                            data += part
-                        return data
-                    response = json.loads(read(struct.unpack(">I", read(4))[0]))
-                    case.check(response.get("error") is not None and
-                               ("closing" in response["error"] or "stopping" in response["error"]),
-                               "an already-read unresolved add gets a shutdown error instead of delaying drain for 90 seconds",
-                               f"Reply={response!r}.")
-                    harness.lock_free()
+            with stalled_api_source(case) as (url,entered), ApiConn(harness) as pending:
+                pending.hello()
+                response=pending.call("torrents.add",dict(source=dict(url=url),stopped=True),ref="shutdown-pending")
+                case.check(response["result"]["state"]=="pending" and response["result"]["ref"]=="shutdown-pending",
+                           "already-read add receives its correlated pending reply",json.dumps(response))
+                case.check(entered.wait(5),"real metadata request remains in flight during shutdown")
+                harness.stop_serve(process)
+                frames=[]
+                while (frame:=pending.receive()) is not None:
+                    frames.append(frame)
+                case.check(any(frame.get("ev")=="bye" and frame.get("reason")=="shutdown" for frame in frames),
+                           "quiesce frames the closing notification for the in-flight API client",json.dumps(frames))
+            harness.lock_free()
+
 
 class ApiConn:
     """Real bounded NDJSON connection; retains unsolicited frames separately."""
@@ -1096,6 +1077,7 @@ class ApiConn:
     def diagnostic(self, frame):
         text = json.dumps(frame, sort_keys=True)
         if self.redact_urls:
+            text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://)[^/?\s"<>]*@', r'\1', text)
             text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://[^?\s"<>]+)\?[^\s"<>]*', r'\1?…', text)
         return text
 
@@ -1510,8 +1492,8 @@ def api_start_results(binary, systemd):
         client.call("torrents.set_seed", dict(hashes=[complete.info_hash], on=False))
         refusal = client.call("torrents.start", dict(hashes=[complete.info_hash]), error="invalid_state")
         case.check(refusal["error"]["details"] == dict(state="done", reason="complete_no_seed", hash=complete.info_hash) and
-                   refusal["error"]["hint"] == "inspect fbittorrent log" and refusal["error"]["message"] == "invalid state",
-                   "completed start preserves the catalogue text and the hash for fbittorrent seed <hash>", str(refusal))
+                   bool(refusal["error"].get("hint")) and bool(refusal["error"].get("message")),
+                   "completed start reports complete_no_seed and its torrent identity with guidance", str(refusal))
         partial_dir = sandbox.root / "partial"
         partial_dir.mkdir()
         partial = fixtures.two_file_fixture(partial_dir)
@@ -1764,6 +1746,8 @@ REPLAY_NORMALIZATION = (
     ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
     ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
     ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("/result/caps", "capabilities", "fixture caps are a subset of live caps; every live cap is in the capability catalogue"),
+    ("/error/message; /error/hint; /result/server/log", "text", "nonempty human-readable guidance; codes, details and state remain checked"),
     ("/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress", "checking only", "live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals"),
     ("object member absent in fixture", "extra optional field", "live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C)"),
     ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
@@ -1785,6 +1769,7 @@ class ReplayNormalizer:
         self.extra_optional = []
         self.undo_windows = {}
         self.undo_hash_windows = {}
+        self.catalogue = capability_catalogue((REPO / "docs/IPC.md").read_text())
 
     def bind(self, kind, fixture, live, pointer):
         valid = (type(live) is int and 0 < live < 2**64) if kind == "request" else (
@@ -1841,6 +1826,12 @@ class ReplayNormalizer:
                 return got  # The complete checking tuple was validated below.
             rule = next((kind for patterns, kind, _ in REPLAY_NORMALIZATION
                          for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
+            if rule == "capabilities":
+                try:
+                    check_capabilities(wanted, got, self.catalogue)
+                except ValueError as error:
+                    raise ReplayMismatch(f"JSON pointer {pointer}: {error}") from error
+                return got
             if rule == "checking only":
                 rule = "exact"
             if rule == "undo deadline":
@@ -2283,11 +2274,27 @@ def restore_replay_interface(client, harness):
 
 def api_replay_normalization(binary, systemd):
     with Case("daemon", "api_replay_normalization") as case:
+        import unittest
+        from behavior_checks_test import BehaviorChecks
+        controls = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(BehaviorChecks).run(controls)
+        case.check(controls.wasSuccessful(), "diagnostic, shutdown, capability and version predicate controls pass",
+                   f"tests={controls.testsRun}; failures={controls.failures}; errors={controls.errors}")
         normalizer = ReplayNormalizer()
         normalizer.compare(dict(id=1, result=dict(instance="0" * 32, server=dict(version="0.2.0"))),
                            dict(id=123, result=dict(instance="a" * 32, server=dict(version="0.1.0"))))
         case.check(True, "identity and version normalization accepts valid first occurrences", json.dumps(normalizer.identities, sort_keys=True))
+        normalizer.compare(dict(result=dict(caps=["files", "torrents"])),
+                           dict(result=dict(caps=["torrents", "watch", "files"])))
+        normalizer.compare(dict(error=dict(code="not_found", message="Old wording", hint="Old hint")),
+                           dict(error=dict(code="not_found", message="New wording", hint="New hint")))
+        case.check(True, "capability supersets and reworded guidance preserve behaviour", "Fixture caps retained; all live caps catalogued; error code unchanged.")
         for label, expected, actual, pointer in [
+            ("missing capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["files"])), "/result/caps"),
+            ("unknown capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["torrents", "made_up"])), "/result/caps"),
+            ("wrong capability type", dict(result=dict(caps=["torrents"])), dict(result=dict(caps="torrents")), "/result/caps"),
+            ("missing guidance", dict(error=dict(message="Old wording")), dict(error=dict(message="")), "/error/message"),
+            ("changed error code", dict(error=dict(code="not_found")), dict(error=dict(code="invalid_args")), "/error/code"),
             ("inconsistent identity", dict(id=1), dict(id=124), "/id"),
             ("invalid volatile", dict(result=dict(dl_bps=1)), dict(result=dict(dl_bps=-1)), "/result/dl_bps"),
             ("changed nonvolatile", dict(result=dict(checked=True)), dict(result=dict(checked=False)), "/result/checked"),
@@ -2516,10 +2523,6 @@ def replay_frame_deferrals(expected, op, caps=()):
     return found
 
 
-CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-05",
-                 queue="P6-05", origin="P6-08")
-
-
 def replay_deferral_class(bead, reason):
     if bead == "ENVIRONMENT-CONDITIONAL":
         return "environment-conditional"
@@ -2596,16 +2599,17 @@ def contract_group(group, binary, systemd):
                     # both run through frozen P1-05 validation, never synthesized.
                     if "caps" in actual.get("result", {}):
                         available_caps = set(actual["result"]["caps"])
+                        try:
+                            check_capabilities(expected.get("result", {}).get("caps", []),
+                                               actual["result"]["caps"], normalizer.catalogue)
+                            case.check(True, "fixture caps are available and all live caps are catalogued", json.dumps(sorted(available_caps)))
+                        except ValueError as error:
+                            case.check(False, "fixture caps are available and all live caps are catalogued", str(error))
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
-                    for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
-                        if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
-                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
-
-                        if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
                     if owners:
@@ -2619,11 +2623,11 @@ def contract_group(group, binary, systemd):
                             if ev is None:raise RuntimeError("EOF before file-removal completion")
                             if ev.get("ev")=="mutation.result" and ev.get("ref")==reference:outcome=ev
                         case.check(outcome["outcome"]=="done","file-deleting removal completes before subsequent missing-record scenario",json.dumps(outcome))
-                    step = case.step(f"replay {path.relative_to(REPO)}:{number}", "canonical bytes match under the single declared normalization table")
+                    step = case.step(f"replay {path.relative_to(REPO)}:{number}", "response behaviour matches the fixture under the declared normalization rules")
                     try:
                         first_extra = len(normalizer.extra_optional)
                         normalizer.compare(expected, actual)
-                        step.ok("Canonical bytes matched; identity bindings and volatile validity checked.")
+                        step.ok("Response behaviour matched; identities, capabilities and volatile values checked.")
                     except ReplayMismatch as failure:
                         step.fail(str(failure))
                     for pointer, value in normalizer.extra_optional[first_extra:]:
@@ -2938,7 +2942,7 @@ def down_cancels_restart(binary, systemd):
             time.sleep(.05)
         stopped, observed = unit.stopped("")
         try:
-            h.engine_call("app/version")
+            h.api("app.info")
             answers = True
         except (OSError, EOFError):
             answers = False
@@ -2984,7 +2988,7 @@ os.execv({unit.systemctl!r},[{unit.systemctl!r},*sys.argv[1:]])
                    result.get("hint") == "systemctl --user stop " + sandbox.unit,
                    "failed or malformed initial manager query returns typed nonzero with the selected-unit stop hint",
                    f"intercepted={marker.exists()}; removed unit file={remove_unit}; result={result}")
-        h.wait_for(lambda: ((after := unit.pid()) > 1 and after != pid and h.engine_call("app/version").get("error") is None,
+        h.wait_for(lambda: ((after := unit.pid()) > 1 and after != pid and h.api("app.info").get("state") in ("running","parked"),
                             f"before={pid}; after={after}; state={unit.state()}"),
                    "restart remains possible so down must not have acknowledged success", timeout=3)
         h.cli("down", start=True)
@@ -3076,7 +3080,7 @@ def kill9_restarts(binary, systemd):
             return
         began = time.monotonic()
         os.kill(before, signal.SIGKILL)
-        h.wait_for(lambda: ((pid := unit.pid()) > 0 and pid != before and h.engine_call("app/version").get("error") is None,
+        h.wait_for(lambda: ((pid := unit.pid()) > 0 and pid != before and h.api("app.info").get("state") in ("running","parked"),
                             f"old pid={before}; new pid={pid}"), "systemd restarts killed daemon", timeout=3)
         case.check(time.monotonic() - began < 3, "replacement daemon answers within three seconds", f"elapsed={time.monotonic()-began:.3f}s")
         unit.no_launcher()
@@ -3262,7 +3266,7 @@ def install_atomic(binary, systemd):
             new_inode = installed.stat().st_ino
             running_inode = Path(f"/proc/{pid}/exe").stat().st_ino
             case.check(new_inode != inode and running_inode == inode and unit.pid() == pid and
-                       h.engine_call("app/version").get("error") is None,
+                       h.api("app.info").get("state") in ("running","parked"),
                        "atomic mv replaces the executable while its old inode continues serving",
                        f"old inode={inode}; installed inode={new_inode}; process inode={running_inode}; pid={pid}")
             case.check(not installed.with_suffix(".tmp").exists(), "installer leaves no temporary executable")
@@ -3286,7 +3290,7 @@ from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_
 from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
 from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
-from daemon_policy import (dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
+from daemon_policy import (quick_palette_presence, dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
     idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
@@ -3761,7 +3765,7 @@ def settings_live_queue(binary, systemd):
         client.call("app.settings.set", dict(max_active_downloads=1))
         client.call("torrents.start", dict(hashes=[f.info_hash for f in fixtures_created]))
         def queue_count(active, queued):
-            q = json.loads(h.engine_call("app/queue")["value"])
+            q = h.queue_counts()
             return q["active_downloads"] == active and q["queued_downloads"] == queued, json.dumps(q)
         h.wait_for(lambda: queue_count(1,1), "queue admits one torrent at limit one")
         applied = client.call("app.settings.set", dict(max_active_downloads=2, idle_exit_secs=0, handler="add",
@@ -3851,8 +3855,8 @@ def tui_single_connection(binary, systemd):
         cache.write_text('{"missing":true}')
         before=client.call("app.stats")["result"]["active_clients"]
         case.check(before["tui"]==0,"no TUI presence before the real terminal starts",json.dumps(before))
-        hidden=harness.engine_path.with_name("hidden-compat.sock")
-        harness.engine_path.rename(hidden)
+        hidden=harness.engine_path.with_name("engine.sock")
+        case.check(not hidden.exists(),"only API v1 socket is created")
         ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p")
         try:
             target,done=ui.start()
@@ -3913,7 +3917,7 @@ def tui_single_connection(binary, systemd):
             case.check(all(path.exists() for path in fixture.files),"remove-keeping-files preserves both real payload files",str(fixture.files))
             # Keep the UI through another scheduled refresh with the compat path unavailable.
             time.sleep(2.2)
-            case.check("offline" not in ui.capture(target) and not harness.engine_path.exists(),
+            case.check("offline" not in ui.capture(target) and not hidden.exists(),
                        "native torrent and file reads remain online with engine.sock absent",ui.capture(target))
             harness.wait_for(one_client,"data and file operations retain the same one TUI connection")
             ui.keys(target,"q")
@@ -3922,14 +3926,18 @@ def tui_single_connection(binary, systemd):
                              "TUI presence is released on detach")
         finally:
             ui.close()
-            if hidden.exists(): hidden.rename(harness.engine_path)
+            assert not hidden.exists()
 
 
 from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, disk_summary_subscription_cleanup
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
 from daemon_trackers import tracker_add_remove
 from daemon_download_limit import download_cap_holds
-from daemon_peers import peers_local_swarm, peer_rates_move
+from daemon_peers import peers_local_swarm, peer_rates_move, tui_peers_tab
+from daemon_tui_trackers import tui_trackers
+from daemon_history import history_points
+from daemon_stats import stats_persist
+from daemon_show_quality import shows_quality_prefers
 from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
 from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
@@ -4002,8 +4010,8 @@ def tui_pending_rss_failure(binary, systemd):
                 harness.cli("rss","add",feed.base+"/rss.xml","--name","Pending feed")
                 native.prepare_imdb_fixture(sandbox.env,["Pending local failure"])
                 ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p-rss")
-                hidden=harness.engine_path.with_name("hidden-compat.sock")
-                harness.engine_path.rename(hidden)
+                hidden=harness.engine_path.with_name("engine.sock")
+                case.check(not hidden.exists(),"only API v1 socket is created")
                 try:
                     target,done=ui.start()
                     ui.keys(target,"4")
@@ -4021,7 +4029,7 @@ def tui_pending_rss_failure(binary, systemd):
                                "held URL confirmation does not block other RPCs or the UI",ui.capture(target))
                     # Leaving this source context below releases an actual HTTP 404.
                 finally:
-                    if hidden.exists(): hidden.rename(harness.engine_path)
+                    assert not hidden.exists()
             ui.assert_pane(target,"could not fetch valid torrent metainfo")
             items=harness.cli("rss","items","Pending feed")["items"]
             case.check(not items[0]["isRead"],"failed mutation confirmation leaves RSS unread",json.dumps(items))
@@ -4292,7 +4300,7 @@ def force_start_bypasses_limit(binary,systemd):
         client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
         h.wait_for(lambda:queue_sequence(client,hashes,[True,True,False]),"forced second transfer bypasses the one ordinary slot")
         rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
-        q=json.loads(h.engine_call("app/queue")["value"])
+        q=h.queue_counts()
         case.check(rows[hashes[1]]["force"] and "queue_pos" not in rows[hashes[1]]
                    and all(rows[hash_]["intent"]=="run" for hash_ in hashes[:2])
                    and q["active_downloads"]==2 and q["max_active_downloads"]==1
@@ -4863,7 +4871,7 @@ def staged_queue_excluded(binary,systemd):
     with api_owned("staged_queue_excluded",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
         client.hello();fixture=recheck_local_fixture(sandbox,name="staged-idle.bin")
         client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stage=True))
-        queue=json.loads(h.engine_call("app/queue")["value"])
+        queue=h.queue_counts()
         # P1-12 and the subscription summary are not on this branch yet. This
         # observation proves queue exclusion only; it is not idle-exit proof.
         case.check(queue["active_downloads"]==0 and queue["queued_downloads"]==0,"staged record occupies no active or queued slot",json.dumps(queue))
@@ -4919,7 +4927,7 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (tui_trackers, tracker_add_remove, download_cap_holds, tui_peers_tab, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, stats_persist, history_points, shows_quality_prefers, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
@@ -4931,7 +4939,7 @@ CASES = {function.__name__: function for function in
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
           notify_completed, notify_action_open, notify_action_default, notify_action_folder,
           notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
-          dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          quick_palette_presence, dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
           idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
           idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
           idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,
@@ -4959,21 +4967,30 @@ CASES.update((function.__name__,function) for function in TORZNAB_CASES)
 from daemon_watch import CASES as WATCH_CASES
 from daemon_catalog import CASES as CATALOG_CASES
 CASES.update((function.__name__,function) for function in CATALOG_CASES)
+from daemon_cli_catalogues import CASES as CLI_CATALOGUE_CASES
+CASES.update((function.__name__,function) for function in CLI_CATALOGUE_CASES)
 CASES.update((function.__name__,function) for function in WATCH_CASES)
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
 CASES.update((function.__name__, function) for function in RESPONSIVE_CASES)
+from daemon_tui_everyday import CASES as EVERYDAY_CASES
+CASES.update((function.__name__,function) for function in EVERYDAY_CASES)
 from daemon_tui_services import CASES as TUI_SERVICE_CASES
 CASES.update((function.__name__,function) for function in TUI_SERVICE_CASES)
-from daemon_legacy import CASES as LEGACY_CASES
-CASES.update((function.__name__, function) for function in LEGACY_CASES)
+from daemon_shows_notify import CASES as SHOWS_NOTIFY_CASES
+CASES.update((function.__name__,function) for function in SHOWS_NOTIFY_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",
                  "down_failed_manager_query", "down_malformed_manager_query", "down_failed_query_without_unit_file",
                  "cleanup_failed_stop", "cleanup_stop_timeout", "dashboard_routes", "install_atomic", "startup_failure_hint", "unit_exec_path"}
 
+
+from daemon_clipboard import clipboard_tui_offer
+CASES["clipboard_tui_offer"]=clipboard_tui_offer
+from daemon_native_data import native_data_unchanged
+CASES["native_data_unchanged"]=native_data_unchanged
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

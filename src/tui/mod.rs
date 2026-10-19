@@ -35,6 +35,18 @@ mod modals_details;
 mod modals_pieces;
 use modals_pieces::*;
 use modals_details::*;
+#[path = "modals/peers.rs"]
+mod modals_peers;
+#[path = "modals/trackers.rs"]
+mod modals_trackers;
+#[path = "modals/tracker_edit.rs"]
+mod tracker_edit;
+#[cfg(test)]
+#[path = "tests/trackers.rs"]
+mod tracker_tests;
+#[cfg(test)]
+#[path = "tests/peers.rs"]
+mod peer_tests;
 #[path = "modals/poster.rs"]
 mod modals_poster;
 #[path = "modals/providers.rs"]
@@ -56,6 +68,13 @@ use mouse::*;
 mod layout;
 use layout::*;
 mod footer;
+mod clipboard;
+mod everyday;
+#[cfg(test)]
+#[path="tests/everyday.rs"] mod everyday_tests;
+mod release_sort;
+#[cfg(test)]
+#[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
 mod text;
 use text::*;
@@ -67,6 +86,13 @@ mod format;
 mod palette;
 mod feedback;
 mod limits;
+mod statistics;
+#[cfg(test)]
+#[path="tests/statistics.rs"]
+mod statistics_tests;
+#[cfg(test)]
+#[path="tests/history.rs"]
+mod history_tests;
 #[cfg(test)]
 #[path="tests/limits.rs"]
 mod limit_tests;
@@ -79,6 +105,9 @@ mod disk_tests;
 #[cfg(test)]
 #[path="tests/port.rs"]
 mod port_tests;
+#[cfg(test)]
+#[path="tests/rename.rs"]
+mod rename_tests;
 #[cfg(test)]
 #[path="tests/log.rs"]
 mod log_tests;
@@ -121,10 +150,8 @@ impl Model for TuiApp {
             }
         }
         self.rss_loaded = true;
-        let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
-        let mut cmds = vec![self.subscribe_ui(),first, self.load_plugins(), self.load_ratings()];
-        if !self.cfg.native(){cmds.push(self.load_rss());cmds.push(self.refresh_shows(false));}
-        Cmd::batch(cmds)
+        let first=if self.presence.is_none() {self.start_daemon()} else {self.poll()};
+        Cmd::batch(vec![self.subscribe_ui(),first,self.load_plugins()])
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Msg>>> {
@@ -132,12 +159,6 @@ impl Model for TuiApp {
             Box::new(Every::with_id(2, Duration::from_millis(300), || Msg::Hover)),
         ];
         if let Some(connection)=self.presence.as_ref().filter(|connection|connection.alive()) {v.push(Box::new(remote::ApiSub {connection:connection.clone()}));}
-        if let Some((id, q)) = self.search_sub.as_ref().filter(|_|!self.cfg.native()) {
-            v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone(),presence:self.presence.clone() }));
-        }
-        if !self.cfg.native() && self.rss_retry_until.is_some_and(|until| std::time::Instant::now() < until) && self.feeds.iter().any(|f| f.is_loading) {
-            v.push(Box::new(Every::with_id(3, Duration::from_secs(1), || Msg::RssReload)));
-        }
         v
     }
 
@@ -157,27 +178,24 @@ impl Model for TuiApp {
             }
             Msg::Raw(_) => Cmd::none(),
             Msg::Poll => {
-                self.tick += 1; self.maybe_reload_theme(); self.poll()
+                self.poll()
             }
             Msg::Hover => {
                 if self.acknowledge_signal() { return Cmd::quit(); }
+                self.tick=self.tick.wrapping_add(1);
+                if self.tick % 7 == 0 {self.maybe_reload_theme();}
                 let ttl = if self.status_is_error { 15 } else { 8 };
                 if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); self.status_is_error=false; self.status_success=false; }
                 self.feedback.tick();
                 let recovery=self.recovery_tick();
                 Cmd::batch(vec![recovery,self.on_hover()])
             }
-            Msg::Ids(pairs) => {
-                self.ids_inflight = false;
-                for (n, id) in pairs { self.name_ids.insert(n, id); }
-                // More unresolved rows may have arrived meanwhile.
-                self.resolve_ids()
-            }
-            Msg::Ratings(r) => {
-                match r { Ok(idx) => self.ratings = Some(idx), Err(e) => self.set_status(format!("ratings index: {e}"), true) }
-                Cmd::none()
-            }
             Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
+            Msg::ApiBatch {connection,updates,ack}=>{
+                let commands=updates.into_iter().map(|update|self.api_update(connection,update)).collect();
+                let _=ack.try_send(());
+                Cmd::batch(commands)
+            },
             Msg::ApiRead {connection,result} => {
                 if self.presence.as_ref().map(|active|active.id)!=connection || self.presence.as_ref().is_some_and(|active|!active.alive()) {return Cmd::none();}
                 self.apply_api_read(result)
@@ -186,7 +204,6 @@ impl Model for TuiApp {
                 self.poll_inflight = false;
                 match r {
                     Ok((mut ts, ti)) => {
-                        if !self.cfg.native(){ts.sort_by(|left,right|store::legacy_order(left,right,self.torrent_sort,self.torrent_descending));}
                         self.online = true;
                         self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
@@ -258,7 +275,7 @@ impl Model for TuiApp {
                 if !results.is_empty() || done {
                     let sel_url = self.selected_result().map(|r| r.file_url.clone());
                     let mut rs = dedupe_results(results);
-                    rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
+                    rs.sort_by(|a,b|store::display_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
                     // Best 100 by seeders is all anyone reads; dedupe first so the cap
                     // is not spent on the same torrent from five providers.
                     rs.truncate(MAX_RESULTS);
@@ -270,7 +287,7 @@ impl Model for TuiApp {
                         _ => {}
                     }
                     drop(st);
-                    if !done { return self.resolve_ids(); }
+                    if !done { return Cmd::none(); }
                 }
                 if done {
                     self.search_running = false;
@@ -280,7 +297,7 @@ impl Model for TuiApp {
                         Some(error) => self.set_status(format!("{n} results · some providers failed: {error}"), true),
                         None => self.set_status(format!("{n} result{}", if n == 1 { "" } else { "s" }), false),
                     }
-                    return self.resolve_ids();
+                    return Cmd::none();
                 }
                 Cmd::none()
             }
@@ -288,7 +305,6 @@ impl Model for TuiApp {
                 self.browse_loading = None;
                 match r {
                     Ok(mut rs) => {
-                        if !self.cfg.native(){rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));}
                         self.search_sub = None; self.search_running = false;
                         let n = rs.len();
                         self.search_results = rs;
@@ -343,64 +359,10 @@ impl Model for TuiApp {
                 }
                 Cmd::none()
             }
-            Msg::Episodes(imdb, r) => {
-                let selected_key = self.selected_episode().filter(|(s, _)| s.imdb == imdb).map(|(_, e)| e.key.clone());
-                self.shows_refreshing.remove(&imdb);
-                let Some(s) = self.shows.get_mut(&imdb) else { return Cmd::none() };
-                match r {
-                    Ok(check) => {
-                        let had_any = !s.episodes.is_empty();
-                        let fresh = s.apply_check(check);
-                        let title = s.title.clone();
-                        if self.show_list.borrow().selected() != Some(0) {
-                            if let Some(key) = selected_key { self.ep_list.borrow_mut().select(s.episodes.iter().position(|e| e.key == key)); }
-                        }
-                        self.rebuild_inbox();
-                        self.save_shows();
-                        if fresh > 0 && had_any { self.set_status(format!("{title}: {fresh} new episode(s)"), false); }
-                        else if self.shows_refreshing.is_empty() {
-                            let warnings = self.shows.shows.iter().filter(|s| s.error.is_some() || !s.catalogue_complete).count();
-                            self.set_status(format!("shows checked · {} unread{}", self.shows.new_total(), if warnings > 0 { format!(" · {warnings} source warning(s)") } else { String::new() }), warnings > 0);
-                        }
-                    }
-                    Err(e) => { s.error = Some(e.clone()); self.save_shows(); self.set_status(format!("{}: {e}", short(&imdb, 12)), true); }
-                }
-                Cmd::none()
-            }
-            Msg::Followed(r) => {
-                match r {
-                    Ok(t) => {
-                        let added = self.shows.follow(&t);
-                        let label = match t.year { Some(y) => format!("{} ({y})", t.name), None => t.name.clone() };
-                        if let Some(i) = self.shows.shows.iter().position(|s| s.imdb == t.id) { self.select_show_parent(i + 1); }
-                        self.ep_list.borrow_mut().select(None);
-                        self.rebuild_inbox();
-                        if self.save_shows() { self.set_success(if added { format!("following {label}") } else { format!("already following {label}") }); }
-                        if added { return self.refresh_show(t.id); }
-                    }
-                    Err(e) => self.set_status(format!("follow: {e}"), true),
-                }
-                Cmd::none()
-            }
             Msg::ShowFilterRead {connection,revision,result}=>self.show_filter_read(connection,revision,result),
-            Msg::ShowGrab { imdb, episode, result } => {
-                self.show_grabbing.remove(&format!("{imdb}:{}", episode.key));
-                match result {
-                    Ok(()) => {
-                        if let Some(show) = self.shows.get_mut(&imdb) { show.mark_grabbed(&episode.key, &episode.magnet); }
-                        self.rebuild_inbox();
-                        if self.save_shows() {
-                            let title = self.shows.get(&imdb).map(|s| s.title.as_str()).unwrap_or(&imdb);
-                            self.set_success(format!("added {title} {}", episode.key));
-                        }
-                    }
-                    Err(e) => self.set_status(format!("adding {}: {e}", episode.key), true),
-                }
-                self.poll()
-            }
             Msg::TopicsSelected {connection,active,result}=>self.topics_selected(connection,active,result),
+            Msg::Trackers {connection,hash,request,forced,result}=>self.trackers_loaded(connection,hash,request,forced,result),
             Msg::ServiceDone {connection,op,args,label,result}=>self.service_done(connection,op,args,label,result),
-            Msg::RssReload => self.load_rss(),
             Msg::RssAction { revision, label, result, error } => {
                 if revision != self.rss_revision { return Cmd::none(); }
                 self.rss_busy = false;
@@ -414,7 +376,14 @@ impl Model for TuiApp {
                 if revision != self.rss_revision { return Cmd::none(); }
                 self.rss_loading = false;
                 match result {
-                    Ok(feeds) => {
+                    Ok(mut feeds) => {
+                        if self.cfg.native() {
+                            for feed in &mut feeds {
+                                if let Some(row)=self.store.rss_feeds.values().find(|row|row.id==feed.uid||row.url==feed.url) {
+                                    feed.is_loading=row.loading;feed.has_error=row.error.is_some();
+                                }
+                            }
+                        }
                         let sel = self.selected_feed().map(|f| f.name.clone());
                         let article = self.item_list.borrow().selected().and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i))).map(|a| a.id.clone());
                         self.feeds = feeds;
@@ -429,10 +398,6 @@ impl Model for TuiApp {
                         if self.feeds.iter().any(|f| f.is_loading) {
                             if self.rss_retry_until.is_none() { self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45)); }
                         } else { self.rss_retry_until = None; }
-                        if self.rss_initial_refresh_pending {
-                            self.rss_initial_refresh_pending = false;
-                            return self.refresh_rss();
-                        }
                     }
                     Err(e) => self.set_status(e, true),
                 }
@@ -482,7 +447,7 @@ impl Model for TuiApp {
             let inner = block.inner(root[2]);
             block.render(root[2], frame);
             if p.yes_no {
-                Paragraph::new("y / N (default: No)").style(th.accented()).render(inner, frame);
+                Paragraph::new(if matches!(p.kind,PromptKind::ConfirmRemoveTracker{..}) {"[Cancel] · (y) Remove tracker"}else{"y / N (default: No)"}).style(th.accented()).render(inner, frame);
             } else {
                 p.input.render(inner, frame);
             }

@@ -55,6 +55,10 @@ ShellRoot {
       "only idempotent mutation resends same ref with old instance", JSON.stringify(resends))
     check("replay", s.c.actions[destructive].status==="no answer" && resends[0].id>original.id,
       "destructive mutation never replays; request ids increase", JSON.stringify(s.c.actions))
+    s=session();s.hello();var renameRef=s.c.request("torrents.rename",{hash:"a".repeat(40),name:"Personal title"},{mutating:true})
+    length=s.writes.length;s.c.disconnected();s.hello()
+    resends=s.writes.slice(length).map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="torrents.rename"})
+    check("replay",resends.length===1 && resends[0].ref===renameRef && resends[0].args.name==="Personal title","display rename retains its idempotent intent after a dropped reply",JSON.stringify(resends))
     console.log("FBTQS-PASS replay")
     s=session(); s.hello(); s.time.ms=44999; s.c.tick()
     check("silence", s.resets.length===0, "session lives before 45 s silence", s.resets.length)
@@ -144,6 +148,12 @@ ShellRoot {
     s=session();s.hello(["torrents","subscribe"])
     declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
     check("dashboard_presence",!("dashboard_visible" in declarations[0].args),"older strict servers do not receive the additive marker",JSON.stringify(declarations))
+    s=session();s.c.visibility(false,false,[],true);s.hello(["torrents","subscribe","dashboard_presence"])
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",declarations[0].args.overlay_visible===true && declarations[0].args.interactive===true && declarations[0].args.dashboard_visible===false,"palette declares actual visibility independently of dashboard",declarations)
+    s.c.visibility(false,false,[],false)
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",declarations.slice(-1)[0].args.overlay_visible===false && declarations.slice(-1)[0].args.interactive===false,"closing palette clears shared presence",declarations)
     console.log("FBTQS-PASS dashboard_presence")
     Qt.callLater(function() { Quickshell.execDetached(["qs", "kill", "-p", Quickshell.shellPath(".")]) })
   }

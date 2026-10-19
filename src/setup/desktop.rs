@@ -2,12 +2,15 @@
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+#[path="quick.rs"]
+mod quick;
 
 #[derive(Default)]
 pub struct Options {
     pub save: Option<String>,
     pub magnet: bool,
     pub plugin: Option<String>,
+    pub quick: Option<String>,
     pub dry_run: bool,
     pub uninstall: bool,
     pub purge: bool,
@@ -163,6 +166,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
                 super::menu::bar(&existing(&shell)?, true)?.into_bytes(),
             );
         }
+        quick::uninstall(&mut actions,&config)?;
         // MIME defaults are ours only while they name our handler. Never change
         // another application's chosen association during uninstall.
         let mime = config.join("mimeapps.list");
@@ -299,7 +303,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
                 );
             }
         }
-        if let Some(mode) = options.plugin {
+        if let Some(mode) = &options.plugin {
             let source = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("plugin/oliver.torrents")
                 .canonicalize()
@@ -315,7 +319,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
                     if metadata.is_some() {
                         remove(&mut actions, plugin.clone());
                     }
-                    let mut item = action("link", plugin);
+                    let mut item = action("link", plugin.clone());
                     item.args.push(source.display().to_string());
                     actions.push(item);
                 }
@@ -331,7 +335,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             let old = existing(&shell)?;
             let new = super::menu::bar(&old, false)?;
             if old != new {
-                write(&mut actions, shell, new.into_bytes());
+                write(&mut actions, shell.clone(), new.into_bytes());
                 command(
                     &mut actions,
                     "omarchy",
@@ -343,6 +347,10 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
                 menu.clone(),
                 super::menu::edit(&existing(&menu)?, false)?.into_bytes(),
             );
+        }
+        if let Some(chord)=options.quick {
+            anyhow::ensure!(options.plugin.is_some() || plugin.join("manifest.json").is_file(),"install the shared service first: fbittorrent setup --plugin copy --quick");
+            quick::install(&mut actions,&config,options.plugin.as_deref().unwrap_or("copy"),&chord)?;
         }
     }
     if !options.dry_run {

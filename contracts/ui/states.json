@@ -151,5 +151,9 @@
       "missing_files": "files are missing",
       "disk_full": "disk full"
     }
-  }
+  },
+  {"state": "tracker.ok", "qml_glyph": "U+F012C", "text_glyph": "✓", "word": "OK", "short": "OK", "secondary": ""},
+  {"state": "tracker.error", "qml_glyph": "U+F0026", "text_glyph": "!", "word": "Error", "short": "Error", "secondary": ""},
+  {"state": "tracker.updating", "qml_glyph": "U+F04E6", "text_glyph": "⟳", "word": "Updating", "short": "Update", "secondary": ""},
+  {"state": "tracker.not_contacted", "qml_glyph": "U+F0150", "text_glyph": "…", "word": "Not contacted", "short": "Wait", "secondary": ""}
 ]

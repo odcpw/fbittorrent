@@ -1,0 +1,30 @@
+[ 1 Torren╭ The Diplomat S04E01 1080p WEB-DL H264-GROUP ─────────────────────────────────────────────────────╮1.0 KiB/s
+╭ Torrents│ Overview  Files  Peers  [Trackers]  Log    [ / ] tabs                                            │─────────╮
+│  STATE  │                                                                                                  │ETA PEERS│
+│▌ ↓ Down │ URL                                                             STATUS               LAST  PEERS │ 4m     3│
+│  ✓ Done │ http://127.0.0.1:42001/announce                                 ! Error          just now      — │         │
+│  ◌ Meta │ fixture: not yet http://127.0.0.1:42001/announce                                                 │        3│
+│         │ https://long-tracker.invalid/a-very-long-tracker-path/announce  ✓ OK             just now      1 │         │
+│         │ udp://unsupported.invalid/announce                              …Not contacted   just now      — │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+│         │                                                                                                  │         │
+╰─────────╰──────────────────────────────────────────────────────────────────────────────────────────────────╯─────────╯
+          [Details] (Esc) Back  (e) Reannounce  (o) Open  (p) Pause  (u) Seed on  (d) Remove …        (?) Help
+          Trackers refreshed

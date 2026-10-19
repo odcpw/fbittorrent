@@ -9,7 +9,9 @@ Item {
   required property var column
   property string pendingText:""
   property bool failed:false
-  readonly property bool unknown:value()==="—"
+  objectName:column.name==="peers" ? "connected-peer-count" : ""
+  readonly property string renderedText:label.text
+  readonly property bool unknown:value()==="—" || value()==="—/—"
   function value() {
     var t=torrent
     switch(column.name) {
@@ -20,7 +22,7 @@ Item {
       case "down":return Model.rate(t.dl_bps,true)
       case "up":return Model.rate(t.ul_bps,true)
       case "eta":return Model.eta(t.eta_s,true)
-      case "peers":return Model.count(t.peers)
+      case "peers":return Model.peerCount(t,true)
       case "ratio":return t.ratio===null || t.ratio===undefined ? "—" : Number(t.ratio).toFixed(2)
       case "added":return Model.when(t.added_at).replace(/ today$/,"")
     }
@@ -61,11 +63,11 @@ Item {
   HoverHandler {id:hover}
   Loader {
     anchors.fill:parent
-    active:hover.hovered && root.column.name==="name"
+    active:hover.hovered && (root.column.name==="name" || root.column.name==="peers")
     sourceComponent:FullTextTip {
       parent:root
       visible:true
-      text:root.torrent.name+"\n"+Model.stateLabel(root.torrent)+" · "+Model.size(root.torrent.size,false)+"\n↓ "+Model.rate(root.torrent.dl_bps,false)+" · ↑ "+Model.rate(root.torrent.ul_bps,false)+" · "+Model.eta(root.torrent.eta_s,false)+"\nPeers "+Model.count(root.torrent.peers)+" · Ratio "+(root.torrent.ratio===undefined || root.torrent.ratio===null ? "—" : Number(root.torrent.ratio).toFixed(2))+"\nAdded "+Model.when(root.torrent.added_at)
+      text:root.column.name==="peers" ? Model.peerCount(root.torrent,false) : root.torrent.name+"\n"+Model.stateLabel(root.torrent)+" · "+Model.size(root.torrent.size,false)+"\n↓ "+Model.rate(root.torrent.dl_bps,false)+" · ↑ "+Model.rate(root.torrent.ul_bps,false)+" · "+Model.eta(root.torrent.eta_s,false)+"\n"+Model.peerCount(root.torrent,false)+" · Ratio "+(root.torrent.ratio===undefined || root.torrent.ratio===null ? "—" : Number(root.torrent.ratio).toFixed(2))+"\nAdded "+Model.when(root.torrent.added_at)
     }
   }
 }

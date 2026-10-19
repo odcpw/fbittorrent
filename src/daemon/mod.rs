@@ -12,6 +12,8 @@ pub(crate) mod rss;
 pub(crate) mod shows;
 pub(crate) mod staged_sources;
 pub(crate) mod watch;
+pub(crate) mod history;
+pub(crate) mod stats;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -44,6 +46,7 @@ pub struct Daemon {
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
+    event_bus: Mutex<std::sync::Weak<crate::api::bus::Bus>>,
     pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) logs: Arc<log::Ring>,
     resume: Arc<engine::resume::Store>,
@@ -53,6 +56,8 @@ pub struct Daemon {
     pub(crate) shows: shows::Service,
     pub(crate) staged_sources: staged_sources::Registry,
     pub(crate) peers: crate::api::peers::Sampler,
+    pub(crate) history: Mutex<history::History>,
+    pub(crate) stats: Mutex<stats::Stats>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
@@ -62,6 +67,14 @@ pub struct Daemon {
 }
 
 impl Daemon {
+    pub(crate) fn statistics(&self)->(crate::api::SessionTotals,crate::api::AllTimeTotals) {
+        let slot=self.slot.read().unwrap_or_else(|e|e.into_inner());
+        let mut stats=self.stats.lock().unwrap();
+        if let Slot::Running(app)=&slot.slot {stats.observe(slot.engine_epoch,app.dispatcher().transfer_totals());}
+        if let Err(error)=stats.save(Instant::now(),false){eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        (stats.session.clone(),stats.all_time.clone())
+    }
+
     pub(crate) fn idle_exit_secs(&self) -> u64 {
         self.policy.lock().unwrap().seconds()
     }
@@ -164,60 +177,6 @@ impl Daemon {
         .into()
     }
 
-    fn dispatch(&self, request: &ipc::Request) -> Result<String> {
-        if self.stopping.load(Ordering::Acquire) {
-            return Err(Self::unavailable(State::Stopping));
-        }
-        let op = crate::api::legacy::parse(request)?;
-        let network = self.network.read().unwrap().clone();
-        if let Some(result) = crate::api::legacy::control(&op, &network, &self.lifecycle) {
-            return result;
-        }
-        let _activity = (request.method != "GET")
-            .then(|| policy::Mutation::start(self.policy.clone()));
-        let began = Instant::now();
-        loop {
-            let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
-            if self.stopping.load(Ordering::Acquire) {
-                return Err(Self::unavailable(State::Stopping));
-            }
-            match &slot.slot {
-                Slot::Starting => {
-                    if began.elapsed() >= Duration::from_secs(60) {
-                        return Err(Self::unavailable(State::Starting));
-                    }
-                }
-                Slot::Running(app) => {
-                    eprintln!(
-                        "DEBUG api legacy dispatch path={:?}",
-                        request.path.chars().take(80).collect::<String>()
-                    );
-                    return crate::api::legacy::running(&app.dispatcher(), op).map_err(|error| {
-                        if app.is_quiescing() {
-                            Self::unavailable(if self.stopping.load(Ordering::Acquire) {
-                                State::Stopping
-                            } else {
-                                State::Starting
-                            })
-                        } else {
-                            error
-                        }
-                    });
-                }
-                Slot::Parked(ledger) => {
-                    let interface = network
-                        .interface
-                        .as_deref()
-                        .unwrap_or("configured interface");
-                    return crate::api::legacy::parked(ledger, op, interface);
-                }
-                Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
-            }
-            drop(slot);
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
     fn replace(&self, next: Slot) -> Result<Slot> {
         // Running handlers hold read guards. Cancellation makes their existing
         // engine dispatch select return before we wait for exclusive ownership.
@@ -230,12 +189,22 @@ impl Daemon {
             app.quiesce();
         }
         let mut slot = self.slot.write().unwrap_or_else(|error| error.into_inner());
-        let old = slot.replace(next)?;
+        let old_epoch=slot.engine_epoch;
+        let initialized=old_epoch>0;
+        let mut old=slot.replace(next)?;
         eprintln!(
             "INFO engine state changed state={} engine_epoch={}",
             slot.slot.state().name(),
             slot.engine_epoch
         );
+        let (epoch,state)=(slot.engine_epoch,slot.slot.state().name());
+        drop(slot);
+        // Record transitions at their source: a fast restart can finish between sampler ticks.
+        if initialized {if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){bus.engine_changed(epoch,state);}}
+        if let Slot::Running(app)=&mut old {
+            app.drain(Duration::from_secs(4));
+            self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
+        }
         Ok(old)
     }
 }
@@ -278,7 +247,6 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
         );
-        engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
     daemon.notifier.enabled(cfg.notify && !daemon.no_notify);
@@ -403,12 +371,15 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
+        event_bus: Mutex::default(),
         inhibitor: inhibit::Inhibitor::new()?,
         clipboard: clipboard::Watcher::new()?,
         rss: rss::Service::new()?,
         shows: shows::Service::new()?,
         staged_sources: Default::default(),
         peers: Default::default(),
+        history: Default::default(),
+        stats: Mutex::new(stats::Stats::open(stats::path(),Instant::now())?),
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),
@@ -419,9 +390,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
-    let dispatch = daemon.clone();
-    let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
+    *daemon.event_bus.lock().unwrap()=api.event_bus();
     let rss_bus=api.event_bus();
     daemon.shows.set_bus(api.event_bus());
     daemon.rss.set_waker(Arc::new(move || {if let Some(bus)=rss_bus.upgrade(){bus.refresh();}}));
@@ -460,7 +430,6 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
-    server.stop_accepting();
     api.stop_accepting();
     daemon.search.shutdown();
     let began = Instant::now();
@@ -478,6 +447,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         "INFO daemon slot released elapsed_ms={}",
         began.elapsed().as_millis()
     );
+    let stats_saved=daemon.stats.lock().unwrap().save(Instant::now(),true);
     let drain_reason = if panicked.load(Ordering::Acquire) {
         StopReason::Panic
     } else {
@@ -492,7 +462,6 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     else if let Err(error)=daemon.resume.preserve_parked_clean() {eprintln!("WARN resume parked clean marker unavailable error={error:?}");}
     api.drain(drain_reason);
     drop(api);
-    drop(server);
     eprintln!("INFO daemon sockets unlinked");
     drop(lock);
     if let Err(error) = notify.send("STOPPING=1") {
@@ -505,6 +474,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     };
     drop(hook);
     let reason = reason?;
+    if let Err(error)=stats_saved {
+        eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
+        if reason!=StopReason::Panic {return Err(error);}
+    }
     eprintln!(
         "INFO daemon stopped reason={reason:?} code={}",
         reason.exit_code()

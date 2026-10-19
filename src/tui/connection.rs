@@ -10,7 +10,7 @@ pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     // This guard owns only UI cleanup, never an engine or the instance lock.
     let _terminal=signals::AppGuard::new(());
     let native=cfg.native();
-    let mut model = TuiApp::new(cfg, screen, if native {Shows::default()}else{Shows::load()?});
+    let mut model = TuiApp::new(cfg, screen, Shows::default());
     if let Some(connection)=existing {
         model.recovery.connected(&connection.hello.server.version,env!("CARGO_PKG_VERSION"));
         model.store.hello(connection.hello.clone());
@@ -48,31 +48,23 @@ impl TuiApp {
     pub(super) fn poll(&mut self) -> Cmd<Msg> {
         if self.poll_inflight { return Cmd::none(); }
         self.poll_inflight = true;
-        let mut cfg = self.cfg.clone();
-        if cfg.native() { cfg.timeout_secs=1; }
         let presence = self.presence.clone();
         Cmd::task(move || {
-            if cfg.native() {
-                let identity=presence.as_ref().map(|connection|connection.id);
-                let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection| {
-                    anyhow::ensure!(connection.alive(),"fbittorrent stopped");remote::read(&connection)
-                });
-                return Msg::ApiRead {connection:identity,result:result.map_err(|error|error.to_string())};
-            }
-            let c = Client::from_config(&cfg, presence.clone());
-            let r = c.login().and_then(|_| Ok((c.torrents()?, c.transfer_info()?)));
-            Msg::Torrents(r.map_err(|e| e.to_string()))
+            let identity=presence.as_ref().map(|connection|connection.id);
+            let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection| {
+                anyhow::ensure!(connection.alive(),"fbittorrent stopped");remote::read(&connection)
+            });
+            Msg::ApiRead {connection:identity,result:result.map_err(|error|error.to_string())}
         })
     }
 
     pub(super) fn action<F>(&self, label: impl Into<String>, f: F) -> Cmd<Msg>
     where F: FnOnce(&Client) -> anyhow::Result<()> + Send + 'static {
-        let cfg = self.cfg.clone();
         let presence = self.presence.clone();
         let label = label.into();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg, presence.clone());
-            match c.login().and_then(|_| f(&c)) {
+            let c = Client::new(presence);
+            match f(&c) {
                 Ok(()) => Msg::ActionDone(Ok(label)),
                 Err(e) => Msg::ActionDone(Err(e.to_string())),
             }

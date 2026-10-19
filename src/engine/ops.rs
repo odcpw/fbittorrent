@@ -1,8 +1,6 @@
-//! Typed engine operations; legacy route parsing lives at the transport boundary.
+//! Typed operations executed by the engine.
 use super::*;
-mod parser;
 mod types;
-pub use parser::{Route, LEGACY_ROUTES};
 pub use types::*;
 
 impl EngineDispatcher {
@@ -42,14 +40,6 @@ impl EngineDispatcher {
             Ok(bytes)
         })
     }
-    /// Legacy compatibility entry point. All execution below takes typed data.
-    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
-        match EngineOp::parse(&request.path, request) {
-            Ok(Some(op)) => Some(self.execute(op).and_then(|result| result.to_legacy_json())),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        }
-    }
     pub fn execute(&self, op: EngineOp) -> Result<EngineResult> {
         op.validate()?;
         if self.inner.stopping.load(Ordering::Acquire) {
@@ -80,6 +70,7 @@ impl EngineDispatcher {
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             return self.staged_operation(cx, op).await;
         }
+        if let EngineOp::Rename {hash,name}=&op {self.rename(cx,hash,name).await?;return Ok(EngineResult::Acknowledged);}
         if let EngineOp::EditTracker {hash,url,add} = &op {
             self.edit_tracker(cx,hash,url,*add).await?;
             return Ok(EngineResult::Acknowledged);
@@ -167,7 +158,7 @@ impl EngineDispatcher {
                 let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
                 let record = ledger.records.iter().find(|record| &record.hash == hash)
                     .context("torrent record not found")?;
-                torrent.name = record.name.clone();
+                torrent.name = record.display_name.as_ref().unwrap_or(&record.name).clone();
                 let bytes = if let Some(metadata) = self.inner.handle(hash).ok().and_then(|handle|handle.metadata.load_full()) {
                     Some(metadata.torrent_bytes.to_vec())
                 } else {
@@ -251,6 +242,7 @@ impl EngineDispatcher {
                 }
                 let only_files = magnet.get_select_only();
                 let record = Record {
+                    display_name:None,
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
@@ -524,7 +516,7 @@ impl EngineDispatcher {
             unreachable!()
         };
         self.add_typed(cx, &options, None).await?;
-        EngineResult::Acknowledged.to_legacy_json()
+        EngineResult::Acknowledged.to_cli_json()
     }
     async fn add_typed(
         &self,
@@ -541,6 +533,7 @@ impl EngineDispatcher {
         }
         let paused = options.stopped;
         let mut record = Record {
+            display_name:None,
             hash: String::new(),
             name: options
                 .torrent
@@ -665,6 +658,7 @@ impl EngineDispatcher {
         Ok(added)
     }
 }
+#[cfg(test)]
 pub(super) fn required<'a>(request: &'a Request, key: &str) -> Result<&'a str> {
     request
         .arg(key)
@@ -745,7 +739,7 @@ pub(crate) fn parked_get(
         .into_iter()
         .find(|row| row.hash == hash)
         .context("torrent record not found")?;
-    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_legacy_json()?)?;
+    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_cli_json()?)?;
     torrent.name = legacy["name"]
         .as_str()
         .context("saved name is unavailable")?

@@ -44,6 +44,7 @@ impl TuiApp {
         if area.is_empty() {
             return;
         }
+        let stale = self.recovery.active && self.store.stale && !matches!(list,MouseList::Browse|MouseList::Settings);
         let state = self.mouse_list_state(list);
         let range = visible_range(&mut state.borrow_mut(), count, area.height);
         let selected = state.borrow().selected();
@@ -57,6 +58,7 @@ impl TuiApp {
             range.end,
             selected,
             hovered,
+            stale,
         )
             .hash(&mut signature);
         [
@@ -86,7 +88,7 @@ impl TuiApp {
             let rows = range.clone().map(|i| {
                 Row::new([
                     Line::raw(if selected == Some(i) { "▌ " } else { "  " }),
-                    row(i),
+                    if stale {Line::from_spans(row(i).into_iter().map(|mut span| {span.style=Some(span.style.unwrap_or_default().fg(self.theme.dim).dim());span}))} else {row(i)},
                 ])
             });
             let modal = matches!(list, MouseList::Files | MouseList::Providers);

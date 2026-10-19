@@ -17,12 +17,17 @@ impl TuiApp {
     pub(in crate::tui) fn footer_signature(&self, width: u16) -> u64 {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         width.hash(&mut hash);
+        self.clipboard.offer.hash(&mut hash);
+        self.clipboard_visible().hash(&mut hash);
         self.recovery.notice(std::time::Instant::now()).hash(&mut hash);
         self.screen.index().hash(&mut hash);
         self.footer_context().hash(&mut hash);
+        if let Some(details)=&self.details {std::mem::discriminant(&details.tab).hash(&mut hash);details.trackers.busy.hash(&mut hash);}
+        self.store.hello.as_ref().map(|h|&h.caps).hash(&mut hash);
         self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
+        self.can_undo_removal().hash(&mut hash);
         self.status_is_error.hash(&mut hash);
         self.status_success.hash(&mut hash);
         self.poster_open.hash(&mut hash);
@@ -33,6 +38,7 @@ impl TuiApp {
         if let Some(torrent) = self.selected_torrent() {
             self.store.pending_for_key(&torrent.hash).hash(&mut hash);
             torrent.name.hash(&mut hash);
+            self.followable_title(&torrent.name).hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
@@ -40,6 +46,7 @@ impl TuiApp {
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);
+            self.followable_title(&result.file_name).hash(&mut hash);
         }
         if let Some(feed) = self.selected_feed() {
             feed.name.hash(&mut hash);
@@ -87,7 +94,6 @@ impl TuiApp {
         if let Some(prompt) = &self.prompt {
             std::mem::discriminant(&prompt.kind).hash(&mut hash);
             prompt.add_flags.hash(&mut hash);
-            prompt.native_streaming.hash(&mut hash);
         }
         hash.finish()
     }
@@ -103,7 +109,8 @@ impl TuiApp {
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
         let show_status=self.recovery.notice(std::time::Instant::now()).is_none() && !self.daemon_stopped && !self.status.is_empty();
-        let feedback=if !show_status {self.footer_selection().unwrap_or_default()}
+        let feedback=if let Some(offer)=self.clipboard_label(usize::from(width)) {offer}
+            else if !show_status {self.footer_selection().unwrap_or_default()}
             else if th.low_chroma && self.status_is_error && !self.status.starts_with('!'){format!("! {}",self.status)}
             else if th.low_chroma && self.status_success && !self.status.starts_with('✓'){format!("✓ {}",self.status)}
             else{self.status.clone()};

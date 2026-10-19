@@ -33,7 +33,7 @@ impl Columns {
         );
         let down = row.map_or_else(
             || (t.is_active() && t.progress_known).then_some(t.dlspeed.max(0) as u64),
-            |r| r.dl_bps,
+            |r| (r.state==api::TorrentState::Downloading).then_some(r.dl_bps).flatten(),
         );
         let eta = row.map_or_else(
             || (t.is_active() && t.eta > 0 && t.eta < 8_640_000).then_some(t.eta as u64),
@@ -63,7 +63,7 @@ impl Columns {
                         String::new()
                     }
                 },
-                |p| p.to_string(),
+                |p| row.and_then(|r|r.seeds).map_or_else(||p.to_string(),|s|format!("{s}/{p}")),
             ),
         }
     }

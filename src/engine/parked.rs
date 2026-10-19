@@ -95,7 +95,7 @@ impl ParkedLedger {
                 cfg.save()?;
                 return Ok(EngineResult::Acknowledged);
             }
-            EngineOp::Queue
+            EngineOp::Rename {..} | EngineOp::Queue
             | EngineOp::Info
             | EngineOp::Files { .. }
             | EngineOp::Trackers { .. }
@@ -111,6 +111,7 @@ impl ParkedLedger {
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if let EngineOp::Rename {hash,name}=&op {rename::apply(&mut ledger,hash,name)?;save_parked_ledger(&self.directory,&ledger)?;return Ok(EngineResult::Acknowledged);}
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             let folder=Config::load()?.save_path.map(PathBuf::from).unwrap_or_else(||dirs::download_dir().unwrap_or_else(||crate::config::data_dir().join("downloads")));
             return staging::execute(&self.directory,&folder,&mut ledger,&op);
@@ -264,38 +265,4 @@ impl ParkedLedger {
             None => EngineResult::Acknowledged,
         })
     }
-    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
-        match EngineOp::parse(&request.path, request) {
-            Ok(Some(op)) => Some(self.execute(op).and_then(|result| {
-                let legacy = result.to_legacy_json()?;
-                match result {
-                    // Parked lists used Vec<Value>, unlike the live lists of
-                    // structs. Retain that wire ordering at this legacy facade.
-                    EngineResult::Torrents(_) | EngineResult::Files(_) => {
-                        json(&serde_json::from_str::<serde_json::Value>(&legacy)?)
-                    }
-                    _ => Ok(legacy),
-                }
-            })),
-            Ok(None) if request.path.starts_with("torrents/") => Some(Err(anyhow!(
-                "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
-            ))),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        }
-    }
-}
-pub(super) fn dispatch_parked_in(
-    request: &Request,
-    directory: &Path,
-    lifecycle: &Lifecycle,
-) -> Option<Result<String>> {
-    ParkedLedger::new(directory.into(), lifecycle.clone()).dispatch(request)
-}
-pub fn dispatch_parked(request: &Request, lifecycle: &Lifecycle) -> Option<Result<String>> {
-    dispatch_parked_in(
-        request,
-        &crate::config::data_dir().join("engine"),
-        lifecycle,
-    )
 }
