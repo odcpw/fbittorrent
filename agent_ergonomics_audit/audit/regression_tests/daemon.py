@@ -1030,8 +1030,9 @@ def shutdown_inflight_add(binary, systemd):
 
 class ApiConn:
     """Real bounded NDJSON connection; retains unsolicited frames separately."""
-    def __init__(self, harness, timeout=8, trace=None):
+    def __init__(self, harness, timeout=8, trace=None, redact_urls=False):
         self.harness, self.case, self.trace = harness, harness.case, trace
+        self.redact_urls = redact_urls
         self.socket = socket.socket(socket.AF_UNIX)
         self.socket.settimeout(timeout)
         self.socket.connect(str(DaemonContract.socket_path(harness.sandbox)))
@@ -1092,8 +1093,14 @@ class ApiConn:
             self.trace.append(dict(dir="s2c", frame=frame))
         return frame
 
+    def diagnostic(self, frame):
+        text = json.dumps(frame, sort_keys=True)
+        if self.redact_urls:
+            text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://[^?\s"<>]+)\?[^\s"<>]*', r'\1?…', text)
+        return text
+
     def call(self, op, args=None, ref=None, error=None):
-        step = self.case.step("API " + op + " " + json.dumps(args, sort_keys=True),
+        step = self.case.step("API " + op + " " + self.diagnostic(args),
                               "matching success reply" if error is None else "matching " + error + " failure")
         identifier = self.send(op, args, ref)
         while True:
@@ -1108,7 +1115,7 @@ class ApiConn:
                 step.fail(f"Unexpected response ID: {frame!r}")
                 raise ValueError("response ID mismatch")
             ok = frame.get("ok") is True if error is None else frame.get("error", {}).get("code") == error
-            step.close(ok, json.dumps(frame, sort_keys=True))
+            step.close(ok, self.diagnostic(frame))
             return frame
 
     def hello(self, kind="test"):
@@ -4551,8 +4558,98 @@ def recheck_drops_resume_file(binary,systemd):
             h.lock_free()
 
 
+def tracker_live_fixture(sandbox, url, name="tracker.bin", private=True):
+    root=sandbox.root/"tracker-source";root.mkdir(exist_ok=True)
+    payload=root/name;payload.write_bytes(os.urandom(4096))
+    fixture=fixtures.torrent_fixture(root,[payload],name=name,tracker=url)
+    if not private:
+        document=dict(info=dict(fixture.info));document["info"].pop("private")
+        document["announce"]=url;fixture.torrent.write_bytes(fixtures.bencode(document))
+        fixture.info_hash=hashlib.sha1(fixtures.bencode(document["info"])).hexdigest()
+    return fixture
+
+
+def tracker_rows(client,hash_):
+    return client.call("torrents.trackers",dict(hash=hash_))["result"]["trackers"]
+
+
+def tracker_flow(name,binary,systemd,redacted=False):
+    with api_owned(name,binary,systemd) as (case,sandbox,h,process), fixtures.tracker_server(
+            fail_first=1,interval_s=600,peers=[("127.0.0.1",9)],directory=sandbox.root,echo_failure=redacted) as tracker, ApiConn(h,redact_urls=True) as client:
+        client.hello()
+        url=tracker.url+("?passkey=fixture-private-token" if redacted else "")
+        fixture=tracker_live_fixture(sandbox,url)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent))))
+        h.wait_for(lambda: ((rows:=tracker_rows(client,fixture.info_hash))[0]["status"]=="error",client.diagnostic(rows)),"first real tracker announce records its failure reason")
+        before=tracker_rows(client,fixture.info_hash)
+        case.check(before[0]["status"]=="error" and "fixture: not yet" in before[0].get("message","") and "peers" not in before[0],
+                   "failure has a reason and no fabricated peer count",client.diagnostic(before))
+        if redacted:
+            case.check(before[0]["url"]==url and "?…" in before[0]["message"] and "fixture-private-token" not in before[0]["message"],
+                       "private wire URL is complete and failure diagnostics redact the query",client.diagnostic(before))
+        started=time.time()
+        client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]))
+        h.wait_for(lambda: ((rows:=tracker_rows(client,fixture.info_hash))[0]["status"]=="ok",client.diagnostic(rows)),"forced announce bypasses the ten-second error backoff",timeout=2)
+        after=tracker_rows(client,fixture.info_hash);requests=tracker.snapshot()
+        case.check(len(requests)==2 and 0<=requests[-1]["ts"]-started<2 and requests[-1]["event"]=="none" and after[0].get("peers")==1,
+                   "force produces one event=none announce within two seconds and records one returned peer",json.dumps(dict(requests=requests,rows=json.loads(client.diagnostic(after)))))
+        client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]));time.sleep(.35)
+        case.check(len(tracker.snapshot())==2,"second force within sixty seconds produces no announce",json.dumps(tracker.snapshot()))
+        client.call("torrents.stop",dict(hashes=[fixture.info_hash]))
+        paused=tracker_rows(client,fixture.info_hash)
+        case.check(paused==after,"paused torrent retains its final tracker result",client.diagnostic(paused))
+        if redacted:
+            logs=h.stderr()+case.path.read_text()+tracker.log.read_text()
+            case.check("fixture-private-token" not in logs and "passkey=" not in logs,
+                       "daemon, case JSONL and tracker logs contain no query string", "Scanned daemon stderr, case JSONL and tracker.log.")
+        if name=="reannounce":
+            cli=h.cli("reannounce",fixture.info_hash,code=1)
+            case.check(cli.get("ok") is False,"CLI preserves paused reannounce invalid_state exit 1",json.dumps(cli))
+
+
+def tracker_status(binary,systemd):tracker_flow("tracker_status",binary,systemd)
+def reannounce(binary,systemd):tracker_flow("reannounce",binary,systemd)
+def reannounce_rate_limited(binary,systemd):tracker_flow("reannounce_rate_limited",binary,systemd)
+def tracker_url_redacted(binary,systemd):tracker_flow("tracker_url_redacted",binary,systemd,redacted=True)
+
+
+def reannounce_not_live_invalid_state(binary,systemd):
+    with api_owned("reannounce_not_live_invalid_state",binary,systemd) as (case,sandbox,h,process), fixtures.tracker_server(directory=sandbox.root) as tracker, ApiConn(h,redact_urls=True) as client:
+        client.hello();fixture=tracker_live_fixture(sandbox,tracker.url)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True))
+        h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="paused",json.dumps(row)),"saved pause finishes checking")
+        rows=tracker_rows(client,fixture.info_hash)
+        case.check(len(rows)==1 and rows[0]["status"]=="not_contacted","never-started tracker is truthful not_contacted",client.diagnostic(rows))
+        refused=client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]),error="invalid_state")
+        case.check(refused["error"].get("details",{}).get("reason")=="not_live" and not tracker.snapshot(),"paused reannounce is rejected without network traffic",client.diagnostic(refused))
+        client.call("torrents.reannounce",dict(hashes=["f"*40]),error="not_found")
+
+
+
+def tracker_saved_views(binary,systemd):
+    with Case("daemon","tracker_saved_views") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h,fixtures.tracker_server(directory=sandbox.root) as tracker:
+        config=Path(sandbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml"
+        select_replay_interface(config,"fbmissing0")
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();fixture=tracker_live_fixture(sandbox,tracker.url)
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True))
+                rows=tracker_rows(client,fixture.info_hash)
+                case.check(rows==[dict(url=tracker.url,status="not_contacted")],"parked metainfo reads every saved URL without a session",json.dumps(rows))
+                client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]),error="engine_unavailable")
+                magnet="magnet:?xt=urn:btih:"+"ab"*20+"&tr="+urllib.parse.quote(tracker.url,safe="")
+                client.call("torrents.add",dict(source=dict(magnet=magnet),stopped=True))
+                rows=tracker_rows(client,"ab"*20)
+                case.check(rows==[dict(url=tracker.url,status="not_contacted")] and not tracker.snapshot(),"unresolved magnet read retains its saved tracker without network contact",json.dumps(rows))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+
+
 CASES = {function.__name__: function for function in
-         (resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
+         (tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+          resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,

@@ -454,6 +454,7 @@ fn run(cli: Cli) -> Result<Code> {
             emit(json, serde_json::json!({"ok": true, "action": "add", "hash": magnet_hash(&text), "name": label}), || println!("added: {label}"));
             Ok(Code::Ok)
         }
+        Cmd::Reannounce {..} => Err(AppError::new(Code::Usage,"reannounce requires the native API daemon").into()),
         Cmd::Reconcile { recent } => {
             let result = reconcile_result(&cfg, || {
                 connect(&cfg, &c)?;
@@ -613,7 +614,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+    matches!(cmd, Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
         | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))

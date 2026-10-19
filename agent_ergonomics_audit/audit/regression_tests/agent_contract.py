@@ -68,7 +68,7 @@ def contract(binary,systemd):
             value,r1=cli(case,sandbox,binary,'capabilities','--json')
             _,r2=cli(case,sandbox,binary,'capabilities','--json')
             case.check(r1.stdout==r2.stdout,'R-008 capabilities is byte-identical',hashlib.sha256(r1.stdout.encode()).hexdigest())
-            case.check(value.get('contract_version')=='1.2.5' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.5 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
+            case.check(value.get('contract_version')=='1.2.6' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.6 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
             cli(case,sandbox,binary,'triage','--json') # R-002
             added,_=cli(case,sandbox,binary,'add',fixture.torrent,'--stopped','--origin','agent','--json') # R-003
             digest=added['hash']
@@ -209,9 +209,34 @@ def exit_code_dictionary_total(binary,systemd):
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 
+
+def reannounce_verb(binary,systemd):
+    from daemon import tracker_live_fixture,tracker_rows
+    with Case('agent_contract','reannounce_verb') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h,fixtures.tracker_server(fail_first=1,interval_s=600,peers=[('127.0.0.1',9)],directory=sandbox.root) as tracker:
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine()
+            fixture=tracker_live_fixture(sandbox,tracker.url)
+            with ApiConn(h) as client:
+                client.hello();client.call('torrents.add',dict(source=dict(path=str(fixture.torrent))))
+                h.wait_for(lambda:((rows:=tracker_rows(client,fixture.info_hash))[0]['status']=='error',json.dumps(rows)),'first announce fails')
+                result,_=cli(case,sandbox,binary,'reannounce',fixture.info_hash,'--json')
+                case.check(result==dict(ok=True,action='reannounce',count=1,hashes=[fixture.info_hash]),'reannounce uses the stable act envelope',json.dumps(result))
+                h.wait_for(lambda:((rows:=tracker_rows(client,fixture.info_hash))[0]['status']=='ok',json.dumps(rows)),'CLI force wakes backoff')
+                detail,_=cli(case,sandbox,binary,'show',fixture.info_hash,'--json')
+                case.check(detail.get('tracker_count')==1 and len(detail.get('trackers',[]))==1 and detail['trackers'][0].get('peers')==1,'show adds truthful tracker_count and tracker rows',json.dumps(detail))
+                cli(case,sandbox,binary,'stop',fixture.info_hash,'--json')
+                failure,_=cli(case,sandbox,binary,'reannounce',fixture.info_hash,'--json',code=1)
+                case.check(failure.get('code')==1 and failure.get('ok') is False,'paused invalid_state keeps CLI exit 1',json.dumps(failure))
+                cli(case,sandbox,binary,'reannounce','unknown-zz','--json',code=6)
+                cli(case,sandbox,binary,'reannounce','--json',code=2)
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+
+
 from agent_stream import (events_follow_completion, events_since_seq_replay, events_resync_when_older, events_down_exit_4, api_list_matches, api_list_matches_ipc_md, api_unknown_op_hint, api_mutating_starts_daemon_read_does_not)
 
-CASES={f.__name__:f for f in [events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

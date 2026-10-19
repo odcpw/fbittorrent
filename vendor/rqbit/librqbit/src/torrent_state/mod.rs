@@ -193,6 +193,7 @@ pub struct ManagedTorrentShared {
     /// Metainfo order (tiers first, then URLs within each tier). In particular,
     /// private first-tracker selection must happen before any set conversion.
     pub trackers: Vec<url::Url>,
+    pub tracker_stats: Arc<tracker_comms::TrackerStats>,
     pub peer_id: Id20,
     pub span: tracing::Span,
     pub(crate) options: ManagedTorrentOptions,
@@ -254,6 +255,14 @@ impl ManagedTorrent {
         }
         self.shared.magnet_name.clone()
     }
+
+    /// Ordered observations survive pause/run-region replacement.
+    pub fn tracker_stats(&self) -> Vec<tracker_comms::TrackerStat> {
+        self.shared.tracker_stats.snapshot()
+    }
+
+    /// Wake tracker interval/backoff sleeps; repeated requests within 60 s coalesce.
+    pub fn announce_now(&self) { self.shared.tracker_stats.announce_now(); }
 
     pub fn shared(&self) -> &ManagedTorrentShared {
         &self.shared

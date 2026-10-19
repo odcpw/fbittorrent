@@ -9,6 +9,10 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name: "torrents.trackers", mutating: false, idempotent: false, since: "P6-01",
+        args: "`hash: hash`", result: "`{trackers: [Tracker]}`" },
+    Operation { name: "torrents.reannounce", mutating: true, idempotent: true, since: "P6-01",
+        args: "`hashes: [hash]` (1..256)", result: "`{state: \"done\"}`" },
     Operation { name: "search.start", mutating: true, idempotent: false, since: "P3-01",
         args: "`query`, `providers?`, `limit?`", result: "`{search_id}`" },
     Operation { name: "search.stop", mutating: true, idempotent: false, since: "P3-01",
@@ -87,6 +91,7 @@ pub mod app;
 pub mod search;
 pub mod recheck;
 pub mod queue;
+pub mod trackers;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

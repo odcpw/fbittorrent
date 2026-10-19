@@ -206,6 +206,16 @@ impl Validate for Reply {
                 for entry in &result.entries { entry.validate()?; }
                 Ok(())
             }
+            Self::TorrentsTrackers(result) => {
+                let mut previous=None;
+                for row in &result.trackers {
+                    text(&row.url,65536,"trackers.url")?;
+                    require(previous.is_none_or(|url:&str|url<row.url.as_str()),"trackers","URLs must be sorted and unique")?;
+                    previous=Some(row.url.as_str());
+                    if let Some(message)=&row.message {text(message,200,"trackers.message")?;}
+                }
+                Ok(())
+            }
             Self::TorrentsList(result) => {
                 for value in &result.torrents {
                     value.validate()?;

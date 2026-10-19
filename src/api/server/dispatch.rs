@@ -138,6 +138,7 @@ impl Shared {
                 ),
                 Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
                 Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
+                Call::TorrentsTrackers {..} | Call::TorrentsReannounce {..} => ops::trackers::dispatch(&self.daemon,&job.request.call),
                 Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 call if call.op().starts_with("search.") => {

@@ -150,6 +150,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 
 | Op | Args | Result | Mutating | Since |
 |---|---|---|---|---|
+| `torrents.trackers` | `hash: hash` | `{trackers: [Tracker]}` | no | P6-01 |
+| `torrents.reannounce` | `hashes: [hash]` (1..256) | `{state: "done"}` | yes | P6-01 |
 | `hello` | See handshake | HelloResult | no | P1-06 |
 | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
 | `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
@@ -769,3 +771,20 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 | `search.browse_sources` | none | `{sources: [BrowseSource]}` | no | P3-01 |
 | `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
 | `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
+
+### Tracker observations (P6-01, contract 1.2.6)
+
+The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
+`Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
+optional `last_announce_at`, `next_announce_at`, `peers`, `message` (200 characters),
+and `tier` (currently absent because the fork flattens tiers). Full URLs travel only
+to the owner's clients; every diagnostic message redacts query strings as `?…`.
+A paused torrent retains observations. Dormant, metadata and parked records with no
+observations return saved URLs as `not_contacted`. `tracker_count` counts every
+metainfo URL, including private secondary and unsupported URLs. Forced announces
+wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
+Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription awaits P1-08 integration: keyed by
+URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
+topic/item registration and pushed-delivery qualification remain pending that
+integration, alongside the TUI/dashboard rendering owned by their tracks.
