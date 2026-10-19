@@ -120,7 +120,7 @@ class DaemonContract:
 
     @staticmethod
     def command(binary, idle_exit_secs=300, no_notify=False):
-        return [str(binary), "serve", "--idle-exit-secs", str(idle_exit_secs), *(["--no-notify"] if no_notify else [])]
+        return [str(binary), "serve", *(["--idle-exit-secs", str(idle_exit_secs)] if idle_exit_secs is not None else []), *(["--no-notify"] if no_notify else [])]
 
     @staticmethod
     def throttle(client, hash_, bps):
@@ -5015,6 +5015,9 @@ from daemon_clipboard import clipboard_tui_offer
 CASES["clipboard_tui_offer"]=clipboard_tui_offer
 from daemon_native_data import native_data_unchanged
 CASES["native_data_unchanged"]=native_data_unchanged
+
+from daemon_delete_safety import CASES as DELETE_SAFETY_CASES
+CASES.update((function.__name__,function) for function in DELETE_SAFETY_CASES)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
