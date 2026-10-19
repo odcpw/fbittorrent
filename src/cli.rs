@@ -14,10 +14,12 @@ pub(super) mod restart;
 mod native;
 mod handler;
 mod download_limit;
+mod serve;
 pub(super) mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
+pub(super) use serve::parse_entry;
 
 #[derive(Parser)]
 #[command(
