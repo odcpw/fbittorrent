@@ -17,6 +17,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
+    cell::OnceCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -123,6 +124,7 @@ impl EventRing {
     }
 }
 struct Sample {
+    summary_cache: OnceCell<Value>,
     history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
@@ -164,6 +166,11 @@ impl Sample {
         }
     }
     fn summary(&self) -> Value {
+        // A sample is immutable while fanned out to subscribers. Count and
+        // project its rows once, even when several bars share the same tick.
+        self.summary_cache.get_or_init(|| self.build_summary()).clone()
+    }
+    fn build_summary(&self) -> Value {
         let counts = summary_counts(&self.rows);
         let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
@@ -487,6 +494,7 @@ impl Bus {
             ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
             (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
+            summary_cache: OnceCell::new(),
             history,stats,
             peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},

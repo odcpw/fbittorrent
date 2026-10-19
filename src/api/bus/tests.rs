@@ -1,4 +1,47 @@
 use super::*;
+
+#[test]
+fn summary_subscribers_observe_the_same_tick_and_each_new_tick() {
+    fn sample(alt: bool) -> Sample {
+        let mut row: Torrent = serde_json::from_str(include_str!("../fixtures/undo_detail.json")).unwrap();
+        row.staged = false;
+        Sample {
+            summary_cache: OnceCell::new(), history: vec![12, 34], stats: Value::Null,
+            epoch: 1, state: "running".into(), rows: vec![row], completions: vec![],
+            logs: json!([]), searches: BTreeMap::new(), files: BTreeMap::new(),
+            peers: BTreeMap::new(), pieces: BTreeMap::new(), trackers: BTreeMap::new(),
+            network: json!({"ready":true,"message":"ready"}),
+            settings: json!({"alt_limits_on":alt}),
+            disk: Disk {needed_bytes:0,low:false,free_bytes:Some(1024)},
+            shows: json!([]), show_releases: BTreeMap::new(), rss_feeds: json!([]),
+            rss_items: BTreeMap::new(),
+            daemon: json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),
+        }
+    }
+    let mut subscribers: Vec<_> = (1..=8).map(|sub| Subscription {
+        sub, sink: EventSink::testing_with_hello(), rev: 0,
+        topics: vec![TopicState {topic:Topic::Summary,interval:Duration::ZERO,
+            due:Instant::now(),sent:None}],
+        since: None, epoch: None, active: true,
+    }).collect();
+    for alt in [false, true] {
+        let mut sample = sample(alt);
+        if alt {sample.rows.clear(); sample.history.push(56);}
+        for sub in &mut subscribers {
+            sub.update(&sample, &[], 1).unwrap();
+            let frames = sub.sink.take_frames();
+            assert_eq!(frames.len(), 1);
+            let frame = &frames[0];
+            assert_eq!(frame["sub"], sub.sub);
+            assert_eq!(frame["rev"], if alt {2} else {1});
+            assert_eq!(frame["data"]["alt"], alt);
+            assert_eq!(frame["data"]["counts"]["total"], if alt {0} else {1});
+            assert_eq!(frame["data"]["history"], json!(sample.history));
+            assert!(!sub.sink.closed());
+        }
+    }
+}
+
 #[test]
 fn history_state_waits_for_its_tick() {
     let old=json!({"history":{"download":[1],"upload":[0],"interval_s":1}});
@@ -29,6 +72,7 @@ fn rev_monotonic() {
         active: true,
     };
     let mut sample = Sample {
+        summary_cache: OnceCell::new(),
         history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
@@ -53,6 +97,8 @@ fn rev_monotonic() {
     sample.state = "running".into();
     let mut last = 0;
     for i in 0..100 {
+        // Each loop models a fresh sampler tick, with a changed observation.
+        sample.summary_cache.take();
         sample.network["message"] = json!(format!("observation {i}"));
         subscription.update(&sample, &[], 1).unwrap();
         for frame in sink.take_frames() {
@@ -176,7 +222,7 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {summary_cache:OnceCell::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
@@ -195,7 +241,7 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
         topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
         since:None,epoch:None,active:true};
     // The worker collected its topic set before this subscription arrived.
-    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+    let mut sample=Sample {summary_cache:OnceCell::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
         rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
         network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
         shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),
