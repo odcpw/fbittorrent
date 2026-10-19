@@ -371,11 +371,25 @@ positive measured chunk rate before the first piece verifies. Missing-file resto
 preconditions complete the payload, delete it, restart dormant history and
 explicitly activate it, preserving startup's lazy restore policy. The diagnostic
 remains `<name> restore failed: missing files`, with reason `missing_files`.
-The integrated receipt records the remaining active-check field mismatches and
-the frozen checker's rejection of changing completed-byte counts in a live
-precondition/query history. These remain failures; no comparison mask or new
-deferral is added. Previously approved capability/protocol/error deferrals remain
-listed individually, alongside P6-08's post-remove scenarios.
+Ruling 7 treats checking measurements as state-conditioned volatile values:
+when the live torrent is checking, completed_bytes must be a u64 no greater than
+size, and finite progress must equal completed_bytes/size within 1e-9 absolute
+(zero size requires both zero). Presence is preserved. Checked and size remain
+exact; other states still compare completed_bytes/progress exactly. P1-05d owns
+the fixture correction to checked=false for an active check.
+Live validation checks every original frame against the frozen types, bounds,
+capabilities and canonical round trips, and retains revision checks. Its
+cross-reply agreement still checks static sizes and file totals. For any hash
+observed checking, its measurements are excluded from that history's agreement,
+including earlier samples and later cancellation; their raw values remain
+validated and non-checking fixture comparisons remain exact. Fixture transcripts
+continue to use the unchanged strict whole-group agreement hook. Deferrals record
+file:line, pointer, class, target bead and reason. Capability/protocol deferrals
+apply only while that feature is unavailable; advertised features stay under
+active comparison. The receipt distinguishes undrivable catalogue frames from
+error codes that can be produced with a different shape and retains the bounded
+starting-window retry evidence. Remaining nonvolatile validation failures are
+recorded without a new mask or deferral.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
@@ -390,6 +404,7 @@ listed individually, alongside P6-08's post-remove scenarios.
 | `/result/server/pid` | timestamp | positive u64; presence preserved |
 | `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
 | `/result/server/version` | version | semantic version string; presence preserved |
+| `/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress` | checking only | live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals |
 | `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
 | `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 

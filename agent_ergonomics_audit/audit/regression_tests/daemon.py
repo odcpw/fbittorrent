@@ -15,6 +15,7 @@ import fcntl
 from contextlib import ExitStack, contextmanager
 import hashlib
 import json
+import math
 import os
 import pwd
 from pathlib import Path
@@ -1611,7 +1612,7 @@ def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     if not validator or not Path(validator).is_file():
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
     output = case.path.with_suffix("." + kind + ".validation.log")
-    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace))
+    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND=kind)
     if optional:
         optional_path = case.path.with_suffix(".extra-optional.json")
         optional_path.write_text(json.dumps(optional, indent=2, sort_keys=True) + "\n")
@@ -1639,6 +1640,7 @@ REPLAY_NORMALIZATION = (
     ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
     ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
     ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress", "checking only", "live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals"),
     ("object member absent in fixture", "extra optional field", "live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C)"),
     ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
 )
@@ -1701,9 +1703,13 @@ class ReplayNormalizer:
         return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]+"), pointer) is not None
 
     def compare(self, expected, live):
-        def walk(wanted, got, pointer=""):
+        def walk(wanted, got, pointer="", checking=False):
+            if checking:
+                return got  # The complete checking tuple was validated below.
             rule = next((kind for patterns, kind, _ in REPLAY_NORMALIZATION
                          for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
+            if rule == "checking only":
+                rule = "exact"
             if rule.startswith("identity:"):
                 if wanted is None:  # Failure.id is the single nullable wire field.
                     if got is not None:
@@ -1725,10 +1731,22 @@ class ReplayNormalizer:
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
                     if key not in got:
                         raise ReplayMismatch(f"JSON pointer {here}: expected {wanted.get(key, '<missing>')!r}, observed {got.get(key, '<missing>')!r}")
+                is_torrent = pointer == "/result/torrent" or re.fullmatch(r"/result/torrents/[0-9]+", pointer)
+                active_check = is_torrent and got.get("state") == "checking"
+                if active_check and any(key in wanted for key in ("completed_bytes", "progress")):
+                    size, completed, progress = (got.get(key) for key in ("size", "completed_bytes", "progress"))
+                    if type(size) is not int or not 0 <= size < 2**64:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/size: checking requires a nonnegative u64 size")
+                    if type(completed) is not int or not 0 <= completed <= size:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/completed_bytes: checking requires 0 <= completed_bytes <= size")
+                    ratio = completed / size if size else 0.0
+                    if type(progress) not in (int, float) or not math.isfinite(progress) or not 0 <= progress <= 1 or abs(progress - ratio) > 1e-9:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/progress: checking progress must equal completed_bytes/size within 1e-9")
                 for key in sorted(got.keys() - wanted.keys()):
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
                     self.extra_optional.append((here, got[key]))
-                result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
+                result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1"),
+                                    active_check and key in ("completed_bytes", "progress")) for key, value in wanted.items()}
                 result.update((key, value) for key, value in got.items() if key not in wanted)
                 return result
             if isinstance(wanted, list):
@@ -2112,6 +2130,42 @@ def api_replay_normalization(binary, systemd):
                 case.check(False, label + " fails comparison", "unexpected match")
             except ReplayMismatch as error:
                 case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
+        watch_frame = dict(result=dict(torrent=dict(playable=dict(ready=True))))
+        pending_frame = dict(result=dict(state="pending"))
+        undo_frame = dict(result=dict(torrent=dict(undo_until=123)))
+        for frame, op, cap in ((watch_frame, "torrents.get", "watch"),
+                               (pending_frame, "torrents.remove", "mutations"),
+                               (undo_frame, "torrents.get", "origin")):
+            absent = replay_frame_deferrals(frame, op)
+            present = replay_frame_deferrals(frame, op, {cap})
+            case.check(bool(absent) and not present, "advertised capability keeps the frame under active comparison",
+                       json.dumps(dict(cap=cap, absent=absent, present=present)))
+        checking = dict(state="checking", checked=False, size=100, completed_bytes=50, progress=.5)
+        sample = dict(checking, completed_bytes=25, progress=.25)
+        for wrap in (lambda row: dict(result=dict(torrent=row)), lambda row: dict(result=dict(torrents=[row]))):
+            normalizer.compare(wrap(checking), wrap(sample))
+            case.check(True, "checking-only measurement normalization accepts a valid live tuple", json.dumps(wrap(sample)))
+        zero = dict(checking, size=0, completed_bytes=0, progress=0.0)
+        normalizer.compare(dict(result=dict(torrent=zero)), dict(result=dict(torrent=zero)))
+        normalizer.compare(dict(result=dict(torrent=checking)), dict(result=dict(torrent=dict(sample, progress=.25 + 1e-10))))
+        case.check(True, "zero size and the declared 1e-9 tolerance are accepted", "zero/zero=0; in-tolerance tuple passes")
+        for label, wanted, got, pointer in [
+            ("over-size checked bytes", checking, dict(sample, completed_bytes=101), "/completed_bytes"),
+            ("negative checked bytes", checking, dict(sample, completed_bytes=-1), "/completed_bytes"),
+            ("boolean checked bytes", checking, dict(sample, completed_bytes=True), "/completed_bytes"),
+            ("nonfinite progress", checking, dict(sample, progress=float("nan")), "/progress"),
+            ("inconsistent progress", checking, dict(sample, progress=.5), "/progress"),
+            ("missing checked bytes", checking, {k: v for k, v in sample.items() if k != "completed_bytes"}, "/completed_bytes"),
+            ("changed static size", checking, dict(sample, size=200, progress=.125), "/size"),
+            ("changed checked flag", checking, dict(sample, checked=True), "/checked"),
+            ("paused is exact", dict(checking, state="paused"), dict(sample, state="paused"), "/completed_bytes"),
+            ("downloading is exact", dict(checking, state="downloading"), dict(sample, state="downloading"), "/completed_bytes"),
+        ]:
+            try:
+                normalizer.compare(dict(result=dict(torrent=wanted)), dict(result=dict(torrent=got)))
+                case.check(False, label + " fails comparison", "unexpected match")
+            except ReplayMismatch as error:
+                case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
 
 
 def replay_starting_window(client, harness, identifier, frames):
@@ -2157,7 +2211,7 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
     if code in ("invalid_message", "hello_required", "proto_unsupported"):
         with ApiConn(harness, timeout=8, trace=frames) as fresh:
             if code == "invalid_message":
-                fresh.socket.sendall(b"[]\n")
+                fresh.socket.sendall(b"x" * expected["error"]["details"]["bytes"])
                 deferred.append(("/id", "P1-18", "fatal malformed input has a request-less error event, not the fixture's ID-bearing failure"))
             elif code == "proto_unsupported":
                 fresh.send_frame(dict(id=identifier, op="hello", args=dict(proto=2, client=dict(name="fixture-test", version="0.2.0", kind="test"))))
@@ -2232,21 +2286,21 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
     return send(request), deferred
 
 
-def replay_frame_deferrals(expected, op):
+def replay_frame_deferrals(expected, op, caps=()):
     found = []
     def visit(value, pointer=""):
         if isinstance(value, dict):
             for key, child in value.items():
                 here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                if key == "playable" or (key == "ready" and pointer.startswith("/result/files/")):
+                if (key == "playable" or (key == "ready" and pointer.startswith("/result/files/"))) and "watch" not in caps:
                     found.append((here, "P5-05", "expected frame depends on the unadvertised watch capability"))
-                elif key == "undo_until":
+                elif key == "undo_until" and "origin" not in caps:
                     found.append((here, "P6-08", "expected frame depends on undo/origin restoration"))
                 visit(child, here)
         elif isinstance(value, list):
             for index, child in enumerate(value): visit(child, pointer + "/" + str(index))
     visit(expected)
-    if op in ("torrents.remove", "torrents.set_upload_limit") and expected.get("result", {}).get("state") == "pending":
+    if op in ("torrents.remove", "torrents.set_upload_limit") and expected.get("result", {}).get("state") == "pending" and "mutations" not in caps:
         found.append(("/result/state", "P1-09", "expected asynchronous mutation state requires the unadvertised mutations capability"))
     return found
 
@@ -2255,11 +2309,24 @@ CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-
                  queue="P6-05", origin="P6-08")
 
 
+def replay_deferral_class(bead, reason):
+    if bead == "ENVIRONMENT-CONDITIONAL":
+        return "environment-conditional"
+    if "proto-2" in reason:
+        return "protocol"
+    if "operation after preceding remove" in reason:
+        return "post-remove"
+    if "capability" in reason or "unadvertised" in reason or "undo/origin" in reason:
+        return "capability-conditioned"
+    return "undrivable-catalogue-frame"
+
+
 def contract_group(group, binary, systemd):
     path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     normalizer = ReplayNormalizer()
     deferred, frames, request, prepared, optional, driven = [], [], None, {}, [], None
+    available_caps = set()
     with replay_owned(group, binary, systemd) as (case, sandbox, harness, process, root):
         if group == "torrents":
             with ApiConn(harness) as setup:
@@ -2267,7 +2334,8 @@ def contract_group(group, binary, systemd):
                 prepared = replay_preconditions(lines, setup, normalizer, root)
         with ApiConn(harness, timeout=20, trace=frames) as client:
             def defer(number, pointer, bead, reason):
-                record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead, reason=reason)
+                record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead,
+                              reason=reason, **{"class": replay_deferral_class(bead, reason)})
                 deferred.append(record)
                 case.check(True, "record the exact deferred fixture field and owner", json.dumps(record, sort_keys=True))
             for number, line in enumerate(lines, 1):
@@ -2276,7 +2344,7 @@ def contract_group(group, binary, systemd):
                     driven = None
                     live_request = normalizer.request(request) if group != "errors" or request["op"] == "hello" else None
                     next_frame = lines[number].get("frame", {}) if number < len(lines) and lines[number]["dir"] == "s2c" else {}
-                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared and not replay_frame_deferrals(next_frame, request["op"]):
+                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared and not replay_frame_deferrals(next_frame, request["op"], available_caps):
                         driven = drive_replay_state(client, prepared, request["args"]["hash"], harness, live_request)
                     if live_request is not None and driven is None:
                         client.send_frame(live_request)
@@ -2312,17 +2380,19 @@ def contract_group(group, binary, systemd):
                         restore_replay_interface(client, harness)
                     # Frame-level deferral: its raw expected and live frame are
                     # both run through frozen P1-05 validation, never synthesized.
-                    owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
+                    if "caps" in actual.get("result", {}):
+                        available_caps = set(actual["result"]["caps"])
+                    owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
-                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39):
+                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39) and "origin" not in available_caps:
                         pointer = "/result/torrent/hash" if number == 39 else "/result"
                         owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
-                        if cap in CAP_BEADS: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
-                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
+                        if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                    if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
                     if owners:
                         for pointer, bead, reason in owners: defer(number, pointer, bead, reason)
