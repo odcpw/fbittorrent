@@ -103,13 +103,17 @@ impl ParkedLedger {
             | EngineOp::Stop { .. }
             | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
             // Typed API additions save intent without constructing a session.
-            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } | EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. } => {}
+            EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..} | EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } | EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. } => {}
             _ => bail!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ),
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
+            let folder=Config::load()?.save_path.map(PathBuf::from).unwrap_or_else(||dirs::download_dir().unwrap_or_else(||crate::config::data_dir().join("downloads")));
+            return staging::execute(&self.directory,&folder,&mut ledger,&op);
+        }
         if let Some(result) = undo::parked(&self.undo, &self.directory, &mut ledger, &op) { return result; }
         if let EngineOp::AddMagnet(options) | EngineOp::AddSelected { options, .. } = &op {
             let cfg = Config::load()?;

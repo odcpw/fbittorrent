@@ -17,6 +17,12 @@ pub const TABLE: &[Operation] = &[
         args: "`path: str` (absolute local directory, ≤4096 bytes, no controls)",
         result: "`{free_bytes: bytes?, writable: bool}`",
     },
+    Operation {name:"torrents.commit",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`, `files?`, `seed?`, `save_path?`",result:"`{state: \"done\"}`"},
+    Operation {name:"torrents.discard",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`",result:"`{state: \"done\"}`; payload files never deleted"},
+    Operation {name:"torrents.move",mutating:true,idempotent:false,since:"P7-02",
+        args:"`hashes: [hash]` (1..256), `save_path`",result:"`{state: \"pending\", ref}`, then mutation.result"},
     Operation { name: "torrents.trackers", mutating: false, idempotent: false, since: "P6-01",
         args: "`hash: hash`", result: "`{trackers: [Tracker]}`" },
     Operation { name: "torrents.reannounce", mutating: true, idempotent: true, since: "P6-01",
@@ -125,6 +131,7 @@ pub mod queue;
 pub mod trackers;
 pub mod rss;
 pub mod shows;
+pub mod moving;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;
@@ -162,6 +169,11 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
             ("hash".into(), state.hash.clone().into()),
             ("reason".into(), state.reason.into()),
         ]));
+        return failure;
+    }
+    if value.downcast_ref::<crate::engine::moving::Busy>().is_some() {
+        let mut failure=error(Busy,"busy",None);
+        failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));
         return failure;
     }
     let text = format!("{value:#}");

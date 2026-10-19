@@ -1,5 +1,8 @@
 //! Subscription owner. One sampler serves every connection; snapshots and
 //! revisions are serialized here, while socket writes use the server's outbox.
+mod summary;
+pub(crate) use summary::counts as summary_counts;
+
 use super::{
     ops::{self, error, ApiResult},
     server::EventSink,
@@ -144,17 +147,11 @@ impl Sample {
         }
     }
     fn summary(&self) -> Value {
-        let mut counts = json!({"total":self.rows.len(),"downloading":0,"stalled":0,"metadata":0,"checking":0,"queued":0,"paused":0,"done":0,"seeding":0,"waiting_vpn":0,"error":0,"staged":0,"ready":0});
-        for row in &self.rows {
-            let key = serde_json::to_value(row.state).unwrap();
-            let key = key.as_str().unwrap();
-            if let Some(v) = counts.get_mut(key) {
-                *v = json!(v.as_u64().unwrap() + 1);
-            }
-        }
+        let counts = summary_counts(&self.rows);
         let top: Vec<_> = self
             .rows
             .iter()
+            .filter(|row| !row.staged)
             .take(5)
             .map(|r| {
                 let mut v = json!({"hash":r.hash,"name":r.name,"state":r.state});
@@ -355,11 +352,7 @@ impl Bus {
         let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
         let epoch = slot.engine_epoch;
         let state = slot.slot.state().name().to_owned();
-        let restoring = match &slot.slot {
-            Slot::Running(app) => app.dispatcher().has_pending_restore(),
-            _ => false,
-        };
-        let (rows, details) = match &slot.slot {
+        let (rows, details, restoring) = match &slot.slot {
             Slot::Running(app) => app
                 .dispatcher()
                 .bus_sample(&files)
@@ -384,11 +377,11 @@ impl Bus {
                         }
                     }
                     if before == g.current() {
-                        break (rows, details);
+                        break (rows, details, false);
                     }
                 }
             }
-            Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new()),
+            Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new(), false),
         };
         let completions = match &slot.slot {
             Slot::Running(app) => app.dispatcher().take_completions(),

@@ -339,6 +339,15 @@ impl TorrentView {
             view.legacy.progress_known = true;
             return view;
         }
+        if record.staged {
+            let facts=StateFacts {activity:Activity::Paused,paused:true,finished:false,
+                stop_on_complete:record.stop_on_complete(),record_paused:true,check_cancelled:false,receiving:false,parked:false};
+            let mut view=Self::record(record,facts,Source::Unrestored {checking:false,stopped:true,failed:false});
+            if let Some(RestoreOutcome::Failed {reason,message})=restore.map(|r|&r.outcome) {
+                view.reason=Some(if message.contains("metadata lookup timed out") {"metadata_timeout"} else {reason}.into());
+            }
+            return view;
+        }
         let checking =
             restore.is_some_and(|entry| matches!(entry.outcome, RestoreOutcome::Checking));
         let stopped = restore.is_some_and(|entry| matches!(entry.outcome, RestoreOutcome::Stopped));
@@ -399,7 +408,7 @@ impl TorrentView {
             receiving: false,
             parked: true,
         };
-        let mut view = Self::record(record, facts, Source::Parked);
+        let mut view = if record.staged {Self::unrestored(record,None)} else {Self::record(record, facts, Source::Parked)};
         if let Some((size, path)) = metadata {
             view.size = Some(size);
             view.content_path = Some(
@@ -465,6 +474,7 @@ impl TorrentView {
         let dl = self.dl_bps.unwrap_or(0);
         json(&Torrent {
             hash: self.hash.clone(),
+            staged: self.staged,
             name: self.legacy.name.clone(),
             state: state.into(),
             error_message: self.error.clone(),
@@ -503,6 +513,9 @@ impl TorrentView {
 impl Inner {
     pub(super) fn unrestored_view(&self, record: &Record) -> TorrentView {
         let mut view = TorrentView::unrestored(record, self.restores.lock().unwrap().get(&record.hash));
+        if record.staged {
+            if let Ok(saved)=self.saved_torrent(record) {view.size=Some(saved.files.iter().map(|f|f.size.max(0) as u64).sum());}
+        }
         if matches!(view.legacy.source, Source::Dormant) {
             if let Ok(saved) = self.saved_torrent(record) {
                 view.size = Some(saved.selected_bytes);
@@ -542,7 +555,7 @@ impl EngineDispatcher {
             if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
                 if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
                     view=TorrentView::trusted_pending(record,value);
-                } else {self.inner.resume_prepared.finish(&record.hash);}
+                } else if !self.inner.moves.active(&record.hash) {self.inner.resume_prepared.finish(&record.hash);}
             }
             if view.error.is_none() {
                 view.error = self

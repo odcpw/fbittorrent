@@ -41,6 +41,13 @@ impl Shared {
             .map(|ticket| ticket.reference.to_string())
             .unwrap_or_default();
         if !self.daemon.is_stopping() {
+            if let Call::TorrentsMove{args}=&job.request.call {
+                match ops::moving::begin(&self.daemon,args) {
+                    Ok(batch)=>{self.begin_confirmation(&job,Reply::TorrentsMove(MutationResult::Pending{reference:MutationRef::new(&reference).unwrap()}),Confirmation::Move(batch),true);}
+                    Err(error)=>self.answer(&job,Err(error)),
+                }
+                return;
+            }
             if matches!(&job.request.call, Call::SearchGrab { .. }) {
                 if let Err(failure) = ops::search::validate_grab(&self.daemon) { self.answer(&job, Err(failure)); return; }
             }
@@ -176,7 +183,7 @@ impl Shared {
             }
         };
         if let Ok(Reply::TorrentsAdd(added)) = &result {
-            if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)))
+            if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)) && args.stage!=Some(true))
                 && added.duplicate != Some(true)
                 && added.deferred != Some(true)
             {

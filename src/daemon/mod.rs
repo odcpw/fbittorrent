@@ -371,6 +371,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         directory.clone(),
         Duration::from_secs(5),
     )?);
+    engine::staging::discard_at_start(&crate::config::data_dir().join("engine"))?;
     crate::search::begin_session()?;
     struct SearchDrain;
     impl Drop for SearchDrain { fn drop(&mut self) { crate::search::shutdown_all(); } }

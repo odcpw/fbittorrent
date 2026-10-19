@@ -234,6 +234,14 @@ impl Inner {
                 let current_generation = inner.restores.lock().unwrap().get(&record.hash)
                     .map(|restore| restore.generation);
                 if current_generation != Some(generation) { return Ok(()); }
+                if current.staged {
+                    inner.write_store(&cx, &format!("{}.torrent", record.hash), &metadata.torrent_bytes).await?;
+                    if let Some(saved)=ledger.records.iter_mut().find(|r|r.hash==record.hash) {
+                        saved.name=metadata.info.name().map(|s|s.into_owned()).unwrap_or_else(||record.hash.clone());
+                    }
+                    inner.save(&cx,&ledger).await?;
+                    return Ok(());
+                }
                 inner.admit_record(&cx, current, true, metadata).await?;
                 if let Some(saved) = ledger.records.iter_mut().find(|saved| saved.hash == record.hash) {
                     if saved.deferred {
@@ -252,7 +260,7 @@ impl Inner {
                     restore.outcome = match result {
                         Ok(()) => {
                             restore.last_error = None;
-                            RestoreOutcome::Restored
+                            if record.staged { RestoreOutcome::Stopped } else { RestoreOutcome::Restored }
                         }
                         Err(error) => {
                             let message = format!("could not restore {}: {error:#}", record.name);

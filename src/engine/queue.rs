@@ -28,7 +28,7 @@ impl Inner {
             let handle = self.handle(&record.hash).ok();
             let snapshot = handle.as_ref().map(|handle| {
                 let stats = handle.stats();
-                let rechecking = self.rechecks.active(&record.hash);
+                let rechecking = self.rechecks.active(&record.hash) || self.moves.active(&record.hash);
                 let failed = self.recheck_failed(&record.hash);
                 if stats.finished && !rechecking && !failed && !matches!(stats.state,TorrentStatsState::Error) {
                     if record.completion_on <= 0 {

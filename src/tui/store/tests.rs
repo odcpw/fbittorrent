@@ -122,7 +122,7 @@ fn fixtures() {
         println!("matched {expects} expect models: {}", path.display());
         total += expects;
     }
-    assert_eq!(total, 9, "every frozen expect model must be exercised");
+    assert_eq!(total, 10, "every frozen expect model including staged Summary must be exercised");
 }
 #[test]
 fn poisoned_expect_reports_the_first_json_pointer() {

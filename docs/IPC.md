@@ -150,6 +150,9 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 
 | Op | Args | Result | Mutating | Since |
 |---|---|---|---|---|
+| `torrents.commit` | `hash`, `files?`, `seed?`, `save_path?` | `{state: "done"}` | yes | P3-06 |
+| `torrents.discard` | `hash` | `{state: "done"}`; payload files never deleted | yes | P3-06 |
+| `torrents.move` | `hashes: [hash]` (1..256), `save_path` | `{state: "pending", ref}`, then mutation.result | yes | P7-02 |
 | `torrents.trackers` | `hash: hash` | `{trackers: [Tracker]}` | no | P6-01 |
 | `torrents.reannounce` | `hashes: [hash]` (1..256) | `{state: "done"}` | yes | P6-01 |
 | `hello` | See handshake | HelloResult | no | P1-06 |
@@ -461,7 +464,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -504,7 +507,26 @@ scenario requires one exact revision failure and recovery; it does not bypass
 other validation. LogEntry examples in diagnostic error details exercise the
 specified object without introducing its later operation or topic.
 
+## Staged adds (P3-06)
+
+`torrents.add {source, stage:true}` persists paused metainfo intent without
+opening payload storage. `torrents.commit {hash, files?, seed?, save_path?}`
+durably applies choices, clears staging and joins the queue; `torrents.discard {hash}` removes only the staged record and cached metainfo. Both return
+`{state:"done"}`, are idempotent with a repeated mutation ref, and reject an
+existing non-staged hash with `invalid_state` / `reason:"not_staged"`.
+Unresolved magnets return their hash immediately, resolve metadata for at most
+90 seconds, then remain paused with `reason:"metadata_timeout"` if no peers
+answer. Engine-slot restarts retain staging; a new daemon lifetime discards all
+staged records before accepting clients and never removes payload data.
+Staged rows are excluded from queue admission and all counts except `staged`;
+their metadata-resolution tasks are excluded from every idle busy reason.
+Summary top rows and pending-download disk demand also exclude staged records.
+
 ## Changelog
+
+- **P3-06:** implements `staging`, `torrents.commit/discard`, and the reserved
+  `stage` argument; CLI contract 1.2.22 includes additive `staged` row visibility.
+
 
 - **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
   `ImdbCard` with optional local `poster_path`, and an additive IMDb transcript.
@@ -812,6 +834,21 @@ URL, a 5,000 ms tick for times and immediate structural status changes. Its type
 topic/item registration and pushed-delivery qualification remain pending that
 integration, alongside the TUI/dashboard rendering owned by their tracks.
 
+### Payload moves (P7-02, contract 1.2.21)
+
+The `move` capability adds `torrents.move {hashes, save_path}`. The absolute
+save path must contain no parent traversal; payload traversal rejects symlinked
+parents/leaves and destination collisions. Only initialized handles qualify;
+staged, unresolved and dormant records require activation first. A move pauses
+transfer, uses rename on the same device or flushed copy across devices, durably
+saves the new location, and re-admits the owned verified bitfield without a hash
+scan. Completion and saved pause/seed intent are preserved. A failed copy keeps
+the source intact. Moves answer pending with a ref and always conclude through
+`mutation.result`; they have no operation timeout and are never resent. CLI
+`move <sel> <path>` waits for that result, prints the act envelope and returns
+exit 8 with `fbittorrent list --json` if the pending connection is lost.
+The Overview action and folder picker remain owned by the dashboard track.
+
 ### P5-04: live global and alternative limits
 
 `limits` is now advertised. `transfer.set_limits` applies and persists only supplied
@@ -850,7 +887,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.20**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.22**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -880,6 +917,8 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.18` | `clipboard` |
 | `1.2.19` | `rss` |
 | `1.2.20` | `shows` |
+| `1.2.21` | `api.move` |
+| `1.2.22` | `api.staging` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 

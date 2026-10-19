@@ -280,6 +280,9 @@ pub struct AddTorrentOptions {
     /// and every relevant payload file's identity before supplying these bytes.
     #[serde(skip)]
     pub trusted_have_pieces: Option<Vec<u8>>,
+    /// App-owned handle replacement retains observations and force throttling.
+    #[serde(skip)]
+    pub tracker_stats: Option<Arc<tracker_comms::TrackerStats>>,
 
     /// Additional trackers for public torrents. Ignored for private metainfo.
     pub trackers: Option<Vec<String>>,
@@ -1216,7 +1219,7 @@ impl Session {
             let span = debug_span!(parent: self.rs(), "torrent", id);
             let peer_opts = self.merge_peer_opts(opts.peer_opts);
             let metadata = Arc::new(metadata);
-            let tracker_stats = Arc::new(tracker_comms::TrackerStats::default());
+            let tracker_stats = opts.tracker_stats.take().unwrap_or_else(||Arc::new(tracker_comms::TrackerStats::default()));
             tracker_stats.register(trackers.iter().cloned());
             for (index,url) in trackers.iter().enumerate() {
                 if !matches!(url.scheme(), "http"|"https"|"udp") {

@@ -13,6 +13,8 @@ pub struct Torrent {
     pub hash: String,
     pub name: String,
     pub state: String,
+    #[serde(skip_serializing_if="is_false")]
+    pub staged: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     pub progress: f64,
@@ -37,6 +39,8 @@ pub struct Torrent {
     pub ratio_limit: f64,
     pub tags: String,
 }
+
+fn is_false(value: &bool) -> bool { !value }
 
 fn known_progress() -> bool { true }
 
