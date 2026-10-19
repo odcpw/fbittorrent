@@ -37,7 +37,12 @@ FocusScope {
   onShowingDetailChanged:scheduleDetail()
   Component.onCompleted:scheduleDetail()
   Component.onDestruction:service.hideDetail()
-  readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
+  readonly property var current:{
+    // A routed cursor can be set before the first torrent snapshot arrives.
+    // Membership changes must refresh it even while Details is closed.
+    var confirmedRows=service.torrents
+    return service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
+  }
   function snapshot(){return {errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
     cleanup:({undo:undoAvailable,hashes:service.cleanupFlow ? service.cleanupFlow.hashes : []}),toast:service.toast,cursor:cursorHash,rowProgress:service.detailRevision>=0 ? table.progress(cursorHash) : 0,stateLabel:service.detailRevision>=0 ? table.stateText(cursorHash) : "",selection:Object.keys(selection),filter:filter,query:query,
     focus:focusPane,details:detailSnapshot(),dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,

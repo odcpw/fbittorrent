@@ -30,7 +30,7 @@ def run(binary):
                 def press(keys,predicate):return q.keys(keys,predicate)
                 def intact():return all(p.exists() and hashlib.sha256(p.read_bytes()).hexdigest()==digest for _,p,digest in prepared) and sentinel.read_text()=='Never remove files outside the torrent'
                 q.wait(lambda:q.ipc('ready')=='true');q.shell('summon',json.dumps(dict(view='torrents',hash=prepared[0][0].info_hash)))
-                q.wait(lambda:view().get('cursor')==prepared[0][0].info_hash)
+                q.wait(lambda:view().get('rows')==len(prepared) and view().get('cursor')==prepared[0][0].info_hash)
                 press(['d'],lambda:(view().get('dialog') or {}).get('kind')=='remove')
                 press(['-k','Return'],lambda:not view().get('dialog'))
                 case.check(hashes()==wanted and intact(),'single Remove defaults to Cancel; records and bytes are unchanged',str(hashes()))
