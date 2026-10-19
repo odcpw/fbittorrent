@@ -1,5 +1,5 @@
 ╭ Watch fixture.mkv ───────────────────────────────────────────────────────────╮
-│ [Overview]  Files    [ / ] tabs                                              │
+│ [Overview]  Files  Log    [ / ] tabs                                         │
 │                                                                              │
 │ state     ▶ Ready · ready to watch                                           │
 │ ready     ▶ Ready to watch · 4m00s buffered · finishes in 42s · (o) Open     │

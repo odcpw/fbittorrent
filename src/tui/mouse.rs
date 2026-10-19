@@ -6,8 +6,9 @@ pub(super) enum MouseList { Torrents, Results, Browse, Feeds, Items, Shows, Epis
 
 impl TuiApp {
     pub(super) fn mouse_list_at(&self, x: u16, y: u16) -> Option<(MouseList, Rect)> {
+        if self.log_open||self.feedback.rects.get().iter().flatten().any(|a|a.contains(x,y)){return None;}
         let b = self.last_bounds.get();
-        if self.screen==Screen::Search && self.search_card {return None;}
+        if self.screen==Screen::Search && self.poster_open {return None;}
         if b.width == 0 || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
         if let Some(m) = &self.providers {
             let area = providers_area(b, m.plugins.len());
@@ -106,7 +107,7 @@ impl TuiApp {
             MouseList::Episodes => self.episode_count(),
             MouseList::Files => self.files.as_ref().map_or(0, |m| m.files.len()),
             MouseList::Providers => self.providers.as_ref().map_or(0, |m| m.plugins.len()),
-            MouseList::Settings => self.settings.as_ref().map_or(0, |_|4),
+            MouseList::Settings => self.settings.as_ref().map_or(0, |_|settings_fields::SETTINGS_ROWS),
         }
     }
 
@@ -143,13 +144,14 @@ impl TuiApp {
         if self.settings.is_some() {
             let area = settings_area(self.last_bounds.get());
             let inner = Block::bordered().padding(Sides::horizontal(1)).inner(area);
-            let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(4));
+            let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(settings_fields::SETTINGS_ROWS as u16));
             if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
                 if rows.contains(m.x, m.y) {
-                    self.settings.as_ref().unwrap().list.borrow_mut().select(Some(usize::from(m.y - rows.y)));
+                    let offset=self.settings.as_ref().unwrap().list.borrow().offset;
+                    self.settings.as_ref().unwrap().list.borrow_mut().select(Some((offset+usize::from(m.y - rows.y)).min(settings_fields::SETTINGS_ROWS-1)));
                     return self.on_settings_key(KeyEvent::new(KeyCode::Right));
                 }
-                if inner.contains(m.x, m.y) && m.y == inner.y.saturating_add(4) {
+                if inner.contains(m.x, m.y) && m.y == inner.y.saturating_add(settings_fields::SETTINGS_ROWS as u16) {
                     return self.on_settings_key(KeyEvent::new(KeyCode::Enter));
                 }
             }
@@ -157,6 +159,7 @@ impl TuiApp {
             if m.kind == MouseEventKind::ScrollUp { return self.on_settings_key(KeyEvent::new(KeyCode::Up)); }
             return Cmd::none();
         }
+        if self.log_open {return match m.kind{MouseEventKind::ScrollDown=>self.on_log_action(actions::Intent::Down),MouseEventKind::ScrollUp=>self.on_log_action(actions::Intent::Up),_=>Cmd::none()};}
         if self.show_help {
             match m.kind {
                 MouseEventKind::ScrollDown => self.help_scroll = self.help_scroll.saturating_add(3).min(self.help_max_scroll()),
@@ -166,6 +169,7 @@ impl TuiApp {
             }
             return Cmd::none();
         }
+        if self.poster_open && self.prompt.is_none(){return Cmd::none();}
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
             if self.show_help { self.show_help = false; return Cmd::none(); }
             let b = self.last_bounds.get();

@@ -183,17 +183,18 @@ fn enter_opens_overview_and_brackets_stop_at_tab_ends_at_each_size() {
         ));
         assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Files);
         assert!(app.files.is_some());
-        assert!(matches!(
-            app.on_key(KeyEvent::new(KeyCode::Char(']'))),
-            Cmd::None
-        ));
+        app.on_key(KeyEvent::new(KeyCode::Char(']')));
+        assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Log);
+        assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char(']'))),Cmd::None));
+        app.on_key(KeyEvent::new(KeyCode::Char('[')));
+        assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Files);
         app.on_key(KeyEvent::new(KeyCode::Char('[')));
         assert!(app.files.is_none());
         assert_eq!(app.details.as_ref().unwrap().tab, DetailsTab::Overview);
         app.on_key(KeyEvent::new(KeyCode::Char('h')));
         assert!(app.details.is_none());
         println!(
-            "{width}x{height}: Enter Overview; ] Files; ] at end; [ Overview; [ at start; h Back"
+            "{width}x{height}: Enter Overview; ] Files; ] Log; ] at end; [ Files; [ Overview; [ at start; h Back"
         );
     }
 }
@@ -421,13 +422,13 @@ fn narrow_breadcrumb_navigation_and_search_card_do_not_start_work() {
         app.on_key(KeyEvent::new(KeyCode::Char('v'))),
         Cmd::None
     ));
-    assert!(app.search_card);
-    assert!(super::golden::render(&app, 80, 24).contains("╭ Details"));
+    assert!(app.poster_open);
+    assert!(super::golden::render(&app, 80, 24).contains("╭ IMDb"));
     assert!(matches!(
         app.on_key(KeyEvent::new(KeyCode::Escape)),
         Cmd::None
     ));
-    assert!(!app.search_card);
+    assert!(!app.poster_open);
     assert_eq!(app.search_results.len(), 10);
 }
 

@@ -235,7 +235,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 let added=added.pop().ok_or_else(||error(Internal,"engine returned no restore result",None))?;
                 return Ok(Reply::TorrentsAdd(AddResult {
                     status:MutationResult::Done,hash:Some(Hash::new(added.hash).unwrap()),name:Some(added.name),
-                    duplicate:Some(added.duplicate),deferred:added.deferred.then_some(true),
+                    duplicate:Some(added.duplicate),deferred:added.deferred.then_some(true),disk:None,
                 }));
             }
             let origin = args.origin.as_deref().unwrap_or("manual");
@@ -247,7 +247,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             let mut add = engine::ops::AddRequest {
                 sources: Vec::new(),
                 torrent: None,
-                save_path: args.save_path.clone().or(cfg.save_path),
+                save_path: args.save_path.clone().or(cfg.save_path.clone()),
                 upload_limit: if seed { 0 } else { 32768 },
                 ratio_limit: if seed { -2.0 } else { 0.0 },
                 stopped: args.stopped.unwrap_or(false),
@@ -370,6 +370,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 }
                 Some(indices.into_iter().map(|index| index as usize).collect())
             } else { None };
+            let disk = add.torrent.as_ref().and_then(|(_,bytes)| crate::daemon::supervisor::add_warning(Path::new(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)),bytes,selected.as_deref()));
             let EngineResult::Added(mut added) = execute(
                 daemon,
                 if args.stage==Some(true) {
@@ -397,6 +398,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 name: Some(added.name),
                 duplicate: Some(added.duplicate),
                 deferred: added.deferred.then_some(true),
+                disk,
             })
         }
         Call::TorrentsStart { args } => {
@@ -472,6 +474,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     reason: entry.reason,
                 }));
             }
+            for hash in &started { daemon.disk.lock().unwrap().restarted(hash.as_str()); }
             Reply::TorrentsStart(StartResult {
                 state: DoneState::Done,
                 started,

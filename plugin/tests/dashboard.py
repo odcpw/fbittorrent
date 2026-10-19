@@ -137,7 +137,7 @@ def run(binary):
             case.check(state['view']['window']['view']=='search' and state['view']['query']=='sintel','actual omarchy-shell CLI routes Search/query to the private real Dashboard',json.dumps(state))
             keyboard=subprocess.Popen(['wtype','-s','80','-k','End','-s','30',' typed','-s','700'],env=q.env)
             try:
-                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view']['cursor']=='query' else None)
+                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view'].get('focus',s['view']['cursor'])=='query' else None)
                 case.check(True,'typing through wtype reaches the focused native search field',json.dumps(dict(state=typed,focus_steps=q.ipc('focusSteps'))))
             finally:keyboard.wait(timeout=3)
             q.keys(['-k','Tab'],lambda:q.state()['view']['window']['view']=='shows')
@@ -198,6 +198,7 @@ def run(binary):
             q.wait(lambda:json.loads(q.ipc('registryState'))['enabled'])
             result=q.native_hook('summonView','{"view":"search"}')
             case.check(q.ipc('startScrolling')=='false','private scroll driver also refuses without hooks','no timer started')
+            case.check(q.native_hook('setPaneWidth','420').startswith('refused:'),'pane width hook refuses without FBT_TEST_HOOKS=1','production guard checked before any width mutation')
             case.check(result.startswith('refused:') and q.state()['view'] is None,'production summonView refuses without FBT_TEST_HOOKS=1',result)
             case.check(not (sandbox.root/'shims/fbittorrent.log').exists(),'refused hook never starts a daemon','recording up shim untouched')
         finally:q.close()

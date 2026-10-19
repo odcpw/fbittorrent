@@ -152,6 +152,8 @@ pub struct TorrentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue_pos: Option<u64>,
     #[serde(skip)]
+    pub piece_length: Option<u64>,
+    #[serde(skip)]
     legacy: Legacy,
 }
 
@@ -164,6 +166,12 @@ impl TorrentView {
     }
 
     fn retain_restore_reason(&mut self) {
+        if self.error.as_deref().is_some_and(super::disk::is_full) {
+            self.state = TorrentState::Error;
+            self.reason = Some("disk_full".into());
+            if let Some(message) = &mut self.error { if !message.starts_with("Disk full") { *message = format!("Disk full: {message}"); } }
+            return;
+        }
         if self
             .error
             .as_deref()
@@ -215,6 +223,7 @@ impl TorrentView {
             origin: None, // projected once this row is attached to its owned ledger
             force: record.force,
             queue_pos: None,
+            piece_length: None,
             legacy: Legacy {
                 source,
                 facts,
@@ -265,6 +274,7 @@ impl TorrentView {
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
         if let Some(metadata) = metadata {
+            view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));
             let content = if metadata.file_infos.len() == 1 {
                 handle
                     .output_folder()

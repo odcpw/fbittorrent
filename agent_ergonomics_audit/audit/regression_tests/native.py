@@ -821,11 +821,13 @@ def expected_daemon_stderr(stderr, complete=True):
     patterns = [r'INFO daemon listening \{.*\} no_notify=(?:false|true)',
                 r'INFO daemon ready state=starting', r'INFO engine starting session',
                 r'INFO engine session exists restores=[0-9]+',
+                r'DEBUG engine initial validation admitted source=engine hash=[0-9a-f]{40}',
                 r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
                 r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
                 r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
                 r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
                 r'INFO imdb index loaded refresh=(?:true|false)',
+                r'INFO inhibit started pid=[0-9]+', r'INFO inhibit released',
                 r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
                 r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
                 r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']

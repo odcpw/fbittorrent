@@ -35,7 +35,7 @@ fn frame_text(frame: &Frame) -> String {
     text
 }
 
-fn compare(path: &str, expected: &str, actual: &str) -> Result<(), String> {
+pub(super) fn compare(path: &str, expected: &str, actual: &str) -> Result<(), String> {
     if expected == actual { Ok(()) } else { Err(unified_diff(path, expected, actual)) }
 }
 
@@ -90,7 +90,7 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details);
+goldens!(torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk);
 
 #[test]
 fn done_row_offers_seed_instead_of_resume() {

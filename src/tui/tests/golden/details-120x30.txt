@@ -1,5 +1,5 @@
 [ 1 Torren╭ The Diplomat S04E01 1080p WEB-DL H264-GROUP ─────────────────────────────────────────────────────╮1.0 KiB/s
-╭ Torrents│ [Overview]  Files    [ / ] tabs                                                                  │─────────╮
+╭ Torrents│ [Overview]  Files  Log    [ / ] tabs                                                             │─────────╮
 │  STATE  │                                                                                                  │ETA PEERS│
 │▌ ↓ Down │ state     ↓ Down · downloading                                                                   │ 4m     3│
 │  ✓ Done │ progress  42.0%  430.1 MiB of 1.0 GiB                                                            │         │

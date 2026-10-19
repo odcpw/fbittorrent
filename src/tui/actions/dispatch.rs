@@ -26,12 +26,16 @@ pub(super) fn pane(app: &TuiApp, screen: Screen) -> Scope {
     }
 }
 pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
-    if app.settings.is_some() {
+    if app.prompt.is_some() {
+        Scope::Prompt
+    } else if app.settings.is_some() {
         Scope::Modal(ModalKind::Settings)
     } else if app.show_help {
         Scope::Modal(ModalKind::Help)
-    } else if app.prompt.is_some() {
-        Scope::Prompt
+    } else if app.log_open || app.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Log) {
+        Scope::Modal(ModalKind::Log)
+    } else if app.poster_open {
+        Scope::Modal(ModalKind::Poster)
     } else if app.files.is_some() {
         Scope::Modal(ModalKind::Files)
     } else if app.details.is_some() {

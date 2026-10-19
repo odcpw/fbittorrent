@@ -5,6 +5,7 @@ use super::*;
 pub(super) enum DetailsTab {
     Overview,
     Files,
+    Log,
 }
 pub(super) struct DetailsModal {
     pub hash: String,
@@ -45,6 +46,8 @@ impl TuiApp {
                     return self.open_files(&torrent);
                 }
             }
+            (DetailsTab::Files, true)=>{details.tab=DetailsTab::Log;self.files=None;}
+            (DetailsTab::Log,false)=>{details.tab=DetailsTab::Files;let torrent=self.selected_torrent().cloned();if let Some(torrent)=torrent{return self.open_files(&torrent);}}
             (DetailsTab::Files, false) => {
                 details.tab = DetailsTab::Overview;
                 self.files = None;
@@ -86,9 +89,9 @@ impl TuiApp {
             .constraints([Constraint::Fixed(2), Constraint::Fill])
             .split(inner);
         let tabs = if details.tab == DetailsTab::Overview {
-            "[Overview]  Files"
+            "[Overview]  Files  Log"
         } else {
-            "Overview  [Files]"
+            if details.tab==DetailsTab::Files {"Overview  [Files]  Log"}else{"Overview  Files  [Log]"}
         };
         Paragraph::new(format!("{tabs}    [ / ] tabs"))
             .style(th.accented())
@@ -97,6 +100,8 @@ impl TuiApp {
             Paragraph::new("This torrent is no longer in your list.")
                 .style(th.dimmed())
                 .render(rows[1], frame);
+        } else if details.tab==DetailsTab::Log {
+            self.view_log_contents(rows[1],Some(&details.hash),frame);
         } else if details.tab == DetailsTab::Files {
             self.view_file_contents(rows[1], frame);
         } else if let Some(t) = self.selected_torrent() {

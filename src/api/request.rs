@@ -1,6 +1,8 @@
 //! Strict client input. Runtime policies (in-flight IDs, hello deadlines,
 //! capabilities, path opening and mutation refs) belong to the server.
 use super::{scalar::*, search::*};
+use super::rss::*;
+use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -149,6 +151,9 @@ pub struct HelloArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppClientArgs {
+    /// The shared bar socket explicitly declares an open dashboard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dashboard_visible: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -343,10 +348,32 @@ pub enum Call {
 
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
+    #[serde(rename="shows.list")] ShowsList {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
+    #[serde(rename="shows.follow")] ShowsFollow {args:ShowFollowArgs},
+    #[serde(rename="shows.unfollow")] ShowsUnfollow {args:ShowArgs},
+    #[serde(rename="shows.check")] ShowsCheck {#[serde(skip_serializing_if="Option::is_none")] args:Option<ShowCheckArgs>},
+    #[serde(rename="shows.releases")] ShowsReleases {args:ShowReleasesArgs},
+    #[serde(rename="shows.set_read")] ShowsSetRead {args:ShowReadArgs},
+    #[serde(rename="shows.mark_show_read")] ShowsMarkShowRead {args:ShowArgs},
+    #[serde(rename="shows.undo_read")] ShowsUndoRead {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
+    #[serde(rename="shows.grab")] ShowsGrab {args:ShowGrabArgs},
+    #[serde(rename="rss.feeds")]
+    RssFeeds { #[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs> },
+    #[serde(rename="rss.add")] RssAdd { args:FeedAddArgs },
+    #[serde(rename="rss.remove")] RssRemove { args:FeedArgs },
+    #[serde(rename="rss.refresh")] RssRefresh { #[serde(skip_serializing_if="Option::is_none")] args:Option<FeedRefreshArgs> },
+    #[serde(rename="rss.items")] RssItems { args:FeedItemsArgs },
+    #[serde(rename="rss.set_read")] RssSetRead { args:FeedReadArgs },
+    #[serde(rename="rss.mark_feed_read")] RssMarkFeedRead { args:FeedArgs },
+    #[serde(rename="rss.grab")] RssGrab { args:FeedGrabArgs },
+    #[serde(rename = "app.clipboard.dismiss")]
+    AppClipboardDismiss { args: HashArgs },
     #[serde(rename = "app.log")]
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
     AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
+    #[serde(rename = "app.free_space")]
+    AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -433,8 +460,14 @@ impl Call {
             Self::SearchGrab { .. } => "search.grab",
 
             Self::TorrentsRecheck { .. } => "torrents.recheck",
+            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
+            Self::ShowsReleases {..}=>"shows.releases",Self::ShowsSetRead {..}=>"shows.set_read",Self::ShowsMarkShowRead {..}=>"shows.mark_show_read",Self::ShowsUndoRead {..}=>"shows.undo_read",Self::ShowsGrab {..}=>"shows.grab",
+            Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
+            Self::RssItems { .. }=>"rss.items", Self::RssSetRead { .. }=>"rss.set_read", Self::RssMarkFeedRead { .. }=>"rss.mark_feed_read", Self::RssGrab { .. }=>"rss.grab",
+            Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",
+            Self::AppFreeSpace { .. } => "app.free_space",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",

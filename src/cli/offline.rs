@@ -68,6 +68,19 @@ pub fn mutation(
                 }
             }
         }
+        // A v0.1 TUI owner has no API socket. Refuse before the offline lock
+        // fallback, even if that older owner does not hold the ledger lock.
+        if !crate::ipc::socket_path(cfg)
+            .with_file_name("api.sock")
+            .exists()
+            && crate::ipc::is_running(cfg)
+        {
+            return Err(crate::agent::AppError::new(
+                crate::agent::Code::Backend,
+                "an older fbittorrent app is running; quit it with Q and retry",
+            )
+            .into());
+        }
         if let Ok((_lock, ledger)) = locked() {
             let EngineResult::Torrents(rows) = ledger.execute(EngineOp::Info)? else {
                 unreachable!()

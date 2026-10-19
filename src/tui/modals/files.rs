@@ -104,7 +104,7 @@ impl TuiApp {
             return;
         }
         if !m.error.is_empty() {
-            Paragraph::new(m.error.clone()).style(bg.fg(th.red)).wrap(WrapMode::Word).render(inner, frame);
+            Paragraph::new(th.error_message(&m.error)).style(th.err().bg(th.selection)).wrap(WrapMode::Word).render(inner, frame);
             return;
         }
         if m.files.is_empty() {
@@ -124,8 +124,8 @@ impl TuiApp {
             |i|{let f=&m.files[i];
             let (mark, prio, pst) = match f.priority {
                 0 => ("[ ]", "skip", bg.fg(th.dim)),
-                6 => ("[x]", "high", bg.fg(th.yellow)),
-                7 => ("[x]", "max", bg.fg(th.green)),
+                6 => ("[x]", "high", th.warn().bg(th.selection)),
+                7 => ("[x]", "max", th.ok().bg(th.selection)),
                 _ => ("[x]", if self.cfg.native() { "include" } else { "normal" }, bg.fg(th.fg)),
             };
             let name_style = if f.priority == 0 { bg.fg(th.dim) } else { bg.fg(th.fg) };

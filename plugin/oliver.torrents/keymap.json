@@ -1,6 +1,22 @@
 {
   "actions": [
     {
+      "id": "limits.toggle",
+      "keys": {
+        "dashboard": [
+          "z"
+        ],
+        "popup": [
+          "z"
+        ],
+        "tui": [
+          "z"
+        ]
+      },
+      "label": "Turtle limits",
+      "scope": "global"
+    },
+    {
       "id": "screen.torrents",
       "keys": {
         "dashboard": [
@@ -384,6 +400,164 @@
       "scope": "modal:details"
     },
     {
+      "id": "log.open",
+      "keys": {
+        "dashboard": [
+          "L"
+        ],
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Log",
+      "scope": "global"
+    },
+    {
+      "id": "log.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.level",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "l"
+        ]
+      },
+      "label": "Level",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.source",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "h"
+        ]
+      },
+      "label": "Source",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.first",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.previous_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "["
+        ]
+      },
+      "label": "Files",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.next_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "]"
+        ]
+      },
+      "label": "Next tab",
+      "scope": "modal:log"
+    },
+    {
+      "id": "torrents.details_previous",
+      "keys": {
+        "dashboard": [
+          "["
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Previous details tab",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.details_next",
+      "keys": {
+        "dashboard": [
+          "]"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Next details tab",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [
@@ -683,16 +857,40 @@
       "scope": "screen:torrents"
     },
     {
-      "id": "search.card",
+      "id": "search.sort",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "s"
+        ],
         "popup": null,
-        "tui": [
-          "v"
-        ]
+        "tui": null
       },
-      "label": "Card",
+      "label": "Sort results",
       "scope": "screen:search"
+    },
+    {
+      "id": "search.reverse_sort",
+      "keys": {
+        "dashboard": [
+          "S"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Reverse results sort",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.copy_magnet",
+      "keys": {
+        "dashboard": [
+          "y"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Copy magnet",
+      "scope": "pane:search.results"
     },
     {
       "id": "search.next",
@@ -1498,7 +1696,10 @@
     {
       "id": "files.down",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "j",
+          "↓"
+        ],
         "popup": null,
         "tui": [
           "j",
@@ -1511,7 +1712,10 @@
     {
       "id": "files.up",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "k",
+          "↑"
+        ],
         "popup": null,
         "tui": [
           "k",
@@ -1524,7 +1728,9 @@
     {
       "id": "files.toggle",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "Space"
+        ],
         "popup": null,
         "tui": [
           "Space"
@@ -1536,7 +1742,9 @@
     {
       "id": "files.all",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "a"
+        ],
         "popup": null,
         "tui": [
           "a"
@@ -1548,7 +1756,9 @@
     {
       "id": "files.none",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "n"
+        ],
         "popup": null,
         "tui": [
           "n"
@@ -1648,7 +1858,10 @@
     {
       "id": "providers.down",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "j",
+          "↓"
+        ],
         "popup": null,
         "tui": [
           "j",
@@ -1661,7 +1874,10 @@
     {
       "id": "providers.up",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "k",
+          "↑"
+        ],
         "popup": null,
         "tui": [
           "k",
@@ -1674,7 +1890,9 @@
     {
       "id": "providers.toggle",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "Space"
+        ],
         "popup": null,
         "tui": [
           "Space"
@@ -1981,6 +2199,55 @@
       },
       "label": "Seed on/off",
       "scope": "prompt"
+    },
+    {
+      "id": "poster.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "v"
+        ]
+      },
+      "label": "Card",
+      "scope": "global"
+    },
+    {
+      "id": "poster.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "v"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.imdb",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.wiki",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "modal:poster"
     }
   ],
   "version": 1

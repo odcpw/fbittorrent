@@ -392,13 +392,14 @@ class Harness:
         except OSError as error:
             return step.fail(f"Lock unavailable: {error}.")
 
-    def cli(self, *args, code=0, timeout=10, start=False):
+    def cli(self, *args, code=0, timeout=10, start=False, on_exit=None):
         private_environment(self.sandbox)
         command = [self.binary, *([] if start else ["--no-start"]), *args, "--json"]
         step = self.case.step("CLI " + shlex.join(command), f"exit {code} with one JSON object")
         child = self.case.popen(command, env=self.sandbox.env, cwd=self.sandbox.root, stdout=subprocess.PIPE, text=True)
         try:
             stdout, _ = child.communicate(timeout=timeout)
+            if on_exit is not None:on_exit(time.monotonic())
         except subprocess.TimeoutExpired:
             child.kill()
             stdout, _ = child.communicate(timeout=2)
@@ -1355,7 +1356,11 @@ def api_torrent_operations(binary, systemd):
         after_restore=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
         case.check(duplicate_restore["duplicate"] and all(before_restore.get(key)==after_restore.get(key) for key in ("seed","origin","save_path","upload_policy")),
                    "P6-08 restore of an existing row is an idempotent duplicate preserving policy",json.dumps(dict(reply=duplicate_restore,before=before_restore,after=after_restore)))
-        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
+        explicit_duplicate = client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False))["result"]
+        unchanged = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(explicit_duplicate["duplicate"] is True and explicit_duplicate["hash"] == fixture.info_hash
+                   and all(before_restore.get(key) == unchanged.get(key) for key in ("seed", "origin", "save_path", "upload_policy", "staged")),
+                   "stage:false is an ordinary successful duplicate preserving the existing record", json.dumps(dict(reply=explicit_duplicate, row=unchanged)))
         link = sandbox.root / "symlink.torrent"
         link.symlink_to(fixture.torrent)
         client.call("torrents.add", dict(source=dict(path=str(link))), error="invalid_args")
@@ -2459,7 +2464,23 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
             client.case.check(frame.get("error", {}).get("code") == code,
                               "drive bounded dispatch/in-flight pressure rather than inject a server error",
                               f"elapsed={time.monotonic()-began:.3f}s; frame={frame!r}")
-            return frame, deferred
+            expected_frame = frame
+        # Releasing the HTTP source completes the auxiliary requests. Drain
+        # their actual replies and mutation outcomes before the next fixture
+        # input; response(identifier) may already have consumed some of them.
+        identifiers = {job["id"] for job in jobs}
+        def remaining():
+            replies = [line["frame"] for line in frames if line["dir"] == "s2c" and line["frame"].get("id") in identifiers]
+            pending = {reply["result"]["ref"] for reply in replies if reply.get("result", {}).get("state") == "pending"}
+            completed = {line["frame"].get("ref") for line in frames if line["dir"] == "s2c" and line["frame"].get("ev") == "mutation.result"}
+            return identifiers - {reply["id"] for reply in replies}, pending - completed
+        deadline = time.monotonic() + 20
+        while any(remaining()) and time.monotonic() < deadline:
+            if client.receive() is None: break
+        outstanding = remaining()
+        client.case.check(not any(outstanding), "drain every real pressure-fixture reply/outcome before protocol validation",
+                          json.dumps(dict(unanswered=sorted(outstanding[0]), pending=sorted(outstanding[1]))))
+        return expected_frame, deferred
     # These complete expected error frames have no P1-06 RPC producer. Do not
     # mistake the old catalogue's app.info requests for a way to trigger them.
     owners = {"ambiguous": "P1-11", "safety": "P1-11", "unsupported": "P1-18",
@@ -3264,7 +3285,7 @@ from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_
 from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
 from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
-from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
+from daemon_policy import (dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
     idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
@@ -3600,14 +3621,15 @@ def imdb_owned(name, binary, systemd, oversized=False, with_process=False):
                        "local IMDb endpoint is explicitly forwarded before either launch mode", source.base)
             with Harness(case, binary, sandbox, systemd) as harness:
                 process = harness.start_serve()
+                harness.imdb_process = process
                 if not (harness.receive_ready() and harness.wait_engine()):
                     raise RuntimeError("private IMDb daemon did not start")
                 try:
                     values = (case, sandbox, harness, source, directory, cache)
                     yield (*values, process) if with_process else values
                 finally:
-                    if process.child.poll() is None:
-                        harness.stop_serve(process)
+                    if harness.imdb_process.child.poll() is None:
+                        harness.stop_serve(harness.imdb_process)
                     harness.lock_free()
 
 
@@ -3902,6 +3924,11 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
+from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
+from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
+from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 def handler_confirm_stages(binary, systemd=False):
@@ -4062,18 +4089,21 @@ def recheck_restart_fixture(name,binary,systemd,staged=False):
         try:
             with ApiConn(h) as client:
                 client.hello()
-                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
-                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
-            h.stop_serve(process); h.notify.close()
-            ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
-            if staged:
-                record=json.loads(ledger.read_text());record["records"][0].update(staged=True,paused=True)
-                ledger.write_text(json.dumps(record))
-            process=h.start_serve();h.receive_ready();h.wait_engine()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),stage=staged))
+                if staged:
+                    ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+                    record=next(row for row in json.loads(ledger.read_text())["records"] if row["hash"]==fixture.info_hash)
+                    case.check(record["staged"] and record["paused"], "API staging durably saves paused intent before recheck", json.dumps(record))
+                else:
+                    h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
+            if not staged:
+                h.stop_serve(process); h.notify.close()
+                process=h.start_serve();h.receive_ready();h.wait_engine()
             with ApiConn(h) as client:
                 client.hello()
                 before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
                 if staged:
+                    case.check(before["staged"] and before["checked"] is False, "live staged record remains visible without payload validation", json.dumps(before))
                     refusal=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),error="invalid_state")
                     case.check(refusal["error"].get("details",{}).get("reason")=="staged",
                                "a real saved staged record is refused with invalid_state/exit-1 code",json.dumps(refusal))
@@ -4885,119 +4915,26 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (staged_magnet_metadata_only,
-          staged_metadata_timeout,
-          staged_discard_keeps_files,
-          staged_queue_excluded,
-          staged_commit_joins_queue,
-          staged_discarded_at_restart,
-          commit_non_staged_invalid_state,
-          move_same_fs,
-          move_cross_fs,
-          move_failed_copy_keeps_source,
-          tracker_saved_views,
-          tracker_status,
-          reannounce,
-          reannounce_rate_limited,
-          reannounce_not_live_invalid_state,
-          tracker_url_redacted,
-          resume_trusted,
-          resume_touched_file,
-          resume_after_kill9,
-          recheck_drops_resume_file,
-          origin_persists,
-          undo_restore,
-          undo_incomplete_download,
-          bulk_remove_mixed_sizes,
-          undo_expired,
-          undo_owner_lifetime,
-          force_start_bypasses_limit,
-          queue_move_order,
-          force_off_returns_to_queue,
-          queue_parked_persists,
-          recheck_failed_receipt,
-          recheck_corrupt_byte,
-          recheck_corrupt_byte_256k,
-          recheck_dormant,
-          recheck_paused_stays_paused,
-          recheck_resets_completion,
-          recheck_staged_invalid_state,
-          settings_invalid_named,
-          settings_live_queue,
-          settings_restart_class_keeps_clients,
-          settings_offline_no_start,
-          imdb_index_loaded_once,
-          imdb_poster_cap,
-          imdb_poster_atomic,
-          fixture_payloads,
-          fixture_servers,
-          path_shims,
-          notify_and_process,
-          launcher_exit_cleanup,
-          systemd_without_bus_address,
-          ready_notify,
-          parked_start,
-          sigterm_drains,
-          alt_limit_holds,
-          global_unlimited_keeps_cap,
-          alt_survives_restart,
-          handler_confirm_stages,
-          lazy_restore_no_checks,
-          dormant_seed_checks,
-          dormant_missing_files,
-          dormant_open_no_check,
-          fixture_serving_states,
-          fixture_launcher_killed,
-          fixture_daemon_killed,
-          fixture_stdin_lifetime,
-          fixture_peer_pair,
-          upgrade_idle_exit_75,
-          upgrade_pending_while_busy,
-          restart_now,
-          restart_closed_never_starts,
-          log_injected_error,
-          log_follow,
-          hello_counters,
-          log_down_never_starts,
-          tui_single_connection,
-          tui_reconnect_existing_owner,
-          tui_pending_rss_failure,
-          offline_stop_ledger,
-          offline_delete_keep_files_ledger,
-          offline_write_waits_for_draining_daemon,
-          notify_completed,
-          notify_action_open,
-          notify_action_default,
-          notify_action_folder,
-          notify_added_undo,
-          notify_off,
-          notify_failed,
-          notify_queue_bounded,
-          notify_vpn_once_per_transition,
-          notify_cli_policy,
-          notify_killed_handler,
-          notify_handler_cli_once,
-          idle_exit_no_torrents,
-          idle_exit_download_keeps_alive,
-          idle_exit_interactive_keeps_alive,
-          idle_exit_bar_does_not,
-          idle_exit_parked_keeps_alive,
-          idle_exit_disabled_never_exits,
-          idle_exit_disabled_shutdown_drains,
-          idle_exit_glance_pauses,
-          idle_exit_glance_drop_resumes,
-          idle_exit_mutation_keeps_alive,
-          bus_subscriptions,
-          events_since_seq_replay,
-          state_watcher_cancellation_stress,
-          mutation_bus_sequence,
-          subscribe_gap_recovery,
-          structural_frame_within_100ms,
-          detail_topic_released,
-          engine_restart_keeps_connection,
-          slow_client_closed_others_live,
-          rev_soak_10min,
-          daemon_api_probe,
+         (staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+          resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
+          lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
+          fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
+          upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
+          log_injected_error, log_follow, hello_counters, log_down_never_starts,
+          origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state,
+          settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
+          settings_offline_no_start, tui_single_connection, tui_reconnect_existing_owner, tui_pending_rss_failure, offline_stop_ledger,
+          offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
+          notify_completed, notify_action_open, notify_action_default, notify_action_folder,
+          notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
+          dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
+          idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
+          idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,
+          state_watcher_cancellation_stress, mutation_bus_sequence, subscribe_gap_recovery, structural_frame_within_100ms,
+          detail_topic_released, engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
+          imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+          systemd_without_bus_address, daemon_api_probe, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
           killmode_mixed, start_limit_not_hit, start_while_deactivating, down_cancels_restart,
@@ -5021,6 +4958,8 @@ from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
 CASES.update((function.__name__, function) for function in RESPONSIVE_CASES)
+from daemon_legacy import CASES as LEGACY_CASES
+CASES.update((function.__name__, function) for function in LEGACY_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",

@@ -12,6 +12,7 @@ mod api;
 mod backend;
 mod browse;
 mod config;
+mod free_space;
 mod daemon;
 mod engine;
 mod native_runtime;
@@ -117,7 +118,7 @@ fn run(cli: Cli) -> Result<Code> {
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if !cfg.native() { agent::warning("deprecated_engine", "engine = \"qbittorrent\" is deprecated and is removed in v0.4.0; see the README".into(), true); }
-    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
+    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::Status{..}|Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
         return Err(AppError::new(Code::Usage, "native sequential and first/last scheduling are intrinsic; toggle commands require legacy mode")
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());

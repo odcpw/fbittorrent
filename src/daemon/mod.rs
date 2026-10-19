@@ -7,8 +7,13 @@ mod runtime_dir;
 mod sdnotify;
 mod signals;
 pub(crate) mod watch;
+mod inhibit;
+mod clipboard;
+pub(crate) mod rss;
+pub(crate) mod shows;
 mod upgrade;
 mod test_ready;
+pub(crate) mod supervisor;
 pub mod slot;
 
 use crate::{
@@ -41,6 +46,11 @@ pub struct Daemon {
     pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) logs: Arc<log::Ring>,
     resume: Arc<engine::resume::Store>,
+    pub(crate) inhibitor: inhibit::Inhibitor,
+    pub(crate) clipboard: clipboard::Watcher,
+    pub(crate) rss: rss::Service,
+    pub(crate) shows: shows::Service,
+    pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
     pub(crate) watch: Mutex<watch::Watch>,
@@ -125,6 +135,7 @@ impl Daemon {
             drop(slot);
             std::thread::sleep(Duration::from_millis(20));
         }
+        self.clipboard.enabled(cfg.clipboard_watch);
         Ok(())
     }
 
@@ -288,6 +299,22 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
+        if let Ok(engine::ops::EngineResult::Torrents(rows)) = daemon.execute(engine::ops::EngineOp::Info) {
+            let (retries, notify) = daemon.disk.lock().unwrap().sample(&rows, Instant::now());
+            if notify { daemon.notifier.disk_low(); }
+            for (hash, free) in retries {
+                let result = match &daemon.slot.read().unwrap().slot {
+                    Slot::Running(app) => app.dispatcher().retry_disk_full(&hash),
+                    _ => Ok(false),
+                };
+                // Consume this rise even when the attempt fails; the next
+                // ENOSPC observation records a fresh baseline for another rise.
+                daemon.disk.lock().unwrap().restarted(&hash);
+                if result.as_ref().is_ok_and(|retry| *retry) {
+                    eprintln!("INFO engine disk_full_recovered hash={hash} free_bytes={free}");
+                } else if let Err(error) = result { eprintln!("ERROR engine disk_full retry failed hash={hash} message={:?}",format!("{error:#}")); }
+            }
+        }
         let timeout = {
             let mut policy = daemon.policy.lock().unwrap();
             let now = Instant::now();
@@ -303,7 +330,7 @@ fn supervise(
         let timeout = if cfg.network_interface.is_some() {
             timeout.min(Duration::from_secs(1))
         } else { timeout };
-        let request = daemon.lifecycle.wait(timeout.min(upgrade.wait(Instant::now())));
+        let request = daemon.lifecycle.wait(timeout.min(Duration::from_secs(5)).min(upgrade.wait(Instant::now())));
         daemon.undo.expire(&crate::config::data_dir().join("engine"));
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
@@ -373,7 +400,12 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
+        inhibitor: inhibit::Inhibitor::new()?,
+        clipboard: clipboard::Watcher::new()?,
+        rss: rss::Service::new()?,
+        shows: shows::Service::new()?,
         logs: log_capture.ring.clone(),
+        disk: Default::default(),
         imdb: Default::default(),
         undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         search: Default::default(),
@@ -385,6 +417,11 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     let dispatch = daemon.clone();
     let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
+    let rss_bus=api.event_bus();
+    daemon.shows.set_bus(api.event_bus());
+    daemon.rss.set_waker(Arc::new(move || {if let Some(bus)=rss_bus.upgrade(){bus.refresh();}}));
+    daemon.clipboard.start(Arc::downgrade(&daemon), api.event_bus())?;
+    daemon.clipboard.enabled(cfg.clipboard_watch);
     eprintln!(
         "INFO daemon listening {} no_notify={no_notify}",
         daemon.info()
@@ -411,6 +448,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.shows.stop();
+    daemon.rss.stop();
+    daemon.clipboard.stop();
+    daemon.inhibitor.stop();
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.

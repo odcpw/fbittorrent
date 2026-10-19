@@ -37,7 +37,7 @@ regular file at most 16 MiB whose first byte is d (bencoded).
 - Idempotent operations (safe to resend with the same `ref` after a mid-request loss, or
   against a new instance after a crash): `torrents.start`, `torrents.stop`,
   `torrents.set_seed`, `torrents.set_files`, `torrents.set_upload_limit`, `torrents.add`,
-  `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
+  `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
   `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
 | `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
 | `settings` | `app.settings.get/set`, topic `settings` | P3-05 |
@@ -161,9 +162,27 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
 | `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
-| `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
+| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
+| `shows.follow` | `query?: str`, `imdb?: str`, `quality?: str` | `{show: Show}` | yes | P3-03 |
+| `shows.unfollow` | `imdb: str` | `{}` | yes | P3-03 |
+| `shows.check` | `imdb?: str` | `{state: "pending", ref: str}`, then `shows.checked` and `mutation.result {new}` | yes | P3-03 |
+| `shows.releases` | `imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str` | `{releases: [Release]}` | no | P3-03 |
+| `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
+| `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
+| `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
+| `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
+| `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
+| `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
+| `rss.refresh` | `feed?: str` | `{state: enum(pending\|done), ref?: str}` | yes | P3-02 |
+| `rss.items` | `feed: str`, `unread_only?: bool` | `{items: [FeedItem]}` | no | P3-02 |
+| `rss.set_read` | `feed: str`, `item: str`, `read: bool` | `{}` | yes | P3-02 |
+| `rss.mark_feed_read` | `feed: str` | `{count: u64}` | yes | P3-02 |
+| `rss.grab` | `feed: str`, `item: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-02 |
+| `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
@@ -172,7 +191,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
-| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}` | yes | P1-06, P1-09, P3-06, P7-09 |
 | `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
@@ -412,8 +431,11 @@ capabilities and canonical round trips, and retains revision checks. Its
 cross-reply agreement still checks static sizes and file totals. For any hash
 observed checking, its measurements are excluded from that history's agreement,
 including earlier samples and later cancellation; their raw values remain
-validated and non-checking fixture comparisons remain exact. Fixture transcripts
-continue to use the unchanged strict whole-group agreement hook. Deferrals record
+validated and non-checking fixture comparisons remain exact. A confirmed completed
+removal clears only that hash's completion history: a later re-add is a new torrent
+instance. Pending or failed removals do not clear it, and static size/file totals
+remain checked across re-adds. Fixture transcripts continue to use the unchanged
+strict whole-group agreement hook. Deferrals record
 file:line, pointer, class, target bead and reason. Capability/protocol deferrals
 apply only while that feature is unavailable; advertised features stay under
 active comparison. The receipt distinguishes undrivable catalogue frames from
@@ -443,7 +465,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","move","staging","watch"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -523,7 +545,7 @@ RSS/Shows routing and TUI on-open refresh removal follow their service integrati
 
 
 - **P3-06:** implements `staging`, `torrents.commit/discard`, and the reserved
-  `stage` argument; CLI contract 1.2.8 includes additive `staged` row visibility.
+  `stage` argument; CLI contract 1.2.22 includes additive `staged` row visibility.
 
 
 - **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
@@ -718,7 +740,7 @@ connected clients; reconnects increment cumulative counts again. Both are local
 memory only. CLI `log --follow` emits one LogEntry JSON object per line; `log`
 never starts a daemon and exits 4 when closed, with up/journalctl hints.
 
-Changelog: P1-14 adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
+Changelog: P1-14 (CLI contract 1.2.6) adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
 existing fixture files remain byte-for-byte unchanged.
 
 ### P1-17: executable upgrades
@@ -733,7 +755,7 @@ app.restart with scope daemon drains immediately, including while busy. CLI
 restart never starts an absent owner, and waits at most 30 seconds for a different
 hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
 keeps the process and API connections. No capability or frozen fixture changes;
-P1-17 implements the existing fields and operation. CLI contract 1.2.4 adds the
+P1-17 implements the existing fields and operation. CLI contract 1.2.7 adds the
 replacement instance/server to restart output.
 
 ### P1-18: agent event stream and raw operation catalogue
@@ -759,9 +781,9 @@ Levenshtein distance <=2; unrelated names have an empty nearest list and the
 api --list hint. api --list and robot-docs api show the same args/results,
 mutating/idempotent/since metadata; a unit test compares every documented row.
 
-Changelog P1-18: CLI contract 1.2.5 adds events/api and capabilities.api_operations.
-The original planned 1.2.1 number predates already-integrated additive changes;
-all earlier fields and frozen fixture bytes remain intact. No new API operation.
+Changelog P1-18: CLI contract 1.2.8 adds events, and 1.2.9 adds the raw API
+catalogue and capabilities.api_operations. Both patches follow the integrated
+merge order; earlier fields and frozen fixture bytes remain intact. No new API operation.
 ### P3-01: daemon search sessions
 
 The `search` capability implements `search.start`, `search.stop`, `search.providers`,
@@ -797,7 +819,7 @@ either `{search_id,key}` or `{result}`, plus the usual add options, and uses
 `engine_unavailable` and a VPN hint; provider download hooks remain forbidden
 with VPN binding enabled.
 
-Contract 1.2.4 adds this namespace and keyed topic; existing transcripts stay
+Contract 1.2.10 adds this namespace and keyed topic; existing transcripts stay
 unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 
 ```json
@@ -815,7 +837,7 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 | `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
 | `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
 
-### Tracker observations (P6-01, contract 1.2.6)
+### Tracker observations (P6-01, contract 1.2.12)
 
 The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
 `Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
@@ -832,7 +854,7 @@ URL, a 5,000 ms tick for times and immediate structural status changes. Its type
 topic/item registration and pushed-delivery qualification remain pending that
 integration, alongside the TUI/dashboard rendering owned by their tracks.
 
-### Payload moves (P7-02, contract 1.2.7)
+### Payload moves (P7-02, contract 1.2.21)
 
 The `move` capability adds `torrents.move {hashes, save_path}`. The absolute
 save path must contain no parent traversal; payload traversal rejects symlinked
@@ -854,13 +876,13 @@ fields; null and numeric zero clear a global limit (unlimited), omission leaves 
 unchanged. Nonzero values must be at least 16384 and fit u32. `transfer.set_alt`
 persists the turtle switch. Both use the settings transaction and live session
 limiters, independently of per-torrent upload caps. Summary.alt and Summary.limits
-publish the effective saved policy as structural state. CLI contract 1.2.6 adds
+publish the effective saved policy as structural state. CLI contract 1.2.14 adds
 `limits --down/--up/--alt/--alt-down/--alt-up`; stopped edits never start a daemon.
 
 ### 2026-10-19 orchestrator ruling: exact hello capability bookkeeping
 
-Contract 1.2.7 updates hello/error fixture capability arrays to the fourteen integrated live
-capabilities. Every added capability has a capabilities.changes[] entry with
+Contract 1.2.15 introduced exact hello/error fixture capability arrays matching
+the integrated live capabilities; later additions keep those arrays current. Every added capability has a capabilities.changes[] entry with
 its `cap` name. Replay compares these arrays exactly; no normalization mask is
 added. The documented hello example is updated to the same fixture bytes.
 
@@ -884,3 +906,179 @@ via a glance acknowledges existing ready rows; completion acknowledges too.
 reconnect/compatibility fallback; a timeout or an unmet paused condition exits 8.
 The default stays completion. Contract 1.2.10 adds readiness fields/conditions to
 the CLI; API field types and event meaning stay those defined in A.8/A.9.
+
+## P6-11 additive destination inspection (contract 1.2.16)
+
+Capability `free_space` adds read-only `app.free_space` (since P6-11):
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `app.free_space` | `path: str` (absolute local directory, ≤4096 bytes, no controls) | `{free_bytes: bytes?, writable: bool}` | no | P6-11 |
+
+`free_bytes` uses the filesystem's available blocks and fragment size from
+`statvfs`; it is absent on lookup failure, a negative/unrepresentable block
+count, or arithmetic overflow. Zero means the known available space is zero.
+`writable` checks effective directory write/search permission and a read-only
+filesystem without creating a probe file. An absent/non-directory path returns
+`{writable:false}`. Malformed arguments return `invalid_args` with `details.key`
+`path`. Permission and capacity can change after this read; the actual write
+can still fail. Native `add --save` uses the same check and exits 2 before
+submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
+covers known, absent and zero space.
+
+### Integrated CLI contract patch history
+
+The current CLI contract is **1.2.25**. Each additive change after the 1.2.0
+baseline has its own patch, assigned in first-parent integration merge order.
+Changes arriving together retain their feature order; the P1-18 event and raw
+API entries receive successive patches. Future merges allocate after the latest
+integrated patch and update this table, capabilities, and contract assertions.
+API hello still negotiates wire version 1; these CLI patches do not change
+NDJSON framing or the capability arrays in the wire fixtures.
+
+| CLI contract patch | capabilities.changes field |
+|---|---|
+| `1.2.1` | `add.deferred` |
+| `1.2.2` | `settings` |
+| `1.2.3` | `api.torrents.recheck` |
+| `1.2.4` | `api.queue` |
+| `1.2.5` | `api.origin` |
+| `1.2.6` | `log` |
+| `1.2.7` | `restart.server` |
+| `1.2.8` | `events` |
+| `1.2.9` | `api` |
+| `1.2.10` | `api.search` |
+| `1.2.11` | `setup.actions` |
+| `1.2.12` | `trackers` |
+| `1.2.13` | `add.confirmation_required` |
+| `1.2.14` | `limits` |
+| `1.2.15` | `caps.imdb` |
+| `1.2.16` | `app.free_space` |
+| `1.2.17` | `add.disk` |
+| `1.2.18` | `clipboard` |
+| `1.2.19` | `rss` |
+| `1.2.20` | `shows` |
+| `1.2.21` | `api.move` |
+| `1.2.22` | `api.staging` |
+| `1.2.23` | `app.client.dashboard_visible` |
+| `1.2.24` | `search.results[].providers` |
+| `1.2.25` | `playable` |
+
+### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
+
+Summary.disk is sampled every five seconds, once per distinct save path; free
+space is absent when statvfs fails. Needed bytes cover run-intent incomplete
+records, including disk-full errors; completed/paused/seeding/parked records are
+excluded. Filesystems shared by paths are counted once. Low means any destination
+has free < its needed + 512 MiB. A new ENOSPC records the affected destination's
+free space and piece length, and reports error/disk_full with “Disk full”. One
+normal “Disk almost full” notification offers the window action per daemon life.
+
+Per the 2026-10-19 orchestrator ruling, automatic retry requires a five-second
+sample with free >= the ENOSPC baseline + max(16 MiB, one piece). Retry consumes
+that rise; repeated ENOSPC records a new baseline. It logs disk_full_recovered.
+Explicit start retries immediately; paused intent is checked atomically before
+an automatic retry. `torrents.add` optionally adds `disk: {free_bytes: u64,
+needed_bytes: u64}` when known selected metadata exceeds free space; the CLI keeps
+exit 0 and adds warnings[].code=disk_low with a binary-unit message. The new
+disk.ndjson transcript covers add capacity, summary low and disk_full state.
+
+### P6-09: peer port and sleep inhibition
+
+The existing restart-class `peer_port` setting is applied by
+`app.settings.set {peer_port}` or `settings --port N`. The daemon instance,
+API socket and connected clients survive; event subscribers receive both
+starting/running `engine.changed` frames (peer-port.ndjson). This adds no
+operation, capability or field to contract 1.2.17. While any run-intent torrent
+is downloading, stalled, metadata or checking, one owned
+`systemd-inhibit --what=sleep --who=fbittorrent --why=Downloading --mode=block sleep infinity`
+child holds the inhibitor. Queued, paused, seeding-only, done, parked and error
+states do not inhibit. The last eligible torrent stopping or daemon drain kills
+the child's process group within five seconds. A failed launcher is cleaned
+and retried at most every five seconds while work remains; no child or polling
+worker runs while there is no eligible work. The session bus address is
+preserved independently of the child's XDG runtime directory.
+
+### P6-13: opt-in clipboard offers (contract 1.2.18)
+
+The `clipboard` capability adds `app.clipboard.dismiss {hash}` (idempotent),
+`clipboard.magnet {hash, name?, already_added}` and origin `clipboard` for adds.
+`settings --clipboard-watch on|off` accepts true/false too; default false starts
+no reader. Watcher activity never extends the idle deadline. The owner-approved
+2026-10-19 command is `wl-paste --watch sh -c 'cat; printf "\0"'`: one NUL-framed
+record per selection. Records over 64 KiB are discarded through the next NUL;
+incomplete records are never parsed. Turning off or draining kills the whole
+owned group, including shell/cat descendants. A failed reader retries at most
+once per five seconds while enabled.
+
+Only the last offered hash is retained by the watcher; existing ledger hashes
+and consecutive identical offers are suppressed. Clipboard text, selection names,
+and child stderr never enter daemon logs. The bounded event history and pending
+notification hold the offered name for display, as normal API/notification data.
+A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
+`torrents.add {source:{magnet:"magnet:?xt=urn:btih:<hash>"},origin:"clipboard"}` or
+`app.clipboard.dismiss {hash}` over api.sock. Add reconstructs the hash-only magnet
+(no clipboard history or tracker URLs retained); metadata uses ordinary DHT/peer
+discovery. No transfer starts before an explicit Add action. Hello/error fixtures
+now advertise the exact live caps including clipboard; changes[].cap records it.
+The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.
+
+### P3-02: daemon RSS (contract 1.2.19)
+
+Capability `rss` adds the rss.* operations above and keyed on-change topics
+`rss.feeds` (id) and `rss.items:<feed-id>` (item id). Feed ids are the existing
+stable URL ids; feeds sort by id, items by published time descending then id.
+`Feed` contains id, name, url, title?, unread, last_refresh_at?, loading, error?.
+`FeedItem` contains id, title, description?, published_at?, size?, link?, magnet?,
+torrent_url?, read, grabbed. Unknown dates/sizes are omitted. Topic removals use
+string ids. The store is reloaded on inode/size/mtime changes before reads; the
+bus checks that stamp while RSS topics are subscribed so local CLI edits push.
+
+A new interactive presence schedules one stale check (older than 30 minutes)
+per feed; bar/glance/idle presence does not fetch. A single owned worker
+coalesces opens and rechecks staleness under its refresh lock. Explicit
+rss.refresh returns pending with a ref; mutation.result carries done or the
+upstream failure (details.source=rss). Bodies are capped at 4 MiB and each fetch
+at ten seconds or the shorter configured timeout; errors retain cached items.
+Drain stops scheduling and waits for the current bounded fetch. RSS refresh
+never adds a torrent. rss.grab uses the item's magnet/torrent URL with origin
+rss, and marks read/grabbed only after a successful ledger add. Existing
+in-process CLI paths and atomic store merge/rename behaviour remain available.
+Hello/error fixture caps now exactly include rss; rss.ndjson covers every op.
+
+### P3-03: daemon Shows (contract 1.2.20)
+
+Capability shows adds the shows.* operations above, `shows` snapshots keyed by
+imdb and `shows.releases:<imdb|inbox>` keyed by release key (imdb/key in inbox
+changes/removals). Release.key itself stays S02E03/S02; show_imdb disambiguates.
+Read state is independent of transfer: none/downloading/queued/paused/done/
+added_before comes from live ledger btih and saved grab history. Releases sort
+by published time descending then key; shows by title. Unknown optional source
+facts are omitted. Inbox defaults to unread-only; explicit unread_only overrides.
+
+A new interactive client checks only shows older than Show::is_stale's 30-minute
+boundary. Bar and idle activity do not fetch; one owned worker coalesces opens.
+Explicit check returns pending with ref, then shows.checked {imdb?,new,warnings}
+and mutation.result {new}, or upstream/eztv if all selected checks fail. Checks
+never add torrents. Drain cancels between pages; an in-flight fetch is bounded
+by the existing ten-second per-request / 30-second catalogue budget. All EZTV
+calls (including browse) honor FBT_EZTV_BASE_URL in isolated environments.
+
+The shared store's inode/size/mtime invalidates reads and on-change topics for
+in-process CLI edits. set_read changes only seen intent; mark_show_read preserves
+the one-level undo target; undo_read restores the last individual read mark to
+unread, and the next undo is empty. Grab marks read/grabbed only after a successful
+ledger add with origin shows. The new transcript covers every operation and
+inbox identity; existing hello/error arrays exactly include the shows cap.
+
+### M1a: visible dashboard presence (contract 1.2.23)
+
+The negotiated `dashboard_presence` capability adds optional boolean
+`app.client.dashboard_visible`. For the shared `bar` connection, interactive
+presence requires both `interactive:true` and `dashboard_visible:true`. A bar
+that merely claims interactive remains idle, preserving the bar-only rule.
+Hiding the dashboard sets both flags false; dropping the connection clears
+presence. Popup `glance` remains independent and freezes the idle countdown.
+The plugin declares visibility after hello and reconnect, including when the
+window was already visible before connecting. It omits the new marker for
+servers without the capability, preserving their strict request parsing.

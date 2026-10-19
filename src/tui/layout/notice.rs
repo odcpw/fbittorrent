@@ -51,11 +51,11 @@ impl TuiApp {
                 let free = summary
                     .disk
                     .free_bytes
-                    .map(|v| human_bytes(v.min(i64::MAX as u64) as i64))
-                    .unwrap_or_else(|| "unknown space".into());
+                    .map(|v| format!("{} free",human_bytes(v.min(i64::MAX as u64) as i64)))
+                    .unwrap_or_else(|| "free space unknown".into());
                 return Some(
                     format!(
-                        "Not enough space for the running downloads: {needed} needed, {free} free"
+                        "Not enough space for the running downloads: {needed} needed, {free}"
                     )
                     .into(),
                 );

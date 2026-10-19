@@ -73,7 +73,7 @@ def tui_search_narrow(binary, systemd):
             pane=ui.capture(target)
             case.check('╭ Details' not in pane,'narrow result list keeps its name/size/seeds/rating columns without a side card',pane)
             ui.keys(target,'Escape',literal=False)
-            ui.keys(target,'v');ui.assert_pane(target,'╭ Details');ui.assert_pane(target,'alpha, beta')
+            ui.keys(target,'v');ui.assert_pane(target,'╭ IMDb');ui.assert_pane(target,'alpha, beta')
             ui.keys(target,'Escape',literal=False);ui.assert_pane(target,'Results (1)')
             ui.keys(target,'q');h.wait_for(lambda:(done.exists(),ui.capture(target)),'q detaches after card navigation')
             case.check(process.child.poll() is None,'card navigation never stops the owner',json.dumps(client.call('app.info')['result']))

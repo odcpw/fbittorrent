@@ -4,10 +4,6 @@ use super::*;
 impl TuiApp {
     pub(super) fn view_search(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
-        if self.search_card {
-            self.view_search_card(area, frame);
-            return;
-        }
         let extended = layout::Tier::at(area.width).extended();
         let rows = Flex::vertical()
             .constraints([Constraint::Fixed(3), Constraint::Fill])

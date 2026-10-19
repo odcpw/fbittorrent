@@ -24,7 +24,7 @@ Environment flags (opt-ins default to 0; set exactly 1 to enable):
   FBT_TEST_VERBOSE=1    Mirror every JSONL line to stderr, including pane polls.
   FBT_TEST_FORCE_FAIL=<suite>/<case>
                        Force that case's first step to fail; retain its logs.
-  FBT_TEST_LEGACY=1     Legacy CLI/TUI checks; controls the configured live service.
+  FBT_TEST_LEGACY=1     Legacy CLI checks; controls the configured live service.
 
 Unavailable opted-in fixture scripts fail explicitly. QS/visual scripts arrive
 in their named P2 beads. No live-service or live-widget suite runs by default.
@@ -40,7 +40,7 @@ export PATH="$HOME/.rch/shims:$HOME/.cargo/bin:$PATH"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Reset all scheduled JSONL suites before any gate can fail. Archived bead
 # evidence and unrelated suites are neither removed nor included in this run.
-summary_args=(--suite fbtlog_test --suite qs_log_test --suite hygiene --suite native --suite daemon --suite ci_gates)
+summary_args=(--suite fbtlog_test --suite qs_log_test --suite hygiene --suite native --suite daemon --suite tui_smoke --suite tui_smoke_setup --suite tui_smoke_control --suite ci_gates)
 if [[ "${FBT_TEST_QS:-0}" == 1 ]]; then summary_args+=(--suite gate_qs_store --suite gate_qs_smoke); fi
 if [[ "${FBT_TEST_VISUAL:-0}" == 1 ]]; then summary_args+=(--suite gate_visual); fi
 if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then summary_args+=(--suite gate_widget); fi
@@ -90,6 +90,9 @@ echo "## Isolated daemon lazy-restore checks"
 python3 agent_ergonomics_audit/audit/regression_tests/daemon.py target/release/fbittorrent --no-systemd \
   --case lazy_restore_no_checks --case dormant_seed_checks \
   --case dormant_missing_files --case dormant_open_no_check
+echo "## Native terminal smoke at 80/120/160 columns"
+python3 agent_ergonomics_audit/audit/regression_tests/tui_smoke.py target/release/fbittorrent
+python3 agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py target/release/fbittorrent
 echo "## CI, summary and resource-gate regression checks"
 python3 agent_ergonomics_audit/audit/regression_tests/ci_test.py
 gate() {
@@ -125,9 +128,8 @@ if [[ "${FBT_TEST_DAEMON_RESOURCES:-0}" == 1 ]]; then
     --output target/test-logs/daemon_budget/measurement.json
 fi
 if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
-  echo "## Configured legacy CLI and TUI"
+  echo "## Configured legacy CLI"
   agent_ergonomics_audit/audit/regression_tests/run.sh
-  agent_ergonomics_audit/audit/regression_tests/tui_smoke.sh
 fi
 if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then
   echo "## Live widget keyboard controls"

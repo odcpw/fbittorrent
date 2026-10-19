@@ -551,7 +551,7 @@
         let mut app = app();
         let mut list = ListState::default();
         list.select(Some(0));
-        app.settings = Some(SettingsModal { saving:false, cfg: Config::default(), list: RefCell::new(list), connections: vec![Some("proton".into()), None], error: String::new() });
+        app.settings = Some(SettingsModal { original:Config::default(),saving:false, cfg: Config::default(), list: RefCell::new(list), connections: vec![Some("proton".into()), None], error: String::new() });
         app.on_key(KeyEvent::new(KeyCode::Left));
         assert_eq!(app.settings.as_ref().unwrap().cfg.max_active_downloads, 2);
         app.on_key(KeyEvent::new(KeyCode::Down));

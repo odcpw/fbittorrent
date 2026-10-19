@@ -9,6 +9,9 @@ pub(super) struct Snapshot {
     pub searches: BTreeMap<String, api::SearchItem>,
     pub events: Vec<api::Event>,
     pub logs: BTreeMap<u64, api::LogEntry>,
+    pub feeds:BTreeMap<String,api::Feed>,
+    pub feed_items:BTreeMap<String,api::FeedItem>,
+    pub shows:BTreeMap<String,api::Show>,pub releases:BTreeMap<String,api::Release>,
 }
 impl Snapshot {
     pub fn new(count: usize) -> Self {
@@ -20,10 +23,12 @@ impl Snapshot {
             searches: BTreeMap::new(),
             events: Vec::new(),
             logs: BTreeMap::new(),
+            feeds:BTreeMap::new(),feed_items:BTreeMap::new(),
+            shows:BTreeMap::new(),releases:BTreeMap::new(),
         }
     }
     pub fn len(&self) -> usize {
-        self.torrents.len() + self.files.len() + self.events.len() + self.searches.len() + self.logs.len()
+        self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.searches.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
     }
     pub fn append(
         &mut self,
@@ -40,6 +45,10 @@ impl Snapshot {
         let mut keys = std::collections::BTreeSet::new();
         for item in items {
             let unique = match (topic, item) {
+                (api::Topic::Shows,api::Item::Show(row))=>keys.insert(row.imdb.clone())&&!self.shows.contains_key(&row.imdb),
+                (api::Topic::ShowReleases(id),api::Item::Release(row))=>{let key=api::release_key(id=="inbox",row);keys.insert(key.clone())&&!self.releases.contains_key(&key)},
+                (api::Topic::RssFeeds,api::Item::Feed(row))=>keys.insert(row.id.clone())&&!self.feeds.contains_key(&row.id),
+                (api::Topic::RssItems(_),api::Item::FeedItem(row))=>keys.insert(row.id.clone())&&!self.feed_items.contains_key(&row.id),
                 (api::Topic::Torrents, api::Item::Torrent(row)) => {
                     keys.insert(row.hash.to_string())
                         && !self.torrents.contains_key(row.hash.as_str())
@@ -67,6 +76,8 @@ impl Snapshot {
         }
         for item in items {
             match item {
+                api::Item::Show(row)=>{self.shows.insert(row.imdb.clone(),row.clone());},
+                api::Item::Release(row)=>{self.releases.insert(api::release_key(matches!(topic,api::Topic::ShowReleases(id) if id=="inbox"),row),row.clone());},
                 api::Item::Torrent(row) => {
                     self.torrents.insert(row.hash.to_string(), row.clone());
                 }
@@ -78,6 +89,8 @@ impl Snapshot {
                     self.logs.insert(entry.seq, entry.clone());
                 }
                 api::Item::Search(row) => { self.searches.insert(row.key.clone(),row.clone()); },
+                api::Item::Feed(row)=>{self.feeds.insert(row.id.clone(),row.clone());},
+                api::Item::FeedItem(row)=>{self.feed_items.insert(row.id.clone(),row.clone());},
             }
         }
         self.bytes += bytes;

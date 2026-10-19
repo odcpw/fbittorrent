@@ -153,12 +153,12 @@ impl TuiApp {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
                 } else if let Some(label) = self.mark_selected_release() {
-                    if self.save_shows() { self.set_status(label, false); }
+                    if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::Undo if self.shows_inbox() => {
                 if let Some(label) = self.undo_inbox_read() {
-                    if self.save_shows() { self.set_status(label, false); }
+                    if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::MarkAll => {
@@ -166,8 +166,7 @@ impl TuiApp {
                     let (imdb, title) = (s.imdb.clone(), s.title.clone());
                     let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
                     self.rebuild_inbox();
-                    self.save_shows();
-                    self.set_status(format!("{title}: {n} release(s) marked read"), false);
+                    if self.save_shows() { self.set_success(format!("{title}: {n} release(s) marked read")); }
                 } else {
                     self.set_status("Shift+M applies to one show. Select a followed show on the left first.", false);
                 }
@@ -251,7 +250,7 @@ impl TuiApp {
                     .constraints([
                         Constraint::Percentage(22.0),
                         Constraint::Fill,
-                        Constraint::Fixed(42),
+                        Constraint::Fixed(52),
                     ])
                     .split(area);
                 [c[0], c[1], c[2]]
@@ -366,7 +365,7 @@ impl TuiApp {
             let card = block.inner(cols[2]);
             block.render(cols[2], frame);
             if let Some(show) = self.release_show() {
-                self.view_imdb_card(&show.label(), pad(card), frame);
+                self.view_imdb_card(&show.label(), card, frame);
             }
         }
         self.shows_rects.set([inner, Rect::default()]);

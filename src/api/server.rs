@@ -106,6 +106,7 @@ struct Outbox {
 struct ClientState {
     client: Option<Client>,
     interactive: bool,
+    dashboard_visible: bool,
     glance: bool,
     caps: validation::NegotiatedCaps,
 }
@@ -165,6 +166,7 @@ pub struct Server {
     _lock: Arc<InstanceLock>,
 }
 impl Server {
+    pub(crate) fn event_bus(&self) -> std::sync::Weak<bus::Bus> { Arc::downgrade(&self.shared.bus) }
     pub(crate) fn start(
         directory: &Path,
         lock: Arc<InstanceLock>,

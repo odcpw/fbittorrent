@@ -80,6 +80,13 @@ ShellRoot {
     s.c.receive(JSON.stringify({ev:"state",sub:7,topic:"summary",rev:3,data:{}}))
     check("subscriptions", s.writes.slice(length).some(function(w) {return JSON.parse(w).op==="unsubscribe"}), "revision gap resubscribes", s.writes.slice(length))
     console.log("FBTQS-PASS subscriptions")
+    s=session();s.hello();var firstSubscribe=JSON.parse(s.writes[s.writes.length-1])
+    s.c.visibility(false,true,["torrent:"+"a".repeat(40)+".files"])
+    var requested=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="subscribe"})
+    check("detail_subscriptions",requested[requested.length-1].args.topics.join(",")==="torrent:"+"a".repeat(40)+".files","each selected detail topic has its own subscribe call",requested)
+    s.reply({sub:91,topics:["summary"]},firstSubscribe.id)
+    check("detail_subscriptions",!s.c.subs[91] && s.writes.some(function(w){var f=JSON.parse(w);return f.op==="unsubscribe" && f.args.sub===91}),"late subscription reply is immediately unsubscribed after visibility generation changes",s.writes)
+    console.log("FBTQS-PASS detail_subscriptions")
     s=session(); s.hello()
     ref=s.c.request("torrents.add",{source:{url:"https://example.invalid/legal.torrent"}},{mutating:true})
     var request=JSON.parse(s.writes[s.writes.length-1]);s.reply({state:"pending",ref:ref},request.id)
@@ -102,6 +109,11 @@ ShellRoot {
     s=session();s.c.connected();s.reply({proto:1,caps:[],instance:"bad"})
     check("protocol",s.resets.length===1,"invalid hello shape resets session",s.c.lastError.message)
     console.log("FBTQS-PASS protocol")
+    s=session();s.hello();var optionalError=null
+    var optional=s.c.request("imdb.lookup",{name:"Missing"},{quiet:true,callback:function(result,error){optionalError=error}})
+    s.c.receive(JSON.stringify({id:optional,ok:false,error:{code:"upstream",message:"optional poster unavailable",retryable:true}}))
+    check("optional_error",optionalError && optionalError.code==="upstream" && !s.c.lastError,"optional read retains its typed callback failure without becoming a global mutation/error banner",optionalError)
+    console.log("FBTQS-PASS optional_error")
     s=session();s.hello([]);length=s.writes.length
     s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)
@@ -113,6 +125,18 @@ ShellRoot {
       check("shutdown_outcome",s.c.actions[ref].status===(reason==="shutdown" ? "confirmed" : "no answer"),"only explicit shutdown bye confirms the pending shutdown",JSON.stringify(s.c.actions[ref]))
     })
     console.log("FBTQS-PASS shutdown_outcome")
+    s=session();s.c.visibility(false,true,[]);s.hello(["torrents","subscribe","dashboard_presence"])
+    var declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",JSON.parse(s.writes[0]).args.interactive && declarations[0].args.dashboard_visible && declarations[0].args.interactive,
+      "already visible dashboard declares presence on connect",JSON.stringify(declarations))
+    s.c.visibility(false,false,[])
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",declarations[declarations.length-1].args.dashboard_visible===false && declarations[declarations.length-1].args.interactive===false,
+      "hiding dashboard clears shared-socket presence",JSON.stringify(declarations))
+    s=session();s.hello(["torrents","subscribe"])
+    declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
+    check("dashboard_presence",!("dashboard_visible" in declarations[0].args),"older strict servers do not receive the additive marker",JSON.stringify(declarations))
+    console.log("FBTQS-PASS dashboard_presence")
     Qt.callLater(function() { Quickshell.execDetached(["qs", "kill", "-p", Quickshell.shellPath(".")]) })
   }
 }

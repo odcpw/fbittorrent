@@ -49,8 +49,6 @@ impl TuiApp {
     }
 
     pub(super) fn on_search_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
-        if intent==actions::Intent::Card {self.search_card=!self.search_card;return Cmd::none();}
-        if intent==actions::Intent::Cancel && self.search_card {self.search_card=false;return Cmd::none();}
         if intent==actions::Intent::Providers { return self.open_providers(); }
         if self.search_browse {
             let n = self.browse_entries.len();

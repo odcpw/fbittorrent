@@ -24,7 +24,9 @@ impl TuiApp {
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
-        self.search_card.hash(&mut hash);
+        self.status_success.hash(&mut hash);
+        self.poster_open.hash(&mut hash);
+        self.poster_target.hash(&mut hash);
         self.search_input.value().trim().is_empty().hash(&mut hash);
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
@@ -100,11 +102,11 @@ impl TuiApp {
         let context_width = dw(&context).min(available);
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
-        let feedback = if self.recovery.notice(std::time::Instant::now()).is_some() || self.daemon_stopped || self.status.is_empty() {
-            self.footer_selection().unwrap_or_default()
-        } else {
-            self.status.clone()
-        };
+        let show_status=self.recovery.notice(std::time::Instant::now()).is_none() && !self.daemon_stopped && !self.status.is_empty();
+        let feedback=if !show_status {self.footer_selection().unwrap_or_default()}
+            else if th.low_chroma && self.status_is_error && !self.status.starts_with('!'){format!("! {}",self.status)}
+            else if th.low_chroma && self.status_success && !self.status.starts_with('✓'){format!("✓ {}",self.status)}
+            else{self.status.clone()};
         FooterCache {
             signature,
             context_width: context_width as u16,
@@ -114,7 +116,7 @@ impl TuiApp {
             legend: Paragraph::new(Text::from_line(shortcut_line(&[&legend], th))).wrap(WrapMode::None),
             help: Paragraph::new(Text::from_line(shortcut_line(&[&help], th))).wrap(WrapMode::None),
             feedback: Paragraph::new(feedback)
-                .style(if self.status_is_error { th.err() } else { th.dimmed() })
+                .style(if show_status && self.status_is_error { th.err() } else if show_status && self.status_success {th.ok()}else { th.dimmed() })
                 .wrap(WrapMode::None),
         }
     }

@@ -20,5 +20,5 @@
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Details  (o) Open  (u) Seed  (a) Add  (j) Next …     (?) Help
+[Torrents] (Enter) Details  (o) Open  (v) Card  (u) Seed  (a) Add …     (?) Help
 Sintel.2010.1080p

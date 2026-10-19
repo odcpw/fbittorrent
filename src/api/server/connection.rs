@@ -168,12 +168,14 @@ impl Shared {
     fn presence(&self, connection: &Connection) {
         let client = connection.client.lock().unwrap();
         let interactive = client.interactive && client.client.as_ref()
-            .is_some_and(|c| c.kind != ClientKind::Bar);
+            .is_some_and(|c| c.kind != ClientKind::Bar || client.dashboard_visible);
         let glance = client.glance;
         let acknowledge = glance || (client.interactive && client.client.as_ref().is_some_and(|c| c.kind == ClientKind::Bar));
         drop(client);
         if acknowledge {self.daemon.watch.lock().unwrap().acknowledge(None);}
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
+        self.daemon.rss.presence(connection.number,interactive);
+        self.daemon.shows.presence(connection.number,interactive);
         self.bus.refresh();
     }
 }
@@ -183,6 +185,8 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
         fn drop(&mut self) {
             self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
             self.0.daemon.search.disconnected(self.1);
+            self.0.daemon.rss.presence(self.1,false);
+            self.0.daemon.shows.presence(self.1,false);
             self.0.bus.remove_connection(self.1);
             self.0.bus.refresh();
         }
@@ -341,6 +345,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             *connection.client.lock().unwrap() = ClientState {
                 client: Some(args.client.clone()),
                 interactive: args.interactive.unwrap_or(false),
+                dashboard_visible: false,
                 glance: false,
                 caps: validation::NegotiatedCaps::from_hello(&hello),
             };
@@ -374,6 +379,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             if let Some(value) = args.interactive {
                 client.interactive = value;
             }
+            if let Some(value)=args.dashboard_visible {client.dashboard_visible=value;}
             if let Some(value) = args.glance {
                 client.glance = value;
             }
