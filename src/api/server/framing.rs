@@ -125,7 +125,8 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
     for (key, value) in args {
         let valid = match key.as_str() {
             "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
-            | "on" => value.is_boolean(),
+            | "on" | "unread_only" | "read" | "inbox" => value.is_boolean(),
+            "feed" | "item" | "url" | "name" | "imdb" | "query" | "key" | "quality" => value.is_string(),
             "proto" | "file" | "sub" | "interval_ms" | "since_seq" => value.is_u64(),
             "bps" => value.is_u64() || (op == "torrents.set_upload_limit" && value.is_null()),
             "hash" => serde_json::from_value::<Hash>(value.clone()).is_ok(),
@@ -138,6 +139,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
             "origin" if op == "torrents.list" => value
                 .as_array()
                 .is_some_and(|values| values.iter().all(Value::is_string)),
+            "path" if op == "app.free_space" => value.as_str().is_some_and(|path| crate::free_space::valid_path(path).is_ok()),
             "reason" | "save_path" | "category" | "origin" => value.is_string(),
             "to" if op=="torrents.queue_move" => serde_json::from_value::<QueueTo>(value.clone()).is_ok(),
             "scope" => serde_json::from_value::<RestartScope>(value.clone()).is_ok(),

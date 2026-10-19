@@ -267,6 +267,7 @@ impl Shared {
                 continue;
             }
             let result = match entry.confirmation {
+                Some(Confirmation::Move(batch))=>batch.result().map(ops::moving::complete),
                 Some(Confirmation::Recheck(batch)) => batch.result().map(|report| Ok(ops::recheck::complete(report))),
                 Some(Confirmation::Metadata(reply)) => {
                     let search = matches!(&reply, Reply::SearchGrab(_));

@@ -77,6 +77,7 @@ type Frame = Value;
 enum Confirmation {
     Worker,
     Recheck(Arc<crate::engine::recheck::Batch>),
+    Move(Arc<crate::engine::moving::Batch>),
     Metadata(Reply),
     Engine(u64),
 }
@@ -164,6 +165,7 @@ pub struct Server {
     _lock: Arc<InstanceLock>,
 }
 impl Server {
+    pub(crate) fn event_bus(&self) -> std::sync::Weak<bus::Bus> { Arc::downgrade(&self.shared.bus) }
     pub(crate) fn start(
         directory: &Path,
         lock: Arc<InstanceLock>,

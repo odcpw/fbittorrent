@@ -6,7 +6,7 @@ impl Inner {
     }
     fn resume_handles(&self) -> HashMap<String, Arc<ManagedTorrent>> {
         self.session.with_torrents(|rows| {
-            rows.map(|(_, handle)| (handle.info_hash().as_string(), handle.clone()))
+            rows.filter(|(_,handle)|!self.moves.active(&handle.info_hash().as_string())).map(|(_, handle)| (handle.info_hash().as_string(), handle.clone()))
                 .collect()
         })
     }

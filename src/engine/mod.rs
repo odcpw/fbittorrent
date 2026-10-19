@@ -33,17 +33,19 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+pub(crate) mod staging;
 mod bus;
 mod queue;
 mod queue_policy;
 mod queue_ops;
 mod trackers;
-mod moving;
+pub(crate) mod moving;
 pub mod recheck;
 pub mod undo;
 pub(crate) mod resume;
 mod undo_ops;
 mod settings;
+pub(crate) mod disk;
 pub mod ops;
 mod restore;
 mod dormant;
@@ -94,6 +96,8 @@ struct Inner {
     completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
+    operations: Arc<Mutex<()>>,
+    moves: moving::Moves,
     directory: PathBuf,
     default_folder: PathBuf,
     rechecks: recheck::Rechecks,
@@ -201,6 +205,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
+        operations: Default::default(), moves: Default::default(),
         directory,
         default_folder,
         rechecks: Default::default(),
@@ -263,6 +268,7 @@ impl AppEngine {
     pub(crate) fn quiesce(&self) {
         self.dispatcher.inner.stopping.store(true, Ordering::Release);
         self.dispatcher.inner.session.cancellation_token().cancel();
+        self.dispatcher.inner.moves.cancel.cancel();
         self.dispatcher.inner.rechecks.cancel.cancel();
         self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
@@ -312,6 +318,10 @@ impl AppEngine {
         let mut drained = true;
         if let Some(runtime) = self.runtime.take() {
             let cx = runtime.cx();
+            match runtime.block_on(time::timeout(cx,bound.saturating_sub(began.elapsed()),self.dispatcher.inner.moves.drain())) {
+                Ok(Ok(()))=>{},
+                result=>{drained=false;crate::native_runtime::log_teardown(drain_failure("joining payload moves",Some(format!("{result:?}"))));}
+            }
             // Resolve the protocol stop and observe every restore's completion
             // while its application context and the session are still alive.
             // Cancelling their regions first races the resolver's close epilogue.

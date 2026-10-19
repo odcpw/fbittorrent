@@ -6,9 +6,13 @@
 pub mod client;
 pub mod bus;
 pub mod errors;
+pub mod destination;
+pub use destination::*;
 pub mod events;
 pub mod mutations;
 pub mod objects;
+pub mod rss;
+pub mod shows;
 pub mod ops;
 pub mod request;
 pub mod search;
@@ -19,6 +23,8 @@ pub mod validation;
 
 pub use events::*;
 pub use objects::*;
+pub use rss::*;
+pub use shows::*;
 pub use request::*;
 pub use search::*;
 pub use response::*;

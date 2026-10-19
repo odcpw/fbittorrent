@@ -392,13 +392,14 @@ class Harness:
         except OSError as error:
             return step.fail(f"Lock unavailable: {error}.")
 
-    def cli(self, *args, code=0, timeout=10, start=False):
+    def cli(self, *args, code=0, timeout=10, start=False, on_exit=None):
         private_environment(self.sandbox)
         command = [self.binary, *([] if start else ["--no-start"]), *args, "--json"]
         step = self.case.step("CLI " + shlex.join(command), f"exit {code} with one JSON object")
         child = self.case.popen(command, env=self.sandbox.env, cwd=self.sandbox.root, stdout=subprocess.PIPE, text=True)
         try:
             stdout, _ = child.communicate(timeout=timeout)
+            if on_exit is not None:on_exit(time.monotonic())
         except subprocess.TimeoutExpired:
             child.kill()
             stdout, _ = child.communicate(timeout=2)
@@ -2459,7 +2460,23 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
             client.case.check(frame.get("error", {}).get("code") == code,
                               "drive bounded dispatch/in-flight pressure rather than inject a server error",
                               f"elapsed={time.monotonic()-began:.3f}s; frame={frame!r}")
-            return frame, deferred
+            expected_frame = frame
+        # Releasing the HTTP source completes the auxiliary requests. Drain
+        # their actual replies and mutation outcomes before the next fixture
+        # input; response(identifier) may already have consumed some of them.
+        identifiers = {job["id"] for job in jobs}
+        def remaining():
+            replies = [line["frame"] for line in frames if line["dir"] == "s2c" and line["frame"].get("id") in identifiers]
+            pending = {reply["result"]["ref"] for reply in replies if reply.get("result", {}).get("state") == "pending"}
+            completed = {line["frame"].get("ref") for line in frames if line["dir"] == "s2c" and line["frame"].get("ev") == "mutation.result"}
+            return identifiers - {reply["id"] for reply in replies}, pending - completed
+        deadline = time.monotonic() + 20
+        while any(remaining()) and time.monotonic() < deadline:
+            if client.receive() is None: break
+        outstanding = remaining()
+        client.case.check(not any(outstanding), "drain every real pressure-fixture reply/outcome before protocol validation",
+                          json.dumps(dict(unanswered=sorted(outstanding[0]), pending=sorted(outstanding[1]))))
+        return expected_frame, deferred
     # These complete expected error frames have no P1-06 RPC producer. Do not
     # mistake the old catalogue's app.info requests for a way to trigger them.
     owners = {"ambiguous": "P1-11", "safety": "P1-11", "unsupported": "P1-18",
@@ -3600,12 +3617,13 @@ def imdb_owned(name, binary, systemd, oversized=False):
                        "local IMDb endpoint is explicitly forwarded before either launch mode", source.base)
             with Harness(case, binary, sandbox, systemd) as harness:
                 process = harness.start_serve()
+                harness.imdb_process = process
                 if not (harness.receive_ready() and harness.wait_engine()):
                     raise RuntimeError("private IMDb daemon did not start")
                 try:
                     yield case, sandbox, harness, source, directory, cache
                 finally:
-                    harness.stop_serve(process)
+                    harness.stop_serve(harness.imdb_process)
                     harness.lock_free()
 
 
@@ -3900,6 +3918,11 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
+from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
+from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
+from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 def handler_confirm_stages(binary, systemd=False):
@@ -4672,8 +4695,218 @@ def tracker_saved_views(binary,systemd):
             if process.child.poll() is None:h.stop_serve(process)
 
 
+def move_receive(client,h,hash_,destination,ref):
+    pending=client.call("torrents.move",dict(hashes=[hash_],save_path=str(destination)),ref=ref)
+    client.case.check(pending.get("result")==dict(state="pending",ref=ref),"move acknowledges its pending ref before a terminal result",json.dumps(pending))
+    deadline=time.monotonic()+15;states=[];event=None
+    while time.monotonic()<deadline:
+        row=client.call("torrents.get",dict(hash=hash_))["result"]["torrent"];states.append(row)
+        for frame in client.pushed:
+            if frame.get("ev")=="mutation.result" and frame.get("ref")==ref:
+                event=frame;client.pushed.remove(frame);break
+        if event is not None:break
+        time.sleep(.005)
+    client.case.check(event is not None,"move always publishes a terminal mutation.result",json.dumps(dict(event=event,states=states)))
+    if event is None:raise RuntimeError("move result missing")
+    return event,states
+
+
+def move_case(name,binary,systemd,cross=False,failing=False):
+    import tempfile
+    with api_owned(name,binary,systemd) as (case,sandbox,h,process), ApiConn(h) as client, ExitStack() as stack:
+        client.hello()
+        root=sandbox.root/"move-source";root.mkdir();a=root/"first.bin";a.write_bytes(os.urandom(256*1024))
+        paths=[a]
+        if failing:
+            b=root/"second.bin";b.write_bytes(os.urandom(256*1024));paths.append(b)
+        fixture=fixtures.torrent_fixture(root,paths,name=name)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(root)))
+        h.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"fixture is durably complete with seeding off")
+        before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        hashes={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+        if cross:
+            if not Path("/dev/shm").is_dir():
+                case.check(True,"cross-filesystem case is environment conditional","SKIP: /dev/shm tmpfs is unavailable");return
+            temporary=stack.enter_context(tempfile.TemporaryDirectory(prefix="fbt-move-",dir="/dev/shm"));destination=Path(temporary)/"payload"
+            if root.stat().st_dev==Path(temporary).stat().st_dev:
+                case.check(True,"cross-filesystem case requires a distinct device","SKIP: /tmp and /dev/shm have equal st_dev");return
+        else:destination=sandbox.root/"move-destination"
+        destination.mkdir()
+        if failing:
+            # A real collision after the first file has been staged. The
+            # transaction must retain both sources and this unrelated target.
+            (destination/paths[-1].name).write_bytes(b"unrelated destination data")
+        case.check(True,"record filesystem strategy and source hashes",json.dumps(dict(source_device=root.stat().st_dev,destination_device=destination.stat().st_dev,save_path_before=before["save_path"],sha256=hashes)))
+        event,states=move_receive(client,h,fixture.info_hash,destination,"move-"+name)
+        after=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        if failing:
+            actual={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+            case.check(event["outcome"]=="failed" and event["error"]["code"]=="invalid_args" and actual==hashes and after["save_path"]==before["save_path"],"failed copy transaction preserves every source byte and the original location",json.dumps(dict(event=event,sha256_before=hashes,sha256_after=actual,row=after)))
+            case.check((destination/paths[-1].name).read_bytes()==b"unrelated destination data" and not list(destination.glob(".fbittorrent-move-*")),"failure keeps unrelated destination data and removes its own staging",str(destination))
+        else:
+            actual={path.name:hashlib.sha256((destination/path.name).read_bytes()).hexdigest() for path in paths}
+            case.check(event["outcome"]=="done" and actual==hashes and all(not path.exists() for path in paths),"move completes with identical destination bytes and removed sources",json.dumps(dict(event=event,sha256_after=actual)))
+            case.check(all(row["state"]=="done" and row["checked"] for row in states) and after["save_path"]==str(destination) and after["state"]=="done" and after["intent"]==before["intent"],"completed torrent stays done, checked and preserves intent throughout relocation",json.dumps(dict(states=states,after=after)))
+            ledger=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+            case.check(ledger["records"][0]["output_folder"]==str(destination),"new output folder is durable before the done receipt",json.dumps(ledger))
+        if cross:
+            # Stop before the outer temporary tmpfs context removes payloads.
+            h.stop_serve(process)
+
+
+def move_same_fs(binary,systemd):move_case("move_same_fs",binary,systemd)
+def move_cross_fs(binary,systemd):move_case("move_cross_fs",binary,systemd,cross=True)
+def move_failed_copy_keeps_source(binary,systemd):move_case("move_failed_copy_keeps_source",binary,systemd,cross=True,failing=True)
+
+
+
+def staged_files_snapshot(root):
+    return {str(path.relative_to(root)):hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def staged_discard_keeps_files(binary,systemd):
+    with api_owned("staged_discard_keeps_files",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        hello=client.hello();case.check("staging" in hello["result"]["caps"],"daemon advertises implemented staging",json.dumps(hello))
+        fixture=recheck_local_fixture(sandbox,name="staged-existing.bin")
+        root=fixture.files[0].parent;(root/"neighbour.txt").write_bytes(b"keep this unrelated file")
+        before=staged_files_snapshot(root)
+        result=client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stage=True,save_path=str(root)),ref="stage-kept")["result"]
+        row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(result["state"]=="done" and row["staged"] and row["state"]=="paused" and not row["checked"],"staging exposes metainfo without hashing payload",json.dumps(dict(result=result,row=row)))
+        case.check(len(client.call("torrents.files",dict(hash=fixture.info_hash))["result"]["files"])==1,"staged metainfo provides the add sheet file list","one file")
+        cli=h.cli("list");case.check(any(row.get("staged") for row in cli["torrents"]),"CLI list includes additive staged marker",json.dumps(cli))
+        args=dict(hash=fixture.info_hash)
+        client.call("torrents.discard",args,ref="discard-kept")
+        client.call("torrents.discard",args,ref="discard-kept")
+        client.call("torrents.get",args,error="not_found")
+        after=staged_files_snapshot(root)
+        case.check(before==after,"discard leaves every pre-existing file byte-identical",json.dumps(dict(sha256_before=before,sha256_after=after)))
+        cache=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine"/(fixture.info_hash+".torrent")
+        case.check(not cache.exists(),"discard removes only cached metainfo",str(cache))
+
+
+def staged_commit_joins_queue(binary,systemd):
+    with api_owned("staged_commit_joins_queue",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();fixture=recheck_local_fixture(sandbox,name="staged-commit.bin",size=2*1024*1024)
+        target=sandbox.root/"committed";target.mkdir()
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stage=True,save_path=str(target)))
+        states=[client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]]
+        case.check(not list(target.iterdir()),"stage never creates a payload file",str(list(target.iterdir())))
+        # All live-handle operations must refuse staged records before opening data.
+        for op,args in [("torrents.start",dict(hashes=[fixture.info_hash])),("torrents.force_start",dict(hashes=[fixture.info_hash],on=True)),("torrents.recheck",dict(hashes=[fixture.info_hash]))]:
+            client.call(op,args,error="invalid_state")
+        args=dict(hash=fixture.info_hash,files=[0],seed=True,save_path=str(target))
+        client.call("torrents.commit",args,ref="commit-once")
+        client.call("torrents.commit",args,ref="commit-once")
+        def admitted():
+            row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"];states.append(row)
+            return not row["staged"] and row["intent"]=="run" and row["state"] in ("stalled","downloading","seeding","queued"),json.dumps(row)
+        h.wait_for(admitted,"committed torrent finishes its check and joins ordinary admission")
+        case.check(states[0]["staged"] and all(not row["staged"] and row["seed"] for row in states[1:]),"state sequence transitions from staged pause to requested seed/run intent",json.dumps(states))
+        ledger=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+        record=ledger["records"][0]
+        case.check(not record.get("staged",False) and not record["paused"] and record["output_folder"]==str(target) and record["only_files"]==[0],"commit choices are durable",json.dumps(ledger))
+
+
+def commit_non_staged_invalid_state(binary,systemd):
+    with api_owned("commit_non_staged_invalid_state",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();fixture=recheck_local_fixture(sandbox)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True))
+        for op in ["torrents.commit","torrents.discard"]:
+            failure=client.call(op,dict(hash=fixture.info_hash),error="invalid_state")
+            case.check(failure["error"]["details"]["reason"]=="not_staged","non-staged commit/discard names its invalid state",json.dumps(failure))
+
+
+def staged_discarded_at_restart(binary,systemd):
+    with Case("daemon","staged_discarded_at_restart") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine()
+            folder=sandbox.root/"existing";folder.mkdir();(folder/"kept.bin").write_bytes(os.urandom(2048))
+            before=staged_files_snapshot(folder);hash_="ab"*20
+            with ApiConn(h) as client:
+                client.hello()
+                client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+hash_+"&dn=No%20peers"),stage=True,save_path=str(folder)))
+                # A settings/engine restart retains the add sheet in this lifetime.
+                epoch=client.call("app.info",{})["result"]["engine_epoch"]
+                client.call("app.restart",dict(scope="engine"))
+                h.wait_for(lambda:((info:=client.call("app.info",{})["result"])["engine_epoch"]>epoch and info["state"]=="running",json.dumps(info)),"engine slot actually restarts before the staging read")
+                h.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=hash_))["result"]["torrent"])["staged"],json.dumps(row)),"staging survives an engine-slot restart")
+            ledger_path=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+            case.check(json.loads(ledger_path.read_text())["records"][0]["staged"],"ledger before daemon restart contains staged record",ledger_path.read_text())
+            h.stop_serve(process);h.notify.close();process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();client.call("torrents.get",dict(hash=hash_),error="not_found")
+            ledger=json.loads(ledger_path.read_text());after=staged_files_snapshot(folder)
+            case.check(ledger["records"]==[] and before==after,"new daemon lifetime discards staged magnet and preserves every payload byte",json.dumps(dict(ledger=ledger,sha256_before=before,sha256_after=after)))
+            case.check("info engine staged record discarded at start hash="+hash_ in h.stderr(),"startup emits the required staged discard line",h.stderr())
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+        h.lock_free()
+
+
+def staged_queue_excluded(binary,systemd):
+    with api_owned("staged_queue_excluded",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();fixture=recheck_local_fixture(sandbox,name="staged-idle.bin")
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),stage=True))
+        queue=json.loads(h.engine_call("app/queue")["value"])
+        # P1-12 and the subscription summary are not on this branch yet. This
+        # observation proves queue exclusion only; it is not idle-exit proof.
+        case.check(queue["active_downloads"]==0 and queue["queued_downloads"]==0,"staged record occupies no active or queued slot",json.dumps(queue))
+        status=h.cli("status")
+        case.check(status["total"]==0 and status["staged"]==1 and status["stopped"]==0,"CLI counts exclude staging from ordinary buckets",json.dumps(status))
+
+
+
+def staged_metadata_timeout(binary,systemd):
+    with api_owned("staged_metadata_timeout",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();hash_="bc"*20;target=sandbox.root/"never-created"
+        began=time.monotonic()
+        result=client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+hash_+"&dn=Metadata%20deadline&tr=http%3A%2F%2F127.0.0.1%3A1%2Fannounce&x.pe=127.0.0.1:1"),stage=True,save_path=str(target)))
+        case.check(result["result"]["state"]=="done" and time.monotonic()-began<2,"staged magnet gives its hash without waiting for metadata",json.dumps(result))
+        while time.monotonic()-began<96:
+            row=client.call("torrents.get",dict(hash=hash_))["result"]["torrent"]
+            if row.get("reason")=="metadata_timeout":break
+            time.sleep(1)
+        elapsed=time.monotonic()-began
+        case.check(row.get("reason")=="metadata_timeout" and row["staged"] and row["state"]=="paused" and 89<=elapsed<96,"real 90-second metadata deadline retains a staged pause",json.dumps(dict(elapsed_s=elapsed,row=row)))
+        case.check(not target.exists(),"unresolved stage never creates its payload folder",str(target))
+        client.call("torrents.discard",dict(hash=hash_))
+
+
+
+def staged_magnet_metadata_only(binary,systemd):
+    with api_owned("staged_magnet_metadata_only",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client, \
+            Sandbox() as seedbox,Harness(case,binary,seedbox,systemd) as seed_h:
+        seed_process=seed_h.start_serve()
+        try:
+            seed_h.receive_ready();seed_h.wait_engine();client.hello()
+            fixture=recheck_local_fixture(seedbox,name="Metadata only.bin",size=64*1024)
+            # BEP 27 forbids a private seed from serving BEP 9 metadata.
+            # This generated public fixture is advertised only by our loopback tracker.
+            fixture.info.pop("private")
+            fixture.info_hash=hashlib.sha1(fixtures.bencode(fixture.info)).hexdigest()
+            fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info)))
+            with ApiConn(seed_h) as seed:
+                seed.hello();seed.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),seed=True))
+                seed_h.wait_for(lambda:((row:=seed.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="seeding",json.dumps(row)),"local seed advertises fixture metadata")
+            port=tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml").read_text())["peer_port"]
+            target=sandbox.root/"no-payload"
+            tracker=fixtures.bencode(dict(interval=1,complete=1,incomplete=0,peers=socket.inet_aton("127.0.0.1")+struct.pack("!H",port)))
+            with fixtures.HttpFixture(seedbox.root,{"/announce":dict(base64=base64.b64encode(tracker).decode())}) as http:
+                magnet="magnet:?xt=urn:btih:"+fixture.info_hash+"&tr="+urllib.parse.quote(http.base+"/announce",safe="")
+                client.call("torrents.add",dict(source=dict(magnet=magnet),stage=True,save_path=str(target)))
+                h.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]).get("file_count")==1,json.dumps(row)),"staged magnet resolves real peer metadata")
+                row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+                case.check(row["name"]=="Metadata only.bin" and row["state"]=="paused" and row["staged"] and not row["checked"],"resolved metadata stays staged and unchecked",json.dumps(row))
+                case.check(not target.exists(),"metadata resolution never creates payload storage",str(target))
+                client.call("torrents.discard",dict(hash=fixture.info_hash))
+        finally:seed_h.stop_serve(seed_process);seed_h.lock_free()
+
+
 CASES = {function.__name__: function for function in
-         (alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
@@ -4706,6 +4939,8 @@ CASES = {function.__name__: function for function in
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
+from daemon_staging import staged_not_busy
+CASES["staged_not_busy"] = staged_not_busy
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES

@@ -534,6 +534,30 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.details_previous",
+      "keys": {
+        "dashboard": [
+          "["
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Previous details tab",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.details_next",
+      "keys": {
+        "dashboard": [
+          "]"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Next details tab",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [
@@ -831,6 +855,42 @@
       "label": "First/last priority (legacy)",
       "note": "Legacy qBittorrent only; native streaming priority is automatic.",
       "scope": "screen:torrents"
+    },
+    {
+      "id": "search.sort",
+      "keys": {
+        "dashboard": [
+          "s"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Sort results",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.reverse_sort",
+      "keys": {
+        "dashboard": [
+          "S"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Reverse results sort",
+      "scope": "screen:search"
+    },
+    {
+      "id": "search.copy_magnet",
+      "keys": {
+        "dashboard": [
+          "y"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Copy magnet",
+      "scope": "pane:search.results"
     },
     {
       "id": "search.next",
@@ -1636,7 +1696,10 @@
     {
       "id": "files.down",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "j",
+          "↓"
+        ],
         "popup": null,
         "tui": [
           "j",
@@ -1649,7 +1712,10 @@
     {
       "id": "files.up",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "k",
+          "↑"
+        ],
         "popup": null,
         "tui": [
           "k",
@@ -1662,7 +1728,9 @@
     {
       "id": "files.toggle",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "Space"
+        ],
         "popup": null,
         "tui": [
           "Space"
@@ -1674,7 +1742,9 @@
     {
       "id": "files.all",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "a"
+        ],
         "popup": null,
         "tui": [
           "a"
@@ -1686,7 +1756,9 @@
     {
       "id": "files.none",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "n"
+        ],
         "popup": null,
         "tui": [
           "n"
@@ -1786,7 +1858,10 @@
     {
       "id": "providers.down",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "j",
+          "↓"
+        ],
         "popup": null,
         "tui": [
           "j",
@@ -1799,7 +1874,10 @@
     {
       "id": "providers.up",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "k",
+          "↑"
+        ],
         "popup": null,
         "tui": [
           "k",
@@ -1812,7 +1890,9 @@
     {
       "id": "providers.toggle",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "Space"
+        ],
         "popup": null,
         "tui": [
           "Space"

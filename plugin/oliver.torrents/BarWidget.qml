@@ -53,6 +53,10 @@ Ui.Panel {
     // Test hook: where the keyboard cursor is. Lets a script verify key handling
     // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
     function state(): string { var state=JSON.parse(svc.stateJson());state.geometry=root.geometry();state.popupDelegates=root.popupItem() ? root.popupItem().delegateCount : 0;return JSON.stringify(state) }
+    function setPaneWidth(px: real): string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused: FBT_TEST_HOOKS=1 required"
+      return svc && svc.dashboardOwner ? String(svc.dashboardOwner.setPaneWidth(px)) : "refused: no dashboard"
+    }
     function summonView(payload: string): string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused: FBT_TEST_HOOKS=1 required"
       return root.shell && root.shell.summon("oliver.torrents",payload) ? "ok" : "unavailable"

@@ -64,6 +64,7 @@ pub enum EngineOp {
     OpenTarget {
         hash: String,
     },
+    Move { hashes: Vec<String>, save_path: PathBuf },
     Trackers { hash: String },
     Reannounce { hashes: Vec<String> },
     Recheck {
@@ -80,6 +81,9 @@ pub enum EngineOp {
         hashes: HashSelection,
         on: bool,
     },
+    Stage { options: AddRequest, files: Option<Vec<usize>> },
+    Commit { hash: String, files: Option<Vec<usize>>, seed: Option<bool>, save_path: Option<PathBuf> },
+    Discard { hash: String },
     Add(AddRequest),
     AddSelected {
         options: AddRequest,
@@ -137,7 +141,7 @@ impl EngineOp {
             Self::SetShareLimits { ratio, .. } if !matches!(ratio, -2.0 | 0.0) => bail!(
                 "native share limits support unlimited (-2) or stop on completion (ratio 0, Stop)"
             ),
-            Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} => {
+            Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} | Self::Stage {options, ..} => {
                 if options.upload_limit < 0 {
                     bail!("upload limit cannot be negative");
                 }
@@ -267,6 +271,7 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    Move(Arc<super::super::moving::Batch>),
     Trackers(Vec<librqbit::TrackerStat>),
     RemovedUndo { undo_until: u64 },
     QueuePosition(u64),
@@ -287,6 +292,7 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::Move(_) => bail!("payload relocation has no legacy route"),
             Self::Trackers(_) => bail!("tracker observations have no legacy route"),
             Self::RemovedUndo { .. } => bail!("undo removal has no legacy route"),
             Self::QueuePosition(_) => bail!("queue movement has no legacy route"),

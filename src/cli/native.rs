@@ -21,6 +21,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Start { .. }
             | Cmd::Stop { .. }
             | Cmd::Reannounce { .. }
+            | Cmd::Move { .. }
             | Cmd::Delete { .. }
             | Cmd::Seed { .. }
             | Cmd::Noseed { .. }
@@ -191,6 +192,15 @@ fn snapshot(cfg: &Config, json_mode: bool) -> Result<(Option<ApiClient>, Vec<api
 }
 pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> Result<Code> {
     match cmd {
+        Cmd::Move {selector,save_path}=>{
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            for batch in hashes.chunks(256) {
+                let pending=c.call("torrents.move",json!({"hashes":batch,"save_path":save_path}))?;
+                await_move(&c,pending)?;
+            }
+            emit(json_mode,json!({"ok":true,"action":"move","count":hashes.len(),"hashes":hashes}));
+        }
         Cmd::Add {
             source,
             stopped,
@@ -209,6 +219,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             if *no_seq || *no_first_last {
                 return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
             }
+            if let Some(path) = save { crate::free_space::require_writable(path)?; }
             let client = connect(cfg, true, no_start, json_mode)?;
             if origin=="handler" && cfg.handler=="confirm" {
                 let value=super::handler::confirm(&client,cfg,source,*stopped,*seed,save.clone(),category.clone())?;
@@ -246,6 +257,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     2,
                     json_mode,
                 );
+            }
+            if let Some(disk) = added.get("disk") {
+                let disk:api::DiskSpace = serde_json::from_value(disk.clone())?;
+                crate::agent::warning("disk_low",crate::daemon::supervisor::warning_message(&disk),true);
             }
             let mut value = added;
             value["ok"] = json!(true);
@@ -513,6 +528,19 @@ fn bulk(c: &ApiClient, op: &str, hashes: &[String], extra: Value) -> Result<()> 
     }
     Ok(())
 }
+fn await_move(c:&ApiClient,result:Value)->Result<Value> {
+    let reference=result["ref"].as_str().context("move acknowledgement omitted ref")?;
+    loop {
+        let unknown=||AppError::new(Code::Timeout,"move outcome is unknown after the owner connection closed").hint("fbittorrent list --json");
+        if let Some(event)=c.event(Duration::from_millis(100)).map_err(|_|unknown())? {
+            if event["ev"]=="mutation.result" && event["ref"]==reference {
+                if event["outcome"]=="done" {return Ok(event.get("result").cloned().unwrap_or(json!({"state":"done"})));}
+                return Err(api::errors::app_error(serde_json::from_value(event["error"].clone())?));
+            }
+            if event["ev"]=="bye" || event["ev"]=="client.disconnected" {return Err(unknown().into());}
+        }
+    }
+}
 fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]
         .as_str()
@@ -556,6 +584,7 @@ pub(super) fn add(
     origin: &str,
     stage: bool,
 ) -> Result<Value> {
+    if let Some(path) = &save { crate::free_space::require_writable(path)?; }
     let input=super::handler::source(source)?;
     let mut args =
         json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});
@@ -573,7 +602,8 @@ pub(super) fn add(
     await_mutation(c, result)
 }
 fn counts(rows: &[api::Torrent]) -> Value {
-    json!({"total":rows.len(),"active":rows.iter().filter(|r|matches!(r.state, api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
+    let visible:Vec<_>=rows.iter().filter(|r|!r.staged).collect();
+    json!({"total":visible.len(),"active":visible.iter().filter(|r|matches!(r.state,api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
 }
 fn status(
     c: Option<&ApiClient>,

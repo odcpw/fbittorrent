@@ -3,7 +3,9 @@ use super::*;
 use ops::EngineResult;
 
 pub(super) fn saved(record: &Record, directory: &Path) -> Result<Vec<librqbit::TrackerStat>> {
-    let mut urls = if let Some(bytes) = parked::parked_metadata(record, directory)? {
+    // A corrupt cache must not hide the saved row's restore diagnostic. Its
+    // magnet still supplies known tracker URLs; this read never repairs or admits it.
+    let mut urls = if let Ok(Some(bytes)) = parked::parked_metadata(record, directory) {
         librqbit::torrent_from_bytes(&bytes)?
             .iter_announce()
             .filter_map(|v| std::str::from_utf8(v.as_ref()).ok()?.parse().ok())
@@ -73,6 +75,31 @@ impl EngineDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn corrupt_saved_metadata_preserves_tracker_diagnostics() {
+        let directory = crate::engine::tests::review_directory("corrupt-trackers");
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut record: Record = serde_json::from_value(serde_json::json!({
+            "hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"corrupt-cache",
+            "source":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&tr=http%3A%2F%2F127.0.0.1%3A1%2Fannounce",
+            "output_folder":directory,"only_files":null,"upload_limit":32768,"ratio_limit":0.0,
+            "category":"","tags":"","added_on":1,"completion_on":0,"paused":false
+        })).unwrap();
+        let cache = directory.join(format!("{}.torrent", record.hash));
+        std::fs::write(&cache, b"corrupt cache").unwrap();
+        assert!(parked::parked_metadata(&record, &directory).is_err());
+        let rows = saved(&record, &directory).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].url.as_str(), "http://127.0.0.1:1/announce");
+        assert_eq!(rows[0].status, librqbit::TrackerStatus::NotContacted);
+        assert!(rows[0].last_announce_at.is_none() && rows[0].peers.is_none());
+        record.source.clear();
+        assert!(saved(&record, &directory).unwrap().is_empty());
+        assert_eq!(std::fs::read(&cache).unwrap(), b"corrupt cache");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn saved_urls_do_not_restore_metadata_or_contact_trackers() {
         let directory = crate::engine::tests::review_directory("saved-trackers");

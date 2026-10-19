@@ -14,6 +14,22 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+#[derive(Debug)]
+pub(super) struct SourceProblem;
+impl std::fmt::Display for SourceProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("reading move source")
+    }
+}
+impl std::error::Error for SourceProblem {}
+#[derive(Debug)]
+pub(super) struct DestinationProblem;
+impl std::fmt::Display for DestinationProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("writing move destination")
+    }
+}
+impl std::error::Error for DestinationProblem {}
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Strategy {
@@ -62,7 +78,9 @@ impl Dir {
         let part = name(part)?;
         if create {
             let result = unsafe { libc::mkdirat(self.0.as_raw_fd(), part.as_ptr(), 0o700) };
-            if result == 0 { self.0.sync_all()?; }
+            if result == 0 {
+                self.0.sync_all()?;
+            }
             if result != 0
                 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::AlreadyExists
             {
@@ -193,9 +211,58 @@ impl Prepared {
         target: &Path,
         paths: &[PathBuf],
         choose: impl Fn(u64, u64) -> Strategy,
-        mut copier: impl FnMut(&File, &mut File) -> Result<()>,
+        copier: impl FnMut(&File, &mut File) -> Result<()>,
     ) -> Result<Self> {
-        let source = Dir::root(source, false)?;
+        Self::with_checks(
+            source,
+            target,
+            paths,
+            &paths.iter().cloned().collect(),
+            &Default::default(),
+            choose,
+            copier,
+            || Ok(()),
+        )
+    }
+    pub(super) fn cancellable(
+        source: &Path,
+        target: &Path,
+        paths: &[PathBuf],
+        required: &std::collections::HashSet<PathBuf>,
+        lengths: &std::collections::HashMap<PathBuf, (u64, u64)>,
+        stopping: &std::sync::atomic::AtomicBool,
+    ) -> Result<Self> {
+        let check = || {
+            ensure!(
+                !stopping.load(Ordering::Acquire),
+                "engine is closing during move"
+            );
+            Ok(())
+        };
+        Self::with_checks(
+            source,
+            target,
+            paths,
+            required,
+            lengths,
+            strategy,
+            |source, target| copy_checked(&mut &*source, target, &check),
+            check,
+        )
+        .context(DestinationProblem)
+    }
+    fn with_checks(
+        source: &Path,
+        target: &Path,
+        paths: &[PathBuf],
+        required: &std::collections::HashSet<PathBuf>,
+        lengths: &std::collections::HashMap<PathBuf, (u64, u64)>,
+        choose: impl Fn(u64, u64) -> Strategy,
+        mut copier: impl FnMut(&File, &mut File) -> Result<()>,
+        check: impl Fn() -> Result<()>,
+    ) -> Result<Self> {
+        check()?;
+        let source = Dir::root(source, false).context(SourceProblem)?;
         let target = Dir::root(target, true)?;
         let strategy = choose(source.0.metadata()?.dev(), target.0.metadata()?.dev());
         let stage_name = PathBuf::from(format!(
@@ -219,10 +286,15 @@ impl Prepared {
             committed: false,
         };
         for path in paths {
+            check()?;
             let source = match prepared.source.file(path, false) {
                 Ok(Some(file)) => file,
-                Ok(None) => continue,
-                Err(error) => return Err(error.context("opening source payload")),
+                Ok(None) if !required.contains(path) => continue,
+                Ok(None) => {
+                    return Err(anyhow::anyhow!("required source payload is missing")
+                        .context(SourceProblem));
+                }
+                Err(error) => return Err(error.context(SourceProblem)),
             };
             // Reject all collisions, including dangling symlinks, before touching
             // this source. O_EXCL publication also protects the final race.
@@ -241,8 +313,16 @@ impl Prepared {
                     && std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound,
                 "destination payload already exists"
             );
-            let original = stamp(&source)?;
-            source.sync_all()?;
+            let original = stamp(&source).context(SourceProblem)?;
+            if let Some((minimum, maximum)) = lengths.get(path) {
+                if original.2 < *minimum || original.2 > *maximum {
+                    return Err(anyhow::anyhow!(
+                        "source size no longer matches its verified pieces"
+                    )
+                    .context(SourceProblem));
+                }
+            }
+            source.sync_all().context(SourceProblem)?;
             prepared.entries.push(Entry {
                 path: path.clone(),
                 published: false,
@@ -273,6 +353,7 @@ impl Prepared {
             prepared.stage.sync_parent(path)?;
         }
         for index in 0..prepared.entries.len() {
+            check()?;
             let path = prepared.entries[index].path.clone();
             prepared.stage.rename(&path, &prepared.target)?;
             prepared.entries[index].published = true;
@@ -300,6 +381,9 @@ impl Prepared {
         }
         self.clean_stage();
         Ok(())
+    }
+    pub(super) fn retain(mut self) {
+        self.committed = true;
     }
     fn clean_stage(&self) {
         let mut directories = std::collections::BTreeSet::new();
@@ -342,13 +426,23 @@ impl Drop for Prepared {
     }
 }
 fn copy(source: &mut impl Read, target: &mut impl Write) -> Result<()> {
+    copy_checked(source, target, &|| Ok(()))
+}
+fn copy_checked(
+    source: &mut impl Read,
+    target: &mut impl Write,
+    check: &impl Fn() -> Result<()>,
+) -> Result<()> {
     let mut buffer = [0u8; 64 * 1024];
     loop {
-        let size = source.read(&mut buffer)?;
+        check()?;
+        let size = source.read(&mut buffer).context(SourceProblem)?;
         if size == 0 {
             break;
         }
-        target.write_all(&buffer[..size])?;
+        target
+            .write_all(&buffer[..size])
+            .context(DestinationProblem)?;
     }
     Ok(())
 }

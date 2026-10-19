@@ -7,13 +7,21 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("staging",include_str!("../../contracts/ipc/v1/staging.ndjson")),
+    ("move",include_str!("../../contracts/ipc/v1/move.ndjson")),
     ("trackers",include_str!("../../contracts/ipc/v1/trackers.ndjson")),
     ("origin",include_str!("../../contracts/ipc/v1/origin.ndjson")),
     ("queue",include_str!("../../contracts/ipc/v1/queue.ndjson")),
     ("search", include_str!("../../contracts/ipc/v1/search.ndjson")),
     ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
+    ("shows",include_str!("../../contracts/ipc/v1/shows.ndjson")),
+    ("rss",include_str!("../../contracts/ipc/v1/rss.ndjson")),
+    ("clipboard", include_str!("../../contracts/ipc/v1/clipboard.ndjson")),
+    ("peer-port", include_str!("../../contracts/ipc/v1/peer-port.ndjson")),
+    ("disk", include_str!("../../contracts/ipc/v1/disk.ndjson")),
     ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
+    ("free-space", include_str!("../../contracts/ipc/v1/free-space.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
     ("hello", include_str!("../../contracts/ipc/v1/hello.ndjson")),
@@ -248,7 +256,9 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
             // known transfer for unknown values. Rates may be genuinely zero.
             if child.as_f64() == Some(0.0) {
                 let invalid = match key.as_str() {
-                    "eta_s" | "rating" | "uploaded_at" | "free_bytes" => true,
+                    "eta_s" | "rating" | "uploaded_at" => true,
+                    // P6-11 reports an observed zero in its typed destination result.
+                    "free_bytes" => !map.get("writable").is_some_and(Value::is_boolean),
                     "size" => !map.contains_key("index"),
                     "progress" => {
                         !map.contains_key("index")
@@ -321,6 +331,7 @@ fn sentinel_negative_controls() {
         assert!(sentinel(&value, "").unwrap_err().starts_with(pointer));
     }
     // Known, observed zeros survive; unknown is represented by omission.
+    sentinel(&json!({"free_bytes":0,"writable":false}), "").unwrap();
     sentinel(&json!({"size":4096,"progress":0,"completed_bytes":0,"dl_bps":0,"ul_bps":0,"index":0,"total":0}), "").unwrap();
     sentinel(
         &json!({"state":"stalled","peers":0,"seeds":0,"completed_bytes":1024,"ratio":0}),
@@ -440,6 +451,9 @@ fn operation_event_error_and_document_coverage() {
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "torrents.commit",
+        "torrents.discard",
+        "torrents.move",
         "torrents.trackers",
         "torrents.reannounce",
         "torrents.force_start",
@@ -447,8 +461,12 @@ fn operation_event_error_and_document_coverage() {
         "search.start", "search.stop", "search.providers", "search.set_provider",
         "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
+        "shows.list","shows.follow","shows.unfollow","shows.check","shows.releases","shows.set_read","shows.mark_show_read","shows.undo_read","shows.grab",
+        "rss.feeds","rss.add","rss.remove","rss.refresh","rss.items","rss.set_read","rss.mark_feed_read","rss.grab",
+        "app.clipboard.dismiss",
         "app.log",
         "app.stats",
+        "app.free_space", // P6-11: planned additive operation.
         "app.settings.get",
         "app.settings.set",
         "imdb.lookup",

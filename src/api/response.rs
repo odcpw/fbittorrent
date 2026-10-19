@@ -1,6 +1,8 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
 use super::{objects::*, scalar::*, search::*};
+use super::rss::*;
+use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -151,6 +153,8 @@ pub struct AddResult {
     pub duplicate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk: Option<DiskSpace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -207,6 +211,9 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsCommit(DoneResult),
+    TorrentsDiscard(DoneResult),
+    TorrentsMove(MutationResult),
     TorrentsTrackers(TrackersResult),
     TorrentsReannounce(DoneResult),
     TorrentsForceStart(DoneResult),
@@ -221,8 +228,13 @@ pub enum Reply {
     SearchGrab(AddResult),
 
     TorrentsRecheck(RecheckReply),
+    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
+    RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
+    RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
+    AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
+    AppFreeSpace(super::FreeSpaceResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -252,6 +264,9 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.commit"=>serde_json::from_value(result).map(Self::TorrentsCommit),
+            "torrents.discard"=>serde_json::from_value(result).map(Self::TorrentsDiscard),
+            "torrents.move"=>serde_json::from_value(result).map(Self::TorrentsMove),
             "torrents.trackers" => serde_json::from_value(result).map(Self::TorrentsTrackers),
             "torrents.reannounce" => serde_json::from_value(result).map(Self::TorrentsReannounce),
             "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
@@ -266,8 +281,17 @@ impl Reply {
             "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
 
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
+            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
+            "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
+            "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
+            "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),
+            "rss.remove"=>serde_json::from_value(result).map(Self::RssRemove), "rss.refresh"=>serde_json::from_value(result).map(Self::RssRefresh),
+            "rss.items"=>serde_json::from_value(result).map(Self::RssItems), "rss.set_read"=>serde_json::from_value(result).map(Self::RssSetRead),
+            "rss.mark_feed_read"=>serde_json::from_value(result).map(Self::RssMarkFeedRead), "rss.grab"=>serde_json::from_value(result).map(Self::RssGrab),
+            "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),
+            "app.free_space" => serde_json::from_value(result).map(Self::AppFreeSpace),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),

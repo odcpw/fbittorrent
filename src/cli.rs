@@ -167,6 +167,8 @@ pub(super) enum Cmd {
     /// Start (resume) torrents
     #[command(alias = "resume")]
     Start { selectors: Vec<String> },
+    /// Move a torrent (or all) to another directory, waiting for the move receipt
+    Move { selector:String, save_path:String },
     /// Ask live torrents to announce now (at most once per tracker per minute)
     Reannounce { selectors: Vec<String> },
     /// Stop (pause) torrents
@@ -289,7 +291,7 @@ pub(super) enum Cmd {
         idle_secs: Option<u64>,
         #[arg(long)]
         handler: Option<String>,
-        #[arg(long, num_args=0..=1, default_missing_value="true")]
+        #[arg(long, num_args=0..=1, default_missing_value="true", value_parser=clap::builder::BoolishValueParser::new())]
         clipboard_watch: Option<bool>,
         #[arg(long)]
         port: Option<u16>,

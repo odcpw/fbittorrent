@@ -385,3 +385,191 @@ cap via changes[].cap; agent unit test pins fixture equality and this coverage.
 passes foreground and systemd (`caps-replay-{foreground,systemd}/`). No replay
 mask or deferral was added. Earlier full-suite failure is resolved for these rows;
 no additional full-suite run is claimed for this targeted bookkeeping delta.
+
+At approximately 10:33 CEST the worktree's entire ignored target tree disappeared
+while P5-07 was being edited; cause not established. Committed source is intact,
+but earlier raw target/test-logs artifacts are unavailable. SBH was observed
+running in enforce mode under disk pressure; this does not by itself establish
+causation. The recreated target tree and /tmp/fbt-track-a-evidence are protected;
+fresh logs are mirrored there. Earlier numerical results remain recorded above
+and in the session output, not promoted into currently available raw evidence.
+
+## P5-07 — daemon/API/CLI (fbt-p5-07-gei)
+
+Added five-second per-path statvfs sampling, filesystem-aware Summary.disk,
+ENOSPC classification, per-torrent recovery baselines under the ruling above,
+one-per-life disk notification, immediate explicit start retry, and add capacity
+warnings with binary units. Contract 1.2.8 adds DiskSpace/add.disk and disk.ndjson;
+neighbouring bus, API add/result/dispatch, CLI and notifier changes carry these
+fields without a new operation or cap. `python3 /tmp/fbt-track-a-run.py api`,
+`units engine::disk`, `units supervisor::`, `build` pass (89 API tests, four policy
+tests). `cases add_warns_disk disk_low_banner disk_full_reason disk_full_recovers`
+passes all four real 64 MiB tmpfs / 100 MiB local-peer cases, including actual
+ENOSPC, one window-action notice, warning before error, and increased allocated
+blocks/downloaded bytes after truncating a 32 MiB filler with no start request.
+Explicit start is acknowledged on the failed record. Evidence:
+`target/test-logs/fbt-p5-07-gei/{module-tests,unit-disk,unit-supervisor,build,live-disk}/`;
+the inner `live-disk/disk-workers/` JSONLs retain free/needed, row and retry-log
+observations. The tests run foreground in an owned user/mount namespace because
+a user unit outside it cannot see the tmpfs; no systemd-mode disk proof is claimed.
+`full` passes 378/0/3 ignored (`full-final/`, cargo test --locked -- --nocapture).
+Fresh exact hello/error replay passes both modes (`fresh-caps-{foreground,systemd}/`).
+Every fresh run is mirrored under `/tmp/fbt-track-a-evidence/fbt-p5-07-gei/`.
+UI banner/urgent icon/add-sheet refusal/goldens: deferred to track C/D. No all.sh
+between track beads by owner instruction. Follow-up: no disk-capacity proof yet
+for deferred URL/magnet metadata; these adds omit disk until size is known.
+
+## P6-09 — daemon/API/CLI (fbt-p6-09-omx)
+
+Added one condition-variable-driven inhibitor owner, observing run-intent
+downloading/stalled/metadata/checking states with no allocations on unchanged
+samples. It cleans its process group independently of launcher exit, releases
+on last stop and drain, and retries failed launchers at most every five seconds
+while eligible work remains. The child has an unblocked signal mask and keeps
+the session bus environment without changing its XDG runtime directory. Existing
+peer_port/settings --port paths are reused. Neighbour edits: bus observation,
+daemon lifecycle wiring, fixture registry; peer-port.ndjson documents the existing
+settings acknowledgement and engine.changed pair (no new wire field/cap/op).
+`FBT_BEAD=fbt-p6-09-omx python3 /tmp/fbt-track-a-run.py check`,
+`units inhibit::`, `units api::fixtures`, `build` pass (one injected-spawner
+lifecycle test, 30 fixture tests). `full` passes **379/0/3 ignored** (`full-final/`).
+The first live runs exposed inherited blocked SIGTERM; the final spawn-mask fix
+was verified with the targeted unit, build and live cases after that full run.
+`cases port_restart_keeps_clients inhibitor_lifecycle` passes foreground and
+systemd (`final-{foreground,systemd}/daemon/`): same instance, surviving API
+connection, two engine.changed frames, actual new loopback TCP listener, one
+inhibitor during actual download, recorded SIGTERM and no live descendants after
+stop/drain. All JSONL/stderr/timestamp traces live under
+`target/test-logs/fbt-p6-09-omx/` and are mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p6-09-omx/`. Actual host sleep inhibition is not
+exercised: the child is a recording shim in both private environments. Settings
+sheet/F6 UI fields are deferred to tracks C/D. No all.sh between track beads.
+
+P6-13 framing conflict found before implementation: installed
+`/usr/share/man/man1/wl-clipboard.1.gz` says --watch automatically enables
+--no-newline and runs the command with selection bytes on stdin. Therefore the
+literal planned `wl-paste --watch cat` loses selection boundaries for ordinary
+newline-free magnets. Requested an explicit ruling for a NUL-delimited
+`wl-paste --watch sh -c 'cat; printf "\\0"'`, retaining one watcher and no
+fbittorrent CLI per change. No P6-13 source edits before that ruling.
+
+P6-13 ruling approved by the orchestrator: use
+`wl-paste --watch sh -c 'cat; printf "\0"'` with one bounded NUL record per
+selection, since magnets never contain NUL. Proceeding with the daemon half.
+
+## P6-13 — daemon/API/CLI (fbt-p6-13-dxe)
+
+Implemented one opt-in reader using the approved NUL wrapper, a 64 KiB record
+bound (oversize discarded through delimiter; no partial offers), hash/ledger
+deduplication, bounded offer names, notification Add/Dismiss over api.sock,
+clipboard origin and idempotent app.clipboard.dismiss. Only the last offered
+hash survives parsing; notification Add reconstructs a hash-only magnet, so
+clipboard tracker URLs are not retained. Off/drain kills the complete owned
+group; launch is serialized with disabling, signals are unblocked before exec,
+and idle reads block in poll rather than spinning. Clipboard child/notifier
+stderr is suppressed; no clipboard text enters daemon logs. Contract 1.2.9,
+clipboard cap/changes entry, new clipboard.ndjson, exact hello/error cap updates,
+and CLI on/off (also true/false) bookkeeping land together. Minimal neighbours:
+typed call/reply/catalogue, dispatch/server event-bus accessor, add-origin
+validation, CLI parser and notifier/lifecycle wiring.
+
+`FBT_BEAD=fbt-p6-13-dxe python3 /tmp/fbt-track-a-run.py check`, `units clipboard::`,
+`api`, `build` pass (two record/parser units, 89 API tests). `full` passes
+**381/0/3 ignored** (`full-final/`, one full cargo test --locked -- --nocapture).
+`cases clipboard_watch_offer clipboard_watch_add clipboard_watch_dedupe
+clipboard_watch_off_kills_child clipboard_never_logged contract_hello contract_errors`
+passes foreground (`final-foreground/`). Systemd offer/add/dedupe/privacy pass
+(`final-systemd/`); corrected production-valid 30 s idle/drain plus exact hello/error
+replay pass `idle-final-systemd/`, with the same idle case also passing
+`idle-final-foreground/`. Tests use fake wl-paste but execute the real sh/cat NUL
+wrapper, record selections/timestamps and notify argv, add a real ledger record,
+exercise idempotent dismiss and compare both stderr/app.log against fixed fixture
+text. Both reader and notifier deliberately emit that fixture text to stderr;
+final scans are empty. Earlier failures retain the in-flight old build's stderr
+leak and the short idle setup race; no verdicts were suppressed. All evidence
+is under `target/test-logs/fbt-p6-13-dxe/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p6-13-dxe/`. UI strips/banner/golden and a real
+Wayland clipboard/day-long owner evaluation remain deferred to tracks C/D/owner.
+No all.sh between track beads. Follow-up: hash-only notification adds rely on
+ordinary peer discovery rather than retaining clipboard tracker parameters.
+
+## P3-02 — RSS daemon/API (fbt-p3-02-n95)
+
+Added eight typed RSS operations, feed/item objects, keyed on-change topics,
+an owned coalescing stale-on-interactive scheduler, cached views invalidated by
+inode/size/mtime, 4 MiB feed reads, persistent grabbed history and rss-origin adds.
+Checks never add torrents. A grab marks read/grabbed only after an accepted real
+engine add. Feed-id removal is exact, preserving nested display names. The
+in-process CLI still uses the shared locked/atomic store. Contract 1.2.10 adds
+rss cap/changes and rss.ndjson; hello/error arrays compare exactly with live caps.
+Neighbours: API types/catalogue/dispatch/framing, bus/diff, presence/drain hooks,
+add-origin validation, and the TUI API mirror's typed RSS collections (rendering
+is deferred; no UI completion claimed). Snapshot row/byte bounds are retained,
+and only the selected feed's item table remains in that mirror.
+
+`FBT_BEAD=fbt-p3-02-n95 python3 /tmp/fbt-track-a-run.py api`, `units rss::`,
+`build` pass: 89 API tests and 13 RSS/store tests. All four
+`cases rss_refresh_on_interactive rss_cli_edit_visible rss_oversized_refused
+rss_grab_marks_read_only_on_success` pass both modes (`final-{foreground,systemd}/`):
+counted local feed hits follow stale interactive edges only; CLI add pushes in
+**103 ms** both modes; >4 MiB refresh returns pending then upstream/rss failure
+while both cached items survive; failed grab leaves read/grabbed false, successful
+local metainfo add persists rss origin and read/grabbed; nested-name removal and
+CLI read-history interoperability pass. One full `cargo test --locked -- --nocapture`
+ran (`full-final/`): **381 passed, 1 failed, 3 ignored**. The sole failure was the
+new RSS snapshot encountering the TUI mirror's unsupported item type. It was
+implemented without changing that test; final `units tui::store::` passes all
+**12** tests including every transcript (`tui-mirror-final/`). No second full run
+is claimed, following the one-full-run track cadence.
+
+Exact hello replay passes both modes (`caps-{foreground,systemd}/`). Error replay
+exposed a pre-existing pressure-fixture race: auxiliary URL replies crossed into
+the next line-cap scenario. The harness now drains every admitted reply and
+pending outcome after releasing its actual HTTP fixture; canonical expectations
+are unchanged. Final `cases contract_errors` passes both modes
+(`replay-fixed-{foreground,systemd}/`), with empty outstanding sets recorded.
+Logs are under `target/test-logs/fbt-p3-02-n95/`, mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p3-02-n95/`. No all.sh between track beads.
+Follow-up: the existing legacy error replay still records its older capability/
+operation deferrals; this bead adds no new comparison mask or deferral.
+
+## P3-03 — Shows daemon/API (fbt-p3-03-oyg)
+
+Moved src/shows.rs mechanically into shows/mod.rs plus tests.rs (Git detects
+69% rename; production prefix/test-body identity in `split-proof.json`; all
+15 `shows::` tests pass). Applied the isomorphic skill's byte-preservation/API
+path discipline within the owner's scoped move/test cadence; no separate
+workspace, tracker ceremony, benchmarks or compile-memory claim. Added typed
+Shows operations/views, keyed show/release topics (compound imdb/key inbox
+identities), one stale-on-interactive worker, inode/size/mtime reload, cancellation
+between bounded EZTV pages, and FBT_EZTV_BASE_URL shared by Shows and browse.
+Read intent stays independent of ledger transfer state; paused intent takes
+precedence for unresolved magnets. Single read marks establish one undo target;
+bulk marking preserves it; undo consumes it; explicit grab alone adds and marks
+read/grabbed with shows origin. Fresh interactive opens do not rewrite/check
+history. Contract 1.2.11 adds shows cap/changes and shows.ndjson, with exact
+hello/error caps. Minimal neighbours: types/catalogue/dispatch/presence/drain,
+bus/diff, origin validation, browse endpoint, typed TUI API mirror (no renderer
+completion claimed) and the CLI test helper's optional pre-log exit timestamp.
+
+`FBT_BEAD=fbt-p3-03-oyg python3 /tmp/fbt-track-a-run.py check`, `api`,
+`units tui::store::`, `build` pass (89 API tests; 12 mirror tests).
+One full `cargo test --locked -- --nocapture` passes **382/0/3 ignored**
+(`full-final/`), also confirming P3-02's RSS mirror integration is green.
+`cases shows_inbox_semantics shows_check_never_downloads shows_cli_edit_visible
+shows_check_only_when_asked` passes foreground (final inbox/check/CLI in
+`final-foreground/`, idle in `live-foreground/`) and systemd (inbox/check/idle in
+`final-systemd/`). Each idle case records **60 one-second zero-hit observations**,
+then one stale interactive check, no fresh reconnect fetch and a deliberate
+explicit check. Four unread releases are newest first; m/M/u semantics,
+one-level undo, Shows-origin grab and independent paused transfer pass. CLI
+follow through the in-process path appears in the topic; an independent socket
+reader timestamps receipt against the CLI exit before JSONL writes, retaining
+the exact <=2 s assertion: **85.7/94.2 ms** foreground/systemd
+(`timed-cli-{foreground,systemd}/`). The previous poll-based systemd run timed
+out after one observation under load; it remains retained, not counted green.
+Final `cases contract_hello contract_errors` passes both modes (`caps-*/`).
+Evidence: `target/test-logs/fbt-p3-03-oyg/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p3-03-oyg/`. UI rendering stays with C/D; no all.sh
+between track beads. Follow-up: legacy EZTV episodes do not distinguish a missing
+source seed/size from zero; API omits nonpositive legacy values conservatively.

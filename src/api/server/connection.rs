@@ -90,7 +90,7 @@ impl Connection {
             Pending {
                 generation,
                 deadline: Instant::now() + Duration::from_secs(after),
-                no_timeout: matches!(&request.call, Call::TorrentsRecheck { .. }) || matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
+                no_timeout: matches!(&request.call, Call::TorrentsRecheck { .. }|Call::TorrentsMove {..}) || matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
                 after,
             },
         );
@@ -172,6 +172,8 @@ impl Shared {
         let glance = client.glance;
         drop(client);
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
+        self.daemon.rss.presence(connection.number,interactive);
+        self.daemon.shows.presence(connection.number,interactive);
         self.bus.refresh();
     }
 }
@@ -181,6 +183,8 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
         fn drop(&mut self) {
             self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
             self.0.daemon.search.disconnected(self.1);
+            self.0.daemon.rss.presence(self.1,false);
+            self.0.daemon.shows.presence(self.1,false);
             self.0.bus.remove_connection(self.1);
             self.0.bus.refresh();
         }

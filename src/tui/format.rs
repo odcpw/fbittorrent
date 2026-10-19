@@ -23,6 +23,7 @@ pub(super) fn torrent(row: &api::Torrent) -> Torrent {
     };
     Torrent {
         hash: row.hash.to_string(),
+        staged: row.staged,
         name: row.name.clone(),
         state: state.into(),
         error_message: row.error.clone(),

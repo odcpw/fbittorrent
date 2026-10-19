@@ -1,0 +1,19 @@
+{"dir":"c2s","frame":{"id":1,"op":"rss.feeds"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"feeds":[]}}}
+{"dir":"c2s","frame":{"id":2,"op":"rss.add","args":{"url":"http://127.0.0.1/feed","name":"Local"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"feed":{"id":"rss-0123456789abcdef","name":"Local","url":"http://127.0.0.1/feed","unread":1,"loading":false}}}}
+{"dir":"c2s","frame":{"id":3,"op":"rss.items","args":{"feed":"rss-0123456789abcdef"}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"items":[{"id":"item-1","title":"Local fixture","magnet":"magnet:?xt=urn:btih:3434343434343434343434343434343434343434","read":false,"grabbed":false}]}}}
+{"dir":"c2s","frame":{"id":4,"op":"rss.refresh","args":{"feed":"rss-0123456789abcdef"}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"state":"pending","ref":"rss-refresh"}}}
+{"dir":"c2s","frame":{"id":5,"op":"rss.set_read","args":{"feed":"rss-0123456789abcdef","item":"item-1","read":true}}}
+{"dir":"s2c","frame":{"id":5,"ok":true,"result":{}}}
+{"dir":"c2s","frame":{"id":6,"op":"rss.mark_feed_read","args":{"feed":"rss-0123456789abcdef"}}}
+{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"count":0}}}
+{"dir":"c2s","frame":{"id":7,"op":"rss.grab","args":{"feed":"rss-0123456789abcdef","item":"item-1"}}}
+{"dir":"s2c","frame":{"id":7,"ok":true,"result":{"state":"done","hash":"3434343434343434343434343434343434343434","name":"Local fixture","duplicate":false}}}
+{"dir":"c2s","frame":{"id":8,"op":"rss.remove","args":{"feed":"rss-0123456789abcdef"}}}
+{"dir":"s2c","frame":{"id":8,"ok":true,"result":{}}}
+{"dir":"s2c","frame":{"ev":"snapshot.begin","sub":1,"topic":"rss.feeds","rev":1,"count":1,"reason":"subscribe"}}
+{"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"rss.feeds","rev":2,"items":[{"id":"rss-0123456789abcdef","name":"Local","url":"http://127.0.0.1/feed","unread":1,"loading":false}]}}
+{"dir":"s2c","frame":{"ev":"snapshot.end","sub":1,"topic":"rss.feeds","rev":3}}

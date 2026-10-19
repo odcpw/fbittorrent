@@ -9,6 +9,20 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {
+        name: "app.free_space",
+        mutating: false,
+        idempotent: false,
+        since: "P6-11",
+        args: "`path: str` (absolute local directory, ≤4096 bytes, no controls)",
+        result: "`{free_bytes: bytes?, writable: bool}`",
+    },
+    Operation {name:"torrents.commit",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`, `files?`, `seed?`, `save_path?`",result:"`{state: \"done\"}`"},
+    Operation {name:"torrents.discard",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`",result:"`{state: \"done\"}`; payload files never deleted"},
+    Operation {name:"torrents.move",mutating:true,idempotent:false,since:"P7-02",
+        args:"`hashes: [hash]` (1..256), `save_path`",result:"`{state: \"pending\", ref}`, then mutation.result"},
     Operation { name: "torrents.trackers", mutating: false, idempotent: false, since: "P6-01",
         args: "`hash: hash`", result: "`{trackers: [Tracker]}`" },
     Operation { name: "torrents.reannounce", mutating: true, idempotent: true, since: "P6-01",
@@ -35,6 +49,25 @@ pub const TABLE: &[Operation] = &[
         args: "`hash: hash`, `to: enum(top|up|down|bottom)`", result: "`{state: \"done\", queue_pos: u64}`" },
     Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03",
         args: "`hashes: [hash]` (1..256)", result: "`{state: \"pending\", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}`" },
+    Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
+    Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
+    Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },
+    Operation { name:"shows.check",mutating:true,idempotent:false,since:"P3-03",args:"`imdb?: str`",result:"`{state: \"pending\", ref: str}`, then `shows.checked` and `mutation.result {new}`" },
+    Operation { name:"shows.releases",mutating:false,idempotent:false,since:"P3-03",args:"`imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str`",result:"`{releases: [Release]}`" },
+    Operation { name:"shows.set_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`, `key: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"shows.mark_show_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`",result:"`{count: u64}`" },
+    Operation { name:"shows.undo_read",mutating:true,idempotent:false,since:"P3-03",args:"none",result:"`{restored?: {imdb: str, key: str}}`" },
+    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
+    Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
+    Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
+    Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
+    Operation { name:"rss.refresh",mutating:true,idempotent:false,since:"P3-02",args:"`feed?: str`",result:"`{state: enum(pending|done), ref?: str}`" },
+    Operation { name:"rss.items",mutating:false,idempotent:false,since:"P3-02",args:"`feed: str`, `unread_only?: bool`",result:"`{items: [FeedItem]}`" },
+    Operation { name:"rss.set_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`, `item: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"rss.mark_feed_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`",result:"`{count: u64}`" },
+    Operation { name:"rss.grab",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`, `item: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
+    Operation { name: "app.clipboard.dismiss", mutating: true, idempotent: true, since: "P6-13",
+        args: "`hash: hash`", result: "`{}`" },
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
         args: "`since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error|warn|info|debug)`, `source?: str`, `hash?: hash`", result: "`{entries: [LogEntry], next_seq: u64}`" },
     Operation { name: "app.stats", mutating: false, idempotent: false, since: "P1-14",
@@ -68,7 +101,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "torrents.get", mutating: false, idempotent: false, since: "P1-06",
         args: "`hash: hash`", result: "`{torrent: TorrentDetail}`" },
     Operation { name: "torrents.add", mutating: true, idempotent: true, since: "P1-06",
-        args: "`source: {magnet: str} | {url: str} | {path: str} | {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual|search|rss|shows|clipboard|handler|agent)?`", result: "`{state: enum(pending|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}`" },
+        args: "`source: {magnet: str} | {url: str} | {path: str} | {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual|search|rss|shows|clipboard|handler|agent)?`", result: "`{state: enum(pending|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}`" },
     Operation { name: "torrents.start", mutating: true, idempotent: true, since: "P1-06",
         args: "`hashes: [hash]` (1..256), `force: bool?`", result: "`{state: \"done\", started: [hash], skipped: [{hash, reason: open(complete_no_seed|already_running|staged)}]}`" },
     Operation { name: "torrents.stop", mutating: true, idempotent: true, since: "P1-06",
@@ -96,6 +129,9 @@ pub mod search;
 pub mod recheck;
 pub mod queue;
 pub mod trackers;
+pub mod rss;
+pub mod shows;
+pub mod moving;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;
@@ -133,6 +169,11 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
             ("hash".into(), state.hash.clone().into()),
             ("reason".into(), state.reason.into()),
         ]));
+        return failure;
+    }
+    if value.downcast_ref::<crate::engine::moving::Busy>().is_some() {
+        let mut failure=error(Busy,"busy",None);
+        failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));
         return failure;
     }
     let text = format!("{value:#}");

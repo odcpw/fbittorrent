@@ -81,6 +81,7 @@
             completions: Default::default(),
             ledger: Arc::new(Mutex::new(ledger)),
             additions: Arc::new(Mutex::new(())),
+            operations: Default::default(), moves: Default::default(),
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
             rechecks: Default::default(),

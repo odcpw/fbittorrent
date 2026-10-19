@@ -1,0 +1,22 @@
+{"dir":"c2s","frame":{"id":1,"op":"shows.list"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"shows":[]}}}
+{"dir":"c2s","frame":{"id":2,"op":"shows.follow","args":{"imdb":"tt1234001"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"show":{"imdb":"tt1234001","title":"Local Fixture","unread":1,"added_at":1792396800,"counts":{"episodes":1,"seen":0,"grabbed":0},"checking":false,"catalogue_complete":true}}}}
+{"dir":"c2s","frame":{"id":3,"op":"shows.check","args":{}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"pending","ref":"show-check"}}}
+{"dir":"c2s","frame":{"id":4,"op":"shows.releases","args":{"inbox":true}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"releases":[{"key":"S01E01","show_imdb":"tt1234001","title":"Local.Fixture.S01E01.1080p","season":1,"episode":1,"season_pack":false,"quality":"1080p","read":false,"transfer":"none"}]}}}
+{"dir":"c2s","frame":{"id":5,"op":"shows.set_read","args":{"imdb":"tt1234001","key":"S01E01","read":true}}}
+{"dir":"s2c","frame":{"id":5,"ok":true,"result":{}}}
+{"dir":"c2s","frame":{"id":6,"op":"shows.mark_show_read","args":{"imdb":"tt1234001"}}}
+{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"count":0}}}
+{"dir":"c2s","frame":{"id":7,"op":"shows.undo_read"}}
+{"dir":"s2c","frame":{"id":7,"ok":true,"result":{"restored":{"imdb":"tt1234001","key":"S01E01"}}}}
+{"dir":"c2s","frame":{"id":8,"op":"shows.grab","args":{"imdb":"tt1234001","key":"S01E01"}}}
+{"dir":"s2c","frame":{"id":8,"ok":true,"result":{"state":"done","hash":"1111111111111111111111111111111111111111","name":"Local.Fixture.S01E01.1080p","duplicate":false}}}
+{"dir":"c2s","frame":{"id":9,"op":"shows.unfollow","args":{"imdb":"tt1234001"}}}
+{"dir":"s2c","frame":{"id":9,"ok":true,"result":{}}}
+{"dir":"s2c","frame":{"ev":"snapshot.begin","sub":1,"topic":"shows.releases:inbox","rev":1,"count":1,"reason":"subscribe"}}
+{"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"shows.releases:inbox","rev":2,"items":[{"key":"S01E01","show_imdb":"tt1234001","title":"Local.Fixture.S01E01.1080p","season":1,"episode":1,"season_pack":false,"quality":"1080p","read":false,"transfer":"none"}]}}
+{"dir":"s2c","frame":{"ev":"snapshot.end","sub":1,"topic":"shows.releases:inbox","rev":3}}
+{"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"shows.releases:inbox","rev":4,"removed":["tt1234001/S01E01"]}}
