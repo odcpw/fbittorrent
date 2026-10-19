@@ -20,6 +20,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::AddClipboard
             | Cmd::Start { .. }
             | Cmd::Stop { .. }
+            | Cmd::Reannounce { .. }
             | Cmd::Delete { .. }
             | Cmd::Seed { .. }
             | Cmd::Noseed { .. }
@@ -308,6 +309,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     } else {
                         json!([])
                     };
+                    if let Some(c)=&client {
+                        let detail=c.call("torrents.get",json!({"hash":hashes[0]}))?;
+                        if let Some(count)=detail["torrent"].get("tracker_count") {value["tracker_count"]=count.clone();}
+                        value["trackers"]=if c.hello.caps.iter().any(|cap|cap=="trackers") {
+                            c.call("torrents.trackers",json!({"hash":hashes[0]}))?["trackers"].clone()
+                        } else {json!([])};
+                    } else { value["trackers"]=json!([]); }
                     emit(json_mode, value);
                 }
                 Cmd::Status { quiet } => {
@@ -357,6 +365,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             );
         }
         Cmd::Start { .. }
+        | Cmd::Reannounce { .. }
         | Cmd::Seed { .. }
         | Cmd::Noseed { .. }
         | Cmd::Delete { .. }
@@ -368,6 +377,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let selectors = match cmd {
                 Cmd::Open { selector } => vec![selector.clone()],
                 Cmd::Start { selectors }
+                | Cmd::Reannounce { selectors }
                 | Cmd::Seed { selectors }
                 | Cmd::Noseed { selectors }
                 | Cmd::Delete { selectors, .. }
@@ -376,6 +386,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             };
             let hashes = selected(&rows, &selectors)?;
             match cmd {
+                Cmd::Reannounce {..} => {
+                    for batch in hashes.chunks(256) { c.call("torrents.reannounce",json!({"hashes":batch}))?; }
+                    emit(json_mode,json!({"ok":true,"action":"reannounce","count":hashes.len(),"hashes":hashes}));
+                }
                 Cmd::Wait {
                     timeout, interval, ..
                 } => return wait_for(cfg, c, hashes, *timeout, *interval, json_mode),

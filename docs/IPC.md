@@ -86,6 +86,8 @@ when a required cap is missing.
 | `imdb` | `imdb.lookup` | P3-04 |
 | `peers` | `torrents.peers`, topic `torrent:<h>.peers`, `seeds` field | P5-01 |
 | `recheck` | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.trackers` | `hash` | `{trackers: [Tracker]}` sorted by URL | no | P6-01 |
+| `torrents.reannounce` | `hashes` (1..256) | `{state: "done"}` (triggered) | yes | P6-01 |
 | `torrents.queue_move` | `hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
 | `torrents.recheck` | P5-03 |
 | `limits` | `transfer.set_limits/set_alt`, `summary.alt`, `summary.limits` | P5-04 |
@@ -651,3 +653,20 @@ fields and the existing restore source; contract patch 1.2.5 records them.
 The filtered count/known-byte sum/unknown-size count, confirmation and undo
 toast are presented by the UI tracks. CLI undo and origin/filter argument
 wiring are tracked separately from this daemon/API increment.
+
+### Tracker observations (P6-01, contract 1.2.6)
+
+The `trackers` capability adds `torrents.trackers` and `torrents.reannounce`.
+`Tracker` carries `url`, status (`ok`, `error`, `updating`, `not_contacted`) and
+optional `last_announce_at`, `next_announce_at`, `peers`, `message` (200 characters),
+and `tier` (currently absent because the fork flattens tiers). Full URLs travel only
+to the owner's clients; every diagnostic message redacts query strings as `?…`.
+A paused torrent retains observations. Dormant, metadata and parked records with no
+observations return saved URLs as `not_contacted`. `tracker_count` counts every
+metainfo URL, including private secondary and unsupported URLs. Forced announces
+wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
+Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription awaits P1-08 integration: keyed by
+URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
+topic/item registration and pushed-delivery qualification remain pending that
+integration, alongside the TUI/dashboard rendering owned by their tracks.

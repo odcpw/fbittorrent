@@ -28,6 +28,15 @@ verified bitfield. Snapshots can be mutated or dropped independently and never
 flush or modify the source tracker. Native unit tests cover verified live bits,
 paused/absent trackers, clone independence and a 10,000-piece clone below 1 ms.
 
+P6-01 keeps `TrackerStats` on `ManagedTorrentShared`, outside run regions.
+`tracker_stats()` returns URL-sorted owned observations through pause;
+`announce_now()` wakes HTTP/UDP interval and retry timers with event=none,
+coalescing forced announces for sixty seconds. Unsupported schemes and private
+secondary URLs remain visible as not_contacted. Tracker diagnostics strip URL
+queries, including remote error text, before logging or surfacing messages.
+Real local HTTP/UDP tracker tests cover failure, forced success, rate limiting
+and pause retention; the existing private-torrent discovery rules stay intact.
+
 P6-06 adds a serde-skipped, app-only `AddTorrentOptions::trusted_have_pieces`.
 The initializer consumes it once, validates byte-rounded length and zero
 padding, and builds the normal chunk tracker without checksum reads. The app

@@ -98,6 +98,7 @@ impl ParkedLedger {
             EngineOp::Queue
             | EngineOp::Info
             | EngineOp::Files { .. }
+            | EngineOp::Trackers { .. }
             | EngineOp::Start { .. }
             | EngineOp::Stop { .. }
             | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
@@ -150,6 +151,10 @@ impl ParkedLedger {
             }]));
         }
         match &op {
+            EngineOp::Trackers {hash} => {
+                let record=ledger.records.iter().find(|r|&r.hash==hash).context("torrent record not found")?;
+                return Ok(EngineResult::Trackers(trackers::saved(record,&self.directory)?));
+            }
             EngineOp::Queue => {
                 return Ok(EngineResult::Queue(QueueInfo {
                     max_active_downloads: Config::load()?.max_active_downloads,

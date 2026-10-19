@@ -63,6 +63,8 @@ impl EngineDispatcher {
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
         match &op {
+            EngineOp::Trackers {hash} => return self.trackers(cx,hash).await,
+            EngineOp::Reannounce {hashes} => return self.reannounce(cx,hashes).await,
             EngineOp::RemoveKeep { hashes } => return self.remove_keep(cx, hashes).await,
             EngineOp::RestoreUndo { hash } => return self.restore_undo(cx, hash).await,
             _ => {}

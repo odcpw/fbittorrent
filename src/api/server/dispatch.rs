@@ -112,6 +112,7 @@ impl Shared {
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
                 ),
+                Call::TorrentsTrackers {..} | Call::TorrentsReannounce {..} => ops::trackers::dispatch(&self.daemon,&job.request.call),
                 Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),

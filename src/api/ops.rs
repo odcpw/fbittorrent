@@ -7,6 +7,8 @@ pub struct Operation {
     pub since: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {name:"torrents.trackers",mutating:false,idempotent:false,since:"P6-01"},
+    Operation {name:"torrents.reannounce",mutating:true,idempotent:true,since:"P6-01"},
     Operation { name:"torrents.force_start",mutating:true,idempotent:true,since:"P6-05" },
     Operation { name:"torrents.queue_move",mutating:true,idempotent:false,since:"P6-05" },
     Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03" },
@@ -144,6 +146,7 @@ pub mod app;
 pub mod settings;
 pub mod recheck;
 pub mod queue;
+pub mod trackers;
 pub mod imdb;
 pub mod torrents;
 pub mod transfer;

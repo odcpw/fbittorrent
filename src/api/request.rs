@@ -262,6 +262,10 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.trackers")]
+    TorrentsTrackers { args: HashArgs },
+    #[serde(rename="torrents.reannounce")]
+    TorrentsReannounce { args: HashesArgs },
     #[serde(rename="torrents.force_start")]
     TorrentsForceStart { args: SetSeedArgs },
     #[serde(rename="torrents.queue_move")]
@@ -333,6 +337,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsTrackers {..} => "torrents.trackers",
+            Self::TorrentsReannounce {..} => "torrents.reannounce",
             Self::TorrentsForceStart {..} => "torrents.force_start",
             Self::TorrentsQueueMove {..} => "torrents.queue_move",
             Self::TorrentsRecheck { .. } => "torrents.recheck",
