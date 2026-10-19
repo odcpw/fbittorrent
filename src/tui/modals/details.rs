@@ -8,13 +8,17 @@ pub(super) enum DetailsTab {
     Peers,
     Trackers,
     Log,
+    Pieces,
 }
 #[derive(Default)]
-struct TabLabel {key: Option<(DetailsTab,bool,bool)>,text: String}
+struct TabLabel {key: Option<(DetailsTab,bool,bool,bool)>,text: String}
 pub(super) struct DetailsModal {
     pub hash: String,
     pub name: String,
     pub tab: DetailsTab,
+    pub loading: bool,
+    pub pieces:Option<Arc<PiecesSession>>,
+    pub canvas:RefCell<PiecesCanvas>,
     pub trackers: modals_trackers::TrackerPanel,
     tab_label: RefCell<TabLabel>,
     pub peer_offset: usize,
@@ -34,17 +38,54 @@ pub(super) fn details_area(bounds: Rect) -> Rect {
 }
 impl TuiApp {
     pub(super) fn open_details(&mut self, torrent: &Torrent) -> Cmd<Msg> {
-        self.files = None;
+        let close=self.close_details();
         self.details = Some(DetailsModal {
             hash: torrent.hash.clone(),
             name: torrent.name.clone(),
             tab: DetailsTab::Overview,
+            loading: false,
+            pieces:None,
+            canvas:RefCell::new(PiecesCanvas::default()),
             trackers: Default::default(),
             tab_label: RefCell::default(),
             peer_offset: 0,
             peer_cache: RefCell::default(),
         });
+        let overview=self.refresh_details();
+        Cmd::batch(vec![close,overview])
+    }
+    /// Fetch immutable metainfo once, and again when metadata becomes known.
+    /// One outstanding read belongs to the visible detail on this connection.
+    pub(super) fn refresh_details(&mut self)->Cmd<Msg> {
+        let Some(connection)=self.presence.clone().filter(|c|c.alive()) else {return Cmd::none();};
+        let Some(details)=self.details.as_mut().filter(|d|!d.loading) else {return Cmd::none();};
+        let hash=crate::api::Hash::new(details.hash.clone()).unwrap();
+        let size=self.store.torrents.get(hash.as_str()).and_then(|row|row.size);
+        if self.store.details.get(&hash).is_some_and(|row|row.torrent.size==size) {return Cmd::none();}
+        details.loading=true;
+        Cmd::task(move|| {
+            let result=connection.request("torrents.get",serde_json::json!({"hash":hash}))
+                .and_then(|value|Ok(serde_json::from_value(value)?)).map_err(|e|e.to_string());
+            Msg::ApiDetail {connection:connection.id,hash,result}
+        })
+    }
+    pub(super) fn detail_loaded(&mut self,connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>)->Cmd<Msg> {
+        if self.presence.as_ref().is_none_or(|c|c.id!=connection || !c.alive()) {return Cmd::none();}
+        let Some(details)=self.details.as_mut().filter(|d|d.hash==hash.as_str()) else {return Cmd::none();};
+        details.loading=false;
+        match result.and_then(|result|self.store.reply(&crate::api::Call::TorrentsGet {args:crate::api::HashArgs {hash}},crate::api::Reply::TorrentsGet(result)).map_err(|e|e.to_string())) {
+            Ok(())=>{}, Err(error)=>self.set_status(format!("Torrent details: {error}"),true),
+        }
         Cmd::none()
+    }
+    pub(super) fn resume_pieces(&mut self)->Cmd<Msg> {
+        let Some(details)=self.details.as_mut().filter(|d|d.tab==DetailsTab::Pieces) else {return Cmd::none();};
+        let close=details.pieces.take().map(|p|p.close()).unwrap_or_else(Cmd::none);
+        self.store.pieces.clear();
+        if let Some(connection)=self.presence.clone().filter(|c|c.hello.caps.iter().any(|cap|cap=="pieces")) {
+            let (session,command)=PiecesSession::start(connection,details.hash.clone());details.pieces=Some(session);
+            Cmd::batch(vec![close,command])
+        } else {details.tab=DetailsTab::Overview;close}
     }
     pub(super) fn details_tab(&mut self, next: bool) -> Cmd<Msg> {
         let tabs = self.details_tabs();
@@ -53,30 +94,34 @@ impl TuiApp {
         let index = if next {index.saturating_add(1).min(tabs.len()-1)} else {index.saturating_sub(1)};
         let tab = tabs[index];
         if tab == current {return Cmd::none();}
+        let cleanup=self.details.as_mut().unwrap().pieces.take().map(|p|p.close()).unwrap_or_else(Cmd::none);
+        self.store.pieces.clear();
         self.details.as_mut().unwrap().tab = tab;
         if tab!=DetailsTab::Trackers {self.store.trackers.clear();let panel=&mut self.details.as_mut().unwrap().trackers;panel.busy=false;panel.request=0;}
         self.files = None;
         if tab != DetailsTab::Peers {self.store.peers.clear();}
-        if tab == DetailsTab::Trackers {return self.load_trackers(false);}
+        if tab == DetailsTab::Pieces {let command=self.resume_pieces();return if matches!(cleanup,Cmd::None) {command} else {Cmd::batch(vec![cleanup,command])};}
+        if tab == DetailsTab::Trackers {let command=self.load_trackers(false);return if matches!(cleanup,Cmd::None) {command} else {Cmd::batch(vec![cleanup,command])};}
         if tab == DetailsTab::Files {
-            if let Some(torrent)=self.selected_torrent().cloned() {return self.open_files(&torrent);}
+            if let Some(torrent)=self.selected_torrent().cloned() {let command=self.open_files(&torrent);return if matches!(cleanup,Cmd::None) {command} else {Cmd::batch(vec![cleanup,command])};}
         }
-        Cmd::none()
+        cleanup
     }
     pub(super) fn details_tabs(&self) -> Vec<DetailsTab> {
         let mut tabs=vec![DetailsTab::Overview,DetailsTab::Files];
         if self.has_cap("peers") {tabs.push(DetailsTab::Peers);}
         if self.has_cap("trackers") {tabs.push(DetailsTab::Trackers);}
         tabs.push(DetailsTab::Log);
+        if self.has_cap("pieces") {tabs.push(DetailsTab::Pieces);}
         tabs
     }
     fn details_tab_label(&self) -> std::cell::Ref<'_,str> {
         let details=self.details.as_ref().expect("visible details");
-        let key=(details.tab,self.has_cap("peers"),self.has_cap("trackers"));
+        let key=(details.tab,self.has_cap("peers"),self.has_cap("trackers"),self.has_cap("pieces"));
         let mut cache=details.tab_label.borrow_mut();
         if cache.key!=Some(key) {
             cache.text=self.details_tabs().iter().map(|tab| {
-                let name=match tab {DetailsTab::Overview=>"Overview",DetailsTab::Files=>"Files",DetailsTab::Peers=>"Peers",DetailsTab::Trackers=>"Trackers",DetailsTab::Log=>"Log"};
+                let name=match tab {DetailsTab::Overview=>"Overview",DetailsTab::Files=>"Files",DetailsTab::Peers=>"Peers",DetailsTab::Trackers=>"Trackers",DetailsTab::Pieces=>"Pieces",DetailsTab::Log=>"Log"};
                 if *tab==details.tab {format!("[{name}]")} else {name.to_string()}
             }).collect::<Vec<_>>().join("  ")+"    [ / ] tabs";
             cache.key=Some(key);
@@ -88,10 +133,12 @@ impl TuiApp {
         self.store.hello.as_ref().is_some_and(|hello|hello.caps.iter().any(|c|c==cap))
     }
     pub(super) fn close_details(&mut self) -> Cmd<Msg> {
-        self.details = None;
+        let close=self.details.take().and_then(|mut d|d.pieces.take()).map(|p|p.close()).unwrap_or_else(Cmd::none);
+        self.files=None;
+        self.store.pieces.clear();
+        self.store.details.clear();
         self.store.peers.clear();self.store.trackers.clear();
-        self.files = None;
-        Cmd::none()
+        close
     }
     pub(super) fn view_details(&self, frame: &mut Frame) {
         let Some(details) = &self.details else { return };
@@ -134,6 +181,11 @@ impl TuiApp {
             self.view_peers(rows[1],frame);
         } else if details.tab==DetailsTab::Log {
             self.view_log_contents(rows[1],Some(&details.hash),frame);
+        } else if details.tab == DetailsTab::Pieces {
+            let hash=crate::api::Hash::new(details.hash.clone()).unwrap();
+            if let Some((data,bits))=self.store.pieces.get(&hash) {
+                details.canvas.borrow_mut().render(data,bits,self.store.pieces_rev,rows[1],th,frame);
+            } else {Paragraph::new("Verified pieces unavailable until checking completes").style(th.dimmed()).render(rows[1],frame);}
         } else if details.tab == DetailsTab::Files {
             self.view_file_contents(rows[1], frame);
         } else if let Some(t) = self.selected_torrent() {
@@ -184,6 +236,9 @@ impl TuiApp {
                     "origin",
                     row.origin.clone().unwrap_or_else(|| "unknown".into()),
                 ));
+            }
+            if let Some(detail)=self.store.details.values().find(|row|row.torrent.hash.as_str()==details.hash && row.torrent.size.is_some()) {
+                lines.push(kv("network",if detail.private {"Private torrent (no DHT, no PeX)"}else{"Public torrent"}.into()));
             }
             if let Some(error) = &t.error_message {
                 lines.push(Line::styled(error.clone(), th.err().bold()));

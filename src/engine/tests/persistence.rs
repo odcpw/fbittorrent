@@ -201,6 +201,7 @@
     #[test]
     fn restoring_downloads_preserves_upload_policy() {
         let record = Record {
+            display_name:None,
             hash: "abc".into(),
             name: "fixture".into(),
             source: String::new(),

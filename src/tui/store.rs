@@ -39,6 +39,8 @@ pub(super) struct Store {
     pub stale: bool,
     pub pending: BTreeMap<api::MutationRef, pending::Pending>,
     pub torrents: BTreeMap<String, api::Torrent>,
+    pub pieces_rev:u64,
+    pub pieces: BTreeMap<api::Hash,(api::Pieces,Vec<u8>)>,
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
     pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
@@ -50,6 +52,7 @@ pub(super) struct Store {
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
+    pub stats:Option<api::SampledStats>,
     pub network: Option<api::NetworkState>,
     pub settings: Option<api::Settings>,
     pub subscriptions: BTreeMap<u64, Subscription>,
@@ -61,6 +64,8 @@ pub(super) struct Store {
 impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
         self.stale = true;
+        self.pieces.clear();
+        self.stats = None;
         self.lose_pending();
         self.subscriptions.clear();
         self.snapshots.clear();
@@ -179,6 +184,9 @@ impl Store {
             let result = self.apply(event);
             match result {
                 Ok(effect) => {
+                    if matches!(event,api::Event::SnapshotEnd {topic:api::Topic::Torrents,..}|api::Event::Delta {topic:api::Topic::Torrents,..}) {
+                        self.pieces.retain(|hash,_|self.torrents.get(hash.as_str()).is_some_and(|row|row.checked));
+                    }
                     let subscription = self.subscriptions.get_mut(&sub).unwrap();
                     subscription.rev = rev;
                     subscription.topic = topic;
@@ -196,6 +204,7 @@ impl Store {
                 api::Event::Heartbeat { .. } => return Ok(Effect::None),
                 api::Event::EngineChanged { epoch, .. } => {
                     self.stale = true;
+                    self.pieces.clear();
                     if let Some(hello) = self.hello.as_mut() {
                         hello.engine_epoch = *epoch;
                     }
@@ -209,7 +218,12 @@ impl Store {
     fn apply(&mut self, event: &api::Event) -> Result<Effect> {
         match event {
             api::Event::State { data, .. } => match data {
+                api::StateData::Pieces(data) => {
+                    let api::Event::State {topic:api::Topic::Pieces(hash),..}=event else {bail!("pieces state on wrong topic")};
+                    self.pieces_rev+=1;self.pieces.clear();self.pieces.insert(hash.clone(),(data.clone(),data.decode()?));
+                },
                 api::StateData::Summary(data) => self.summary = Some(data.clone()),
+                api::StateData::Stats(data) => self.stats=Some(data.clone()),
                 api::StateData::Network(data) => self.network = Some(data.clone()),
                 api::StateData::Settings(data) => self.settings = Some(data.clone()),
             },

@@ -631,6 +631,7 @@
         app.store.rss_feeds.insert(feed.id.clone(),feed);
         app.store.rss_items.insert("fixture-feed".into(),[(item.id.clone(),item)].into());
         app.sync_native_feeds();
+        assert!(!app.rss_busy);
         assert!(matches!(app.refresh_rss(),Cmd::Task(..)));
         assert!(app.rss_busy);
         assert!(matches!(app.refresh_rss(), Cmd::None));

@@ -7,6 +7,8 @@ use std::sync::{Condvar, Mutex as StdMutex};
 pub(super) struct Record {
     pub(super) hash: String,
     pub(super) name: String,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub(super) display_name: Option<String>,
     pub(super) source: String,
     pub(super) output_folder: String,
     pub(super) only_files: Option<Vec<usize>>,
@@ -67,7 +69,7 @@ impl Record {
 
     fn deferred_intent(options: &ops::AddRequest, folder: &Path, hash: String, name: String, source: String, files: Option<Vec<usize>>) -> Result<Self> {
         let record = Self {
-            hash, name, source, only_files: files,
+            display_name:None, hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
             category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||origin_from_tags(&options.tags)),

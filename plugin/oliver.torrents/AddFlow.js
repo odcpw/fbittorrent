@@ -124,6 +124,14 @@ function create(service,changed,debug) {
     if(s.stageSupported){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}
     publish();return true
   }
+  // Shared Shows/RSS entry: stage first, mark the source only on commit.
+  f.release=function(op,args,row){
+    if(s.visible){service.notify("Finish or discard the current add first");return false}
+    if(["shows.grab","rss.grab"].indexOf(op)<0 || service.client.caps.indexOf("staging")<0){service.notify("Staged review is unavailable");return false}
+    epoch++;reset();s.visible=true;s.phase="staging";s.origin=op==="shows.grab" ? "shows" : "rss";s.name=row.title || "Release";s.size=row.size
+    s.stageSupported=true;s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
+    send(op,Object.assign({},args,{stage:true}),s.origin,staged);publish();return true
+  }
   f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
     if(s.visible)return false
@@ -134,7 +142,7 @@ function create(service,changed,debug) {
   f.seed=function(value){if(busy())return;seedDirty=true;s.seed=!!value;publish()}
   f.path=function(value){if(busy())return;pathDirty=true;s.savePath=value;scheduleSpace(false);publish()}
   f.checkPath=function(){checkSpace()}
-  f.retry=function(){s.error="";if(s.searchArgs && s.stageSupported && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}else{s.phase=s.owned ? "resolving" : s.searchArgs ? "preview" : "input";if(s.owned)inspect()}publish()}
+  f.retry=function(){s.error="";if(s.grabArgs && !s.owned){s.phase="staging";send(s.grabOp,Object.assign({},s.grabArgs,{stage:true}),s.origin,staged)}else if(s.searchArgs && s.stageSupported && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}else{s.phase=s.owned ? "resolving" : s.searchArgs ? "preview" : "input";if(s.owned)inspect()}publish()}
   f.commit=function(){
     if(s.duplicate){service.finishAdd(s.hash);close();return}
     if(s.phase!=="preview" && s.phase!=="ready")return
@@ -180,6 +188,6 @@ function create(service,changed,debug) {
       var files=service.store.topics[frame.topic] || {};fileRows(Object.keys(files).map(function(key){return files[key]}))
     }
   }
-  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!s.searchArgs,hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),neededBytes:requiredBytes(),insufficientSpace:tooLarge(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,stageSupported:s.stageSupported,elapsed_s:s.elapsed_s,busy:busy(),trace:trace}}
+  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!(s.searchArgs || s.grabArgs),hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),neededBytes:requiredBytes(),insufficientSpace:tooLarge(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,stageSupported:s.stageSupported,elapsed_s:s.elapsed_s,busy:busy(),trace:trace}}
   return f
 }

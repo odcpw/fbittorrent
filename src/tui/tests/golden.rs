@@ -79,6 +79,7 @@ fn assert_render(surface: &str, width: u16, height: u16) {
         "poster"=>&["The Diplomat (2023)","TV series","7.9","Keri Russell"],
         "disk"=>&["! Disk","Not enough space","needed","free"],
         "clipboard"=>&["Add 'Sintel.2010.1080p'? (y/Esc)","(y) Add","(Esc) Dismiss"],
+        "pieces"=>&["[Pieces]","1000 verified pieces","first/last","verified","missing","playable prefix"],
         "peers"=>&["[Peers]","ADDRESS","CLIENT","KIND","↓/s","↑/s","SEED","127.0.0.1:42001","127.0.0.1:42002","yes","no"],
         "details-trackers"=>&["[Trackers]","URL","STATUS","LAST","PEERS","! Error","✓ OK","Not contacted","fixture: not yet"],
         _=>panic!("missing surface behaviour: {surface}"),
@@ -97,7 +98,7 @@ macro_rules! goldens {
         #[test] fn wide() { assert_render(stringify!($surface), 160, 45); }
     })+ };
 }
-goldens!(peers,clipboard,torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk);
+goldens!(peers,clipboard,torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk, pieces);
 
 #[test]
 fn done_row_offers_seed_instead_of_resume() {
@@ -176,6 +177,24 @@ fn watch_ready_and_may_stall_goldens() {
         assert!(actual.contains(if stall {"4m00s buffered"}else{"30s buffered"}));
         assert!(actual.contains(if stall {"finishes in 42s"}else{"finishes in 18m00s"}));
         println!("{path}: truthful watch detail at 80x24; synthetic rendering only");
+    }
+}
+
+#[test]
+fn private_overview_explains_networking_only_for_known_private_metainfo() {
+    for (private,known) in [(true,true),(false,true),(true,false)] {
+        let mut app=fixture::app("details");
+        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"default_cap","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
+        if known {value["size"]=serde_json::json!(1024);}
+        let detail:crate::api::TorrentDetail=serde_json::from_value(value).unwrap();
+        let hash=detail.torrent.hash.clone();
+        app.store.reply(&crate::api::Call::TorrentsGet {args:crate::api::HashArgs {hash}},crate::api::Reply::TorrentsGet(crate::api::GetResult {torrent:detail})).unwrap();
+        for width in [80,120,160] {
+            let text=render(&app,width,30);
+            assert_eq!(text.contains("no DHT, no PeX"),private && known,"private={private}; known={known}; width={width}\n{text}");
+            assert_eq!(text.contains("Public torrent"),!private && known);
+        }
+        let _=app.close_details();assert!(app.store.details.is_empty(),"closing releases immutable detail state");
     }
 }
 

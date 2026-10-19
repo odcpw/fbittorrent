@@ -24,6 +24,8 @@ macro_rules! detail {
     };
 }
 pub(super) const ACTIONS: &[Action] = &[
+    action!("details.rename",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
+        |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),T,None,None,None),
     action!("trackers.add",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('+'))],"Add",15,
         TuiApp::can_edit_trackers,Some(TuiApp::prompt_add_tracker),TD,None,None,None),
     action!("trackers.remove",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('x'))],"Remove",16,

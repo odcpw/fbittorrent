@@ -49,6 +49,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   The bottom rows show contextual commands such as `(o) Open`; uppercase keys
   use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.
+  Live speed history appears in the TUI tab bar and dashboard/popup status row.
+  Dashboard Settings shows session and all-time transfer totals; press `L` in
+  the TUI for the same totals below the Log. All-time totals survive daemon restarts.
 - **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
   a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
   season packs, with no account or external watchlist. Checks run on app opening
@@ -140,8 +143,23 @@ Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activ
 o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
 ```
 
-Add it to your own bindings file if desired. Setup does not change keybindings
-or reload your shell.
+Add it to your own bindings file if desired. Normal setup keeps keybindings unchanged.
+
+The quick-add/search palette is a separate, optional overlay. To install it and
+an unused shortcut, opt in explicitly (the default chord below can be replaced):
+
+```bash
+fbittorrent setup --plugin copy --quick 'SUPER + CTRL + ALT + T'
+```
+
+Setup adds the `oliver.torrents-quick` plugin and an owned block in
+`hypr/bindings.lua`, preserving the bar route and unrelated bindings. Repeating
+setup is idempotent; `setup --uninstall` removes that block. Hyprland reloads Lua
+changes automatically. Choose a chord that is not already used by your desktop.
+The palette shares the existing Torrents daemon connection. Paste a magnet or
+absolute `.torrent` path and press Enter to add directly; ordinary text searches
+after a short pause. Use ↑/↓ and Enter to send a result to dashboard review.
+Esc closes only the palette and leaves transfers running.
 
 ## Lifecycle
 
@@ -212,6 +230,9 @@ Space toggles the selected file, `a` / `n` include or skip the filtered files, `
 filters names, and `o` opens the selected file. Files sort naturally by episode
 number. Overview loads the daemon's local IMDb poster and shows the confirmed
 seed policy. Log shares one bounded subscription and filters by torrent hash.
+The Pieces tab shows the verified have bitfield, first/last priority markers and
+the known playable prefix. Both UIs release its two-second subscription when
+hiding the pane. Large torrents are aggregated to the available display width.
 
 Press `,` for Settings, `L` for Log, and `?` for the generated keyboard help.
 Settings covers every current writable daemon setting, including the VPN binding,
@@ -293,6 +314,12 @@ unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
 
 The daemon posts completion notifications with Open File / Open Folder actions.
+Give a torrent a display name with `fbittorrent rename <selector> 'My title'`,
+`N` in the TUI/dashboard, or a double-click on its dashboard Overview title.
+An empty name clears the override. Display names survive restart and metadata
+refresh; payload file names and the info hash stay unchanged. Filters, sorting
+and CLI name selectors use the display name.
+
 A Shows check that finds unread releases posts one notification about new episodes,
 listing up to three names; Open Shows opens the Shows dashboard. Unchanged
 checks stay silent, and an interactive dashboard or TUI suppresses this notice.
@@ -523,6 +550,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:clipboard` | Add | `y` | — | — |  |
 | `modal:clipboard` | Dismiss | `Esc` | — | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Rename | `N` | — | — |  |
 | `modal:details` | Add | `+` | `+` | — |  |
 | `modal:details` | Remove | `x` | `x` | — |  |
 | `modal:details` | Reannounce | `e` | `e` | — |  |
@@ -554,6 +582,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Rename | `N` | `N` | — |  |
 | `screen:torrents` | Undo removal | `U` | — | — |  |
 | `screen:torrents` | Sort | `s` | `s` | — |  |
 | `screen:torrents` | Reverse sort | `S` | `S` | — |  |

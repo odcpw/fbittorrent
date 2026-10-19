@@ -12,14 +12,19 @@ ScrollView {
   required property var service
   required property var torrent
   property var card:null
+  readonly property bool editing:titleEditor.editing
+  function renameTitle(){titleEditor.begin()}
+  function key(event){return titleEditor.key(event)}
   readonly property bool posterLoaded:poster.loaded
+  readonly property string networkingText:DetailText.networking(root.torrent)
   signal recheckRequested(string hash)
   clip:true
   contentWidth:availableWidth
   ColumnLayout {
     width:root.availableWidth;spacing:Commons.Style.spacing.sm
     Components.PosterCard {id:poster;Layout.fillWidth:true;card:root.card}
-    Components.DetailField {Layout.fillWidth:true;value:root.torrent.name;font.bold:true}
+    Components.DisplayNameEditor {id:titleEditor;Layout.fillWidth:true;service:root.service;torrent:root.torrent}
+    Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.original_name && root.torrent.original_name!==root.torrent.name;label:"Original name";value:root.torrent.original_name || ""}
     Components.DetailField {Layout.fillWidth:true;value:Model.stateLabel(root.torrent)+(DetailText.reason(root.torrent,root.service.store.network) ? " · "+DetailText.reason(root.torrent,root.service.store.network) : "")}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.playable;value:DetailText.playable(root.torrent.playable)}
     Components.DetailField {Layout.fillWidth:true;label:"Size";value:Model.size(root.torrent.size,false)+" · "+Model.percent(root.torrent.progress,root.torrent.state==="done" || root.torrent.state==="seeding")}
@@ -45,7 +50,7 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;value:DetailText.policy(root.torrent)}
     Components.DetailField {Layout.fillWidth:true;label:"Queue position";visible:root.torrent.queue_pos!==undefined;value:String(root.torrent.queue_pos)}
     Components.DetailField {Layout.fillWidth:true;label:"Files · Pieces";value:Model.count(root.torrent.file_count)+" · "+Model.count(root.torrent.piece_count)+" × "+Model.size(root.torrent.piece_size,false)}
-    Components.DetailField {Layout.fillWidth:true;visible:root.torrent.private!==undefined;value:root.torrent.private ? "Private torrent" : "Public torrent"}
+    Components.DetailField {Layout.fillWidth:true;visible:root.networkingText!=="";value:root.networkingText}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.comment;label:"Comment";value:root.torrent.comment || ""}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.created_by;label:"Created by";value:root.torrent.created_by || ""}
     RowLayout {

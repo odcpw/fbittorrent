@@ -1,4 +1,4 @@
-//! Native CLI execution. Local search/RSS/Shows remain in cli::local until P3-07.
+//! Torrent CLI execution on API v1; catalogue commands use the shared catalog_* handlers.
 use super::*;
 use crate::api::{self, client::Client as ApiClient};
 use crate::{
@@ -27,6 +27,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Noseed { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
+            | Cmd::Rename {..}
             | Cmd::Limit { .. }
             | Cmd::Restart
     )
@@ -357,6 +358,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 json!({"ok":true,"action":if stop{"stop"}else{"delete"},"count":hashes.len(),"hashes":hashes,"running":running}),
             );
         }
+        Cmd::Rename{selector,name}=>{
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            anyhow::ensure!(hashes.len()==1,AppError::new(Code::Usage,"rename requires one torrent"));
+            c.call("torrents.rename",json!({"hash":hashes[0],"name":name}))?;
+            emit(json_mode,json!({"ok":true,"action":"rename","count":1,"hashes":hashes}));
+        },
         Cmd::Limit{selector,down}=>{
             let bps=super::download_limit::parse(down)?;
             let c=connect(cfg,true,no_start,json_mode)?;
@@ -592,21 +600,24 @@ fn status(
     let Some(c) = c else {
         emit(
             json_mode,
-            json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,"total":rows.len()}),
+            json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,"total":rows.len(),"all_time":crate::daemon::stats::read(&crate::daemon::stats::path())?}),
         );
         return Ok(());
     };
     let info = c.call("app.info", json!({}))?;
     let transfer = c.call("transfer.info", json!({}))?;
+    let stats = c.call("app.stats", json!({}))?;
     let mut value = counts(rows);
     value["ok"] = json!(true);
     value["running"] = json!(true);
+    value["all_time"] = stats["all_time"].clone();
     value["connection"] = json!("api");
     value["backend"] = json!("native");
     value["engine"] = json!(cfg.engine);
     // Cumulative app.info counters cannot represent interactive presence.
     // P1-08 supplies the frozen Summary.daemon.busy_reasons signal instead.
     let summary = summary(c, cfg)?;
+    if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
     value["app_open"] = json!(summary.as_ref().is_some_and(|v| v["daemon"]["busy_reasons"]
         .as_array()
         .is_some_and(|reasons| reasons.iter().any(|reason| reason == "interactive"))));

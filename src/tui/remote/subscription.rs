@@ -48,7 +48,7 @@ impl TuiApp {
         Cmd::task(move||{
             let mut topics=vec!["summary","torrents","network"];
             if connection.hello.caps.iter().any(|cap|cap=="clipboard") {topics.push("events");}
-            for (topic,cap) in [("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
+            for (topic,cap) in [("stats","history"),("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
                 if connection.hello.caps.iter().any(|c|c==cap){topics.push(topic);}
             }
             let result=(||->Result<()> {

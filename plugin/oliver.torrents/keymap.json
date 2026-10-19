@@ -307,6 +307,18 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "details.rename",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "modal:details"
+    },
+    {
       "id": "trackers.add",
       "keys": {
         "dashboard": [
@@ -690,6 +702,20 @@
       },
       "label": "Next tab",
       "scope": "modal:log"
+    },
+    {
+      "id": "torrents.rename",
+      "keys": {
+        "dashboard": [
+          "N"
+        ],
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "screen:torrents"
     },
     {
       "id": "torrents.undo_remove",

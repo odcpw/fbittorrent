@@ -144,12 +144,14 @@ closed_enum!(ByeReason {
 /// should ignore unsupported topics rather than inventing a store shape.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Topic {
+    Stats,
     Shows,ShowReleases(String),
     RssFeeds, RssItems(String),
     Log,
     Summary,
     Torrents,
     Files(Hash),
+    Pieces(Hash),
     Search(u64),
     Peers(Hash),
     Trackers(Hash),
@@ -160,6 +162,7 @@ pub enum Topic {
 impl Topic {
     pub fn as_str(&self) -> String {
         match self {
+            Self::Stats=>"stats".into(),
             Self::Shows=>"shows".into(),Self::ShowReleases(id)=>format!("shows.releases:{id}"),
             Self::RssFeeds=>"rss.feeds".into(), Self::RssItems(id)=>format!("rss.items:{id}"),
             Self::Log => "log".into(),
@@ -168,6 +171,7 @@ impl Topic {
             Self::Network => "network".into(),
             Self::Settings => "settings".into(),
             Self::Events => "events".into(),
+            Self::Pieces(h) => format!("torrent:{h}.pieces"),
             Self::Files(h) => format!("torrent:{h}.files"),
             Self::Search(id) => format!("search:{id}"),
             Self::Peers(h) => format!("torrent:{h}.peers"),
@@ -184,6 +188,7 @@ impl<'de> Deserialize<'de> for Topic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         match s.as_str() {
+            "stats"=>Ok(Self::Stats),
             "shows"=>Ok(Self::Shows),
             _ if s.starts_with("shows.releases:")&&s.len()>15&&s.len()<=143=>Ok(Self::ShowReleases(s[15..].into())),
             "rss.feeds"=>Ok(Self::RssFeeds),
@@ -199,6 +204,7 @@ impl<'de> Deserialize<'de> for Topic {
                 .ok_or_else(|| serde::de::Error::custom("invalid search topic")),
             _ if s.starts_with("torrent:") && s.ends_with(".trackers") => Hash::new(&s[8..s.len()-9]).map(Self::Trackers).map_err(serde::de::Error::custom),
             _ if s.starts_with("torrent:") && s.ends_with(".peers") => Hash::new(&s[8..s.len()-6]).map(Self::Peers).map_err(serde::de::Error::custom),
+            _ if s.starts_with("torrent:") && s.ends_with(".pieces") => Hash::new(&s[8..s.len()-7]).map(Self::Pieces).map_err(serde::de::Error::custom),
             _ => s
                 .strip_prefix("torrent:")
                 .and_then(|s| s.strip_suffix(".files"))

@@ -197,6 +197,6 @@ impl Metrics<'_> {
 pub(super) fn rate(value: Option<u64>) -> String {
     value.map_or_else(|| "—".into(), |value| human_rate(signed(value)))
 }
-fn bytes(value: Option<u64>) -> String {
+pub(super) fn bytes(value: Option<u64>) -> String {
     value.map_or_else(|| "—".into(), |value| human_bytes(signed(value)))
 }

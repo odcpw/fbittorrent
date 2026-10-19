@@ -15,7 +15,7 @@ function create(service, changed) {
     service.client.request("torrents.get",{hash:hash},{callback:function(result){
       if(!result)return
       var extra={},row=result.torrent
-      ;["file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
+      ;["original_name","file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
       keep(extras,hash,extra);changed()
     }})
   }
@@ -97,6 +97,7 @@ function create(service, changed) {
   d.openFile=function(){var f=d.files[d.cursor];if(f)service.openTarget(d.hash,f.index)}
   d.frame=function(frame,request){
     if(!d.hash)return
+    if(frame.topic==="torrent:"+d.hash+".pieces"){changed();return}
     var topic="torrent:"+d.hash+".files"
     if(frame.topic===topic || (request && request.op==="torrents.files" && request.args.hash===d.hash)){
       if(frame.ev==="snapshot.end" || (request && frame.ok))d.loading=false
@@ -105,6 +106,7 @@ function create(service, changed) {
     var events=frame.topic==="events" ? frame.items || frame.added || [] : [frame]
     var engineChanged=events.some(function(e){if(e.ev!=="engine.changed" && e.ev!=="engine.restarted")return false;var epoch=Number(e.epoch || engineEpoch+1);if(epoch<=engineEpoch)return false;engineEpoch=epoch;return true})
     var row=service.store.torrents[d.hash],known=!!(row && row.size!==undefined)
+    if(d.tab==="pieces" && (engineChanged || !row || !row.checked)){service.store.releaseTopics(["torrent:"+d.hash+".pieces"]);changed()}
     if(engineChanged || (known && !metadataKnown))d.get(true)
     metadataKnown=known
   }

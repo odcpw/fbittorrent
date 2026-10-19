@@ -848,3 +848,109 @@ mount namespace even in the outer `--systemd` matrix; the subscription-only
 case uses a real transient unit there. No product/contract thresholds or wall
 budget changed. Python compilation and diff checks pass; test-only delta,
 so no new Cargo or umbrella run. No acceptance checks removed or relaxed.
+
+### P3-18 fbt-p3-18-3pe — per-show quality and inbox filters (daemon/API/CLI)
+
+Added idempotent typed `shows.set_quality`, durable four-quality overrides and
+null/omitted reset to the configured default, plus `shows quality <show>
+<q|default>` without autostart. Existing inbox read/quality filters are proven
+against real mixed-quality EZTV results. Contract 1.2.30 adds a new transcript,
+operation/catalogue/CLI entry and changelog row; existing fixture bytes stay
+unchanged. Minimal neighbours: server dispatch/preflight, a setter-only null
+reset validator rule with negative controls, and visibility of the existing
+offline owner lock. Private-XDG final evidence below
+`target/test-logs/fbt-p3-18-3pe/`: check (`check-final/`) and debug build
+(`build-owned/`) passed; `daemon.py ... --case shows_quality_prefers` passed in
+foreground and systemd (`owned-{foreground,systemd}/processes/daemon/`), proving
+restart persistence, 2160p preferred over 900-seed 1080p, read and quality filters,
+validation, default reset and no downloads. `agent_contract.py ... --case
+shows_quality_verb` passed (`owned-cli/processes/agent_contract/`), covering exit
+0/2/6/7, live API and offline edits, default and no autostart. Full locked Cargo
+suite on this tree passed 550/0 with three existing opt-in ignores (`full-owned/`),
+including storage, wire/null and transcript tests. Initial runs caught missing
+null-reset preflight/validator and changelog bookkeeping; fixed with no relaxed
+expectations. Both daemon acceptance criteria met; dropdown/TUI rendering is
+deferred to tracks C/D. Python compile/diff/source-size checks passed. Per the
+ownership correction, 553b597 was fully reversed by 7fd01cd; P6-10 is solely
+track D's a5d35d0, with no duplicate implementation retained. No umbrella rerun.
+
+## P6-03 — global rate history
+
+One preallocated 600-point global download/upload ring samples real rates once
+per second without subscribers; Summary and `status --json` expose its latest
+60 download samples, `app.stats {history:true}` exposes both arrays, and the
+`stats` topic pushes every five seconds. No padding, interpolation, per-torrent
+rings or persisted rates. Contract 1.2.31 adds `history`, a new transcript and
+changelog row. Per the owner's exact-cap ruling, existing hello/error transcript
+cap arrays alone now list the live caps; every other existing fixture value is
+unchanged. The no-watch negative control derives a cap-free copy without changing
+payloads or gap checks. Minimal neighbours include the typed TUI stats cache and
+test-only negotiated EventSink setup; chart rendering/goldens remain with C/D.
+Private-XDG evidence under `target/test-logs/fbt-p6-03-n6s/`: `check/`,
+`history-unit/` (11 matching tests), `build/`, `foreground/` and `systemd/`
+(`daemon.py --case history_points`, 30 steps each) passed. The actual loopback
+`agent_contract.py --case status_history_field` passed (`cli-minute/`, 170 steps,
+64.23 s): exactly 60 samples, final ten all positive (~65,400 B/s), 4,079,616 of
+8,388,608 bytes received and still downloading. Ring unit logs all 600 retained
+points after 700 simulated clock ticks and rejects extra half-second samples.
+Initial full-suite failures caught missing fixture hello, stale embedded caps and
+negative-control setup; fixed without weakening controls. Final full-suite result
+is recorded below. No umbrella run between track beads; no hosted Actions.
+Final `cargo test --locked -- --nocapture` passed 553/0 with three existing
+opt-in ignores (`full-green/development_full/`); the corrected negative control
+also passed in isolation (`negative-corrected/`). Python compile, diff check,
+source-size gate and exact non-cap fixture preservation audit passed.
+
+## P6-04 — session and all-time statistics
+
+Actual engine network byte counters accumulate across engine epochs; a separate
+monotonic completion counter cannot lose events to notification queue eviction.
+Final counters are collected after the existing bounded engine drain, outside
+the slot lock. `app.stats`, the pushed `stats` state and `status --json` expose
+session/all-time totals; stopped status reads durable totals without autostart.
+Only `{downloaded,uploaded,completed}` persist in private state `stats.json`,
+0600 through unique temporary, fsync/rename/directory-fsync, on change every 30 s
+and at final drain. A save failure cannot override panic exit 70. Contract 1.2.32
+adds `status.all_time`, a new statistics transcript and docs/catalogue row under
+the existing history capability; every existing fixture byte stays unchanged.
+Minimal neighbours: engine atomic completion counter/synchronous totals accessor,
+existing drain visibility, and the test engine initializer's new field. Settings
+Stats rendering and the TUI Log footer remain deferred to C/D. Private-XDG logs
+under `target/test-logs/fbt-p6-04-ag3/`: `stats-unit/` passed
+`cargo test --locked --bin fbittorrent stats::tests -- --nocapture`, printing save
+seconds `[30,60,61]` (last is forced drain), validating epoch accumulation, 0600,
+exact three-key JSON and refusal to replace the prior file in an unwritable
+directory. `api-fixed/` passed 108 tests/one existing opt-in ignore, including
+new transcript roundtrip and exact catalogue/docs agreement. `build-final/`
+passed debug build. `daemon.py ... --case stats_persist` passed foreground and
+systemd (`{foreground,systemd}/processes/daemon/stats_persist.jsonl`), 466 steps
+each in 15.200/15.282 s: actual downloaded totals 8,388,608 before and after daemon
+restart; new session starts at zero; second local transfer yields 8,912,896 bytes
+and two completions, matching status and final persisted file. Engine-only
+restart preserves session/start time with no verification recount; independent
+seed uploads and pushed stats agree. Both daemon acceptance criteria met.
+Initial check caught the engine test initializer's missing counter; initial API
+checks caught missing transcript topics and wording disagreement; all corrected
+without relaxed expectations. Full-suite result follows. No umbrella run between
+track beads and no hosted Actions.
+Final `cargo test --locked -- --nocapture` passed 554/0 with three existing
+opt-in ignores (`full/development_full/`, 8.28 s test runtime). Python compile,
+diff check, changed-source size gate and existing-fixture preservation passed.
+
+## P6-03 vertical slice — history UI
+
+Dashboard and popup share a rate/status row with a bounded, data-driven Canvas
+sparkline; the TUI uses ftui's sparkline in free tab-bar space, with stack storage
+and no new timer/animation. Offline/stale data is hidden. Focused history render
+and QML behavior tests passed; all 49 existing TUI layout tests passed after the
+two existing disk baselines gained only their intended history header glyphs.
+No new frozen fixtures. Logs: `target/test-logs/fbt-p6-03-n6s/ui-history-unit/`,
+`ui-history-qml-geometry/`, `ui-history-layout-final/`. Actual private-compositor
++ tmux smoke passed 70 steps (`ui-history-live-green/processes/telemetry_ui/`),
+showing pushed real loopback rates on both UIs, a changing chart, and daemon/transfer
+survival after UI close; inspected the dashboard PNG and retained the pane.
+Neighbour hooks are one-line additions in Dashboard, popup content, Model and
+TUI layout/module registration. Initial smoke setup failures (missing local Sway,
+missing QML Io import and a Path passed to the string-only tmux helper) were
+corrected; Sway was reused read-only from cod_3's ignored test tools. No full gate
+or hosted CI per the new focused-test model. All P6-03 surfaces now implemented.

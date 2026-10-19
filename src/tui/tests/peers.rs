@@ -6,7 +6,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
     let frame:serde_json::Value=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().map(|l|serde_json::from_str::<serde_json::Value>(l).unwrap()).find(|v|v["frame"]["result"]["caps"].is_array()).unwrap();
     let mut hello:api::HelloResult=serde_json::from_value(frame["frame"]["result"].clone()).unwrap();
     if !hello.caps.iter().any(|c|c=="peers") {hello.caps.push("peers".into());}
-    hello.caps.retain(|cap|cap!="trackers"); // Isolate the peers capability in these fixtures.
+    hello.caps.retain(|cap|cap!="trackers" && cap!="pieces"); // Isolate the peers capability in these fixtures.
     app.store.hello(hello);
     app.store.stale=false;
     let t=app.torrents[0].clone();let _=app.open_details(&t);
@@ -50,4 +50,26 @@ fn overview_and_table_show_known_seeds_over_total_and_keep_unknowns_absent() {
     row.seeds=None;assert_eq!(format::Columns::of(&t,Some(&row)).peers,"41");
     row.peers=None;assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(true),"unknown");
     app.store.torrents.insert(row.hash.to_string(),row);
+}
+
+#[test]
+fn details_combines_peer_tracker_and_piece_capabilities_without_leaking_rows() {
+    let mut app=fixture::app("pieces");
+    let hello=app.store.hello.as_mut().unwrap();
+    for cap in ["peers","trackers"] {if !hello.caps.iter().any(|c|c==cap){hello.caps.push(cap.into());}}
+    assert_eq!(app.details_tabs(),[DetailsTab::Overview,DetailsTab::Files,DetailsTab::Peers,DetailsTab::Trackers,DetailsTab::Log,DetailsTab::Pieces]);
+    assert!(!app.store.pieces.is_empty());
+    app.details_tab(false);
+    assert_eq!(app.details.as_ref().unwrap().tab,DetailsTab::Log);
+    assert!(app.store.pieces.is_empty());
+    app.details_tab(false);
+    assert_eq!(app.details.as_ref().unwrap().tab,DetailsTab::Trackers);
+    assert!(app.tracker_topic().is_some());
+    app.details_tab(false);
+    assert_eq!(app.details.as_ref().unwrap().tab,DetailsTab::Peers);
+    assert!(app.tracker_topic().is_none());
+    assert!(app.peer_topic().is_some());
+    app.close_details();
+    assert!(app.peer_topic().is_none() && app.tracker_topic().is_none());
+    assert!(app.store.details.is_empty() && app.store.pieces.is_empty() && app.store.peers.is_empty() && app.store.trackers.is_empty());
 }

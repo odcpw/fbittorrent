@@ -86,6 +86,11 @@ impl TuiApp {
             .style(self.theme.text().bg(self.theme.selection));
         let inner = block.inner(area);
         block.render(area, frame);
-        self.view_log_contents(inner, None, frame);
+        let stats=self.store.stats.as_ref().filter(|s|self.online && !self.store.stale && s.session.is_some() && s.all_time.is_some());
+        let rows=if stats.is_some(){if inner.width<100 {2}else{1}}else{0};
+        let rows=rows.min(inner.height);
+        self.view_log_contents(Rect::new(inner.x,inner.y,inner.width,inner.height.saturating_sub(rows)), None, frame);
+        if let Some(stats)=stats {self.statistics_footer.borrow_mut().render(stats,self.theme.dimmed(),Rect::new(inner.x,inner.bottom()-rows,inner.width,rows),frame);}
+
     }
 }

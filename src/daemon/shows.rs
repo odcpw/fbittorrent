@@ -83,8 +83,8 @@ impl Service {
         let all=self.snapshot()?;let mut releases=Vec::new();
         for show in all.iter().filter(|s|selector.is_none_or(|id|id==s.imdb)){
             for e in show.episodes.iter().filter(|e|(!unread||show.is_new(&e.key))&&quality.is_none_or(|q|q==e.quality)){
-                let hash=librqbit::Magnet::parse(&e.magnet).ok().and_then(|m|m.as_id20()).map(|id|id.as_string());
-                let transfer=if let Some(row)=rows.iter().find(|r|Some(r.hash.as_str())==hash.as_deref()){
+                let hash=librqbit::Magnet::parse(show.grabbed.get(&e.key).unwrap_or(&e.magnet)).ok().and_then(|m|m.as_id20()).map(|id|id.as_string());
+                let transfer=if let Some(row)=rows.iter().find(|r|!r.staged && Some(r.hash.as_str())==hash.as_deref()){
                     if row.intent==api::Intent::Pause{api::ReleaseTransfer::Paused}else{match row.state {api::TorrentState::Downloading|api::TorrentState::Stalled=>api::ReleaseTransfer::Downloading,
                         api::TorrentState::Paused=>api::ReleaseTransfer::Paused,api::TorrentState::Done|api::TorrentState::Seeding=>api::ReleaseTransfer::Done,
                         api::TorrentState::Error=>api::ReleaseTransfer::AddedBefore,_=>api::ReleaseTransfer::Queued}}

@@ -7,3 +7,5 @@ function reason(row,network){
 function policy(row){if(row.upload_policy==="custom")return "upload capped at "+Model.size(row.upload_limit_bps,false)+"/s";return row.seed ? "seeding allowed" : "upload capped at 32 KiB/s while downloading; stops when complete"}
 function playable(p){if(!p)return "";return (p.ready ? "Ready to watch" : "Not ready to watch")+(p.buffered_s!==undefined ? " · "+Model.eta(p.buffered_s,false)+" buffered" : "")+(p.stall_free===false ? " · may stall" : "")}
 function localUrl(path){return path ? "file://"+String(path).split("/").map(encodeURIComponent).join("/") : ""}
+
+function networking(row){return !row || row.private===undefined || row.size===undefined ? "" : row.private ? "Private torrent (no DHT, no PeX)" : "Public torrent"}

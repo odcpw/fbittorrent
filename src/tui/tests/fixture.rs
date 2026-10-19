@@ -77,6 +77,15 @@ pub(super) fn app(surface: &str) -> TuiApp {
         "details-trackers"=>crate::tui::tracker_tests::prepare(&mut app),
         "peers"=>crate::tui::peer_tests::prepare(&mut app),
         "disk"=>crate::tui::disk_tests::prepare(&mut app),
+        "pieces" => {
+            let lines=include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().collect::<Vec<_>>();
+            let hello:serde_json::Value=serde_json::from_str(lines[1]).unwrap();
+            app.store.hello(serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
+            let data:crate::api::Pieces=serde_json::from_str(include_str!("../../../agent_ergonomics_audit/audit/regression_tests/fixtures/states/pieces-1000.json")).unwrap();
+            let hash=crate::api::Hash::new(app.torrents[0].hash.clone()).unwrap();
+            let t=app.torrents[0].clone();let _=app.open_details(&t);app.details.as_mut().unwrap().tab=DetailsTab::Pieces;
+            app.store.pieces.insert(hash,(data.clone(),data.decode().unwrap()));
+        },
         "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
         "poster" => {let key=app.torrents[0].name.clone();crate::tui::poster_tests::ready(&mut app,&key);let _=app.on_key(KeyEvent::new(KeyCode::Char('v')));},
         "done" => app.tor_list.borrow_mut().select(Some(1)),

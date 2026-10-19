@@ -248,9 +248,11 @@ impl Inner {
                     inner.save(&cx,&ledger).await?;
                     return Ok(());
                 }
+                let resolved_name=metadata.info.name().map(|s|s.into_owned()).unwrap_or_else(||record.hash.clone());
                 inner.admit_record(&cx, current, true, metadata).await?;
                 if let Some(saved) = ledger.records.iter_mut().find(|saved| saved.hash == record.hash) {
-                    if saved.deferred {
+                    if saved.deferred || saved.name!=resolved_name {
+                        saved.name=resolved_name;
                         saved.deferred = false;
                         inner.save(&cx, &ledger).await?;
                     }

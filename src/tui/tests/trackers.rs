@@ -20,7 +20,7 @@ fn tracker_caps_labels_privacy_and_modal_action_scope() {
     let mut app=fixture::app("torrents");
     assert!(!app.details_tabs().contains(&DetailsTab::Trackers));
     prepare(&mut app);
-    assert_eq!(app.details_tabs(),[DetailsTab::Overview,DetailsTab::Files,DetailsTab::Peers,DetailsTab::Trackers,DetailsTab::Log]);
+    assert_eq!(app.details_tabs(),[DetailsTab::Overview,DetailsTab::Files,DetailsTab::Peers,DetailsTab::Trackers,DetailsTab::Log,DetailsTab::Pieces]);
     for (width,height) in [(80,24),(120,30),(160,45)] {
         let text=golden::render(&app,width,height);
         for expected in ["[Trackers]","! Error","✓ OK","…Not contacted","fixture: not yet","(e) Reannounce"] {assert!(text.contains(expected),"{expected} missing:\n{text}");}

@@ -18,6 +18,16 @@ from fbtlog import Case, REPO, suite_status
 from native import NativeHarness
 
 
+def process_cleanup_controls():
+    import unittest
+    from native_cleanup_test import NativeCleanup
+    with Case("fbtlog_test", "process_cleanup") as test:
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(NativeCleanup).run(result)
+        test.check(result.wasSuccessful(), "private-process cleanup, failure paths and suite audit controls pass",
+                   f"tests={result.testsRun}; failures={result.failures}; errors={result.errors}")
+
+
 def settings_reopen():
     with Case("fbtlog_test", "settings_reopen") as test:
         fixtures = test.suite.directory / "fixtures/reopen"
@@ -247,67 +257,10 @@ sys.exit(1 if attempt == 1 else 0)
 
 def early_abort_summary():
     with Case("fbtlog_test", "early_abort_summary") as test:
-        root = test.suite.directory / "fixtures/umbrella"
-        regression = root / "agent_ergonomics_audit/audit/regression_tests"
-        regression.mkdir(parents=True)
-        (root / "scripts").mkdir()
-        (root / "plugin/tests").mkdir(parents=True)
-        umbrella = regression / "umbrella.sh"
-        shutil.copyfile(REPO / "agent_ergonomics_audit/audit/regression_tests/all.sh", umbrella)
-        shutil.copyfile(REPO / "scripts/testlog-summary.py", root / "scripts/testlog-summary.py")
-        (regression / "fbtlog_test.py").write_text("pass\n")
-        (root / "plugin/tests/qs-log.py").write_text("pass\n")
-        for name in ("check-gitignore.sh", "check-nova3-licences.sh"):
-            path = root / "scripts" / name
-            path.write_text("#!/bin/bash\nexit 0\n")
-            path.chmod(0o700)
-        home = root / "home"
-        shims = home / ".rch/shims"
-        shims.mkdir(parents=True)
-        # This fixture cannot compile anything: its cargo records the stages
-        # and aborts at the release stage, without invoking the real toolchain.
-        cargo = shims / "cargo"
-        cargo.write_text('''#!/bin/bash
-echo "$1" >> "$HOME/cargo-calls.txt"
-case "$1" in
-  test) exit 0 ;;
-  build) echo "fixture release abort" >&2; exit 137 ;;
-  *) exit 2 ;;
-esac
-''')
-        cargo.chmod(0o700)
-        rustc = shims / "rustc"
-        rustc.write_text("#!/bin/bash\necho 'host: x86_64-unknown-linux-gnu'\n")
-        rustc.chmod(0o700)
-        logs = root / "target/test-logs"
-        native = logs / "native"
-        native.mkdir(parents=True)
-        (native / "stale_native_case.jsonl").write_text(json.dumps(dict(
-            final=True, ok=True, ms=1)) + "\n")
-        (native / "summary.json").write_text('{"cases": 1, "passed": 1, "failed": 0}\n')
-        archive = logs / "fbt-p0-15-3hq/keep.jsonl"
-        archive.parent.mkdir()
-        archive.write_text('{"final": true, "ok": false, "ms": 1}\n')
-        archived = archive.read_bytes()
-        result = subprocess.run(["bash", str(umbrella)], capture_output=True, text=True,
-                                timeout=20, env=dict(os.environ, HOME=str(home),
-                                    CARGO_BUILD_JOBS="4", FBT_TEST_LEGACY="0", FBT_TEST_WIDGET="0",
-                                    FBT_TEST_FORCE_FAIL=""))
-        (root / "stdout.log").write_text(result.stdout)
-        (root / "stderr.log").write_text(result.stderr)
-        test.check(result.returncode == 137 and (home / "cargo-calls.txt").read_text() == "test\nbuild\n",
-                   "early abort retains the release failure exit code after the final summary")
-        test.check(not list(native.glob("*.jsonl")) and not (native / "summary.json").exists(),
-                   "all scheduled suite logs are cleared before a release stage can abort")
-        test.check(re.search(r"^native\s+.*not run$", result.stdout, re.MULTILINE) is not None
-                   and "stale_native_case" not in result.stdout
-                   and not re.search(r"^native\s+1\s+1\s+0", result.stdout, re.MULTILINE),
-                   "aborted run reports native as not run without displaying stale success")
-        test.check(archive.read_bytes() == archived and "fbt-p0-15-3hq" not in result.stdout,
-                   "archived bead evidence is preserved and excluded from the scheduled summary")
-        test.check(all(re.search(rf"^{suite}\s+.*not run$", result.stdout, re.MULTILINE)
-                       for suite in ("fbtlog_test", "qs_log_test", "hygiene", "native")),
-                   "every scheduled suite without current logs is labelled not run")
+        sys.path.insert(0, str(REPO / "scripts"))
+        from gate_test import run_named
+        ok, output = run_named("test_build_abort_never_uses_stale_success")
+        test.check(ok, "build failure stays nonzero; unstarted cases cannot inherit old successes; archived evidence survives", output)
 
 
 def main():
@@ -385,6 +338,7 @@ def main():
     polling_cli_exits()
     settings_reopen()
     tmux_relaunch()
+    process_cleanup_controls()
     early_abort_summary()
     return suite_status("fbtlog_test")
 

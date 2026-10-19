@@ -28,6 +28,9 @@ mod modals_files;
 use modals_files::*;
 #[path = "modals/details.rs"]
 mod modals_details;
+#[path = "modals/pieces.rs"]
+mod modals_pieces;
+use modals_pieces::*;
 use modals_details::*;
 #[path = "modals/peers.rs"]
 mod modals_peers;
@@ -82,6 +85,13 @@ mod format;
 mod palette;
 mod feedback;
 mod limits;
+mod statistics;
+#[cfg(test)]
+#[path="tests/statistics.rs"]
+mod statistics_tests;
+#[cfg(test)]
+#[path="tests/history.rs"]
+mod history_tests;
 #[cfg(test)]
 #[path="tests/limits.rs"]
 mod limit_tests;
@@ -94,6 +104,9 @@ mod disk_tests;
 #[cfg(test)]
 #[path="tests/port.rs"]
 mod port_tests;
+#[cfg(test)]
+#[path="tests/rename.rs"]
+mod rename_tests;
 #[cfg(test)]
 #[path="tests/log.rs"]
 mod log_tests;
@@ -212,10 +225,10 @@ impl Model for TuiApp {
                         self.daemon_stopped = self.cfg.native() && !self.recovery.active && self.failed_polls >= 2;
                     }
                 }
-                Cmd::none()
+                self.refresh_details()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,self.subscribe_ui()]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); self.store.details.clear();if let Some(details)=self.details.as_mut(){details.loading=false;}let overview=self.refresh_details(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,overview,self.subscribe_ui()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -320,6 +333,7 @@ impl Model for TuiApp {
                 }
                 Cmd::none()
             }
+            Msg::ApiDetail {connection,hash,result}=>self.detail_loaded(connection,hash,result),
             Msg::ApiFiles {connection,hash,result} => {
                 if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
                 self.update(Msg::Files(hash,result))

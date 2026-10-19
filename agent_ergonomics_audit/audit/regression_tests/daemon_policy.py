@@ -240,3 +240,18 @@ def dashboard_bar_presence(binary, systemd):
                    'hiding dashboard clears interactive presence despite a stale interactive flag',json.dumps(summary))
         client.call('app.client',dict(interactive=False,dashboard_visible=False,glance=False))
         idle_exit(case,h,p,client)
+
+
+def quick_palette_presence(binary, systemd):
+    with owned('quick_palette_presence',binary,systemd) as (case,box,h,p),d.ApiConn(h) as client:
+        hello(client,'bar',interactive=True)
+        client.call('app.client',dict(interactive=True,overlay_visible=True,dashboard_visible=False))
+        _,summary=subscribe(client)
+        case.check('interactive' in summary['busy_reasons'] and 'idle_exit_in_s' not in summary,
+                   'visible palette keeps the shared bar socket interactive',json.dumps(summary))
+        hold(case,p,client,3,'visible palette outlives the two-second idle deadline')
+        client.call('app.client',dict(overlay_visible=False))
+        summary=fresh(h)
+        case.check(summary['busy_reasons']==[] and 'idle_exit_in_s' in summary,
+                   'Esc clears palette presence despite a stale bar interactive claim',json.dumps(summary))
+        idle_exit(case,h,p,client)

@@ -60,6 +60,7 @@ pub enum EngineOp {
         hash: String,
     },
     Peers { hash: String },
+    Rename {hash:String,name:String},
     EditTracker { hash: String, url: String, add: bool },
     // Typed engine entry points for the daemon adapter. These do not add routes
     // to the legacy transport or advertise v1 operations before that API lands.
@@ -135,6 +136,7 @@ pub enum EngineOp {
 impl EngineOp {
     pub(crate) fn validate(&self) -> Result<()> {
         match self {
+            Self::Rename {name,..} if !crate::engine::rename::valid_name(name)=>bail!("invalid display name"),
             Self::FilePriority { priority, .. } if !matches!(priority, 0 | 1) => bail!(
                 "the native engine supports skip (0) and normal (1) file priorities; high and maximum are unavailable"
             ),
@@ -228,6 +230,7 @@ pub struct AddedTorrent {
 
 #[derive(Debug)]
 pub struct TorrentDetails {
+    pub original_name:String,
     pub torrent: super::super::view::TorrentView,
     pub private: bool,
     pub file_count: Option<u64>,
@@ -244,6 +247,7 @@ impl TorrentDetails {
         bytes: Option<&[u8]>,
     ) -> Result<Self> {
         let mut detail = Self {
+            original_name:torrent.original_name().to_owned(),
             torrent,
             private: false,
             file_count: None,

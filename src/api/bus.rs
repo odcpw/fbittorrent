@@ -123,6 +123,7 @@ impl EventRing {
     }
 }
 struct Sample {
+    history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
     rows: Vec<Torrent>,
@@ -131,6 +132,7 @@ struct Sample {
     searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     peers: BTreeMap<String, Value>,
+    pieces: BTreeMap<String, Value>,
     trackers: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
@@ -144,12 +146,14 @@ struct Sample {
 impl Sample {
     fn value(&self, topic: &Topic) -> Value {
         match topic {
+            Topic::Stats=>self.stats.clone(),
             Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
             Topic::RssFeeds=>self.rss_feeds.clone(),
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
             Topic::Trackers(h) => self.trackers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
+            Topic::Pieces(h) => self.pieces.get(h.as_str()).cloned().unwrap_or(Value::Null),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
             Topic::Network => self.network.clone(),
             Topic::Settings => self.settings.clone(),
@@ -163,6 +167,7 @@ impl Sample {
         let counts = summary_counts(&self.rows);
         let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
+        result["history"]=json!(self.history);
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -255,7 +260,7 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
             if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
-            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Trackers(hash) = topic {
+            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Pieces(hash) | Topic::Trackers(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
@@ -294,9 +299,11 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
+                            Topic::Stats=>Duration::from_secs(5),
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
+                            Topic::Pieces(_) => Duration::from_millis(args.effective_interval_ms(2000).max(2000)),
                             Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
                             Topic::Summary => {
                                 Duration::from_millis(args.effective_interval_ms(summary_interval))
@@ -402,6 +409,15 @@ impl Bus {
             .map(ops::torrents::torrent)
             .collect::<ApiResult<Vec<_>>>()?;
         self.daemon.watch.lock().unwrap().decorate(&mut rows);
+        let mut pieces=BTreeMap::new();
+        if let Slot::Running(app)=&slot.slot {
+            for hash in topics.iter().filter_map(|t|if let Topic::Pieces(h)=t {Some(h)}else{None}).collect::<BTreeSet<_>>() {
+                let playable=rows.iter().find(|row|&row.hash==hash).and_then(|row|row.playable.as_ref());
+                if let Ok(value)=app.dispatcher().pieces_snapshot(hash.as_str()).map_err(ops::engine_error).and_then(|value|ops::pieces::encode(value,playable)) {
+                    pieces.insert(hash.to_string(),json!(value));
+                }
+            }
+        }
         let files = details
             .into_iter()
             .map(|(hash, files)| {
@@ -464,7 +480,12 @@ impl Bus {
         for hash in topics.iter().filter_map(|t|if let Topic::Trackers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
             if rows.iter().any(|r|&r.hash==hash) {trackers.insert(hash.to_string(),serde_json::to_value(ops::trackers::read(&self.daemon,hash)?).unwrap());}
         }
+        let (session,all_time)=self.daemon.statistics();
+        let (history,stats)={let mut ring=self.daemon.history.lock().unwrap();
+            ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
+            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
+            history,stats,
             peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
             show_releases,
@@ -478,6 +499,7 @@ impl Bus {
             logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
             searches,
             files,
+            pieces,
             network,
             settings,
             disk: self.daemon.disk.lock().unwrap().summary.clone(),
@@ -587,7 +609,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
-            if self.daemon.watch.lock().unwrap().due() { dirty = true; }
+            if self.daemon.watch.lock().unwrap().due() || self.daemon.history.lock().unwrap().due(Instant::now()) { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;
@@ -599,7 +621,7 @@ impl Bus {
                 .unwrap()
                 .subscriptions
                 .values()
-                .flat_map(|s| s.topics.iter().map(|t| t.topic.clone()))
+                .flat_map(|s| s.topics.iter().filter(|t| !matches!(t.topic,Topic::Pieces(_)) || t.due<=Instant::now()).map(|t| t.topic.clone()))
                 .collect();
             match self.sample(&topics) {
                 Ok(sample) => {
@@ -711,7 +733,11 @@ impl Subscription {
     fn update(&mut self, sample: &Sample, events: &[Value], oldest: u64) -> ApiResult<()> {
         // A slot without a usable ledger is transitional, not an empty saved
         // history. Keep detail subscriptions until the replacement is ready.
-        if matches!(sample.state.as_str(), "starting" | "stopping") {
+        // A new stats subscription can arrive while the worker samples an
+        // older topic set. Wait for its first actual sample, rather than emit
+        // null and tear down the shared UI connection.
+        if matches!(sample.state.as_str(), "starting" | "stopping")
+            || (sample.stats.is_null() && self.topics.iter().any(|t|t.topic==Topic::Stats)) {
             // An initial snapshot stays pending, but must not leave a past-due
             // deadline spinning the sampler while the engine opens/drains.
             for topic in &mut self.topics {
@@ -731,6 +757,7 @@ impl Subscription {
         });
         for index in order {
             let t = &mut self.topics[index];
+            if restart && matches!(t.topic,Topic::Pieces(_)) {t.sent=None;}
             let mut value = if t.topic == Topic::Events {
                 json!(events
                     .iter()
@@ -739,6 +766,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
+            if matches!(t.topic,Topic::Pieces(_)) && value.is_null() {if t.due<=Instant::now() {t.due=Instant::now()+t.interval;}continue;}
             let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_));
@@ -834,6 +862,7 @@ impl Subscription {
                 |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) | Topic::Trackers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
             );
         }
+        self.topics.retain(|t|!matches!(&t.topic,Topic::Pieces(h) if !sample.rows.iter().any(|r|&r.hash==h)));
         self.epoch = Some(engine);
         Ok(())
     }

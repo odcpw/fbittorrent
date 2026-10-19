@@ -16,6 +16,7 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::Rename { hash, .. }
         | EngineOp::EditTracker { hash, .. }
         | EngineOp::Commit {hash, ..}
         | EngineOp::Discard {hash}
@@ -166,7 +167,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     use ErrorCode::*;
     Ok(match call {
-        Call::TorrentsCommit {args} => {
+        Call::TorrentsCommit {args} => return crate::daemon::staged_sources::commit(daemon,&args.hash,|| {
             if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
                 return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
             }
@@ -177,12 +178,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             execute(daemon,EngineOp::Commit {hash:args.hash.to_string(),
                 files:args.files.as_ref().map(|values|values.iter().map(|v|*v as usize).collect()),
                 seed:args.seed,save_path:args.save_path.as_ref().map(Into::into)})?;
-            Reply::TorrentsCommit(DoneResult {state:DoneState::Done})
-        }
-        Call::TorrentsDiscard {args} => {
+            Ok(Reply::TorrentsCommit(DoneResult {state:DoneState::Done}))
+        }),
+        Call::TorrentsDiscard {args} => return crate::daemon::staged_sources::discard(daemon,&args.hash,|| {
             execute(daemon,EngineOp::Discard {hash:args.hash.to_string()})?;
-            Reply::TorrentsDiscard(DoneResult {state:DoneState::Done})
-        }
+            Ok(Reply::TorrentsDiscard(DoneResult {state:DoneState::Done}))
+        }),
         Call::ImdbLookup { args } => return super::imdb::lookup(&daemon.imdb, args),
         Call::TorrentsList { args } => {
             let mut rows = list(daemon)?;
@@ -212,6 +213,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             daemon.watch.lock().unwrap().decorate(&mut rows);
             Reply::TorrentsGet(GetResult {
                 torrent: TorrentDetail {
+                    original_name:Some(detail.original_name),
                     torrent: rows.remove(0),
                     private: detail.private,
                     file_count: detail.file_count,
@@ -224,6 +226,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsRename {args}=>{execute(daemon,EngineOp::Rename{hash:args.hash.to_string(),name:args.name.clone()})?;Reply::TorrentsRename(DoneResult{state:DoneState::Done})},
         Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
             execute(daemon,EngineOp::EditTracker{hash:args.hash.to_string(),url:args.url.clone(),add:matches!(call,Call::TorrentsAddTracker{..})})?;
             if matches!(call,Call::TorrentsAddTracker{..}) {Reply::TorrentsAddTracker(DoneResult{state:DoneState::Done})}
