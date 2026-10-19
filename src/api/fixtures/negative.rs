@@ -364,6 +364,13 @@ fn events_changed_entries_are_rejected_with_and_without_watch() {
     }
 }
 
+fn encode_file_size_frames(frames: &[Value]) -> String {
+    frames.iter().map(|frame| format!("{frame}\n")).collect()
+}
+
+fn file_size_frames(op: &str) -> (Vec<Value>, Vec<Value>) {
+    let rows: Vec<Value> = GROUPS
+
 #[test]
 fn missing_files_restore_errors_require_the_matching_reason() {
     let detail: Value = GROUPS
@@ -372,6 +379,219 @@ fn missing_files_restore_errors_require_the_matching_reason() {
         .unwrap()
         .1
         .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let mut value = if op == "torrents.list" {
+        rows[12]["frame"]["result"]["torrents"][0].clone()
+    } else {
+        rows[14]["frame"]["result"]["torrent"].clone()
+    };
+    // These controls exercise sizes without requiring a hello/watch prefix.
+    value.as_object_mut().unwrap().remove("playable");
+    let hash = value["hash"].clone();
+    let (args, result) = if op == "torrents.list" {
+        (json!({}), json!({"torrents":[value]}))
+    } else {
+        (json!({"hash":hash}), json!({"torrent":value}))
+    };
+    (
+        vec![
+            json!({"dir":"c2s","frame":{"id":1,"op":op,"args":args}}),
+            json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":result}}),
+        ],
+        vec![
+            json!({"dir":"c2s","frame":{"id":2,"op":"torrents.files","args":{"hash":hash}}}),
+            json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":rows[24]["frame"]["result"]}}),
+        ],
+    )
+}
+
+#[test]
+fn inconsistent_catalogue_file_lengths_fail_at_the_exact_line_and_pointer() {
+    let text = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1;
+    check_group("torrents", text).unwrap();
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    assert_eq!(lines[24].matches("\"size\":2048").count(), 2);
+    // Recreate precisely the original inconsistent files reply, preserving all
+    // other records, and send it through the ordinary round-trip checker.
+    lines[24] = lines[24].replace("\"size\":2048", "\"size\":4096");
+    let error = check_group("files-size-negative", &(lines.join("\n") + "\n")).unwrap_err();
+    assert_eq!(error, "contracts/ipc/v1/files-size-negative.ndjson:25: /frame/result/files: sum of file lengths must equal the torrent size for the same hash");
+    println!("original file-length mismatch rejected: {error}");
+}
+
+#[test]
+fn file_lengths_match_list_and_detail_sizes_in_both_reply_orders() {
+    for op in ["torrents.list", "torrents.get"] {
+        for files_first in [false, true] {
+            let (torrent, files) = file_size_frames(op);
+            let frames = if files_first {
+                [files.clone(), torrent.clone()].concat()
+            } else {
+                [torrent.clone(), files.clone()].concat()
+            };
+            check_group("files-size-positive", &encode_file_size_frames(&frames)).unwrap();
+            let mut wrong_files = files;
+            wrong_files[1]["frame"]["result"]["files"][0]["size"] = json!(2049);
+            let (frames, pointer, rule) = if files_first {
+                (
+                    [wrong_files, torrent].concat(),
+                    if op == "torrents.list" {
+                        "/frame/result/torrents/0/size"
+                    } else {
+                        "/frame/result/torrent/size"
+                    },
+                    "must equal the sum of file lengths for the same hash",
+                )
+            } else {
+                (
+                    [torrent, wrong_files].concat(),
+                    "/frame/result/files",
+                    "sum of file lengths must equal the torrent size for the same hash",
+                )
+            };
+            let error =
+                check_group("files-size-negative", &encode_file_size_frames(&frames)).unwrap_err();
+            assert_eq!(
+                error,
+                format!("contracts/ipc/v1/files-size-negative.ndjson:4: {pointer}: {rule}")
+            );
+            println!("{op} files_first={files_first}: positive passed; negative rejected {error}");
+        }
+    }
+}
+
+#[test]
+fn file_size_checks_preserve_earlier_observations_and_hash_scope() {
+    let (mut list, files) = file_size_frames("torrents.list");
+    let (mut get, _) = file_size_frames("torrents.get");
+    for frame in &mut get {
+        frame["frame"]["id"] = json!(3);
+    }
+    list[1]["frame"]["result"]["torrents"][0]["size"] = json!(4097);
+    let frames = [list.clone(), get.clone(), files.clone()].concat();
+    let error = check_group("files-size-history", &encode_file_size_frames(&frames)).unwrap_err();
+    assert_eq!(error, "contracts/ipc/v1/files-size-history.ndjson:4: /frame/result/torrent/size: must agree with earlier list/get replies for the same hash");
+
+    // A file reply can arrive before any torrent reply as well. Retain its
+    // total even if a later file reply happens to have the correct total.
+    let mut wrong_files = files.clone();
+    for frame in &mut wrong_files {
+        frame["frame"]["id"] = json!(4);
+    }
+    wrong_files[1]["frame"]["result"]["files"][0]["size"] = json!(2049);
+    let frames = [wrong_files, files.clone(), get.clone()].concat();
+    let error = check_group("files-size-history", &encode_file_size_frames(&frames)).unwrap_err();
+    assert_eq!(error, "contracts/ipc/v1/files-size-history.ndjson:6: /frame/result/torrent/size: must equal the sum of file lengths for the same hash");
+
+    list[1]["frame"]["result"]["torrents"][0]["hash"] = json!("f".repeat(40));
+    // Different hashes may have different sizes: correlate the files request,
+    // not merely the most recent list/get response or response arrival order.
+    let frames = [list, files, get].concat();
+    check_group("files-size-hashes", &encode_file_size_frames(&frames)).unwrap();
+    println!("earlier list/files observations retained; different hashes remain independent");
+}
+
+#[test]
+fn file_size_sum_checks_empty_lists_and_overflow() {
+    let (mut torrent, mut files) = file_size_frames("torrents.list");
+    torrent[1]["frame"]["result"]["torrents"][0]["size"] = json!(u64::MAX);
+    files[1]["frame"]["result"]["files"][0]["size"] = json!(u64::MAX);
+    files[1]["frame"]["result"]["files"][1]["size"] = json!(0);
+    let frames = [torrent.clone(), files.clone()].concat();
+    check_group("files-size-boundary", &encode_file_size_frames(&frames)).unwrap();
+    files[1]["frame"]["result"]["files"][1]["size"] = json!(1);
+    let frames = [torrent.clone(), files.clone()].concat();
+    let error = check_group("files-size-overflow", &encode_file_size_frames(&frames)).unwrap_err();
+    assert_eq!(error, "contracts/ipc/v1/files-size-overflow.ndjson:4: /frame/result/files/1/size: sum of file lengths exceeds u64");
+    torrent[1]["frame"]["result"]["torrents"][0]["size"] = json!(0);
+    files[1]["frame"]["result"]["files"] = json!([]);
+    let frames = [torrent.clone(), files.clone()].concat();
+    check_group("files-size-empty", &encode_file_size_frames(&frames)).unwrap();
+    torrent[1]["frame"]["result"]["torrents"][0]["size"] = json!(1);
+    let frames = [torrent, files].concat();
+    let error = check_group("files-size-empty", &encode_file_size_frames(&frames)).unwrap_err();
+    assert_eq!(error, "contracts/ipc/v1/files-size-empty.ndjson:4: /frame/result/files: sum of file lengths must equal the torrent size for the same hash");
+    println!("file sums: u64::MAX and empty zero-size lists pass; overflow and mismatched empty lists reject");
+}
+
+#[test]
+fn list_get_reply_agreement_covers_both_fields_and_all_reply_orders() {
+    for earlier_op in ["torrents.list", "torrents.get"] {
+        for later_op in ["torrents.list", "torrents.get"] {
+            let (earlier, _) = file_size_frames(earlier_op);
+            let (mut later, _) = file_size_frames(later_op);
+            for frame in &mut later {
+                frame["frame"]["id"] = json!(3);
+            }
+            let frames = [earlier.clone(), later.clone()].concat();
+            check_group(
+                "reply-agreement-positive",
+                &encode_file_size_frames(&frames),
+            )
+            .unwrap();
+            for field in ["size", "completed_bytes"] {
+                let mut wrong = later.clone();
+                let value = if later_op == "torrents.list" {
+                    &mut wrong[1]["frame"]["result"]["torrents"][0]
+                } else {
+                    &mut wrong[1]["frame"]["result"]["torrent"]
+                };
+                value[field] = json!(value[field].as_u64().unwrap() + 1);
+                let frames = [earlier.clone(), wrong].concat();
+                let error = check_group(
+                    "reply-agreement-negative",
+                    &encode_file_size_frames(&frames),
+                )
+                .unwrap_err();
+                let object = if later_op == "torrents.list" {
+                    "torrents/0"
+                } else {
+                    "torrent"
+                };
+                assert_eq!(error, format!("contracts/ipc/v1/reply-agreement-negative.ndjson:4: /frame/result/{object}/{field}: must agree with earlier list/get replies for the same hash"));
+                println!("{earlier_op} then {later_op}, {field}: matching replies pass; negative rejected {error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
+    let text = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1;
+    for (hash, field, wrong_value, line) in [
+        ("2".repeat(40), "size", 4096, 43),
+        ("2".repeat(40), "completed_bytes", 2048, 43),
+        ("a".repeat(40), "size", 4096, 63),
+        ("a".repeat(40), "completed_bytes", 1, 63),
+    ] {
+        let mut frames: Vec<Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let torrent = frames[12]["frame"]["result"]["torrents"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|torrent| torrent["hash"] == hash)
+            .unwrap();
+        torrent[field] = json!(wrong_value);
+        let error = check_group(
+            "reply-agreement-catalogue",
+            &encode_file_size_frames(&frames),
+        )
+        .unwrap_err();
+        assert_eq!(error, format!("contracts/ipc/v1/reply-agreement-catalogue.ndjson:{line}: /frame/result/torrent/{field}: must agree with earlier list/get replies for the same hash"));
+        println!("catalogue stale {field} rejected without files: {error}");
+
         .nth(54)
         .map(|line| {
             serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()

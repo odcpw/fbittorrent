@@ -3,7 +3,10 @@
 use super::*;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 pub const MIN_UPLOAD_BPS: u64 = 16_384;
 pub const MIN_INTERVAL_MS: u64 = 250;
@@ -200,6 +203,85 @@ impl Validate for Reply {
             }
             Self::Subscribe(result) => count(result.topics.len(), MAX_SUBSCRIPTIONS, "topics"),
             _ => Ok(()), // Pending refs are required by their serde variants.
+        }
+    }
+}
+
+/// Validate the fixture transcript's repeated list/get values and file totals
+/// per hash, checking either arrival order. Omitted values remain unknown.
+#[derive(Debug, Default)]
+pub struct TorrentFileSizes {
+    by_hash: BTreeMap<Hash, FileSizeObservations>,
+}
+#[derive(Debug, Default)]
+struct FileSizeObservations {
+    torrent_sizes: BTreeSet<u64>,
+    completed_bytes: BTreeSet<u64>,
+    file_totals: BTreeSet<u64>,
+}
+impl TorrentFileSizes {
+    fn torrent(&mut self, value: &Torrent, path: &str) -> Checked {
+        let observed = self.by_hash.entry(value.hash.clone()).or_default();
+        if let Some(size) = value.size {
+            require(
+                observed
+                    .torrent_sizes
+                    .iter()
+                    .all(|earlier| *earlier == size),
+                &format!("{path}/size"),
+                "must agree with earlier list/get replies for the same hash",
+            )?;
+            require(
+                observed.file_totals.iter().all(|total| *total == size),
+                &format!("{path}/size"),
+                "must equal the sum of file lengths for the same hash",
+            )?;
+            observed.torrent_sizes.insert(size);
+        }
+        if let Some(completed) = value.completed_bytes {
+            require(
+                observed
+                    .completed_bytes
+                    .iter()
+                    .all(|earlier| *earlier == completed),
+                &format!("{path}/completed_bytes"),
+                "must agree with earlier list/get replies for the same hash",
+            )?;
+            observed.completed_bytes.insert(completed);
+        }
+        Ok(())
+    }
+
+    pub fn reply(&mut self, call: &Call, reply: &Reply) -> Checked {
+        match (call, reply) {
+            (_, Reply::TorrentsList(result)) => {
+                for (index, value) in result.torrents.iter().enumerate() {
+                    self.torrent(value, &format!("/frame/result/torrents/{index}"))?;
+                }
+                Ok(())
+            }
+            (_, Reply::TorrentsGet(result)) => {
+                self.torrent(&result.torrent.torrent, "/frame/result/torrent")
+            }
+            (Call::TorrentsFiles { args }, Reply::TorrentsFiles(result)) => {
+                let mut total = 0u64;
+                for (index, file) in result.files.iter().enumerate() {
+                    total = total.checked_add(file.size).ok_or_else(|| {
+                        Violation(format!(
+                            "/frame/result/files/{index}/size: sum of file lengths exceeds u64"
+                        ))
+                    })?;
+                }
+                let observed = self.by_hash.entry(args.hash.clone()).or_default();
+                require(
+                    observed.torrent_sizes.iter().all(|size| *size == total),
+                    "/frame/result/files",
+                    "sum of file lengths must equal the torrent size for the same hash",
+                )?;
+                observed.file_totals.insert(total);
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 }
