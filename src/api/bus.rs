@@ -197,6 +197,7 @@ pub(crate) struct Bus {
 }
 impl Bus {
     pub(crate) fn refresh(&self) { self.wake.signal(); }
+    pub(crate) fn new_episodes(&self,count:u64,names:&[String]) {self.daemon.notifier.new_episodes(count,names);}
     pub(crate) fn engine_changed(&self,epoch:u64,state:&str) {self.registry.lock().unwrap().engine_changed(epoch,state);self.wake.signal();}
     pub fn new(daemon: Arc<Daemon>) -> Arc<Self> {
         Arc::new(Self {

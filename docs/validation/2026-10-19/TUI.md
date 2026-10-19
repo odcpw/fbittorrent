@@ -492,3 +492,21 @@ Evidence root: `target/test-logs/fbt-p4-03-r5p/`; every command has matching `.j
 | Rust suite | `cargo test --locked -- --nocapture`, `api_only_full.*` | 526 PASS, 3 existing ignores; run before the final bounded-batch adjustment, followed by the final 172-test TUI suite and both live suites above |
 
 `api_only_bus_unit.*`: 7/7 bus tests pass, including both rapid phases delivered once per connection without a sampler tick. The initial smoke exposed the turtle backlog and sampled-transition races; assertions and deadlines were retained. The independent wire trace (`turtle-trace.json`) received the changed summary about 160 ms after the key while the old terminal remained stale. One smoke attempt was discarded because it began before the final link completed (`api_only_smoke_final.*`); the final named runs above use the completed debug binary. Earlier diagnostic failures remain in their own log roots. Compatibility/version-warning work is skipped under the owner's standing no-compat rule; old global paths are removed next in P4-09. No all.sh or hosted-CI claim. No unmet P4-03 criterion or remaining follow-up in this slice.
+
+### P6-10 / fbt-p6-10-2mq — Shows release notifications
+
+After a successful saved check, the Shows owner sends one notice for newly discovered unread keys, with a bounded three-name summary and remainder count. Existing or read keys do not count. Interactive TUI/dashboard presence suppresses delivery; unchanged checks stay silent. The existing bounded notifier, notify=false and --no-notify rules apply; the window action runs `dashboard --view shows`. No new API field, operation, fixture or wire change. Neighbour `src/api/bus.rs` adds only the owner-to-notifier forwarding method. README documents the behavior.
+
+Evidence root: `target/test-logs/fbt-p6-10-2mq/` (matching command `.jsonl`/`.log`).
+
+| Acceptance / control | Command / artifact | Observed |
+|---|---|---|
+| EZTV check with new releases sends one notification | `daemon.py target/debug/fbittorrent --case shows_notify … --log-root …/live`, `live/daemon/shows_notify.jsonl` | PASS: 4 new releases, one recorded notify-send argv, three names plus +1 more, Shows action, unchanged empty torrent ledger |
+| Second unchanged check sends none | same, `--case shows_notify_none_when_unchanged`, named JSONL | PASS: actual second EZTV request; new=0, notice count remains one throughout a one-second observation |
+| Interactive suppression and resumption | same, `--case shows_notify_suppressed_interactive`, named JSONL | PASS: API-declared TUI and visible dashboard each suppress a positive check; background check after both close notifies once; no automatic source fetch or download |
+| Text/action/queue controls | `cargo test --locked -p fbittorrent daemon::notify:: -- --nocapture`, `notify_unit.*` | 3/3 PASS: singular/three/five, markup escaping, at most three names, +2 more, exact Shows dashboard arguments, existing queue bound |
+| Existing behavior | same daemon run, `--case shows_inbox_semantics --case notify_off`, `shows_notify_live.*` | All 6 emitted cases PASS, including config/flag notification-off controls |
+| Build and full Rust suite | `cargo check --locked --tests`, `cargo build --locked`, `cargo test --locked -- --nocapture`; `check.*`, `debug_build.*`, `full.*` | PASS; full suite 528 passed, 0 failed, 3 existing ignores (also exercises final P4-03 bounded batching) |
+| Static checks | Python compilation, source size gate, diff check; `static.*` | PASS; changed src files <=900 lines |
+
+All fixtures use private XDG roots, a loopback EZTV server and the prescribed recording notify-send shim. Exact argv artifacts are retained beside case JSONL; no live desktop notification or window launch is claimed. No unmet criterion, deviation or follow-up. No all.sh between track beads, per owner instruction.

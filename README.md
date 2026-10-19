@@ -271,6 +271,9 @@ unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
 
 The daemon posts completion notifications with Open File / Open Folder actions.
+A Shows check that finds unread releases posts one notification about new episodes,
+listing up to three names; Open Shows opens the Shows dashboard. Unchanged
+checks stay silent, and an interactive dashboard or TUI suppresses this notice.
 Browser handlers use `add --origin handler`: the daemon posts Added with Undo
 (keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
 or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
