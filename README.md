@@ -575,3 +575,13 @@ expired cursor emits an explicit resync marker. Ctrl+C detaches only the reader.
 arguments accept repeated `--arg key=value` or one `--json-args` object; `--ref`
 keeps an explicit mutation identity across invocations. `api --list --json` and
 `robot-docs api` expose the operation catalogue. Reads never start a daemon.
+
+Local integration consumers can run `python3
+agent_ergonomics_audit/audit/regression_tests/daemon.py target/debug/fbittorrent
+--serve-fixture downloading --throttle 32768` (also idle/seeding/paused; empty is
+an idle alias). The FBTFIXTURE JSON line names its private socket, summary and
+owned resources. The fixture stays alive until stopped; an initially closed
+stdin does not stop it. Closing a pipe that was open at launch supports UI
+teardown. A guardian removes both private peer daemons even after launcher
+SIGKILL. --systemd uses only disposable transient units. Global throttle API
+wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
