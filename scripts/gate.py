@@ -184,7 +184,8 @@ def optional_checks(env, binary):
     for flag, name, command in [
         ('QS', 'qs_store', ['bash', 'plugin/tests/qs-store.sh']),
         ('QS', 'qs_smoke', ['bash', 'plugin/tests/qs-smoke.sh']),
-        ('VISUAL', 'visual', ['bash', 'plugin/tests/qs-visual.sh']),
+        ('QS', 'qs_palette', ['bash', 'plugin/tests/qs-dashboard.sh', '--palette', str(binary), '--log-root', '{logs}']),
+        ('VISUAL', 'visual', ['bash', 'plugin/tests/qs-visual.sh', '--milestone', '--binary', str(binary)]),
         ('WIDGET', 'widget', [PYTHON, str(Path(__file__).resolve()), '--unit', 'bash', str(HARNESS / 'widget_keys.sh')]),
         ('VPN', 'vpn', [PYTHON, str(HARNESS / 'ci.py'), '--suite', 'gate_vpn', '--isolate-state', '--',
                        PYTHON, str(HARNESS / 'vpn.py'), str(binary)]),
@@ -324,7 +325,8 @@ def rust_tests(mode, logs, env):
 
 
 def full_checks(env, binary):
-    return [python_check('logging', 'agent_ergonomics_audit/audit/regression_tests/fbtlog_test.py'),
+    return [python_check('resource_controls', 'agent_ergonomics_audit/audit/regression_tests/resources_test.py'),
+            python_check('logging', 'agent_ergonomics_audit/audit/regression_tests/fbtlog_test.py'),
             python_check('qml_logging', 'plugin/tests/qs-log.py', '--self-test'),
             Check('hygiene', ['bash', 'scripts/check-gitignore.sh']),
             Check('licences', ['bash', 'scripts/check-nova3-licences.sh']),
@@ -357,7 +359,7 @@ def summary(checks, elapsed, logs, mode):
         if group in ('hygiene', 'licences', 'widget_model'): group = 'hygiene'
         if group == 'tui_controls': group = 'tui_smoke'
         if group == 'upgrade_fixtures': group = 'daemon'
-        if group in ('qs_store', 'qs_smoke', 'visual', 'widget', 'vpn'): group = 'optional'
+        if group in ('qs_store', 'qs_smoke', 'qs_palette', 'visual', 'widget', 'vpn'): group = 'optional'
         counts = groups.setdefault(group, dict(PASS=0, FLAKY=0, FAIL=0, **{'NOT RUN': 0}))
         counts[check.status] += 1
     print('\nGate          PASS  FLAKY  FAIL  NOT RUN')

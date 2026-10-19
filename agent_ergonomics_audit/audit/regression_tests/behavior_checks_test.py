@@ -32,6 +32,17 @@ class BehaviorChecks(unittest.TestCase):
                 self.assertFalse(expected_daemon_stderr("\n".join(self.phases[:index] + self.phases[index+1:])))
         self.assertFalse(expected_daemon_stderr("INFO startup only"))
 
+    def test_parked_owner_releases_its_empty_slot_without_a_session_drain(self):
+        parked=self.phases[:1]+self.phases[2:]
+        self.assertTrue(expected_daemon_stderr("\n".join(parked),engine_active=False))
+        self.assertTrue(expected_daemon_stderr("\n".join(self.phases),engine_active=False))
+        self.assertFalse(expected_daemon_stderr("\n".join(parked)))
+        for index in range(len(parked)):
+            with self.subTest(missing=index):
+                self.assertFalse(expected_daemon_stderr("\n".join(parked[:index]+parked[index+1:]),engine_active=False))
+        wrong=parked.copy();wrong[1],wrong[2]=wrong[2],wrong[1]
+        self.assertFalse(expected_daemon_stderr("\n".join(wrong),engine_active=False))
+
     def test_every_drain_phase_keeps_its_order(self):
         for index in range(len(self.phases)-1):
             phases = self.phases.copy()

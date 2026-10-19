@@ -42,7 +42,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('binary',type=Path);parser.add_argument('--log-root',type=Path)
     args=parser.parse_args();binary=args.binary.resolve()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
-    with fbtlog.Case('quick_ui','palette_live') as case,fixtures.daemon_pair(case,binary,False,262144) as pair,d.Sandbox() as box:
+    with fbtlog.Case('quick_ui','palette_summon_routing') as case,fixtures.daemon_pair(case,binary,False,262144) as pair,d.Sandbox() as box:
         source=pair.box.root/'source';source.mkdir();items=[]
         for i in range(12):
             path=source/f'Result-{i:02}.bin';path.write_bytes(f'owned search result {i}'.encode())
@@ -113,4 +113,7 @@ def main():
             case.check('ERROR api subscription failed' not in case.suite.stderr_path.read_text(),'subscription handoff produces no API sampling errors','owned daemon stderr checked')
             uninstall();case.check(clean() and not quick_path.exists(),'uninstall removes only owned palette integration and keeps the payload sentinel','original binding, other plugin and payload preserved')
     return fbtlog.suite_status('quick_ui')
-if __name__=='__main__':sys.exit(main())
+if __name__=='__main__':
+    import private_net
+    private_net.enter()
+    sys.exit(main())

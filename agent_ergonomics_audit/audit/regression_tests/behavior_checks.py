@@ -48,11 +48,12 @@ def healthy_diagnostics(stderr):
     return True
 
 
-def ordered_shutdown(stderr, complete=True):
+def ordered_shutdown(stderr, complete=True, *, engine_active=True):
     """Require each owner drain to release the engine before unlinking sockets.
 
     Engine-only restarts may drain before the owner starts shutting down.
-    Unrelated success diagnostics may appear between any two phases.
+    Unrelated success diagnostics may appear between any two phases. A caller
+    that observed a parked/starting owner may omit the absent engine drain.
     """
     phases = [r"daemon draining\b", r"engine drained\b", r"daemon slot released\b",
               r"daemon sockets unlinked\b", r"daemon stopped\b"]
@@ -62,6 +63,8 @@ def ordered_shutdown(stderr, complete=True):
         phase = next((i for i, pattern in enumerate(phases) if re.search(pattern, line)), None)
         if phase is None or (phase == 1 and next_phase == 0):
             continue
+        if phase == 2 and next_phase == 1 and not engine_active:
+            next_phase = 2
         if phase != next_phase:
             return False
         if phase == 4:
@@ -74,5 +77,5 @@ def ordered_shutdown(stderr, complete=True):
     return not complete or (stopped and next_phase == 0)
 
 
-def expected_daemon_stderr(stderr, complete=True):
-    return healthy_diagnostics(stderr) and ordered_shutdown(stderr, complete)
+def expected_daemon_stderr(stderr, complete=True, *, engine_active=True):
+    return healthy_diagnostics(stderr) and ordered_shutdown(stderr, complete, engine_active=engine_active)

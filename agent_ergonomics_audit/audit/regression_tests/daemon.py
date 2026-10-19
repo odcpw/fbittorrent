@@ -363,6 +363,18 @@ class Harness:
     def stop_serve(self, process, number=signal.SIGTERM, code=0):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
+        engine_active = True
+        if code == 0:
+            # A parked owner has no engine to drain. Keep the full shutdown
+            # ordering requirement unless a typed live read proves that state.
+            try:
+                with ApiConn(self) as client:
+                    client.hello()
+                    state = client.call("app.info").get("result", {}).get("state")
+                    engine_active = state not in ("parked", "starting")
+                    self.case.check(True, "record engine slot before signalling owned daemon", str(state))
+            except (OSError, EOFError, ValueError):
+                pass
         stderr_offset = len(self.stderr())
         began = time.monotonic()
         os.kill(pid, number)
@@ -374,7 +386,7 @@ class Harness:
 
         if code == 0:
             diagnostics = self.stderr()[stderr_offset:]
-            self.case.check(expected_daemon_stderr(diagnostics),
+            self.case.check(expected_daemon_stderr(diagnostics, engine_active=engine_active),
                             "owned shutdown has healthy diagnostics and drains before socket unlink", diagnostics)
 
     def lock_free(self):
