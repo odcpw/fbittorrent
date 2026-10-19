@@ -894,3 +894,69 @@ unmerged service is duplicated. Additional neighbouring edits: src/search/
 normalization export + child signal mask, src/agent.rs version/changes,
 regression registries and backward-compatible imdb_owned(with_process=True).
 No release/all.sh between beads per the owner's track cadence.
+
+
+## P5-05 (fbt-p5-05-orh) — verified ready to watch
+
+Added daemon-owned watch history and a once-per-second engine snapshot adapter.
+The largest included video starts at its own piece offset; threshold is
+max(32 MiB, ceil(3%)) plus verified last piece. MKV Info/Duration and MP4 mvhd
+reads are bounded to 1 MiB and remain absent on unknown/malformed data. Playback
+rate calculations remain absent when not downloading or rate/duration unknown.
+History is private 0600, no-follow, bounded (32,768 retained hashes / 2 MiB read),
+atomic and fsynced, survives engine-slot replacement and daemon restart, and
+re-arms after a verified lost prefix while emitting at most once per daemon life.
+Open/default actions use the existing notifier; open_target and glance acknowledge
+shared readiness. API list/get/files, Summary ready counts, events, CLI
+wait --until complete|playable|stall-free, ready file paths, truthful TUI detail
+wording and popup labels now share the same values. Existing coalescing preserves
+ready/stall-free flips while buffering counters coalesce. Contract 1.2.10 / watch
+uses the already-frozen Playable/event shapes; exact hello/error examples append
+only the new implemented capability. Legacy engine wire goldens/state table stay
+unchanged and pass the root suite. All changed src files remain below 900 lines.
+
+Evidence root target/test-logs/fbt-p5-05-orh/: run-daemon.py foreground-final
+target/debug/fbittorrent playable_before_complete playable_never_for_iso
+playable_two_file_mid_piece — 3/3 PASS on the final debug binary. The comprehensive
+case proves: (AC1) real 64 MiB Matroska / 1 MiB/s seed emits exactly one playable
+at >=32 MiB before completed; (AC2) notification Open records xdg-open with the
+video path and shared ack; (AC3) CLI playable wait exits 0 while incomplete,
+returns the video path, and stall-free wait also succeeds; (AC5) pause retains
+readiness; (AC6) restart suppresses the event, actual first-byte corruption makes
+a subsequent startup check lose the prefix, and repair re-arms exactly once.
+Each step is recorded in foreground-final/daemon/playable_before_complete.jsonl.
+AC4: foreground-final/daemon/playable_never_for_iso.jsonl proves the real ISO
+transfer never has playback metadata/event, and both watch waits time out as 8.
+The mid-piece case proves prefix 32.5 MiB from video file index 1 despite absent
+torrent piece 0, per-file readiness only on that video, and paused playable wait.
+systemd-boundary/daemon/playable_two_file_mid_piece.jsonl also PASS.
+
+cargo test --locked: full.* PASS 483, 3 ignored, run once on the final Rust code.
+Focused new-watch-goldens.* PASS 14 checks (watch, bus, TUI words and two new
+80x24 baselines); new baselines reviewed as synthetic rendering only. Earlier
+watch-unit.* PASS 7. size-final.* and git diff --check PASS. watch-cli-final.*
+is the final successful cargo build --locked (debug). No release/all.sh between
+track beads, per owner cadence. Initial live throttle of 16 KiB/s produced a
+truthful stalled/unknown-rate state instead of active slow downloading; the
+qualification now uses 512 KiB/s for the same false assertion and proves the
+faster-rate true flip within 2 seconds. Initial source compile errors were fixed;
+all final assertions remain strict.
+
+UI: qs-format.* and qs-format-artifacts/ PASS, including literal unknown/slow/
+stall-free controls. Actual private headless popup captures over real throttled
+watch daemons PASS: visual-ready-qualified.* / visual-ready-artifacts/ and
+visual-may-stall-final.* / visual-may-stall-artifacts/. PNGs visually inspected:
+target/test-logs/visual/2026-10-19/popup-ready-tokyo-night.png and
+popup-may-stall-tokyo-night.png show Ready to watch and Playable · may stall.
+The ignored headless Sway tool was reused read-only from cod_3's
+plugin/tests/target/headless-tools/usr/bin/sway through FBT_TEST_SWAY; all displays,
+network namespaces, daemons and XDG paths remained private. Early capture attempts
+record the missing-tool, relative-binary-path and hyphenated-case-slug setup
+failures; the harness fixes and qualified runs are retained. No owner shell,
+notification service or torrents were exercised. Additional neighbouring edits
+are the existing TUI details/state views, Model.js, visual fixture/case registry,
+README, capability examples and CLI contract expectations. Dashboard uses the
+existing watch fields/ready counts; a separate dashboard interaction capture is
+not newly qualified. Follow-ups: qualify immediate Open after a completed move
+against the 1-second cached target refresh; refresh P1-06's old watch-fixture
+preconditions when removing its documented watch replay deferrals.

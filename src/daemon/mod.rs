@@ -6,6 +6,7 @@ mod log_capture;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
+pub(crate) mod watch;
 mod upgrade;
 mod test_ready;
 pub mod slot;
@@ -42,6 +43,7 @@ pub struct Daemon {
     resume: Arc<engine::resume::Store>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
+    pub(crate) watch: Mutex<watch::Watch>,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -375,6 +377,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         imdb: Default::default(),
         undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         search: Default::default(),
+        watch: Mutex::new(watch::Watch::open(crate::config::data_dir().join("watch.json"))),
         resume: Arc::new(engine::resume::Store::open(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),

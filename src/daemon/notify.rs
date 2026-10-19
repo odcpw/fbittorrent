@@ -100,6 +100,7 @@ impl Notifier {
             "torrent.added" if event["origin"] == "handler" => {
                 ("Added", vec![("undo", "Undo"), ("window", "Open window")])
             }
+            "torrent.playable" => ("Ready to watch", vec![("default", "Open"), ("open", "Open")]),
             "torrent.completed" => (
                 "Download complete",
                 vec![
@@ -252,6 +253,7 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
         }
         "open" | "default" | "folder" => {
             if let Some(target) = &n.target {
+                if n.kind == "torrent.playable" {request("torrents.open_target", json!({"hash":n.hash}), None)?;}
                 let path = if action == "folder" {
                     if target.is_dir() {
                         target

@@ -365,7 +365,8 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("added: {label}{}", hash.as_deref().map(|h| format!("  ({})", &h[..8.min(h.len())])).unwrap_or_default()));
             Ok(Code::Ok)
         }
-        Cmd::Wait { selectors, timeout, interval } => {
+        Cmd::Wait { selectors, timeout, interval, until } => {
+            if until!=cli::Until::Complete {return Err(AppError::new(Code::Usage,"watch readiness requires the native API").into());}
             connect(&cfg, &c)?;
             let hs = resolve(&c, &selectors)?;
             wait_for(&c, hs, timeout, interval.max(1), json)

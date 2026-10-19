@@ -45,7 +45,10 @@ function isDone(t) { return t.state === "done" || t.state === "seeding" || (t.pr
 var words={metadata:"Metadata",checking:"Checking",downloading:"Downloading",stalled:"Stalled",queued:"Queued",paused:"Paused",done:"Done",seeding:"Seeding",waiting_vpn:"Waiting for VPN",error:"Error",disk_full:"Disk full",ready:"Ready to watch",added_before:"Added before",in_list:"In your list",unread:"Unread",pending:"Pending",reason:"Reason"}
 var stateRoles={metadata:"metadata",checking:"checking",downloading:"download",stalled:"stalled",queued:"queued",paused:"paused",done:"done",seeding:"upload",waiting_vpn:"vpn",error:"error",disk_full:"error",ready:"ready",added_before:"add",in_list:"add",unread:"unread",pending:"paused",reason:"error"}
 function stateLabel(t) {
-  if(t.playable && t.playable.ready && isActive(t))return "Ready to watch"
+  if(t.playable && t.playable.ready && isActive(t)){
+    var p=t.playable
+    return p.stall_free===true || (p.stall_free===undefined && Number(p.buffered_s)>=120) ? "Ready to watch" : "Playable · may stall"
+  }
   if (t.state==="error" && t.reason==="disk_full") return "Disk full"
   if (words[t.state]) return words[t.state]
   switch (t.state) {

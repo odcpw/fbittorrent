@@ -5013,8 +5013,10 @@ CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
 from daemon_staging import staged_not_busy
 CASES["staged_not_busy"] = staged_not_busy
+from daemon_watch import CASES as WATCH_CASES
 from daemon_catalog import CASES as CATALOG_CASES
 CASES.update((function.__name__,function) for function in CATALOG_CASES)
+CASES.update((function.__name__,function) for function in WATCH_CASES)
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
