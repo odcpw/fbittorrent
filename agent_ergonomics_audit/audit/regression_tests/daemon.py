@@ -3576,7 +3576,7 @@ MUTATION_CASES = (ref_replay_remove, ref_per_client, remove_requires_flag, add_u
                   stale_instance_stop_applies, hashes_cap_257, mutation_magnets_and_file_removal, mutation_url_input_bounds, ref_survives_engine_restart)
 
 @contextmanager
-def imdb_owned(name, binary, systemd, oversized=False):
+def imdb_owned(name, binary, systemd, oversized=False, with_process=False):
     """Real daemon + local IMDb HTTP endpoints in one private cache tree."""
     import gzip
     import shutil
@@ -3603,9 +3603,11 @@ def imdb_owned(name, binary, systemd, oversized=False):
                 if not (harness.receive_ready() and harness.wait_engine()):
                     raise RuntimeError("private IMDb daemon did not start")
                 try:
-                    yield case, sandbox, harness, source, directory, cache
+                    values = (case, sandbox, harness, source, directory, cache)
+                    yield (*values, process) if with_process else values
                 finally:
-                    harness.stop_serve(process)
+                    if process.child.poll() is None:
+                        harness.stop_serve(process)
                     harness.lock_free()
 
 
@@ -5011,6 +5013,8 @@ CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
 from daemon_staging import staged_not_busy
 CASES["staged_not_busy"] = staged_not_busy
+from daemon_catalog import CASES as CATALOG_CASES
+CASES.update((function.__name__,function) for function in CATALOG_CASES)
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES

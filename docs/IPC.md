@@ -501,7 +501,26 @@ Staged rows are excluded from queue admission and all counts except `staged`;
 their metadata-resolution tasks are excluded from every idle busy reason.
 Summary top rows and pending-download disk demand also exclude staged records.
 
+## CLI catalogue sources (P3-07)
+
+CLI search and IMDb use the existing API after a bounded 200 ms hello when the
+owner is running and advertises the relevant capability. When the owner is down,
+parked, stopping, silent or lacks the capability, the same normalized sources run
+in-process. These reads never start the daemon. Search waits for `search.done`,
+then takes a final atomic result snapshot before releasing its owned session;
+`--limit` applies after shared deduplication and sorting. `--install` waits for its
+mutation result. The legacy WebUI selection retains its existing route.
+The frozen `search.install` accepts HTTPS sources; Invalid non-HTTPS CLI install URLs retain their local validation failure
+(exit 5), including while a daemon is running. No API input rule is relaxed. Contract 1.2.9 adds only `providers[]` to each native CLI search row;
+legacy fields and human output share one shaper. `imdb --refresh` forwards
+`refresh:true` so the daemon replaces its index exactly once per forced call.
+RSS/Shows routing and TUI on-open refresh removal follow their service integration.
+
 ## Changelog
+
+- **P3-07:** CLI search/IMDb use capable running daemons or shared local sources;
+  contract 1.2.9 adds search result `providers[]` and deterministic provenance.
+
 
 - **P3-06:** implements `staging`, `torrents.commit/discard`, and the reserved
   `stage` argument; CLI contract 1.2.8 includes additive `staged` row visibility.

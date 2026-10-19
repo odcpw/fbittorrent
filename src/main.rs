@@ -152,31 +152,7 @@ fn run(cli: Cli) -> Result<Code> {
             return Ok(Code::Ok);
         }
         Cmd::Imdb { name, refresh } => {
-            if refresh || imdb::ratings_stale() {
-                eprintln!("fetching IMDb ratings dataset…");
-                imdb::refresh_ratings()?;
-            }
-            let n = name.join(" ");
-            let Some(t) = imdb::lookup(&n)? else {
-                emit(json, serde_json::json!({"ok": true, "found": false, "query": n}), || println!("no match"));
-                return Ok(Code::Ok);
-            };
-            let poster = if t.poster_url.is_empty() { None } else { imdb::fetch_poster(&t.poster_url, 300).ok().map(|p| p.display().to_string()) };
-            if json {
-                let mut v = serde_json::to_value(&t)?;
-                v["ok"] = serde_json::json!(true);
-                v["found"] = serde_json::json!(true);
-                v["url"] = serde_json::json!(t.url());
-                v["poster_path"] = serde_json::json!(poster);
-                println!("{}", agent::with_warnings(v));
-                return Ok(Code::Ok);
-            }
-            println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
-            match (t.rating, t.votes) { (Some(r), Some(v)) => println!("★ {r:.1}  ({v} votes)"), _ => println!("★ n/a") }
-            if !t.stars.is_empty() { println!("{}", t.stars); }
-            if !t.blurb.is_empty() { println!("\n{}\n{}", t.blurb, t.wiki_url); }
-            if let Some(p) = poster { println!("poster: {p}"); }
-            return Ok(Code::Ok);
+            return cli::catalog_imdb::run(&cfg,name.join(" "),refresh,json);
         }
         Cmd::Config => {
             emit(json, serde_json::json!({"ok": true, "path": config::config_path().display().to_string(), "config": serde_json::to_value(&cfg)?}), || {
@@ -485,6 +461,7 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Shows(sub) => shows_cmd(&cfg, &c, sub, json),
         Cmd::Search { query, wait, limit, install, install_url, plugins } => {
+            if cfg.native() {return cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json);}
             if !cfg.native() { connect(&cfg, &c)?; }
             if plugins {
                 let ps = c.search_plugins()?;

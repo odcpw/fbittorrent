@@ -184,7 +184,7 @@ def api_list_matches_ipc_md(binary,systemd):
         step.close(result.returncode==0,json.dumps(dict(exit=result.returncode,stdout=result.stdout,stderr=result.stderr)))
         independent=json.loads(result.stdout)
         case.check(independent['operations']==catalog,'static catalogue works even with an invalid private config',json.dumps(independent))
-        case.check(caps['contract_version']=='1.2.8'  and all(any(c['field']==name for c in caps['changes']) for name in ['events','api']),
+        case.check(caps['contract_version']=='1.2.9'  and all(any(c['field']==name for c in caps['changes']) for name in ['events','api']),
                    'additive event/API changes advance current patch without downgrading integrated fields',json.dumps(caps['changes']))
 
 

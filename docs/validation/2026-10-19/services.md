@@ -848,3 +848,49 @@ Exact staging fixture correction (other bytes retained): before SHA256 `96aa411f
 +{"dir":"c2s","frame":{"id":5,"op":"torrents.discard","args":{"hash":"0123456789abcdef0123456789abcdef01234568"}}}
  {"dir":"s2c","frame":{"id":5,"ok":true,"result":{"state":"done"}}}
 ```
+
+
+## P3-07 (fbt-p3-07-c2p) — search/IMDb checkpoint
+
+Native CLI search and IMDb probe one 200 ms hello and use only a running capable
+owner; otherwise shared normalized local sources run without launching an engine.
+One legacy JSON/human shaper serves both paths. Search waits for search.done,
+takes an atomic snapshot, dedupes/sorts before limit, releases sessions/subs,
+returns partial rows on bounded waits and reports all-provider failure as exit 5.
+IMDb refresh reaches the persistent owner and reloads exactly once. Contract
+1.2.9 adds providers[]; primary engineName follows the selected provider URL.
+A real multi-provider test exposed Nova inheriting the daemon's blocked TERM
+mask: the owned child launcher now clears that mask, so pool workers terminate
+and search.done arrives. Invalid non-HTTPS install URLs retain local rejection
+(exit 5); the API's HTTPS-only rule stays unchanged. Pending install failures
+are awaited, demonstrated by a real local TLS peer receiving ClientHello then
+closing after 500 ms; successful HTTPS installation is not newly qualified.
+
+Evidence root: target/test-logs/fbt-p3-07-c2p/. run-daemon.py <label>
+target/debug/fbittorrent <cases> used isolated retaining Sandboxes and owned
+foreground/transient-unit processes. foreground-final/daemon/ and
+systemd-final/daemon/: six cases each PASS (cli_search_both_paths_identical,
+cli_search_dedupe_both_paths, cli_search_timeout_cleans_provider,
+cli_search_parked_fallback, cli_search_silent_hello_fallback,
+cli_imdb_both_paths_identical). foreground-install/daemon/ and
+systemd-install/daemon/: cli_search_install_waits PASS each. Agreement cases
+log both stdout SHA256 and first differing byte; provider process groups are
+proven drained. IMDb refresh loads exactly one new index. cli-contract/
+agent_contract/contract.jsonl PASS 65 steps. cargo test --locked: full.log +
+full.jsonl PASS 474, 3 ignored. source-focused.log: 4 pass/1 ignored for shared
+shape/IMDb argument checks. cargo build --locked: debug-final.* PASS. size.*
+PASS (all changed src files under 900 lines); git diff --check PASS.
+Initial foreground/systemd runs retain the two-provider completion and IMDb
+fixture shutdown failures; final cases close both with no weakened assertions.
+
+Acceptance: search/IMDb JSON and human bytes agree up/down, including old search
+characterization bytes with only providers[] removed. Golden provenance is
+actual pre-change 212c3cd (package 0.1.0), captured before this implementation;
+no v0.1.2 binary/tag was available, so v0.1.2 provenance remains unmet. RSS/Shows
+verbs, their selectors/grab/refresh waits, TUI stale/fresh refresh criterion and
+RSS/Shows shape goldens remain pending track A integration: commits 07b3481
+(RSS) and a42a4a3 (Shows) are visible but not ancestors of this branch. No
+unmerged service is duplicated. Additional neighbouring edits: src/search/
+normalization export + child signal mask, src/agent.rs version/changes,
+regression registries and backward-compatible imdb_owned(with_process=True).
+No release/all.sh between beads per the owner's track cadence.
