@@ -300,10 +300,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
         }
     })
 }
-// TABLE remains the frozen full contract. Availability follows the phase's
-// negotiated capabilities; P1-08 installs subscription routing.
+// TABLE remains the frozen full contract. Subscription routing uses the bus.
 pub(super) fn implemented(op: &str) -> bool {
-    !matches!(op, "subscribe" | "unsubscribe") && ops::TABLE.iter().any(|row| row.name == op)
+    ops::TABLE.iter().any(|row| row.name == op)
 }
 pub(super) fn distance(a: &str, b: &str) -> usize {
     if a.len() > 128 {

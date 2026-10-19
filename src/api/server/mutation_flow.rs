@@ -90,6 +90,7 @@ impl Shared {
             return false;
         }
         job.mutation = Some(ticket.clone());
+        job._activity = Some(Arc::new(crate::daemon::policy::Mutation::start(self.daemon.policy.clone())));
         let deadline = job
             .connection
             .pending
@@ -123,6 +124,7 @@ impl Shared {
                     op: job.request.call.op().into(),
                     deadline,
                     confirmation: None,
+                    _activity: job._activity.as_ref().unwrap().clone(),
                 },
             );
         }
@@ -215,7 +217,7 @@ impl Shared {
             ),
         };
         let event = Event::MutationResult {
-            seq: self.event_sequence.fetch_add(1, Ordering::Relaxed),
+            seq: 0, // The instance-wide bus assigns every event sequence.
             ts: now(),
             reference: task.ticket.reference.clone(),
             op: task.op,
@@ -223,6 +225,8 @@ impl Shared {
             error: failure,
             result,
         };
+        let event: Event = serde_json::from_value(self.bus.publish(serde_json::to_value(event).unwrap()))
+            .expect("bus preserves typed mutation events");
         task.ticket
             .finish(event.clone(), |delivery| self.deliver_mutation(delivery));
         let mut events = self.mutation_events.lock().unwrap();

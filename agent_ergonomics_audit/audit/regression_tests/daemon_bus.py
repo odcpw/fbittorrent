@@ -317,3 +317,29 @@ def events_since_seq_replay(binary, systemd):
         case.check(rows == events[1:] and replay[0]["reason"] == "subscribe",
                    "since_seq replays only events after the last seen sequence without changing their timestamps or identities",
                    str(replay))
+
+
+def mutation_bus_sequence(binary, systemd):
+    """A confirmed P1-09 result has one identity across every P1-08 transport."""
+    with d.api_owned("mutation_bus_sequence", binary, systemd) as (case, sandbox, harness, process), d.ApiConn(harness) as client, d.ApiConn(harness) as writer:
+        client.hello(); writer.hello()
+        fixture(writer, sandbox, stopped=True)
+        sub = client.call("subscribe", dict(topics=["events"]))["result"]["sub"]
+        stream = RevisionStream(client)
+        initial = stream.snapshot(sub, ["events"])
+        prior = [item["seq"] for frame in initial for item in frame.get("items", [])]
+        answer = writer.call("app.restart", dict(scope="engine"), ref="bus-restart-once")
+        direct = d.mutation_outcome(writer, answer["result"]["ref"])
+        frame = stream.until(lambda frame: any(item.get("ref") == direct["ref"] for item in frame.get("added", [])))
+        subscribed = next(item for item in frame["added"] if item.get("ref") == direct["ref"])
+        case.check(subscribed == direct and direct["seq"] > max(prior, default=0),
+                   "mutation completion shares its sequence and timestamp with subscribed history",
+                   json.dumps(dict(direct=direct, subscribed=subscribed, prior=prior), sort_keys=True))
+        replay_answer = writer.call("app.restart", dict(scope="engine"), ref="bus-restart-once")
+        repeated = d.mutation_outcome(writer, replay_answer["result"]["ref"])
+        case.check(repeated == direct, "idempotent mutation replay preserves event identity", json.dumps(repeated))
+        client.call("unsubscribe", dict(sub=sub))
+        replacement = client.call("subscribe", dict(topics=["events"], since_seq=direct["seq"]-1))["result"]["sub"]
+        replay = RevisionStream(client).snapshot(replacement, ["events"])
+        found = [item for frame in replay for item in frame.get("items", []) if item.get("ref") == direct["ref"]]
+        case.check(found == [direct], "since_seq contains the confirmed mutation exactly once", json.dumps(found))

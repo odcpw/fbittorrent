@@ -98,7 +98,10 @@ impl Shared {
                     &reference,
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
+                    self.bus.counts(),
                 ),
+                Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
+                Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }
@@ -128,6 +131,15 @@ impl Shared {
                 return;
             }
         }
-        self.answer(&job, result);
+        if let Ok(Reply::Subscribe(subscription)) = &result {
+            let sub = subscription.sub;
+            if job.connection.complete(job.request.id.get(), job.generation, result) {
+                self.bus.activate(job.connection.number, sub);
+            } else {
+                self.bus.unsubscribe(job.connection.number, sub);
+            }
+        } else {
+            self.answer(&job, result);
+        }
     }
 }

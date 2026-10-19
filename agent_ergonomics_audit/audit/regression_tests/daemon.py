@@ -1515,20 +1515,6 @@ def api_collection_cap(binary, systemd):
             harness.lock_free()
 
 
-def api_subscriptions_deferred(binary, systemd):
-    with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
-        hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add"], "P1-06, P1-09 and P7-09 advertise exactly their implemented capabilities", str(hello["caps"]))
-
-        case.check(hello["caps"] == ["torrents", "files", "imdb"], "daemon advertises exactly its implemented capabilities (P3-04 adds imdb)", str(hello["caps"]))
-        for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
-            frame = client.call(op, args, error="unknown_op")
-            nearest = ["torrents.list"] if op == "torrents.lis" else []
-            case.check(frame["error"]["details"]["nearest"] == nearest and bool(frame["error"].get("hint")),
-                       "unknown_op includes only implemented nearby names and a hint", str(frame))
-        client.call("app.info")
-
-
 def api_start_results(binary, systemd):
     with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         client.hello()
@@ -3173,20 +3159,12 @@ if __name__ == "__main__":
 from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
                         structural_frame_within_100ms, detail_topic_released,
                         engine_restart_keeps_connection, slow_client_closed_others_live,
-                        rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay)
+                        rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay, mutation_bus_sequence)
 
 from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
     idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
-
-CASES = {function.__name__: function for function in
-         (idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
-          idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
-          idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
-          idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
-          engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
-          fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
 
 # P1-09: every mutation records its complete envelope, including resend identity.
 def mutation_request(client, op, args, ref=None, instance=None, error=None):
@@ -3613,7 +3591,13 @@ def imdb_poster_atomic(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
+          idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
+          idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,
+          state_watcher_cancellation_stress, mutation_bus_sequence, subscribe_gap_recovery, structural_frame_within_100ms,
+          detail_topic_released, engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
+          imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
@@ -3624,9 +3608,6 @@ CASES = {function.__name__: function for function in
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
           api_concurrent_adds, api_collection_cap, api_replay_normalization, api_start_results,
-          api_missing_completed_payload, api_loopback_seed_receives,
-
-          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
           api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)

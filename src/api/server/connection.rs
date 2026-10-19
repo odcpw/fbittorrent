@@ -31,6 +31,11 @@ impl Connection {
             return;
         }
         if out.frames.len() >= OUTGOING {
+            if let Some(client) = &self.client.lock().unwrap().client {
+                eprintln!("WARN api slow client kind={} name={} queued=512",
+                    serde_json::to_value(client.kind).unwrap(),
+                    serde_json::to_string(&client.name).unwrap());
+            }
             out.frames.clear();
             out.ending = true;
             out.terminal = Some(bye(ByeReason::SlowClient));
@@ -159,7 +164,27 @@ impl Connection {
         }
     }
 }
+impl Shared {
+    fn presence(&self, connection: &Connection) {
+        let client = connection.client.lock().unwrap();
+        let interactive = client.interactive && client.client.as_ref()
+            .is_some_and(|c| c.kind != ClientKind::Bar);
+        let glance = client.glance;
+        drop(client);
+        self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
+        self.bus.refresh();
+    }
+}
 pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stream: UnixStream) {
+    struct Presence<'a>(&'a Shared, u64);
+    impl Drop for Presence<'_> {
+        fn drop(&mut self) {
+            self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
+            self.0.bus.remove_connection(self.1);
+            self.0.bus.refresh();
+        }
+    }
+    let _presence = Presence(&shared, connection.number);
     let mut reader = BufReader::new(stream);
     let mut bytes = Vec::new();
     let mut staged: Vec<Job> = Vec::new();
@@ -307,6 +332,10 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 glance: false,
                 caps: validation::NegotiatedCaps::from_hello(&hello),
             };
+            shared.presence(&connection);
+            // Only the initial hello has a read deadline. A subscribed idle
+            // connection sleeps until data or shutdown wakes the socket.
+            let _ = reader.get_ref().set_read_timeout(None);
             connection.send(json!({"id":request.id,"ok":true,"result":hello}));
             continue;
         }
@@ -337,6 +366,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 client.glance = value;
             }
             drop(client);
+            shared.presence(&connection);
             connection.complete(
                 request.id.get(),
                 generation,
@@ -357,6 +387,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
             request,
             generation,
             mutation: None,
+            _activity: None,
         };
         if !shared.prepare_mutation(&mut job) {
             continue;
@@ -416,6 +447,9 @@ pub(super) fn write_client(
                 .unwrap()
                 .keys()
                 .any(|(number, _)| *number == connection.number);
+        let deadline = connection.pending.lock().unwrap().values()
+            .filter(|p| !p.no_timeout).map(|p| p.deadline)
+            .fold(last + Duration::from_secs(15), Instant::min);
         let mut out = connection.out.lock().unwrap();
         let (frame, terminal) = if let Some(frame) = out.frames.pop_front() {
             (frame, false)
@@ -430,7 +464,7 @@ pub(super) fn write_client(
         } else {
             let _guard = connection
                 .ready
-                .wait_timeout(out, Duration::from_millis(25))
+                .wait_timeout(out, deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
             continue;
         };
@@ -459,6 +493,7 @@ pub(super) fn write_client(
         }
     }
     connection.closed.store(true, Ordering::Release);
+    shared.bus.remove_connection(connection.number);
     *connection.client.lock().unwrap() = ClientState::default();
     connection.pending.lock().unwrap().clear();
     let _ = stream.shutdown(Shutdown::Both);

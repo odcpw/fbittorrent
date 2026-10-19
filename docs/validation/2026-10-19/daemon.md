@@ -67,3 +67,29 @@ countdown. All 20 cases have conforming JSONL and clean owned process/unit clean
 (`final-full/development_full/full.{jsonl,stdout.log}`). Unmet for P1-12: none;
 UI attachment/quit verbs remain P1-15. Handoffs: P1-09 asynchronous mutation workers
 must retain the lifetime guard; P3-01 must update the live/grace-period search count.
+
+## P1-08 / P1-12 — reconciliation with main's server and CLI modules
+
+Kept main's canonical connection/dispatch/framing/mutation-flow modules, ported
+subscription routing, bounded EventSink extensions, bus lifecycle, presence and
+idle override, and removed the superseded duplicate source modules. Consolidated
+hello capabilities and the daemon case registry. P1-09 queued workers and pending
+confirmations now retain the idle guard, and confirmed mutations use the bus's
+single event sequence. A new real case verifies direct delivery, subscribed
+history, idempotent replay and since-sequence replay agree exactly. The live
+transcript adapter retains each subscription's real revision history when calling
+the unchanged frozen checker; a regression accepts the canonical consecutive
+sequence and rejects a gap. No contract fixture or validator changed.
+
+Commands use `target/test-logs/track-daemon-reconcile/run.py`; evidence is relative
+to that directory. `check` (`check-fixed/`) passes `cargo check --locked --tests`;
+`api` (`adapter-units/`) passes 77 module tests with one intentional bridge ignore;
+`build` (`debug-build/`) passes. All nine bus cases and ten P1-12 cases pass in
+foreground (`foreground/`, with the corrected transcript case in
+`foreground-adapter/`) and systemd (`systemd/`), including verified private XDG
+state and owned-process/unit cleanup. `full` (`full-final/`) passes the single
+full `cargo test --locked -- --nocapture`: 326 passed, zero failed, two intentional
+ignores. Every changed Rust source is below 900 lines. The earlier parser-phase
+and transcript-context failures remain archived. No all.sh between track beads,
+per owner policy. Unmet for this port: none. The existing P1-08 literal canonical
+live replay limitation above remains recorded; no additional claim is made here.
