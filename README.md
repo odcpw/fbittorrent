@@ -232,7 +232,10 @@ the window or restarting the shell. `h` / `l` change pane focus. In focused File
 Space toggles the selected file, `a` / `n` include or skip the filtered files, `/`
 filters names, and `o` opens the selected file. Files sort naturally by episode
 number. Overview loads the daemon's local IMDb poster and shows the confirmed
-seed policy. Log shares one bounded subscription and filters by torrent hash.
+Upload: off/on permission. Upload defaults off, and the explicit opt-in lives in
+Details rather than Add. Log shares one bounded subscription and filters by torrent hash.
+The [M2 demo](docs/M2-demo.md) walks through find/add/watch, the Shows inbox and
+safe cleanup, with the remaining real-desktop checks listed explicitly.
 The Pieces tab shows the verified have bitfield, first/last priority markers and
 the known playable prefix. Both UIs release its two-second subscription when
 hiding the pane. Large torrents are aggregated to the available display width.

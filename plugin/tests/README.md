@@ -42,14 +42,13 @@ stop and reap all owned children. It never fabricates states for a screenshot.
 | File | What it tests | Run | Last result |
 |---|---|---|---|
 | `smoke/probe-ui.qml` | Installed `qs.Ui.PanelHero` and `qs.Commons` imports via private symlinks | `FBT_BIN=<binary> plugin/tests/qs-smoke.sh` | PASS, Quickshell 0.3.2, revision 2b4501a282689792b62e94f3fb30d8f512324fe6 |
-| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | PASS on socket-polling fallback; live subscription restoration still needs the P1-08 server cap |
+| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | Uses the current API subscription service |
 
 The smoke runs offscreen and never uses an owner Wayland socket. It reads only
 `app.info` from an already running owner API socket before/after the test to check
 `clients.bar`; absent socket or changed instance is logged as a skip, and no owner
-daemon is started. The current pre-P1-11 binary lacks `status --quiet`, so readiness
-uses its equivalent read-only `status --json` until that flag appears. The owner
-probe likewise uses API 1 directly until the `api` CLI verb lands.
+daemon is started. The owner probe is read-only API 1; fixture readiness and all
+mutations use the disposable daemon.
 
 ## Dashboard and network boundary
 
@@ -79,9 +78,9 @@ not fully contained. Requalified runs are retained with the Track C receipt.
 native table at 900 and each tier boundary ±1, including live header widths,
 sidebar/details docking, a native double-click, no right-click action, Cancel-first
 remove/delete, typed sort persistence across a service restart, confirmed
-pause/resume and seed policy, recorded argv for open/copy/title links, and real
-Ctrl+Q shutdown. A missing Shows cap is an explicit unqualified positive-follow
-case. `python3 plugin/tests/run-qs.py table plugin/tests/table` covers the Qt proxy,
+pause/resume, Details upload opt-in/out, recorded argv for open/copy/title links,
+real Shows follow and Ctrl+Q shutdown. It captures Details at 900/1280/1500/1600 px.
+`python3 plugin/tests/run-qs.py table plugin/tests/table` covers the Qt proxy,
 extra typed sorts, pending/failed ref indexes, unread badges and visible ranges.
 `lint.sh` rejects collection loops in Service/view frame handlers with positive
 and negative controls.
@@ -138,3 +137,13 @@ checks read/transfer persistence; W8 verifies Cancel, filtered removal, bounded
 Undo and deletion against private payload digests and unrelated sentinel files.
 Player and notification commands are private recording shims. An unavailable
 workflow fails explicitly. Logs are in `target/test-logs/qs_journey_w1/`, `qs_journey_w2/` and `qs_journey_w8/`.
+
+`python3 plugin/tests/m2.py --binary <current-binary>` runs the P2 checks, every
+dashboard entry point, all width boundaries (including 1098/1398/1598), the three
+owner journeys and P3 daemon cases serially. Native shells and foreground daemon
+cases use private network namespaces. The real-manager catalogue autostart case
+uses its existing disposable named unit, private XDG and loopback HTTP fixture
+in the manager's network namespace, so both ends can actually communicate. Focus with
+`--group p2|dashboard|daemon` or repeated `--case NAME`. Each invocation retains
+commands, exit status, output and generated case evidence under `target/m2-*/`.
+See [the one-page owner demo](../../docs/M2-demo.md) for real-desktop checks.

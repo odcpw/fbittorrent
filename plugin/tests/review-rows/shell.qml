@@ -9,6 +9,7 @@ import "Plugin/DetailText.js" as DetailText
 ShellRoot {
   id:root
   property int phase:0
+  property int waiting:0
   readonly property string saved:"a".repeat(40)
   readonly property string staged:"b".repeat(40)
   ListModel {id:rows;dynamicRoles:true}
@@ -39,6 +40,11 @@ ShellRoot {
   Timer {interval:50;repeat:true;running:true
     onTriggered:{
       var shown=root.texts(table),captions=root.texts(filters),c=service.store.counts
+      // Qt's proxy/delegate updates are asynchronous. Wait for the actual
+      // membership, with a bounded failure, rather than assuming one 50 ms tick.
+      var settled=root.phase===0 ? table.count===2 && shown.indexOf("Reviewing")>=0 : root.phase===1 ? table.count===1 && table.hashAt(0)===root.saved : root.phase===2 ? table.count===1 && table.hashAt(0)===root.staged : root.phase===3 ? table.count===0 : root.phase===4 ? table.count===1 : table.count===0
+      if(!settled && root.waiting++<60)return
+      root.waiting=0
       if(root.phase===0){
         root.check("All 2 / Paused 1 / Reviewing 1 describe the two actual rows",{rows:table.count,labels:captions,c:c,status:service.status},table.count===2 && filters.count("all")===2 && filters.count("paused")===1 && filters.count("reviewing")===1 && captions.indexOf("All  2")>=0 && captions.indexOf("Paused  1")>=0 && captions.indexOf("Reviewing  1")>=0 && service.status.total===1)
         root.check("staged row says Reviewing and contributes no Ready/Paused transfer state",shown,shown.indexOf("Reviewing")>=0 && c.ready===0 && service.store.filter("paused").length===1 && !Model.isStopped(service.store.torrents[root.staged]))

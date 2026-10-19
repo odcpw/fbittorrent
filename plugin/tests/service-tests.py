@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real daemon fallback and scripted API subscription/reload checks; no live shell."""
+"""Real daemon and scripted API subscription/reload checks; private shell only."""
 from contextlib import contextmanager
 import json
 import os
@@ -12,12 +12,22 @@ import daemon
 import fixtures
 from fbtlog import Case, suite_status
 from qs_env import prepare, ROOT
+from headless import Headless
 
 
 class Shell:
     def __init__(self, case, sandbox, hooks=True):
         self.case = case
-        self.config, self.env = prepare(sandbox, Path(__file__).with_name('service'), wayland=True)
+        self.compositor = Headless(sandbox, case)
+        try:
+            self.start(case, sandbox, hooks)
+        except BaseException:
+            self.compositor.close()
+            raise
+
+    def start(self, case, sandbox, hooks):
+        self.config, self.env = prepare(sandbox, Path(__file__).with_name('service'))
+        self.env.update(self.compositor.env)
         fixtures.path_shim('fbittorrent', 'exit 0', sandbox.root)
         self.env['FBT_TEST_HOOKS']='1' if hooks else '0'
         self.env['FBT_TEST_BINARY']=str(sandbox.root/'shims/fbittorrent')
@@ -50,6 +60,10 @@ class Shell:
         return json.loads(self.ipc('state'))
 
     def close(self):
+        try: self.close_shell()
+        finally: self.compositor.close()
+
+    def close_shell(self):
         if self.child.poll() is None:
             subprocess.run(['qs','kill','--pid',str(self.child.pid)], env=self.env, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, timeout=3)
@@ -70,7 +84,7 @@ def shell(case, sandbox, **options):
     finally: process.close()
 
 
-def real_fallback(binary):
+def real_service(binary):
     with Case('qs_service','bar_single_connection') as case, fixtures.Sandbox() as sandbox, \
             daemon.Harness(case,binary,sandbox,False) as harness:
         process=harness.start_serve()
@@ -89,7 +103,8 @@ def real_fallback(binary):
                     screens=json.loads(q.ipc('screens'))
                     case.check(True, 'record isolated widget screen bindings',json.dumps(dict(screens=screens,physical_two_monitors=len(set(screens))==2,
                                note='two screen bindings' if len(set(screens))==2 else 'SKIP physical second monitor: only one exposed; owner policy forbids changing the live compositor')))
-                    case.check(q.ipc('mode') == 'poll', 'P1-06 fallback uses socket polling', q.ipc('mode'))
+                    subscribed=q.wait(lambda: s if (s:=q.state()).get('subs',{}).get('summary') and s['subs'].get('events') else None)
+                    case.check(q.ipc('mode') == 'subscribe', 'real daemon pushes summary and event subscriptions through the one shared connection', json.dumps(subscribed))
                     log=sandbox.root/'shims/fbittorrent.log'
                     case.check(not log.exists(), 'no CLI process is spawned for automatic status', str(log))
                     q.ipc('start')
@@ -155,7 +170,7 @@ def hook_guard():
 if __name__=='__main__':
     import private_net
     private_net.enter()
-    real_fallback(Path(sys.argv[1]).resolve())
+    real_service(Path(sys.argv[1]).resolve())
     scripted_reload()
     hook_guard()
     sys.exit(suite_status('qs_service'))

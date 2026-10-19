@@ -90,12 +90,14 @@ def run(binary):
                             yts = q.wait(lambda: ready(q), timeout=5)
                             yts_ms = (time.monotonic() - began) * 1000
                             case.check(yts_ms <= 1000 and yts['grid']['cells'] == 60
-                                       and yts['total'] == 70 and yts['query'] == 'YTS · Latest movies',
+                                       and yts['total'] == 70 and yts['label'] == 'YTS · Latest movies'
+                                       and yts['query'] == '',
                                        'empty Search renders the YTS grid and sixty unique local posters within 1 s',
                                        json.dumps(dict(ms=yts_ms, state=yts)))
                             capture(case, q)
                             # Exercise the actual Browse sheet navigation, not a
                             # test-only callback that bypasses its selection.
+                            q.keys(['-k','Down'],lambda:(q.state().get('view') or {}).get('focus')=='results')
                             try:
                                 q.keys(['b'], lambda: (q.state().get('view') or {}).get('panel') == 'browse')
                             except TimeoutError as error:
@@ -136,9 +138,17 @@ def run(binary):
                         if 'staging' in hello['caps']:
                             with Case('qs_grid', 'grid_enter_stages') as case:
                                 q.keys(['-k', 'Return'], lambda: (q.state().get('view') or {}).get('add', {}).get('visible'))
-                                q.wait(lambda: (q.state().get('view') or {}).get('add', {}).get('phase') == 'ready', timeout=12)
+                                # Browse supplies a magnet, not a fabricated file
+                                # list. Review must work before peers answer.
+                                try:
+                                    q.wait(lambda: (a := (q.state().get('view') or {}).get('add', {})).get('owned')
+                                           and a.get('hash') == state(q)['cursor'] and a.get('canDownload'), timeout=12)
+                                except TimeoutError as error:
+                                    raise RuntimeError(json.dumps(q.state())) from error
                                 rows = client.call('torrents.list', {})['result']['torrents']
-                                case.check(len(rows) == 1 and rows[0]['staged'], 'Enter stages exactly one selected cell before Download', json.dumps(rows))
+                                case.check(len(rows) == 1 and rows[0]['staged'] and not rows[0]['checked']
+                                           and not rows[0]['upload_enabled'] and not list(box.downloads.iterdir()),
+                                           'Enter stages exactly one selected magnet before Download without payload transfer or upload', json.dumps(rows))
                         else:
                             print('UNMET: grid_enter_stages needs P3-06 staging on this branch; no passing staging case is recorded.', flush=True)
                     finally:
