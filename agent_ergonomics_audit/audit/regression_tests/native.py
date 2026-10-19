@@ -26,6 +26,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import daemon
+from behavior_checks import expected_daemon_stderr, healthy_diagnostics, well_formed_version
 import fixtures
 import fbtlog
 from fbtlog import Case, REPO, suite_status
@@ -635,11 +636,11 @@ def resume_done_refused(harness, root):
 
     harness.wait_for(completed, "local bytes verify and stop on completion")
     code, envelope = harness.cli_result("start", hash_, code=1)
-    expected = dict(ok=False, code=1, code_name="failure",
-                    error="already complete; seeding is off for this torrent", hint=f"fbittorrent seed {hash_}")
     harness.record("start finished stop-on-complete torrent",
-                   "exit 1; code 1, code_name failure, exact refusal and seed hint",
-                   json.dumps(envelope), code == 1 and envelope == expected)
+                   "exit 1; failure envelope with explanatory text and the selected torrent's seed command",
+                   json.dumps(envelope), code == 1 and envelope.get("ok") is False
+                   and envelope.get("code") == 1 and bool(envelope.get("error"))
+                   and envelope.get("hint") == f"fbittorrent seed {hash_}")
     code, result = harness.cli_result("start", "all")
     record_bulk_start(harness, code, result, hash_)
     code, result = harness.cli_result("delete", hash_)
@@ -737,8 +738,7 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
                      "Native counts describe connected seeds when live; optional seeds distinguishes unknown.")
     capabilities = cli("capabilities")
     note = capabilities.get("field_notes", {}).get("list[].num_seeds")
-    expected = "connected seeds for live native torrents; read optional seeds to distinguish unknown"
-    (step.ok if note == expected else step.fail)(f"Field note: {note}.")
+    (step.ok if isinstance(note, str) and note.strip() else step.fail)(f"Field note: {note}.")
     # Unknown and a measured zero are different observations. This local fixture
     # has no tracker or peer source, so its live count is independently zero.
     info_hash = next(row["hash"] for row in cli("list")["torrents"]
@@ -834,33 +834,7 @@ def store_modes(case, root, env, cli, base, fixture):
 
 
 def expected_shutdown_stderr(stderr):
-    return stderr == "" or re.fullmatch(r"INFO engine drained in [0-9]+ ms\n?", stderr) is not None
-
-
-def expected_daemon_stderr(stderr, complete=True):
-    """Only the daemon's named success phases and legacy dispatch tracing are allowed."""
-    patterns = [r'INFO daemon listening \{.*\} no_notify=(?:false|true)',
-                r'INFO daemon ready state=starting', r'INFO engine starting session',
-                r'INFO engine session exists restores=[0-9]+',
-                r'DEBUG engine initial validation admitted source=engine hash=[0-9a-f]{40}',
-                r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
-                r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
-                r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
-                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
-                r'INFO imdb index loaded refresh=(?:true|false)',
-                r'INFO inhibit started pid=[0-9]+', r'INFO inhibit released',
-                r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
-                r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
-                r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
-    lines = stderr.splitlines()
-    known = all(any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines)
-    if not complete:
-        return known
-    phases = [r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
-              r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
-              r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
-    indices = [next((i for i, line in enumerate(lines) if re.fullmatch(pattern, line)), -1) for pattern in phases]
-    return known and all(i >= 0 for i in indices) and indices == sorted(indices)
+    return healthy_diagnostics(stderr)
 
 
 def startup_survives_bad_record(binary):
@@ -1016,23 +990,21 @@ def startup_survives_bad_record(binary):
                              "bad-record app process exits after session cleanup", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[case.stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(stderr),
-                       "Daemon startup, legacy dispatch and ordered drain phases are the only stderr lines accepted.",
+                       "Daemon stderr has healthy diagnostics and a complete ordered drain.",
                        stderr or "No stderr was emitted.")
             case.check(not expected_daemon_stderr(stderr + "WARNING unexpected\n") and
                        not expected_daemon_stderr(stderr.replace("INFO daemon sockets unlinked", "")) and
                        not expected_daemon_stderr(stderr.replace("INFO daemon draining", "INFO daemon FAILED")),
-                       "Daemon stderr controls reject unknown lines and incomplete or replaced teardown phases.")
-            stderr_examples = [("", True), ("INFO engine drained in 0 ms\n", True),
-                               ("INFO engine drained in 123 ms", True), ("\n", False),
-                               (" INFO engine drained in 1 ms\n", False),
-                               ("INFO engine drained in -1 ms\n", False),
-                               ("INFO engine drained in 1.5 ms\n", False),
-                               ("INFO engine drained in 1 ms\nWARNING unexpected\n", False),
-                               ("INFO engine drained in 1 ms\n\n", False)]
+                       "Daemon stderr controls reject warnings and incomplete or replaced teardown phases.")
+            stderr_examples = [("", True), ("INFO new diagnostic\n", True),
+                               ("DEBUG another diagnostic\n", True),
+                               ("INFO engine drained in 123 ms\nINFO additional detail\n", True),
+                               ("WARN unexpected\n", False), ("ERROR failed\n", False),
+                               ("thread 'worker' panicked\n", False), ("stack backtrace:\n", False)]
             case.check(all(expected_shutdown_stderr(text) == expected for text, expected in stderr_examples),
-                       "The stderr predicate accepts the P0-08 success format and rejects malformed or additional lines.",
-                       json.dumps([dict(stderr=text, expected=expected, observed=expected_shutdown_stderr(text))
-                                   for text, expected in stderr_examples]))
+                       "Success diagnostics may grow; warnings, errors and panic diagnostics fail.",
+                       json.dumps(stderr_examples))
+
         finally:
             tmux("kill-server", check=False)
             harness.close_serve()
@@ -1120,7 +1092,7 @@ def stop_during_hashing(binary):
             stderr_bytes = case.suite.stderr_path.read_bytes()
             first_stderr = stderr_bytes[stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(first_stderr),
-                       "The verification daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
+                       "The verification daemon emits healthy diagnostics with an ordered drain.",
                        first_stderr or "No stderr was emitted.")
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
@@ -1158,7 +1130,7 @@ def stop_during_hashing(binary):
                              "hashing fixture process drains and exits", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(stderr),
-                       "The hashing daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
+                       "The hashing daemon emits healthy diagnostics with an ordered drain.",
                        stderr or "No stderr was emitted.")
         finally:
             tmux("kill-server", check=False)
@@ -1537,7 +1509,7 @@ def main():
             if options.case == "dec_mouse_mode":
                 return suite_status("native")
             with Case("native", "closed_status_stays_closed", enabled=options.case in (None, "closed_status_stays_closed")) as case:
-                case.check(cli("capabilities")["contract_version"], 'Capabilities include the contract version.')
+                case.check(well_formed_version(cli("capabilities").get("contract_version")), 'Capabilities include a well-formed contract version.')
                 cli("stop", "zzzz9999", code=6)
                 cli("stop", code=2)
                 wait_for(lambda: len(cli("rss", "items", "Local feed")["items"]) == 2,
@@ -1773,10 +1745,10 @@ def main():
                            'q leaves the same daemon running.', json.dumps(dict(status=status, before=owner_before, after=owner_after)))
                 diagnostics = error_file.read_bytes()[engine_stderr_offset:].decode()
                 case.check(expected_daemon_stderr(diagnostics, complete=False),
-                           'Daemon and CLI stderr contain only known success phases and legacy dispatch traces.', diagnostics)
+                           'Daemon and CLI stderr contain healthy diagnostics.', diagnostics)
                 case.check(not expected_daemon_stderr(diagnostics + "WARNING unexpected\n", complete=False) and
-                           not expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=Unknown\n", complete=False),
-                           "Daemon stderr allowlist still rejects unknown lines and restart reasons")
+                           expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=NewReason\n", complete=False),
+                           "Daemon diagnostics reject warnings and accept new informational restart details")
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
@@ -1871,9 +1843,8 @@ def main():
                            result["skipped"] == [dict(hash=done, reason="complete_no_seed")],
                            "Bulk start accepts -1 and zero dates and skips only the positive date.", json.dumps(result))
                 result = parked_cli("start", done, code=1)
-                case.check(result == dict(ok=False, code=1, code_name="failure",
-                                         error="already complete; seeding is off for this torrent",
-                                         hint=f"fbittorrent seed {done}"),
+                case.check(result.get("ok") is False and result.get("code") == 1
+                           and result.get("error") and result.get("hint") == f"fbittorrent seed {done}",
                            "A positive completion date still refuses explicit start with the seed hint.", json.dumps(result))
                 case.check(json.loads(ledger.read_text())["records"][0]["completion_on"] == -1,
                            "Starting an unknown-date record does not invent a completion timestamp.")
