@@ -48,7 +48,7 @@ impl Columns {
         );
         Self {
             size: size.map_or_else(|| "—".into(), |v| human_bytes(signed(v))),
-            progress: progress.map_or_else(|| "—".into(), |v| format!("{:.0}%", v * 100.)),
+            progress: crate::torrent_format::progress(progress),
             down: down.map_or_else(String::new, compact_rate),
             eta: if down.is_some() {
                 eta.map_or_else(String::new, compact_eta)

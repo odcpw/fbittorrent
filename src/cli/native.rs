@@ -126,16 +126,16 @@ pub(super) fn emit(json_mode: bool, value: Value) {
         } else if let Some(rows) = value["torrents"].as_array() {
             for row in rows {
                 let hash = row["hash"].as_str().unwrap_or("");
-                let progress = if row["progress_known"] == false {
-                    "—".into()
-                } else {
-                    format!("{:.1}%", 100.0 * row["progress"].as_f64().unwrap_or(0.0))
-                };
+                let progress=crate::torrent_format::progress((row["progress_known"]!=false)
+                    .then(||row["progress"].as_f64()).flatten());
+                let key=serde_json::from_value(row["native_state"].clone()).map_or("unknown",|state|
+                    crate::torrent_format::key(state,row["reason"].as_str(),row["playable"]["ready"]==true));
+                let state=crate::torrent_format::cell(key,row["reason"].as_str()).trim_end();
                 println!(
                     "{}  {:>6}  {:<12} {}",
                     &hash[..hash.len().min(8)],
                     progress,
-                    row["state"].as_str().unwrap_or("unknown"),
+                    state,
                     row["name"].as_str().unwrap_or("")
                 );
             }
