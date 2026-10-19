@@ -196,8 +196,8 @@ impl Validate for Reply {
     }
 }
 
-/// File lengths and torrent sizes belong to separate replies. Keep their
-/// observations per hash for one transcript, checking either arrival order.
+/// Validate the fixture transcript's repeated list/get values and file totals
+/// per hash, checking either arrival order. Omitted values remain unknown.
 #[derive(Debug, Default)]
 pub struct TorrentFileSizes {
     by_hash: BTreeMap<Hash, FileSizeObservations>,
@@ -205,20 +205,38 @@ pub struct TorrentFileSizes {
 #[derive(Debug, Default)]
 struct FileSizeObservations {
     torrent_sizes: BTreeSet<u64>,
+    completed_bytes: BTreeSet<u64>,
     file_totals: BTreeSet<u64>,
 }
 impl TorrentFileSizes {
     fn torrent(&mut self, value: &Torrent, path: &str) -> Checked {
+        let observed = self.by_hash.entry(value.hash.clone()).or_default();
         if let Some(size) = value.size {
-            let observed = self.by_hash.entry(value.hash.clone()).or_default();
+            require(
+                observed
+                    .torrent_sizes
+                    .iter()
+                    .all(|earlier| *earlier == size),
+                &format!("{path}/size"),
+                "must agree with earlier list/get replies for the same hash",
+            )?;
             require(
                 observed.file_totals.iter().all(|total| *total == size),
-                path,
+                &format!("{path}/size"),
                 "must equal the sum of file lengths for the same hash",
             )?;
-            // Retain earlier observations too: a later correct get reply must
-            // not hide an inconsistent list reply before the files arrive.
             observed.torrent_sizes.insert(size);
+        }
+        if let Some(completed) = value.completed_bytes {
+            require(
+                observed
+                    .completed_bytes
+                    .iter()
+                    .all(|earlier| *earlier == completed),
+                &format!("{path}/completed_bytes"),
+                "must agree with earlier list/get replies for the same hash",
+            )?;
+            observed.completed_bytes.insert(completed);
         }
         Ok(())
     }
@@ -227,12 +245,12 @@ impl TorrentFileSizes {
         match (call, reply) {
             (_, Reply::TorrentsList(result)) => {
                 for (index, value) in result.torrents.iter().enumerate() {
-                    self.torrent(value, &format!("/frame/result/torrents/{index}/size"))?;
+                    self.torrent(value, &format!("/frame/result/torrents/{index}"))?;
                 }
                 Ok(())
             }
             (_, Reply::TorrentsGet(result)) => {
-                self.torrent(&result.torrent.torrent, "/frame/result/torrent/size")
+                self.torrent(&result.torrent.torrent, "/frame/result/torrent")
             }
             (Call::TorrentsFiles { args }, Reply::TorrentsFiles(result)) => {
                 let mut total = 0u64;
