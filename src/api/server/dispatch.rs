@@ -48,6 +48,26 @@ impl Shared {
                 }
                 return;
             }
+            if matches!(&job.request.call, Call::SearchGrab { .. }) {
+                if let Err(failure) = ops::search::validate_grab(&self.daemon) { self.answer(&job, Err(failure)); return; }
+            }
+            if matches!(&job.request.call, Call::SearchInstall { .. } | Call::SearchGrab { .. }) {
+                let pending = PendingResult { state: PendingState::Pending, reference: MutationRef::new(&reference).unwrap() };
+                let reply = if matches!(&job.request.call, Call::SearchInstall { .. }) {
+                    Reply::SearchInstall(InstallReply::Pending(pending))
+                } else { Reply::SearchGrab(AddResult { status: MutationResult::Pending { reference: pending.reference },
+                    hash: None, name: None, duplicate: None, deferred: None }) };
+                if self.begin_confirmation(&job, reply, Confirmation::Worker, false) {
+                    let result = ops::search::dispatch(&self.daemon, job.connection.number, &job.request.call);
+                    if result.as_ref().ok().is_some_and(|reply| ops::search::awaits_metadata(&self.daemon, reply)) {
+                        if let Some(active) = self.mutation_active.lock().unwrap().get_mut(&(job.connection.number, job.generation)) {
+                            active.confirmation = Some(Confirmation::Metadata(result.unwrap()));
+                        }
+                        self.mutation_changed.notify_all();
+                    } else { self.confirm((job.connection.number, job.generation), result); }
+                }
+                return;
+            }
             if let Call::TorrentsRecheck { args } = &job.request.call {
                 match ops::recheck::begin(&self.daemon, args) {
                     Ok(batch) => {
@@ -107,7 +127,9 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppSettingsGet { .. }
+                Call::AppLog { .. }
+                | Call::AppStats { .. }
+                | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }
                 | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
@@ -116,12 +138,26 @@ impl Shared {
                     &self.daemon,
                     &job.request.call,
                     &reference,
+                    serde_json::to_value(&*self.connections_since_start.lock().unwrap()).unwrap(),
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
+                    self.bus.counts(),
                 ),
+                Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
+                Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
                 Call::TorrentsTrackers {..} | Call::TorrentsReannounce {..} => ops::trackers::dispatch(&self.daemon,&job.request.call),
                 Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
+                Call::TransferSetLimits { args } => ops::transfer::set_limits(&self.daemon, args),
+                Call::TransferSetAlt { args } => ops::transfer::set_alt(&self.daemon, args.on),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
+                call if call.op().starts_with("search.") => {
+                    let result = ops::search::dispatch(&self.daemon, job.connection.number, call);
+                    if job.connection.read_done.load(Ordering::Acquire) || job.connection.closed.load(Ordering::Acquire) {
+                        self.daemon.search.disconnected(job.connection.number);
+                    }
+                    self.bus.refresh();
+                    result
+                },
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }
         };
@@ -150,6 +186,15 @@ impl Shared {
                 return;
             }
         }
-        self.answer(&job, result);
+        if let Ok(Reply::Subscribe(subscription)) = &result {
+            let sub = subscription.sub;
+            if job.connection.complete(job.request.id.get(), job.generation, result) {
+                self.bus.activate(job.connection.number, sub);
+            } else {
+                self.bus.unsubscribe(job.connection.number, sub);
+            }
+        } else {
+            self.answer(&job, result);
+        }
     }
 }

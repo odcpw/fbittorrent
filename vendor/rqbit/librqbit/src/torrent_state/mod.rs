@@ -224,6 +224,23 @@ pub struct ManagedTorrent {
 }
 
 impl ManagedTorrent {
+    /// Wake on every state transition, including completion (which broadcasts
+    /// only on the live state's finished notifier). Consumers must poll this
+    /// future before sampling and sample again after it wakes. In particular an
+    /// error broadcast can precede the assignment under the state write lock.
+    pub async fn state_changed(&self) {
+        let state = self.state_change_notify.notified();
+        let live = self.live();
+        if let Some(live) = live {
+            rqbit_runtime::select! {
+                _ = state => {},
+                _ = live.finished_notify.notified() => {},
+            }
+        } else {
+            state.await;
+        }
+    }
+
     pub fn id(&self) -> TorrentId {
         self.shared.id
     }
@@ -821,4 +838,53 @@ fn spawn_peer_adder(live: &Arc<TorrentStateLive>, mut peer_rx: PeerStream) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod change_tests {
+    use super::*;
+    use std::{future::Future, task::Poll};
+    async fn arm(wait: std::pin::Pin<&mut impl Future<Output=()>>) {
+        let mut wait=wait;
+        std::future::poll_fn(|context| { assert!(wait.as_mut().poll(context).is_pending(), "wait must register before the transition"); Poll::Ready(()) }).await;
+    }
+    #[test]
+    fn state_changed_pause_unpause_completion_error() {
+        let seed_dir=tempfile::tempdir().unwrap();
+        let client_dir=tempfile::tempdir().unwrap();
+        std::fs::write(seed_dir.path().join("hello.txt"),b"hello").unwrap();
+        let mut bytes=b"d4:infod6:lengthi5e4:name9:hello.txt12:piece lengthi16384e6:pieces20:".to_vec();
+        bytes.extend_from_slice(&[0xaa,0xf4,0xc6,0x1d,0xdc,0xc5,0xe8,0xa2,0xda,0xbe,0xde,0x0f,0x3b,0x48,0x2c,0xd9,0xae,0xa9,0x43,0x4d]);
+        bytes.extend_from_slice(b"7:privatei1eee");
+        let runtime=rqbit_runtime::RuntimeBuilder::new().worker_threads(2).enable_time().build().unwrap();
+        let cx=runtime.request_cx_with_budget(rqbit_runtime::Budget::INFINITE);
+        runtime.block_on(async {
+            let opts=||crate::SessionOptions{dht:None,disable_trackers:true,disable_local_service_discovery:true,..Default::default()};
+            let seed=Session::new_with_opts(&cx,seed_dir.path().to_owned(),crate::SessionOptions{listen:Some(crate::ListenerOptions{listen_addr:"127.0.0.1:0".parse().unwrap(),..Default::default()}),..opts()}).await.unwrap();
+            let seed_handle=seed.add_torrent(&cx,crate::AddTorrent::from_bytes(bytes.clone()),Some(crate::AddTorrentOptions{overwrite:true,..Default::default()})).await.unwrap().into_handle().unwrap();
+            timeout(&cx,Duration::from_secs(5),seed_handle.wait_until_completed(&cx)).await.unwrap().unwrap();
+            let client=Session::new_with_opts(&cx,client_dir.path().to_owned(),opts()).await.unwrap();
+            let handle=client.add_torrent(&cx,crate::AddTorrent::from_bytes(bytes),Some(crate::AddTorrentOptions{paused:true,overwrite:true,..Default::default()})).await.unwrap().into_handle().unwrap();
+            timeout(&cx,Duration::from_secs(5),handle.wait_until_initialized(&cx)).await.unwrap().unwrap();
+            let mut wait=std::pin::pin!(handle.state_changed());arm(wait.as_mut()).await;
+            client.unpause(&cx,&handle).await.unwrap();timeout(&cx,Duration::from_secs(5),wait).await.unwrap();
+            assert!(matches!(handle.stats().state,TorrentStatsState::Live));
+            let mut wait=std::pin::pin!(handle.state_changed());arm(wait.as_mut()).await;
+            client.pause(&cx,&handle).await.unwrap();timeout(&cx,Duration::from_secs(5),wait).await.unwrap();
+            assert!(handle.is_paused());
+            client.unpause(&cx,&handle).await.unwrap();
+            let mut wait=std::pin::pin!(handle.state_changed());arm(wait.as_mut()).await;
+            handle.live().unwrap().add_peer_from_discovery(seed.listen_addr().unwrap()).unwrap();
+            timeout(&cx,Duration::from_secs(10),wait).await.unwrap();
+            assert!(handle.stats().finished,"completion must wake the live finished notifier");
+            assert_eq!(std::fs::read(client_dir.path().join("hello.txt")).unwrap(),b"hello");
+            let mut wait=std::pin::pin!(handle.state_changed());arm(wait.as_mut()).await;
+            handle.stop_with_error(anyhow::anyhow!("state_changed error regression"));
+            timeout(&cx,Duration::from_secs(5),wait).await.unwrap();
+            assert!(matches!(handle.stats().state,TorrentStatsState::Error));
+            timeout(&cx,Duration::from_secs(5),client.stop(&cx)).await.unwrap().unwrap();
+            timeout(&cx,Duration::from_secs(5),seed.stop(&cx)).await.unwrap().unwrap();
+            println!("state_changed woke on real pause, unpause, loopback completion and error");
+        });
+    }
 }

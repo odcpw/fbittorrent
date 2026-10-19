@@ -22,8 +22,11 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
+import daemon
+import fixtures
 import fbtlog
 from fbtlog import Case, REPO, suite_status
 
@@ -290,7 +293,9 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             return child.returncode, json.loads(out)
         socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
         lock_path = socket_path.with_name("engine.lock")
+        owner = NativeHarness(lambda: case, binary, env)
         try:
+            owner.ensure_serve()
             tmux("new-session", "-d", "-s", session, "-n", "keeper", "sleep 120")
             launch = shlex.join([sys.executable, str(supervisor), binary, str(status_path), str(pid_path), str(stderr)])
             code, window = tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", session, launch)
@@ -311,12 +316,14 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             torrent.write_bytes(bencode({"info": info}))
             code, added = cli("add", str(torrent), "--quiet")
             case.check(code == 0 and added.get("ok") is True, "A real unfinished torrent is admitted before terminal close.", json.dumps(added))
-            step = case.step("check the app owns engine.lock before closing its terminal", "flock -n refuses the held instance lock.")
+            owner.wait_for(lambda: owner.cli("show", added["hash"])["state"] in ("stalledDL", "downloading"),
+                           "unfinished fixture is active before terminal close")
+            step = case.step("check the daemon owns engine.lock before closing the TUI terminal", "flock -n refuses the held instance lock.")
             probe = case.popen(["flock", "-n", str(lock_path), "true"], env=env)
             lock_code = probe.wait(timeout=5)
             step.close(lock_code == 1, f"flock exit {lock_code} while the app is open.")
             step = case.step("tmux kill-window " + window,
-                             "No engine.sock, flock -n succeeds, and app exit 129 within 6 seconds; engine drain is logged.")
+                             "TUI exits 129 within 6 seconds while the daemon socket and instance lock remain live.")
             began = time.monotonic()
             kill_code, _ = tmux("kill-window", "-t", window)
             acquired, samples = False, []
@@ -324,15 +331,17 @@ with open(sys.argv[4], "ab", buffering=0) as err:
                 probe = case.popen(["flock", "-n", str(lock_path), "true"], env=env)
                 acquired = probe.wait(timeout=1) == 0
                 samples.append(dict(ms=round((time.monotonic()-began)*1000), socket=socket_path.exists(), lock=acquired))
-                if acquired and not socket_path.exists() and status_path.exists(): break
+                if not acquired and socket_path.exists() and status_path.exists(): break
                 time.sleep(.1)
             elapsed = time.monotonic() - began
             status = json.loads(status_path.read_text()) if status_path.exists() else {}
             trace.write_text(source_trace.read_text() if source_trace.exists() else "<no signal trace>\n")
             diagnostics = stderr.read_text()
-            step.close(kill_code == 0 and elapsed <= 6 and acquired and not socket_path.exists() and
-                       status.get("returncode") == 129 and "engine drained in " in diagnostics,
-                       f"elapsed={elapsed:.3f}s; status={status}; polls={samples}; tui.stderr tail={diagnostics[-2000:]!r}; "
+            download = cli("show", added["hash"])[1]
+            step.close(kill_code == 0 and elapsed <= 6 and not acquired and socket_path.exists() and
+                       status.get("returncode") == 129 and "engine drained in " not in diagnostics and
+                       download["state"] in ("stalledDL", "downloading"),
+                       f"elapsed={elapsed:.3f}s; status={status}; download={download}; polls={samples}; tui.stderr tail={diagnostics[-2000:]!r}; "
                        f"signals={trace.read_text()!r}", [stderr, trace])
         finally:
             if pid_path.exists() and not status_path.exists():
@@ -343,6 +352,7 @@ with open(sys.argv[4], "ab", buffering=0) as err:
                 except FileNotFoundError:
                     pass
             tmux("kill-server")
+            owner.close_serve()
 
 
 def bencode(value):
@@ -357,12 +367,88 @@ def bencode(value):
     return b"l" + b"".join(bencode(item) for item in value) + b"e"
 
 
+def prepare_imdb_fixture(env, names):
+    """Unrelated IMDb lookups stay cache-only in these local torrent fixtures."""
+    cache = Path(env["XDG_CACHE_HOME"]) / "fbittorrent"
+    by_name = cache / "imdb/by-name-v2"
+    by_name.mkdir(parents=True, exist_ok=True)
+    for path in (cache, cache / "imdb", by_name):
+        path.chmod(0o700)
+    for name in names:
+        key = re.sub(r"[^a-z0-9]", "_", name.lower())[:120]
+        path = by_name / (key + ".json")
+        path.write_text('{"missing":true}')
+        path.chmod(0o600)
+    ratings = cache / "title.ratings.tsv"
+    if not ratings.exists():
+        ratings.write_text("tconst\taverageRating\tnumVotes\n")
+        ratings.chmod(0o600)
+
+
 class NativeHarness:
     """Record native CLI calls and retain only the asserted polling captures."""
 
     def __init__(self, get_case, binary, env):
         self.get_case, self.binary, self.env = get_case, binary, env
         self.polling, self.poll_records = False, []
+
+    def ensure_serve(self):
+        """Existing adapter cases own a disposable foreground daemon explicitly."""
+        path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        if getattr(self, "serve", None) is not None and self.serve.poll() is None:
+            return
+        if not Path(self.binary).exists():
+            # Logging-contract fixtures pass a placeholder binary; they exercise tmux and logs, never a daemon.
+            return
+        # The sandbox root: fixtures that keep the real XDG_RUNTIME_DIR (/run/user/<uid>) must not
+        # derive scratch paths from it, so use the sandboxed data dir's parent, else a private tempdir.
+        data = self.env.get("XDG_DATA_HOME")
+        root = Path(data).parent if data and os.access(Path(data).parent, os.W_OK) else Path(tempfile.mkdtemp(prefix="fbt-native-"))
+        # These foreground cases never control the user's service manager.
+        self.env["FBITTORRENT_UNIT"] = "fbt-native-" + str(os.getpid()) + ".service"
+        self.env["HOME"] = str(root / "home")
+        Path(self.env["HOME"]).mkdir(exist_ok=True, mode=0o700)
+        shim = root / "native-shims"
+        shim.mkdir(exist_ok=True)
+        control = shim / "systemctl"
+        control.write_text("#!/bin/sh\ncase \"$*\" in *daemon-reload*) exit 0;; *show*) printf 'LoadState=not-found\\nActiveState=inactive\\nSubState=dead\\nMainPID=0\\nJob=\\n';; *) exit 99;; esac\n")
+        control.chmod(0o700)
+        if str(shim) not in self.env.get("PATH", "").split(os.pathsep):
+            self.env["PATH"] = str(shim) + os.pathsep + self.env.get("PATH", "")
+        ledger = Path(self.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
+        names = [record["name"] for record in json.loads(ledger.read_text())["records"]] if ledger.exists() else []
+        prepare_imdb_fixture(self.env, names + ["terminal-close.fixture"])
+        self.serve = self.get_case().popen([self.binary, "serve", "--idle-exit-secs", "600"],
+                                          env=self.env, stdout=subprocess.DEVNULL)
+        self.wait_for(lambda: path.exists() and self.serve.poll() is None, "disposable daemon listener opens")
+        def ready():
+            try:
+                response = daemon.Harness.engine_call(self, "app/version", timeout=1)
+                return isinstance(response.get("value"), str) and not response.get("error")
+            except (OSError, EOFError):
+                return False
+        self.wait_for(ready, "disposable daemon answers its legacy version request")
+
+    def api(self, op, args=None):
+        """Read real daemon state independently of the CLI's legacy/API shaper."""
+        adapter = SimpleNamespace(case=self.get_case(), sandbox=SimpleNamespace(env=self.env))
+        with daemon.ApiConn(adapter) as connection:
+            connection.hello()
+            return connection.call(op, {} if args is None else args)["result"]
+
+    @property
+    def engine_path(self):
+        return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+
+    def close_serve(self):
+        process = getattr(self, "serve", None)
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=2)
+                self.record("clean up owned daemon", "daemon drains within ten seconds", "required SIGKILL", False)
 
     def record(self, action, expect, observed, ok=True, started=None):
         if self.polling and action == "capture terminal pane" and ok:
@@ -421,6 +507,7 @@ class NativeHarness:
                     observed, gone, started)
         if not gone:
             raise TimeoutError(observed)
+        self.ensure_serve()
         tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
         # Socket removal precedes terminal teardown. Keep this private server
         # alive between sessions so session absence cannot race server exit.
@@ -439,9 +526,10 @@ class NativeHarness:
                 status = status if isinstance(status, dict) else {}
                 present = socket_path.exists()
                 observed = (f"socket={present}; status exit {status_exit}, ok={status.get('ok')}, "
-                            f"app_open={status.get('app_open')}, connection={status.get('connection')}")
-                if (status_exit == 0 and status.get("ok") is True and status.get("app_open") is True
-                        and status.get("connection") == "connected" and present and time.monotonic() < end):
+                            f"running={status.get('running')}, daemon={status.get('daemon')}, connection={status.get('connection')}")
+                if (status_exit == 0 and status.get("ok") is True and status.get("running") is True
+                        and status.get("daemon", {}).get("state") == "running"
+                        and status.get("connection") == "api" and present and time.monotonic() < end):
                     show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
@@ -456,7 +544,7 @@ class NativeHarness:
                 break
             time.sleep(max(0, min(.1, end-time.monotonic())))
         self.record("wait for settings safely reopen engine",
-                    f"Socket present, status ok/app_open/connected and show {hash_} exit 0 within {seconds} seconds",
+                    f"Socket present, status ok/running with daemon running over API and show {hash_} exit 0 within {seconds} seconds",
                     f"{'Ready' if ready else 'Timed out'} after {time.monotonic()-started:.3f} seconds; {observed}",
                     ready, started)
         return restored
@@ -728,12 +816,36 @@ def expected_shutdown_stderr(stderr):
     return stderr == "" or re.fullmatch(r"INFO engine drained in [0-9]+ ms\n?", stderr) is not None
 
 
+def expected_daemon_stderr(stderr, complete=True):
+    """Only the daemon's named success phases and legacy dispatch tracing are allowed."""
+    patterns = [r'INFO daemon listening \{.*\} no_notify=(?:false|true)',
+                r'INFO daemon ready state=starting', r'INFO engine starting session',
+                r'INFO engine session exists restores=[0-9]+',
+                r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
+                r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
+                r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
+                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
+                r'INFO imdb index loaded refresh=(?:true|false)',
+                r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
+                r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
+                r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
+    lines = stderr.splitlines()
+    known = all(any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines)
+    if not complete:
+        return known
+    phases = [r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
+              r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
+              r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
+    indices = [next((i for i, line in enumerate(lines) if re.fullmatch(pattern, line)), -1) for pattern in phases]
+    return known and all(i >= 0 for i in indices) and indices == sorted(indices)
+
+
 def startup_survives_bad_record(binary):
     """Open the real TUI with a corrupt cache and a local unresolved magnet."""
     with Case("native", "startup_survives_bad_record") as case, \
             tempfile.TemporaryDirectory(prefix="fbittorrent-bad-record-") as temporary:
         root = Path(temporary)
-        env = dict(os.environ, TERM="xterm-256color")
+        env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
                                ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
                                ("XDG_STATE_HOME", "state")]:
@@ -876,12 +988,17 @@ def startup_survives_bad_record(binary):
             case.check(magnet not in rows(), "Delete removes an unresolved record without needing a handle.")
             harness.cli("down")
             harness.wait_for(lambda: not socket_path.exists(), "bad-record app closes", seconds=6)
+            tmux("send-keys", "-t", session, "-l", "q")
             harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
                              "bad-record app process exits after session cleanup", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[case.stderr_offset:].decode("utf-8", errors="replace")
-            case.check(expected_shutdown_stderr(stderr),
-                       "Stderr is empty or exactly one successful engine-drained INFO line; nothing else is accepted.",
+            case.check(expected_daemon_stderr(stderr),
+                       "Daemon startup, legacy dispatch and ordered drain phases are the only stderr lines accepted.",
                        stderr or "No stderr was emitted.")
+            case.check(not expected_daemon_stderr(stderr + "WARNING unexpected\n") and
+                       not expected_daemon_stderr(stderr.replace("INFO daemon sockets unlinked", "")) and
+                       not expected_daemon_stderr(stderr.replace("INFO daemon draining", "INFO daemon FAILED")),
+                       "Daemon stderr controls reject unknown lines and incomplete or replaced teardown phases.")
             stderr_examples = [("", True), ("INFO engine drained in 0 ms\n", True),
                                ("INFO engine drained in 123 ms", True), ("\n", False),
                                (" INFO engine drained in 1 ms\n", False),
@@ -895,6 +1012,7 @@ def startup_survives_bad_record(binary):
                                    for text, expected in stderr_examples]))
         finally:
             tmux("kill-server", check=False)
+            harness.close_serve()
             tracker.shutdown()
 
 
@@ -903,7 +1021,7 @@ def stop_during_hashing(binary):
     with Case("native", "stop_during_hashing") as case, \
             tempfile.TemporaryDirectory(prefix="fbittorrent-hashing-") as temporary:
         root = Path(temporary)
-        env = dict(os.environ, TERM="xterm-256color")
+        env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
                                ("XDG_RUNTIME_DIR", "runtime"), ("XDG_CACHE_HOME", "cache"),
                                ("XDG_STATE_HOME", "state")]:
@@ -973,16 +1091,22 @@ def stop_during_hashing(binary):
                        "The stopped state follows completed verification and preserves saved paused intent.", json.dumps(finished))
             harness.cli("down")
             harness.wait_for(lambda: not socket_path.exists(), "saved-paused verification app closes", seconds=6)
+            tmux("send-keys", "-t", session, "-l", "q")
             harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
                              "saved-paused verification app drains and exits", seconds=6)
             stderr_bytes = case.suite.stderr_path.read_bytes()
             first_stderr = stderr_bytes[stderr_offset:].decode("utf-8", errors="replace")
-            case.check(expected_shutdown_stderr(first_stderr),
-                       "The verification run emits only its optional successful-drain INFO line.",
+            case.check(expected_daemon_stderr(first_stderr),
+                       "The verification daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
                        first_stderr or "No stderr was emitted.")
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
             # its fresh startup check before exercising the actual Resume key.
+            # A clean stop lets fast resume (P6-06) trust the saved state and
+            # skip the check, so consume the CLEAN marker as a crash would.
+            marker = store / "resume/CLEAN"
+            case.check(marker.is_file(), "A clean down leaves the fast-resume CLEAN marker.", str(marker))
+            marker.unlink(missing_ok=True)
             harness.start_tmux(tmux, session, launch)
             harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
@@ -1006,27 +1130,212 @@ def stop_during_hashing(binary):
             case.check(bool(restored), "Resume completes the real recheck and admits the torrent.", json.dumps(restored))
             harness.cli("down")
             harness.wait_for(lambda: not socket_path.exists(), "hashing fixture closes", seconds=6)
+            tmux("send-keys", "-t", session, "-l", "q")
             harness.wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1,
                              "hashing fixture process drains and exits", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[stderr_offset:].decode("utf-8", errors="replace")
-            case.check(expected_shutdown_stderr(stderr),
-                       "The hashing fixture emits only the optional successful-drain INFO line.",
+            case.check(expected_daemon_stderr(stderr),
+                       "The hashing daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
                        stderr or "No stderr was emitted.")
         finally:
             tmux("kill-server", check=False)
+            harness.close_serve()
+
+
+# Presence and quit cases use the real static-unit startup path, scoped to a
+# unique runtime-only test unit. No persistent owner unit is started or changed.
+ATTACH_CASES = ("tui_starts_daemon", "q_detaches", "q_confirms", "first_q_notice_once",
+                "daemon_gone_banner", "second_tui_attaches")
+
+
+class AttachedTui:
+    def __init__(self, case, binary, sandbox, harness, session="fbt-fbt-p1-15-h0l"):
+        self.case, self.binary, self.sandbox, self.h = case, binary, sandbox, harness
+        self.socket = session + "-" + str(os.getpid()) + "-" + sandbox.root.name
+        self.session, self.counter = session, 0
+        created = self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+        case.check(created.returncode == 0, "case owns a fresh private tmux server",
+                   f"socket={self.socket}; exit={created.returncode}; stderr={created.stderr}")
+
+    def tmux(self, *args):
+        return subprocess.run(["tmux", "-L", self.socket, "-f", "/dev/null", *args],
+                              env=self.sandbox.env, capture_output=True, text=True, timeout=5)
+
+    def start(self):
+        before = self.clients() if daemon.DaemonContract.socket_path(self.sandbox).exists() else 0
+        self.counter += 1
+        done = self.sandbox.root / f"ui-{self.counter}.exit"
+        stderr = self.case.path.with_suffix(f".tui-{self.counter}.stderr")
+        command = (shlex.join([self.binary, "tui"]) + " 2>>" + shlex.quote(str(stderr)) +
+                   "; code=$?; printf '%s' \"$code\" >" + shlex.quote(str(done)) + "; sleep 600")
+        result = self.tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", self.session, command)
+        target = result.stdout.strip()
+        self.case.check(result.returncode == 0, "a new TUI starts in this terminal", f"target={target}; {result.stderr}")
+        self.h.wait_for(lambda: ("Torrents" in self.capture(target), self.capture(target)), "attached TUI draws its first frame")
+        self.h.wait_for(lambda: ((count := self.clients()) == before + 1, f"tui clients={count}; before={before}"),
+                        "new terminal completes its interactive API hello")
+        self.status()
+        return target, done
+
+    def capture(self, target):
+        result = self.tmux("capture-pane", "-p", "-t", target)
+        return result.stdout
+
+    def assert_pane(self, target, text, timeout=5):
+        return self.h.wait_for(lambda: (text in self.capture(target), self.capture(target)),
+                               "pane contains " + text, timeout=timeout)
+
+    def keys(self, target, key, literal=True):
+        step = self.case.step("tmux send-keys " + ("-l " if literal else "") + repr(key), "key reaches the selected TUI")
+        result = self.tmux("send-keys", "-t", target, *(["-l", key] if literal else [key]))
+        step.close(result.returncode == 0, f"exit={result.returncode}; pane={self.capture(target)!r}")
+        self.status()
+
+    def status(self):
+        return self.h.cli("status")
+
+    def clients(self):
+        with daemon.ApiConn(self.h) as connection:
+            connection.hello()
+            return connection.call("app.stats")["result"]["active_clients"]["tui"]
+
+    def close(self):
+        self.tmux("kill-server")
+
+
+@contextlib.contextmanager
+def local_download(case, binary, leech):
+    """Actual BitTorrent payload from a capped loopback seed, not simulated progress."""
+    import base64
+    import struct
+    import tomllib
+    with daemon.Sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
+        config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
+        peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
+        body = fixtures.bencode(dict(interval=1, peers=peer))
+        with fixtures.HttpFixture(seedbox.root, {"/announce": dict(base64=base64.b64encode(body).decode())}) as tracker:
+            payload = seedbox.downloads / "daemon-fixture.bin"
+            payload.write_bytes(os.urandom(8 * 1024 * 1024))
+            torrent = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
+            process = seedh.start_serve()
+            if not (seedh.receive_ready() and seedh.wait_engine()):
+                raise RuntimeError("loopback seed failed to start")
+            seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
+            seedh.wait_for(lambda: ((row := json.loads(seedh.engine_call("torrents/info")["value"])[0])["state"] == "uploading", str(row)), "verified local seed")
+            reply = seedh.engine_call("torrents/setUploadLimit", "POST", [("hashes", torrent.info_hash), ("limit", "32768")])
+            case.check(reply.get("value") == "Ok.", "seed upload is capped so the download remains active", str(reply))
+            leech.cli("add", str(torrent.torrent), "--quiet")
+            leech.wait_for(lambda: ((row := leech.cli("show", torrent.info_hash))["completed"] >= 32768 and
+                                   row["progress"] < 1, str(row)), "real local payload begins", timeout=20)
+            try:
+                yield torrent.info_hash
+            finally:
+                seedh.stop_serve(process)
+
+
+def attachment_case(name, binary):
+    with Case("native", name) as case, daemon.Sandbox() as sandbox, \
+            daemon.Harness(case, binary, sandbox) as h, daemon.InstalledUnit(h) as unit:
+        ui = AttachedTui(case, binary, sandbox, h)
+        try:
+            case.check(not h.engine_path.exists() and unit.pid() == 0,
+                       "fixture has no daemon before the TUI starts it", str(h.engine_path))
+            target, done = ui.start()
+            pid = unit.pid()
+            case.check(pid > 1 and h.engine_path.exists(), "starting TUI starts its isolated daemon", f"pid={pid}")
+            ui.assert_pane(target, "Torrents")
+            h.wait_for(lambda: ((count := ui.clients()) == 1, f"tui clients={count}"), "one presence connection")
+            # The worker must keep the presence alive beyond its five-second heartbeat.
+            if name == "tui_starts_daemon":
+                time.sleep(5.3)
+                case.check(ui.clients() == 1 and unit.pid() == pid, "presence heartbeat retains the interactive client", f"pid={pid}")
+                ui.keys(target, "C-c", literal=False)
+                h.wait_for(lambda: (done.exists(), "UI exit marker=" + str(done.exists())), "Ctrl+C detaches")
+                case.check(unit.pid() == pid, "Ctrl+C leaves the daemon running", json.dumps(ui.status()))
+            elif name in ("q_detaches", "q_confirms"):
+                with local_download(case, binary, h) as hash_:
+                    ui.assert_pane(target, "daemon-fixture.bin")
+                    if name == "q_detaches":
+                        before = h.cli("show", hash_)["completed"]
+                        ui.keys(target, "q")
+                        h.wait_for(lambda: (done.exists(), ui.capture(target)), "q closes only the TUI")
+                        h.wait_for(lambda: ((row := h.cli("show", hash_))["completed"] > before and row["progress"] < 1,
+                                           str(row)), "download gains payload after q", timeout=8)
+                        case.check(unit.pid() == pid, "same daemon continues the real local download", json.dumps(ui.status()))
+                    else:
+                        # Each cancellation is a control against accidental shutdown.
+                        for key, literal in [("Y", True), ("n", True), ("Enter", False)]:
+                            ui.keys(target, "Q")
+                            ui.assert_pane(target, "Stop fbittorrent? 1 downloads pause until it starts again. y/N")
+                            ui.keys(target, key, literal)
+                            case.check(unit.pid() == pid and not done.exists(), "only lowercase y can confirm shutdown", json.dumps(ui.status()))
+                        ui.keys(target, "Q")
+                        ui.assert_pane(target, "Stop fbittorrent? 1 downloads pause until it starts again. y/N")
+                        ui.keys(target, "y")
+                        h.wait_for(lambda: (not h.engine_path.exists() and unit.pid() == 0, str(ui.status())), "Q/y stops daemon", timeout=6)
+                        h.wait_for(lambda: (done.exists(), ui.capture(target)), "confirmed Q closes this TUI")
+            elif name == "first_q_notice_once":
+                notice = "Downloads continue in the background; fbittorrent stops itself when idle."
+                for ordinal in (1, 2):
+                    ui.keys(target, "q")
+                    h.wait_for(lambda: (done.exists(), ui.capture(target)), "q detaches without acknowledgement")
+                    pane = ui.capture(target)
+                    case.check((notice in pane) == (ordinal == 1), "only first q prints the background notice", pane)
+                    saved = Path(sandbox.env["XDG_STATE_HOME"]) / "fbittorrent/notices.json"
+                    case.check(json.loads(saved.read_text())["first_quit_seen"] is True, "first quit preference is saved", saved.read_text())
+                    if ordinal == 1:
+                        target, done = ui.start()
+            elif name == "daemon_gone_banner":
+                # Cancel a manager restart before delivering an actual SIGKILL;
+                # the TUI must stay in place and Enter must start a new owner.
+                drop = unit.drop / "no-restart.conf"
+                drop.write_text("[Service]\nRestart=no\n")
+                unit.control("daemon-reload")
+                began = time.monotonic()
+                os.kill(pid, signal.SIGKILL)
+                h.wait_for(lambda: ("fbittorrent stopped" in ui.capture(target) and "Enter) Start" in ui.capture(target), ui.capture(target)),
+                           "stopped banner and enabled Enter action", timeout=5)
+                case.check(time.monotonic() - began < 5 and not done.exists(), "daemon loss is visible within five seconds without closing the client", ui.capture(target))
+                ui.status()
+                ui.keys(target, "Enter", literal=False)
+                h.wait_for(lambda: (unit.pid() > 1 and unit.pid() != pid and h.engine_path.exists(), str(ui.status())), "Enter starts a new daemon")
+                h.wait_for(lambda: ("fbittorrent stopped" not in ui.capture(target), ui.capture(target)), "reconnection clears stopped banner")
+                ui.assert_pane(target, "Torrents")
+            elif name == "second_tui_attaches":
+                with fixtures.magnet_fixture(sandbox.root) as torrent:
+                    h.cli("add", str(torrent.torrent), "--quiet")
+                    ui.assert_pane(target, "daemon-fixture.bin")
+                    other, _ = ui.start()
+                    ui.assert_pane(other, "daemon-fixture.bin")
+                    h.wait_for(lambda: ((count := ui.clients()) == 2, f"tui clients={count}"), "two independent interactive clients")
+                    case.check(unit.pid() == pid and len(h.cli("list")["torrents"]) == 1,
+                               "second terminal attaches to the same daemon and torrent", ui.capture(target) + "\nSECOND:\n" + ui.capture(other))
+                    launcher = sandbox.root / "shims/omarchy-launch-or-focus-tui.log"
+                    case.check(not launcher.exists(), "terminal attachment never invokes the desktop focus helper", str(launcher))
+                    ui.keys(other, "q")
+                    h.wait_for(lambda: ((count := ui.clients()) == 1, f"tui clients={count}"), "detaching second TUI retains first")
+        finally:
+            ui.close()
+
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
     parser.add_argument("--list", action="store_true", help="list case slugs without launching anything")
-    parser.add_argument("--case", choices=CASES,
+    parser.add_argument("--case", choices=CASES + ATTACH_CASES,
                         help="log one case, replaying its prerequisites in the isolated fixture")
     options = parser.parse_args()
     if options.list:
-        print("\n".join(CASES))
+        print("\n".join(CASES + ATTACH_CASES))
         return 0
     binary = str(Path(options.binary).resolve())
+    if options.case in ATTACH_CASES:
+        attachment_case(options.case, binary)
+        return suite_status("native")
+    if options.case is None:
+        for name in ATTACH_CASES:
+            attachment_case(name, binary)
     if options.case in (None, "stop_during_hashing"):
         stop_during_hashing(binary)
         if options.case == "stop_during_hashing":
@@ -1042,7 +1351,7 @@ def main():
         return suite_status("native")
     with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
-        env = dict(os.environ, XDG_CONFIG_HOME=str(root / "config"),
+        env = dict(os.environ, HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"),
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "runtime"),
                    XDG_CACHE_HOME=str(root / "cache"),
                    XDG_STATE_HOME=str(root / "state"), TERM="xterm-256color")
@@ -1055,7 +1364,7 @@ def main():
             probe.bind(("127.0.0.1", 0))
             peer_port = probe.getsockname()[1]
         (config_dir / "config.toml").write_text(
-            f'engine = "native"\nautostart = false\nnotify = false\n'
+            f'engine = "native"\nautostart = false\nnotify = false\nnetwork_interface = "lo"\n'
             f'backend_unit = "fbittorrent-fixture-never.service"\n'
             f'url = "http://127.0.0.1:9"\npeer_port = {peer_port}\n'
             f'save_path = {json.dumps(str(root / "downloads"))}\n')
@@ -1064,6 +1373,7 @@ def main():
         cli, record, wait_for = harness.cli, harness.record, harness.wait_for
 
         name = "Fixture.with.a.long.filename." + "readable." * 14 + "END.txt"
+        prepare_imdb_fixture(env, [name] + [f"Fixture episode {i}" for i in range(1, 46)])
         if options.case in (None, "no_fake_seed_counts"):
             prepare_peer_label_fixture(env, name)
         content = b"Local torrent lifecycle fixture.\n"
@@ -1147,7 +1457,8 @@ def main():
 
         def keys(*args):
             for key in args:
-                tmux("send-keys", "-t", session, *(["-l", key] if len(key) == 1 else [key]))
+                result = tmux("send-keys", "-t", session, *(["-l", key] if len(key) == 1 else [key]))
+                record("tmux send-keys " + repr(key), "key delivered to isolated TUI", f"exit={result.returncode}", result.returncode == 0)
 
         def mouse_text(text, button):
             rows = capture(log=False).splitlines()
@@ -1167,6 +1478,7 @@ def main():
         try:
             with Case("native", "dec_mouse_mode", enabled=options.case in (None, "dec_mouse_mode")) as case:
                 error_file = case.suite.stderr_path
+                engine_stderr_offset = error_file.stat().st_size
                 app_launch = f"exec {shlex.quote(binary)} tui 2>>{shlex.quote(str(error_file))}"
                 launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(terminal_bytes))}"
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
@@ -1380,13 +1692,13 @@ def main():
                          "live queue limit changes admission")
                 import tomllib
                 case.check(tomllib.loads((config_dir / "config.toml").read_text())["max_active_downloads"] == 1, 'The one-download limit is durable in the isolated config file.')
-                cli("settings", "--max-downloads", "0", code=1)
+                cli("settings", "--max-downloads", "0", code=2)  # usage: value out of range (CLI exit-code dictionary)
                 case.check(cli("settings").get("max_active_downloads") == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
                 for hash_ in extra_hashes:
                     cli("delete", hash_)
                 cli("settings", "--max-downloads", "3")
                 cli("settings", "--vpn", "fbmissing0")
-                wait_for(lambda: cli("status").get("connection") == "vpn_waiting", "required VPN blocks networking")
+                wait_for(lambda: cli("status").get("daemon", {}).get("state") == "parked", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
                 case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)
@@ -1398,17 +1710,30 @@ def main():
             if options.case == "settings_queue_vpn_restart":
                 return suite_status("native")
             with Case("native", "quit_restart_down", enabled=options.case in (None, "quit_restart_down")) as case:
+                owner_before = harness.api("app.info")
                 keys("q")
-                wait_for(lambda: not socket_path.exists(), "quit removes socket", seconds=6)
-                case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
-                diagnostics = error_file.read_text()
-                case.check(all(re.fullmatch(r"INFO engine drained in \d+ ms", line) for line in diagnostics.splitlines()),
-                           'The app and CLI have emitted only successful engine-drain info messages on stderr.', diagnostics)
+                wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1, "q detaches TUI", seconds=6)
+                status = cli("status")
+                owner_after = harness.api("app.info")
+                reported_running = status["running"] if "running" in status else (
+                    status.get("engine") == "native" and status.get("connection") in ("connected", "vpn_waiting"))
+                case.check(socket_path.exists() and status["ok"] and reported_running is True and
+                           owner_after["instance"] == owner_before["instance"] and
+                           owner_after["server"]["pid"] == owner_before["server"]["pid"] and
+                           owner_after["state"] in ("starting", "running", "parked"),
+                           'q leaves the same daemon running.', json.dumps(dict(status=status, before=owner_before, after=owner_after)))
+                diagnostics = error_file.read_bytes()[engine_stderr_offset:].decode()
+                case.check(expected_daemon_stderr(diagnostics, complete=False),
+                           'Daemon and CLI stderr contain only known success phases and legacy dispatch traces.', diagnostics)
+                case.check(not expected_daemon_stderr(diagnostics + "WARNING unexpected\n", complete=False) and
+                           not expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=Unknown\n", complete=False),
+                           "Daemon stderr allowlist still rejects unknown lines and restart reasons")
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
                 case.check(show_episodes("tt1234002")["S01E01"]["read"], 'Restart preserves the exact Beta Show episode read marker.')
                 case.check(not show_episodes("tt1234002")["S01E02"]["read"], 'The other Beta Show release remains unread.')
+                wait_for(lambda: "3 Shows (1)" in capture(), "reopened TUI restores unread Shows badge")
                 case.check("3 Shows (1)" in capture(), 'The current screen displays a Shows badge with one unread release.')
                 restored = cli("show", expected_hash)
                 case.check(restored["state"] == "stoppedDL" and restored["up_limit"] == 32768, 'Restart preserves both the manual pause and upload cap.')
@@ -1453,19 +1778,41 @@ def main():
                 environment = shlex.join([f"{key}={parked_env[key]}" for key in parked_env if key.startswith("XDG_")])
                 parked_launch = (f"exec env {environment} script -qef -c {shlex.quote(app_launch)} "
                                  f"{shlex.quote(str(parked_root / 'terminal.typescript'))}")
+                keys("q")
+                parked_harness.ensure_serve()
                 harness.start_tmux(tmux, session, parked_launch)
                 parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
-                wait_for(lambda: parked_socket.exists() and parked_cli("status").get("connection") == "vpn_waiting",
-                         "parked engine fixture opens without a network session")
+                def parked_without_session():
+                    if not parked_socket.exists(): return False
+                    owner = parked_harness.api("app.info")
+                    network = parked_harness.api("app.network")["state"]
+                    return owner["state"] == "parked" and network["ready"] is False and network["interface"] == "fbmissing0"
+                wait_for(parked_without_session, "parked engine fixture opens without a network session")
                 listed = {torrent["hash"]: torrent for torrent in parked_cli("list")["torrents"]}
                 unknown, zero, done = [item["hash"] for item in records]
-                case.check(listed[unknown]["completion_on"] == -1 and listed[unknown]["state"] == "stoppedDL",
+                normalized = {row["hash"]: row for row in parked_harness.api("torrents.list")["torrents"]}
+                case.check(normalized[unknown]["intent"] == "pause" and normalized[unknown]["state"] == "waiting_vpn" and
+                           "completed_at" not in normalized[unknown] and "progress" not in normalized[unknown] and
+                           normalized[done]["completed_at"] == 123,
+                           "API preserves pause intent, omits unknown completion, and keeps the known date", json.dumps(normalized))
+                # API omits an unknown date; contract-1.x shapes it as zero.
+                # The legacy adapter retains the disk sentinel. Both must stay incomplete.
+                expected_cli_unknown = 0 if "native_state" in listed[unknown] else -1
+                case.check(listed[unknown]["completion_on"] == expected_cli_unknown and listed[unknown]["state"] == "stoppedDL",
                            "A saved -1 record remains incomplete.", json.dumps(listed[unknown]))
                 keys("1")
                 wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
                 keys("Home")  # The -1 record has the newest added_on timestamp.
                 wait_for(lambda: "(p) Resume" in capture(),
                          "unknown-date selection keeps the incomplete-row Resume control")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "run",
+                         "Resume in the TUI changes the paused VPN-waiting record to run intent")
+                wait_for(lambda: "(p) Pause" in capture(), "VPN-waiting run intent offers Pause")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "pause",
+                         "Pause in the TUI restores saved pause intent without opening a network session")
+                wait_for(lambda: "(p) Resume" in capture(), "VPN-waiting paused intent offers Resume again")
                 result = parked_cli("start", unknown)
                 case.check(result["hashes"] == [unknown] and result["skipped"] == [],
                            "Explicit start accepts the existing -1 record.", json.dumps(result))
@@ -1501,6 +1848,8 @@ def main():
                 terminal_artifact.write_bytes(terminal_bytes.read_bytes())
                 print(f"Terminal stream retained: {terminal_artifact}")
             tmux("kill-server", check=False)
+            harness.close_serve()
+            if 'parked_harness' in locals(): parked_harness.close_serve()
             server.shutdown()
     if options.case is None:
         terminal_close_is_graceful(binary)

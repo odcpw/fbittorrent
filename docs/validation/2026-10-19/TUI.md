@@ -143,3 +143,234 @@ P4-04/P3-01/P3-18; P4-10 and P4-11 await P4-04; P4-08 awaits P1-14/P4-03;
 P4-03 awaits the authorized P1-15 integration and P3-07; P4-05 lacks P2-08's
 `contracts/ui/themes/expected.json`; P4-09 awaits P4-03. No next item is
 unblocked on this branch. M3 is not reached. No branch switch or merge performed.
+
+## P1-15 — fbt-p1-15-h0l
+
+The TUI now attaches in its own terminal to the daemon, retaining the legacy
+2 s data poll and one bounded API presence connection (`tui-<pid>`, interactive
+hello and `app.client` heartbeat). It owns no lifecycle object, engine or lock.
+`q`/Ctrl+C/SIGHUP detach; `Q` asks while work is active and only lowercase `y`
+sends `app.shutdown`. The first `q` prints the canonical notice after terminal
+restoration and atomically saves the private, once-only preference. Two failed
+polls show the stopped banner; Enter starts/reconnects. Settings restart the
+owner's engine slot without closing the UI. RSS/Shows on-open refresh remains
+local. Neighbour edits move legacy migration into daemon startup and decrement
+API client counts on disconnect (the two-client regression exposed cumulative
+counts); daemon supervision/teardown and all frozen wire fixtures stay unchanged.
+
+Evidence root: `target/test-logs/fbt-p1-15-h0l/`. Run the retained
+`native-cases.py verified` wrapper for `native.py` with private five-XDG fixtures,
+disposable runtime-only static units and actual capped loopback seed/leech engines.
+Every new case logs keys, panes and CLI status; `Q_confirms` uses logger-compatible
+slug `q_confirms`.
+
+| Criterion | Command/case | JSONL evidence | Observed |
+| --- | --- | --- | --- |
+| No daemon → TUI starts it | `native.py --case tui_starts_daemon` | `verified/native/tui_starts_daemon.jsonl` | same owner remains after heartbeat and Ctrl+C |
+| q keeps download running | `native.py --case q_detaches` | `verified/native/q_detaches.jsonl` | real payload increases after q; same daemon PID |
+| Q confirms/stops | `native.py --case q_confirms` | `verified/native/q_confirms.jsonl` | Y/n/Enter cancel; y stops owner within 6 s |
+| First-q notice once | `native.py --case first_q_notice_once` | `verified/native/first_q_notice_once.jsonl` | first prints; second omits; saved marker true |
+| Daemon-gone banner <5 s | `native.py --case daemon_gone_banner` | `verified/native/daemon_gone_banner.jsonl` | stopped + Enter in 4.026 s; Enter starts new PID |
+| Two terminals attach | `native.py --case second_tui_attaches` | `verified/native/second_tui_attaches.jsonl` | both show same torrent; clients 2→1 on detach; no focus helper |
+
+`cargo test --locked tui:: -- --nocapture`: **86 pass** (`focused_final.*`),
+including prompts and all **34 unchanged goldens**. The bead's one full
+`cargo test --locked -- --nocapture`: **303 pass, 2 ignored** (`full.*`);
+subsequent attach-path refinement is covered by the focused run and six real
+cases. Agent documentation checks: 4 pass (`agent_docs.*`). Size self-tests and
+all 116 API/TUI/daemon files pass (`sizes_final.*`); generated key docs match
+(`generated.*`). SIGHUP detaches in **121 ms**, leaves the unfinished torrent,
+socket and held lock (`verified/native/terminal_close_is_graceful.jsonl`).
+
+Additional native replay: 24/26 pass in `verified/native/summary.json`.
+`quit_restart_down`'s log checker was extended for the exact successful daemon
+restart/parked phases, retaining negative controls, and its existing Shows-badge
+assertion now waits for the initial asynchronous read model. Its focused replay
+is recorded in `restart_final/`. `startup_survives_bad_record` remains red:
+CLI `show` intermittently returns exit 4 through the legacy readiness probe
+(which has a 200 ms budget), while the daemon remains running (also reproduced separately in
+`restore_verified/`); no assertion or timeout was weakened. Follow-up: replace
+that false-closed CLI probe through P1-11's API client. The six bead criteria are
+met; automatic idle exit is still P1-12, as disclosed in README/robot-docs.
+No release build or all.sh between track beads. Continue with P4-03's available
+API screens; Track B namespaces and the bus integration still need merging.
+
+## P4-03 — fbt-p4-03-r5p (in progress)
+
+The confirmed mirror is implemented in `src/tui/store.rs` and its snapshot,
+sort and pending modules. It commits chunked snapshots atomically, rejects
+revision gaps without changing confirmed rows, removes null optional fields,
+compares numeric sort values, uses daemon file sort keys and retains rows as
+stale across instance/engine changes. Pending/confirmed mutation messages do
+not fabricate row state; disconnects mark results unknown and never retry.
+Staging is bounded to 32 MiB, 100,000 items and 16 subscriptions; events to 512
+and pending mutations to 64. `cargo test --locked -p fbittorrent tui::store::
+-- --nocapture` passes **11 tests**, replaying all **9 frozen expect models**
+with file/frame/first-JSON-pointer diagnostics and poisoned-expect controls
+(`target/test-logs/fbt-p4-03-r5p/mirror_final.{jsonl,log}`). Size self-tests pass
+(`sizes.*`); every new source file is below 900 lines. This is an intermediate
+component, not completion: UI connection/data-path wiring remains. Current
+branch lacks the bus and settings request operations, and Track B feature
+namespaces; those integrations remain pending. No full suite or all.sh run for
+this intermediate checkpoint; the bead's one full suite is reserved for its
+completed integration.
+
+P4-03 read-path checkpoint: native torrent rows, rates, network state, file reads
+and file selection now use the existing presence connection. The typed store
+keeps unknown values; screen adapters render them as unknown and use explicit
+seed intent, including custom caps and completed records without a date.
+`cargo test --locked -p fbittorrent tui:: -- --nocapture` passes **99** tests,
+including all **34 unchanged goldens** (`rpc_units.*`). The real
+`daemon.py --case tui_single_connection` passes with `engine.sock` renamed out
+of reach: torrent/file views stay online, Space changes real file selection,
+and client counts go **0→1→0** (`rpc_live/daemon/tui_single_connection.jsonl`,
+3.826 s). Debug build and size self-tests pass (`rpc_binary.*`, `rpc_sizes.*`).
+The native helper now accepts the bead's unique tmux session name. Remaining:
+push/ApiSub transport, native mutations, reconnect UI, settings service and
+Track B namespaces. The existing timer remains until the push server arrives;
+no full-suite/all.sh run for this coherent intermediate integration.
+
+P4-03 mutation checkpoint: native start/stop/seed/remove/add/open and file
+selection use the single API connection. Its bounded multiplexing worker emits
+ordered mutation refs and events, keeps heartbeats/RPCs responsive during pending
+URL fetches, caches completion before waking callers, and cancels on UI close.
+Rows remain confirmed; pending verbs dim rows and disable the same actions in
+both keys and footer. Search/RSS/Shows keep their current service implementation
+behind `remote::ScreenClient`; RSS and Shows mark downloaded only after real
+admission, including a failure control. Local provider metadata handoffs are
+private and bounded to eight unconfirmed files. Reconnect to the same daemon
+resets connection-scoped revisions and stale replies cannot overwrite new data.
+`cargo test --locked -p fbittorrent tui:: -- --nocapture`: **106 passed**, all
+**34 prior goldens unchanged** (`action_ready_units.*`). Debug build, source size
+self-test and Python compilation pass (`action_ready_binary.*`,
+`mutations_sizes.*`). Two real tmux cases pass with engine.sock hidden
+(`action_ready_live/daemon/{tui_single_connection,tui_pending_rss_failure}.jsonl`):
+file selection, start, seed, stop, one HTTP add, API target/open, keep-files
+remove, one TUI connection 0→1→0; held/failed HTTP admission stays responsive and
+leaves RSS unread. The first repeat exposed a truthful-action race: the footer
+advertised Resume before file selection settled. The catalogue now disables
+pending row actions and the test waits for their visible readiness (no timeout
+or outcome assertion relaxed). Five P1-15 lifetime cases pass in
+`lifetime_regression/native/`; q_confirms passes in
+`lifetime_confirm_verified/native/` after a minimal adjacent harness fix that
+verifies a process has exited when /proc vanishes during shutdown rather than
+throwing ProcessLookupError. Every live-child isolation check remains enforced.
+The bead remains incomplete: the branch lacks the bus/shared-client/settings
+and Track B service integrations; its two-second fallback timer remains until
+push is available. Reconnect UI is the next independent step. No full-suite or
+all.sh run at this coherent intermediate checkpoint.
+
+P4-03 recovery checkpoint: initial attachment runs off the UI thread and shows
+Connecting; connection loss preserves dimmed confirmed rows, marks in-flight
+results unknown, and retries only the socket at 0.5/1/2/4/8/10 seconds (then 10).
+Only explicit opening/Enter can start a daemon. One handshake runs at a time;
+success resets the backoff and the connection-scoped mirror. Unsupported
+protocols produce a persistent banner before decoding foreign reply shapes;
+newer installed stable versions show the restart-to-update notice. The footer
+cache hashes the notice/countdown without formatting on unchanged frames.
+The full `cargo test --locked` run is green: **327 passed, 2 ignored**, including
+**110 TUI tests** and all **34 unchanged goldens** (`full_cargo_test.*`). Debug
+build and source size self-test pass (`recovery_binary.*`, `recovery_sizes.*`).
+The original lifecycle/owner-request assertion is unchanged and passes; a
+session-less poll still has no effect on the daemon owner's lifecycle.
+The six real lifetime cases pass in `recovery_lifetime/native/`; the terminal
+helper now waits for the new interactive hello before asserting owner state.
+The core mutations and failed RSS admission cases pass in
+`recovery_live/daemon/`. The replacement-owner case passes in
+`recovery_owner_verified/daemon/tui_reconnect_existing_owner.jsonl` (5.180 s):
+shutdown keeps the cached row and terminal, retries leave the socket absent,
+an independently started owner has a different instance, the same terminal
+reattaches without Enter with exactly one TUI connection, fresh removal clears
+the old row, and q releases the connection. The receiver is closed/reopened
+between daemon generations so stale STATUS datagrams cannot satisfy or spoil
+the successor's exact READY=1 check; failed development attempts are retained.
+Python compilation and git diff checks pass. No release build/all.sh is needed
+for this track checkpoint. Remaining P4-03 acceptance is explicitly unmet:
+remove the native timer and local service/legacy bridge after bus, shared
+api::Client, settings and Track B namespaces are merged into this branch.
+The regex for qbt::Client alone is insufficient proof while the isolated
+LegacyClient bridge still exists. P4-04 is skipped pending the missing
+P2-08 contracts/ui/states.json and the remaining P4-03 integration; P4-10 and
+P4-11 require its modal/layout, P4-07 additionally needs the Track B services,
+and P4-09 requires the completed API migration. No frozen fixture or old golden
+was changed; no daemon lifecycle/teardown implementation was touched.
+
+P1-15/P4-03 native gate repair: each attachment fixture now has a sandbox-specific
+tmux socket and asserts server creation; q is checked against the same live
+daemon PID/instance rather than interactive presence. The stderr allowlist
+already recognized daemon startup; it now also accepts the named Settings
+restart reason and explicitly rejects unknown lines/reasons. Parked readiness
+uses app.info/app.network; unknown completion remains absent on API v1, is
+shaped as zero by the API CLI or retained as -1 by the legacy adapter, and the
+saved -1 is still asserted unchanged on disk. The TUI now uses saved intent for
+Pause/Resume and its footer cache, including VPN-waiting rows; positive
+completion dates keep Resume hidden when seeding is off. The timestamp case
+presses p twice and verifies both real ledger intents through the API. All
+three requested cases pass against the final debug binary via the unmodified
+native.py entrypoint with --case (`native_gate_final_{q_detaches,quit_restart_down,
+resume_unknown_timestamp}/native/*.jsonl`). The one all-native invocation
+(`native_gate_all/native/summary.json`) ran 26 cases: 24 passed, two failed.
+The run exposed an additional asynchronous-attach regression: --no-start tui
+waited instead of returning exit 4. Attach-only opening now checks the existing
+owner before fullscreen and avoids opening a second connection; the adjacent
+backend policy getter is identical to the one already on main. Its existing
+real-terminal/zero-launcher control now passes
+(`native_gate_final_launcher_never_called/native/launcher_never_called.jsonl`),
+as do the three requested cases on the final binary. The remaining full-native
+failure is startup_survives_bad_record: legacy CLI show exited 4 after a 211 ms
+probe, followed by a missing-state KeyError (steps 46/47); retained unchanged
+for the API CLI integration, which is not on this branch. Full cargo test
+--locked passed once: 328 passed, 2 ignored (`native_gate_cargo_test.*`); after
+the small attach-only correction, the touched TUI suite passed 111 tests with
+34 unchanged goldens (`native_gate_attach_units.*`). Debug build, Python
+compilation, size gate and diff checks pass. settings_queue_vpn_restart was
+verified byte-identical and passed locally; its main-gate repair remains the
+integrator's. No release/all.sh run, frozen fixture change, or state-table
+change. All log paths above are under target/test-logs/fbt-p4-03-r5p/.
+
+### P3-01 search extraction checkpoint
+
+Moved search download resolution, process capture/lifetime, job registry and all existing tests into `src/search/*`; existing function bodies and test bytes are identical, with only sibling visibility and facade wiring added (`split_isomorphism.jsonl`). `cargo test --locked -p fbittorrent search:: -- --nocapture`: 15 passed, including three search goldens; `bash scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`: passed. Evidence: `target/test-logs/fbt-p3-01-mrt/split_{units_fixed,sizes,isomorphism}.*`. The daemon integration is still in progress; no search acceptance criterion is claimed at this checkpoint.
+
+### P3-01 — daemon search
+
+Added daemon-owned search sessions (four admissions, reclaimable thirty-second disconnect lease, process-group cancellation and drain), typed API operations and keyed bus snapshots/deltas/completion events, provider/browse/grab adapters, ledger `added` annotations, deterministic deduplication and conservative mojibake repair. Provider output/raw session retention is bounded to 2 MiB; metainfo inspection is bounded and runs outside the bus. Added `contracts/ipc/v1/search.ndjson`, capability/operation metadata and contract 1.2.4. Existing IPC records/examples and existing search tests remain unchanged. Neighbouring TUI mirror changes support the additive fixture's search items; the search screen migration follows in P4-03.
+
+| Acceptance | Command | JSONL evidence under `target/test-logs/fbt-p3-01-mrt/` | Observed |
+|---|---|---|---|
+| Dedupe both providers and repair the name | `python3 …/daemon-case.py live search_dedupe_and_repair` | `live/daemon/search_dedupe_and_repair.jsonl` | PASS; one `辛特尔`, alpha+beta, nine seeds; original damaged UTF-8 bytes retained |
+| Disconnect expires at 30 s and kills the process group | `python3 …/daemon-case.py live search_process_group_gone` | `live/daemon/search_process_group_gone.jsonl` | PASS; live children at 28 s, no members at 30.070 s; session not found |
+| Fifth session is busy | `python3 …/daemon-case.py live search_fifth_busy` | `live/daemon/search_fifth_busy.jsonl` | PASS; retryable `busy`, `details.limit=sessions`; stop frees admission |
+| Reconnect reclaims retained results | `python3 …/daemon-case.py live search_session_grace` | `live/daemon/search_session_grace.jsonl` | PASS; identical results and provider group; search busy reason |
+
+Additional live proof: `grab_live/daemon/search_grab_and_ledger.jsonl` PASS (real loopback metainfo, pending/confirmed ref, origin search, ledger annotation, parked refusal with VPN hint). The first combined live run caught a URL receipt waiting for a magnet-only outcome; fixed and this extra case rerun green. Focused `cargo test --locked -p fbittorrent search:: -- --nocapture`: 19 passed (`service_units.*`). One full `cargo test --locked`: 384 passed, one failed, two ignored (`search_full.*`): the additive fixture exposed the TUI reducer's missing search-item support. Added the reducer and regression; `cargo test --locked -p fbittorrent tui:: -- --nocapture`: 112 passed, including all 34 unchanged goldens and nine original expect models (`search_consumer_units.*`). Per owner cadence the full suite was not repeated; final source size gate passes (`search_final_sizes.*`). All four bead criteria are met; the initial full-suite failure and its focused repair are recorded explicitly. No release build/all.sh (track-level instruction). Follow-up: P3-07 CLI shaping remains with its owner; P4-03 search screen migration is next.
+
+### P4-03 — native search client checkpoint
+
+Native search now starts and subscribes on the existing presence connection, mirrors keyed pushed results, preserves selected row identity and provider lists, shows the daemon's `added` annotation, and sends selected-row grabs, provider toggles and browse requests to the daemon. Completion uses the event topic, including retained results; reconnect reclaims the session only on the same daemon instance, and never replays a query on a replacement owner. `q` releases the connection without stopping its session. Native IMDb cards use `imdb.lookup` and bounded poster resources; local ratings/provider execution remain only on the legacy/service fallback path. The bounded event mirror now matches the daemon's 1000-record retention.
+
+`cargo test --locked -p fbittorrent tui:: -- --nocapture`: 114 passed, all 34 goldens and nine original expect models unchanged (`target/test-logs/fbt-p4-03-r5p/search_client_units.*`). `daemon.py` cases `tui_search_api`, `tui_search_owner_restart`, `tui_single_connection`, `tui_reconnect_existing_owner` all pass against the debug binary (`search_client_live_fixed/daemon/tui_search_api.jsonl`, other three in `search_client_live/daemon/`). Positive search terminal proof: engine.sock hidden, exactly one TUI connection, providers descend from the daemon, provider toggle persisted over API, pending grab creates origin=search, q leaves the provider alive. Replacement-owner proof: old process group gone, terminal reconnects, query is not replayed. An initial ancestry assertion incorrectly used the deliberately hidden legacy socket; it now uses the v1 hello PID, with the assertion's intent preserved. `cargo test --locked`: **388 passed, 0 failed, 2 ignored** (`search_client_full.*`), also validating the P3-01 consumer repair in the preceding commit. Source size gate passes (`search_client_sizes.*`). P4-03 remains open: RSS/Shows migration, removal of their legacy facade and the core two-second refresh are still pending; this checkpoint closes only the search/IMDb slice. No release/all.sh between track beads.
+
+### P4-04 — state/compact-column checkpoint (still in progress)
+
+Embedded the shared state table, with every state glyph measured as one cell and every state cell padded to nine. Torrents now keep STATE and NAME at all supported widths, with compact percentage/rate/ETA columns and Size/Peers at medium/wide; absent native measurements stay blank or unknown as appropriate. The existing 80..160-column filename/mouse test caught truncation beside the old bar/flags; compact columns fix it without relaxing that assertion. The queued/VPN control now checks the exact contract glyph, short word and padding instead of obsolete bar labels. `cargo test --locked -p fbittorrent tui:: -- --nocapture`: 117 passed in ordinary verification mode (`target/test-logs/fbt-p4-04-9lu/state_columns_verify.*`); reviewed 20 golden differences affect only torrent header/rows, their exposed modal backgrounds and the selected state line; frame heights are unchanged. Size gate passes (`state_columns_sizes.*`). Remaining P4-04 work: table virtualization/rendered rectangles, details modal, responsive Search/Shows/RSS, banners and final evidence; full suite reserved for bead completion.
+
+### P4-04 — virtualized torrent table checkpoint (still in progress)
+
+Replaced torrent rows with a cached ftui Table over the Virtualized visible range, typed header sorting (unknown values remain last), right-border overflow scrollbars and hash/rectangle records consumed by mouse selection. The 5,000-row control formats 24 visible rows once over 32 unchanged frames, ignores offscreen edits and invalidates visible/theme changes. Every visible row is clicked at 80/120/160; a reorder between rendering and clicking still selects the recorded hash. `cargo test --locked -p fbittorrent tui:: -- --nocapture`: 121 passed (`target/test-logs/fbt-p4-04-9lu/table_final_verify.*`); size gate passed (`table_final_sizes.*`). Reviewed torrent/background goldens: no internal dividers, state words and full selected episode filename preserved; outer border padding is now zero. Appendix B gates the s/S chords on P4-09; header sorting is enabled now. Details, other list layouts and banners remain in progress; no full suite claimed at this compiling checkpoint.
+
+### P4-04 — Details and banner checkpoint (still in progress)
+
+Enter opens stable-hash Overview at every size; brackets stop at Overview/Files, h/Esc returns, missing records cannot retarget an action. Narrow is fullscreen; medium/wide center 100x30 and fall back below 30 rows. Added the separate medium selection strip and one priority banner (disk > VPN > connection/stopped > update), consuming shared reason phrases. The new Details goldens intentionally expose only the two implemented tabs (later tabs belong to P4-08/P5-02/P6). Header theme text now hides below wide rather than clipping. `cargo test --locked -p fbittorrent tui:: -- --nocapture`: 127 passed in normal mode (`target/test-logs/fbt-p4-04-9lu/details_verify.*`); size gate passes (`details_sizes.*`). An old pane-cutoff assertion matched the newly required Details footer label; it now tests the actual pane border, retaining the same 140-column cutoff, filename and mouse assertions. Reviewed 80/120/160 Details goldens, medium strip and exposed modal backgrounds. Live debug terminal cases `details_live/daemon/{tui_details_narrow,tui_single_connection}.jsonl` PASS: 80x24 navigation, real include/skip selection over the one API connection, return/detach, owner alive. The existing one-connection case now explicitly traverses Overview then Files, retaining all engine assertions. README/keymap are regenerated from the action catalogue. Remaining: responsive Search/Shows/RSS, virtualization for their lists and final bead evidence/full suite.
+
+### P4-04 — responsive layouts complete
+
+Finished narrow single-pane Shows/RSS breadcrumbs, medium extra columns/card placement and wide side cards; Search keeps Size/Seeds/rating at 80 and Uploaded/Provider/Peers at 120/160, with v/Esc card navigation. Every list now renders a cached ftui Table over a Virtualized viewport, with an overflow scrollbar on the right border. Modal rendering drops covered hit regions. Torrent/Search header clicks sort confirmed numeric values, preserve selection identity and keep absent measurements last; pushed search updates retain the chosen order. The 5,000-row controls reach the final row and build formatted visible rows only once over 32 unchanged frames (no claim of allocator-wide zero allocations inside ftui). Added known-zero/absent-size and confirmation-visibility controls; only the modal draws its Details legend. Reviewed the regenerated Search/Shows/RSS/modal goldens: existing P0-16 fixture data is retained, including its values rather than the plan's illustrative numbers; Details exposes Overview/Files per Do step 5. Existing IPC fixtures, examples and state-contract bytes are unchanged.
+
+| Acceptance | Command | Evidence under `target/test-logs/fbt-p4-04-9lu/` | Result |
+|---|---|---|---|
+| Three-size goldens and truthful words | `cargo test --locked -p fbittorrent tui:: -- --nocapture` | `screens_verify.{log,jsonl}` | 134 passed, including all 37 goldens, glyph-width and state-cell controls; native absent values stay absent |
+| Click each visible row at every size | same command, `click_hits_rows_at_each_size`, `click_every_other_visible_list_row_at_each_size` | `screens_verify.log` (size, coordinates, hash/identity printed) | PASS at 80x24, 120x30, 160x45; covered modal regions excluded; numeric header controls pass |
+| Enter at 80 opens Overview; brackets navigate and stop | same command; real `daemon.py` cases via `python3 …/daemon-case.py final_live …` | `screens_verify.log`; `final_live/daemon/tui_details_narrow.jsonl` | PASS; real file selection changes over API, h/Esc return, daemon survives q |
+
+Final private debug terminal cases `tui_details_narrow`, `tui_search_narrow`, `tui_single_connection`, `tui_search_api`: all PASS (`final_live/daemon/*.jsonl`), with captured panes and daemon stderr checks. The first narrow search fixture typed v into the deliberately focused query; it now explicitly leaves editing before opening the card. An old filename test now navigates to RSS Items, retaining its assertion at every size. `cargo test --locked` ran once for the completed bead: **408 passed, 0 failed, 2 ignored** (`full.*`); final debug build, generated keymap check, Python compilation, source size gate (`final_sizes.*`) and diff check pass. Every changed src file is <=900 lines. No release/all.sh between track beads. No acceptance item unmet. Follow-ups already assigned: P4-03 RSS/Shows service migration, P4-08 Log tab, P5-02 Peers tab and P4-09 s/S chords after legacy removal; they are not claimed here.

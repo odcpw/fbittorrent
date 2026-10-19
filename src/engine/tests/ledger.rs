@@ -171,3 +171,34 @@ fn origin_default_manual() {
     println!("old field defaults manual; legacy rss tag migrates; explicit manual and unknown comma-bearing open strings remain authoritative");
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+
+#[test]
+fn staged_excluded_from_counts_and_busy() {
+    use crate::api::validation::Validate;
+    let directory=review_directory("staged-counts-busy");
+    let mut record=crate::engine::tests::review_record(&"a".repeat(40),&directory);
+    record.staged=true;
+    // Even inconsistent old run intent cannot admit a staged record to counts.
+    record.paused=false;
+    let app=test_app(&directory,&directory.join("downloads"),Ledger::default(),None);
+    let dispatcher=app.dispatcher();
+    dispatcher.inner.set_restore_outcome(&record.hash,RestoreOutcome::Metadata);
+    let row=crate::api::ops::torrents::torrent(view::TorrentView::unrestored(&record,None)).unwrap();
+    row.validate().unwrap();
+    let counts=serde_json::to_value(crate::api::bus::summary_counts(&[row.clone()])).unwrap();
+    assert!(counts.as_object().unwrap().iter().all(|(key,value)|value.as_u64()==Some(u64::from(key=="staged"))));
+    let mut ledger=Ledger {records:vec![record],..Default::default()};
+    assert!(!dispatcher.has_pending_restore(&ledger),"staged metadata resolver must not count as restore busy work");
+    let activity=crate::daemon::policy::Transfers::from_torrents(&[row],"running",dispatcher.has_pending_restore(&ledger));
+    let at=std::time::Instant::now();
+    let mut policy=crate::daemon::policy::Policy::new(3,None,at);
+    policy.transfers(activity,at);
+    let snapshot=policy.snapshot(at);
+    assert!(snapshot.busy_reasons.is_empty());
+    assert_eq!(snapshot.idle_exit_in_s,Some(3));
+    ledger.records[0].staged=false;
+    assert!(dispatcher.has_pending_restore(&ledger),"ordinary pending metadata must still keep the daemon alive");
+    println!("staged counts={counts}; policy={snapshot:?}; ordinary pending restore stays busy");
+    drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}

@@ -30,14 +30,14 @@ struct Connection {
     end_reason: Arc<Mutex<Option<String>>>,
 }
 impl Connection {
-    fn connect(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
+    fn connect(cfg: &Config, agent: bool, path: &std::path::Path, name: Option<&str>) -> Result<Self> {
         let deadline = Instant::now() + Duration::from_millis(200);
         let mut writer = connect_probe(path, deadline)?;
         writer.set_write_timeout(Some(Duration::from_millis(200)))?;
         let mut reader = BufReader::new(writer.try_clone()?);
         send(
             &mut writer,
-            &json!({"id":1,"op":"hello","args":{"proto":1,"client":{"name":format!("cli-{}",std::process::id()),"kind":if agent{"agent"}else{"cli"},"version":env!("CARGO_PKG_VERSION")}}}),
+            &json!({"id":1,"op":"hello","args":{"proto":1,"client":{"name":name.map(str::to_owned).unwrap_or_else(||format!("cli-{}",std::process::id())),"kind":if agent{"agent"}else{"cli"},"version":env!("CARGO_PKG_VERSION")}}}),
         )?;
         let mut bytes = Vec::new();
         let frame = read_frame(&mut reader, &mut bytes, Some(deadline))?;
@@ -103,7 +103,7 @@ impl Connection {
             end_reason,
         })
     }
-    fn request(
+    fn request_frame(
         &self,
         id: u64,
         op: &str,
@@ -135,7 +135,7 @@ impl Connection {
         let answer = receive.recv_timeout(timeout);
         self.pending.lock().unwrap().remove(&id);
         match answer {
-            Ok(Ok(frame)) => result(frame),
+            Ok(Ok(frame)) => Ok(frame),
             Ok(Err(error)) => Err(Disconnected(error).into()),
             Err(_) => Err(AppError::new(
                 Code::Timeout,
@@ -163,6 +163,7 @@ pub struct Client {
     connection: Mutex<Arc<Connection>>,
     cfg: Config,
     agent: bool,
+    name: Option<String>,
     path: PathBuf,
     next: AtomicU64,
     pub hello: HelloResult,
@@ -177,13 +178,20 @@ impl Client {
             &crate::ipc::socket_path(cfg).with_file_name("api.sock"),
         )
     }
+    pub fn connect_named(cfg: &Config, name: &str) -> Result<Self> {
+        Self::connect_at_named(cfg,true,&crate::ipc::socket_path(cfg).with_file_name("api.sock"),Some(name))
+    }
     fn connect_at(cfg: &Config, agent: bool, path: &std::path::Path) -> Result<Self> {
-        let connection = Connection::connect(cfg, agent, path)?;
+        Self::connect_at_named(cfg,agent,path,None)
+    }
+    fn connect_at_named(cfg: &Config, agent: bool, path: &std::path::Path, name: Option<&str>) -> Result<Self> {
+        let connection = Connection::connect(cfg, agent, path, name)?;
         let hello = connection.hello.clone();
         Ok(Self {
             connection: Mutex::new(Arc::new(connection)),
             cfg: cfg.clone(),
             agent,
+            name: name.map(str::to_owned),
             path: path.into(),
             next: AtomicU64::new(2),
             hello,
@@ -198,6 +206,20 @@ impl Client {
         self.request(op, args, None)
     }
     pub fn request(&self, op: &str, args: Value, reference: Option<&str>) -> Result<Value> {
+        self.execute(op,args,reference,false)
+    }
+    pub fn envelope(&self, op: &str, args: Value, reference: Option<&str>) -> Result<Value> {
+        self.execute(op,args,reference,true)
+    }
+    pub fn hello_envelope(cfg: &Config, args: Value) -> Result<Value> {
+        let deadline=Instant::now()+Duration::from_millis(200);
+        let path=crate::ipc::socket_path(cfg).with_file_name("api.sock");
+        let mut socket=connect_probe(&path,deadline)?;
+        socket.set_write_timeout(Some(Duration::from_millis(200)))?;
+        send(&mut socket,&json!({"id":1,"op":"hello","args":args}))?;
+        read_frame(&mut BufReader::new(socket),&mut Vec::new(),Some(deadline))
+    }
+    fn execute(&self, op: &str, args: Value, reference: Option<&str>, envelope: bool) -> Result<Value> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let generated = crate::api::ops::TABLE
             .iter()
@@ -217,7 +239,7 @@ impl Client {
         } else {
             self.cfg.timeout_secs.max(1)
         });
-        match connection.request(
+        match connection.request_frame(
             id,
             op,
             args.clone(),
@@ -225,7 +247,7 @@ impl Client {
             &connection.hello.instance,
             timeout,
         ) {
-            Ok(value) => Ok(value),
+            Ok(value) => if envelope { Ok(value) } else { result(value) },
             Err(error) => {
                 let Some(lost) = error.downcast_ref::<Disconnected>() else {
                     return Err(error);
@@ -255,14 +277,14 @@ impl Client {
                 }
                 let mut active = self.connection.lock().unwrap();
                 if Arc::ptr_eq(&active, &connection) {
-                    let replacement = match Connection::connect(&self.cfg, self.agent, &self.path) {
+                    let replacement = match Connection::connect(&self.cfg, self.agent, &self.path, self.name.as_deref()) {
                         Ok(v) => v,
                         Err(_) => {
                             super::ensure_daemon(
                                 &self.cfg,
                                 !self.cfg.autostart || crate::backend::start_prevented(),
                             )?;
-                            Connection::connect(&self.cfg, self.agent, &self.path)?
+                            Connection::connect(&self.cfg, self.agent, &self.path, self.name.as_deref())?
                         }
                     };
                     *active = Arc::new(replacement);
@@ -270,7 +292,7 @@ impl Client {
                 // Keep both ref and the previously observed instance. The server's frozen
                 // mutation policy decides whether the idempotent resend can be applied.
                 active
-                    .request(
+                    .request_frame(
                         self.next.fetch_add(1, Ordering::Relaxed),
                         op,
                         args,
@@ -285,7 +307,7 @@ impl Client {
                         )
                         .hint("fbittorrent list --json")
                         .into()
-                    })
+                    }).and_then(|frame| if envelope { Ok(frame) } else { result(frame) })
             }
         }
     }
@@ -313,7 +335,7 @@ impl Client {
                 break;
             }
             std::thread::sleep(delay.min(left));
-            if let Ok(connection) = Connection::connect(&self.cfg, self.agent, &self.path) {
+            if let Ok(connection) = Connection::connect(&self.cfg, self.agent, &self.path, self.name.as_deref()) {
                 *self.connection.lock().unwrap() = Arc::new(connection);
                 self.call("subscribe", args)?;
                 return Ok(());

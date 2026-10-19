@@ -12,7 +12,12 @@ impl Screen {
 
 pub struct TuiApp {
     pub(super) cfg: Config,
-    pub(super) lifecycle: Lifecycle,
+    pub(super) store: super::store::Store,
+    pub(super) presence: Option<Arc<super::attach::Presence>>,
+    pub(super) recovery: super::attach::Recovery,
+    pub(super) failed_polls: u8,
+    pub(super) daemon_stopped: bool,
+    pub(super) quit_notice: bool,
     pub(super) theme: Theme,
     pub(super) footer_cache: RefCell<Option<super::footer::FooterCache>>,
     pub(super) screen: Screen,
@@ -24,6 +29,12 @@ pub struct TuiApp {
     pub(super) torrents: Vec<Torrent>,
     pub(super) transfer: TransferInfo,
     pub(super) tor_list: RefCell<ListState>,
+    pub(super) rects: RefCell<super::layout::Rects>,
+    pub(super) torrent_table: RefCell<super::layout::TorrentTable>,
+    pub(super) list_tables: RefCell<[super::layout::ListTable;10]>,
+    pub(super) torrent_revision: u64,
+    pub(super) torrent_sort: super::store::TorrentSort,
+    pub(super) torrent_descending: bool,
     pub(super) poll_inflight: bool,
     pub(super) tick: usize,
     // search
@@ -33,12 +44,18 @@ pub struct TuiApp {
     pub(super) search_list: RefCell<ListState>,
     pub(super) search_sub: Option<(SubId, String)>,
     pub(super) search_running: bool,
+    pub(super) native_search: Option<super::remote::search::Session>,
+    pub(super) search_wire: Vec<crate::api::SearchItem>,
     pub(super) search_seq: u64,
     pub(super) search_browse: bool,
+    pub(super) search_card: bool,
+    pub(super) search_sort: super::store::SearchSort,
+    pub(super) search_descending: bool,
     pub(super) browse_entries: Vec<browse::Entry>,
     pub(super) browse_list: RefCell<ListState>,
     pub(super) browse_loading: Option<String>,
     pub(super) files: Option<FilesModal>,
+    pub(super) details: Option<DetailsModal>,
     pub(super) providers: Option<ProvidersModal>,
     pub(super) settings: Option<SettingsModal>,
     pub(super) plugins: Vec<SearchPlugin>,
@@ -95,9 +112,17 @@ pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: S
 pub enum Msg {
     Raw(Event),
     Poll,
+    Api {connection:u64,update:super::attach::ApiUpdate,ack:std::sync::mpsc::SyncSender<()>},
+    ApiRead {connection:Option<u64>,result:Result<super::remote::ReadSnapshot,String>},
+    Attached(Result<Arc<super::attach::Presence>,super::attach::Failure>),
+    OwnerShutdown(Result<(),String>),
+    SettingsSaved(Result<Config,String>),
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
     Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
+    NativeSearchStarted {connection:u64,sequence:u64,result:Result<super::remote::search::Session,String>},
+    SearchDisposed,
+    NativeBrowse {connection:Option<u64>,sequence:u64,label:String,result:Result<Option<Vec<crate::api::SearchItem>>,String>},
     SearchBatch { id: SubId, results: Vec<SearchResult>, done: bool, error: Option<String> },
     Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
@@ -107,6 +132,7 @@ pub enum Msg {
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
     Files(String, Result<Vec<TorrentFile>, String>),
+    ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
     Ratings(Result<Arc<imdb::RatingsIndex>, String>),
     /// Resolved (release name, IMDb id) pairs for the ratings column.
@@ -129,10 +155,6 @@ pub enum Screen { Torrents, Search, Shows, Rss }
 
 impl TuiApp {
     pub(super) fn new(cfg: Config, screen: Screen, shows: Shows) -> Self {
-        Self::with_lifecycle(cfg, screen, shows, Lifecycle::default())
-    }
-
-    pub(super) fn with_lifecycle(cfg: Config, screen: Screen, shows: Shows, lifecycle: Lifecycle) -> Self {
         let theme = Theme::load();
         let mut search_input = TextInput::new()
             .with_placeholder("search torrents, Enter to run")
@@ -141,7 +163,8 @@ impl TuiApp {
         search_input.set_focused(screen == Screen::Search);
         let mut app = TuiApp {
             cfg,
-            lifecycle,
+            store:super::store::Store::default(),
+            presence:None,recovery:super::attach::Recovery::default(),failed_polls:0,daemon_stopped:false,quit_notice:false,
             theme,
             footer_cache: RefCell::new(None),
             screen,
@@ -153,6 +176,12 @@ impl TuiApp {
             torrents: vec![],
             transfer: TransferInfo::default(),
             tor_list: RefCell::new(ListState::default()),
+            rects:RefCell::default(),
+            torrent_table:RefCell::default(),
+            list_tables:RefCell::new(std::array::from_fn(|_|Default::default())),
+            torrent_revision:0,
+            torrent_sort:super::store::TorrentSort::Added,
+            torrent_descending:true,
             poll_inflight: false,
             tick: 0,
             search_input,
@@ -161,12 +190,18 @@ impl TuiApp {
             search_list: RefCell::new(ListState::default()),
             search_sub: None,
             search_running: false,
+            native_search: None,
+            search_wire: vec![],
             search_seq: 0,
             search_browse: false,
+            search_card: false,
+            search_sort:super::store::SearchSort::Seeds,
+            search_descending:true,
             browse_entries: browse::catalogue(),
             browse_list: RefCell::new(ListState::default()),
             browse_loading: None,
             files: None,
+            details: None,
             providers: None,
             settings: None,
             plugins: vec![],

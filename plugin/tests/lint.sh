@@ -3,7 +3,9 @@
 set -euo pipefail
 root="${FBT_PLUGIN_SOURCE:-$(dirname "$0")/../oliver.torrents}"
 model="$root/Model.js"
+python3 "$(dirname "$0")/token-lint.py" "$root"
 python3 "$(dirname "$0")/check-structure.py" "$root"
+python3 "$(dirname "$0")/check-frame-handlers.py" "$root"
 python3 "$(dirname "$0")/../../scripts/check-widget-online.py" --self-test "$root/Service.qml"
 if rg -n 'num_seeds\s*\+\s*["\x27]s["\x27]' "$model"; then
   echo 'Unknown native seed counts must not become an s-suffixed widget count.' >&2
@@ -14,9 +16,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = p => fs.readFileSync(p, 'utf8').replace(/^\.(?:pragma|import).*$/gm, '');
-const glyphs = {};
-vm.runInNewContext(source(require('node:path').join(require('node:path').dirname(process.argv[2]), 'Glyphs.js')), glyphs);
-const model = {Glyphs:glyphs};
+const model = {};
+for (const name of ['Glyphs', 'Formats', 'Palette']) {
+  const file = require('node:path').join(require('node:path').dirname(process.argv[2]), name+'.js');
+  if (fs.existsSync(file)) {model[name]={}; vm.runInNewContext(source(file),model[name]);}
+}
 vm.runInNewContext(source(process.argv[2]), model);
 const torrent = {state: 'downloading', progress: 0.42, size: 1024 * 1024,
   dlspeed: 2048, upspeed: 0, eta: 65, num_seeds: 0, num_leechs: 7,

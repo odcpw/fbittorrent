@@ -1,30 +1,30 @@
-  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                     ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                               ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Search ──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Sintel                                                                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ Results (10) · 2/3 providers ──────────────────────────────────────╮╭ Details ───────────────────────────────────────╮
-│                                                                    ││                                                │
-│   NAME                                       IMDB  SEEDS      SIZE ││  Sintel                                        │
-│ ▌ Sintel                                             124 512.0 MiB ││                                                │
-│   Sintel - 2010 - Multisubs mkv                      123 512.0 MiB ││  size      512.0 MiB                           │
-│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD             122 512.0 MiB ││  peers     124 seeds, 3 leechers               │
-│   Sintel (2010) [720p] [x264…[bluray] [YTS]          121 512.0 MiB ││  uploaded  2026-10-18                          │
-│   Sintel 2010 x2╭ Search providers ────────────────────────────────────────────────────────────────╮                 │
-│   Sintel 2010 82│ ▌ [x] EZTV                  provider-0.invalid                                   │                 │
-│   Sintel (2010) │   [ ] YTS                   provider-1.invalid                                   │rsor rests here  │
-│   Sintel.2010.72│   [x] The Pirate Bay        provider-2.invalid                                   │                 │
-│   Sintel [辛特尔│                                                                                  │                 │
-│   [philosophy-ra│                                                                                  │                 │
+╭ Results (10) · 2/3 providers ────────────────────────────────────────────────────────────────────────────────────────╮
+│  NAME                                                              SIZE SEEDS↓     ★   UPLOADED PROVIDER        PEERS│
+│▌ Sintel                                                       512.0 MiB    124     — 2026-10-18 fixture             3│
+│  Sintel - 2010 - Multisubs mkv                                512.0 MiB    123     — 2026-10-18 fixture             3│
+│  Sintel.2010.1080p.WEB.H264-CLASSiCALHD                       512.0 MiB    122     — 2026-10-18 fixture             3│
+│  Sintel (2010) [720p] [x264] [bluray] [YTS]                   512.0 MiB    121     — 2026-10-18 fixture             3│
+│  Sintel 2010 x264 DMRip 1080p mkv                             512.0 MiB    120     — 2026-10-18 fixture             3│
+│  Sintel 2010 820╭ Search providers ────────────────────────────────────────────────────────────────╮ure             3│
+│  Sintel (2010) B│ ▌ [x] EZTV                  provider-0.invalid                                   │ure             3│
+│  Sintel.2010.720│   [ ] YTS                   provider-1.invalid                                   │ure             3│
+│  Sintel [辛特尔]│   [x] The Pirate Bay        provider-2.invalid                                   │ure             3│
+│  [philosophy-raw│                                                                                  │ure             3│
+│                 │                                                                                  │                 │
 │                 │ 2 of 3 enabled · Space toggle · a all · n none · o open site · Esc close         │                 │
 │                 ╰──────────────────────────────────────────────────────────────────────────────────╯                 │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 [Providers] (Esc) Close  (Space) Toggle  (o) Open site  (a) All  (n) None  (j) Next  (k) Previous  (r) Reload   (?) Help
 EZTV

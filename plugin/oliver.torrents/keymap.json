@@ -227,6 +227,163 @@
       "scope": "global"
     },
     {
+      "id": "daemon.start",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Start fbittorrent",
+      "scope": "modal:stopped"
+    },
+    {
+      "id": "details.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "h"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.next",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "]"
+        ]
+      },
+      "label": "Next tab",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.previous",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "["
+        ]
+      },
+      "label": "Previous tab",
+      "scope": "modal:details"
+    },
+    {
+      "id": "files.next_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "]"
+        ]
+      },
+      "label": "Next tab",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.previous_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "["
+        ]
+      },
+      "label": "Overview",
+      "scope": "modal:files"
+    },
+    {
+      "id": "details.open",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "o"
+        ]
+      },
+      "label": "Open",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.pause",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "p"
+        ]
+      },
+      "label": "Pause/resume",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.seed",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "u"
+        ]
+      },
+      "label": "Seed",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.remove",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "d"
+        ]
+      },
+      "label": "Remove",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.delete",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "D"
+        ]
+      },
+      "label": "Delete files",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.imdb",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.wiki",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "modal:details"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [
@@ -351,7 +508,7 @@
           "Enter"
         ]
       },
-      "label": "Files",
+      "label": "Details",
       "scope": "screen:torrents"
     },
     {
@@ -524,6 +681,18 @@
       "label": "First/last priority (legacy)",
       "note": "Legacy qBittorrent only; native streaming priority is automatic.",
       "scope": "screen:torrents"
+    },
+    {
+      "id": "search.card",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "v"
+        ]
+      },
+      "label": "Card",
+      "scope": "screen:search"
     },
     {
       "id": "search.next",
@@ -1318,6 +1487,7 @@
         "popup": null,
         "tui": [
           "Esc",
+          "h",
           "q",
           "Enter"
         ]

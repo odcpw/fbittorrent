@@ -90,6 +90,7 @@ impl Shared {
             return false;
         }
         job.mutation = Some(ticket.clone());
+        job._activity = Some(Arc::new(crate::daemon::policy::Mutation::start(self.daemon.policy.clone())));
         let deadline = job
             .connection
             .pending
@@ -123,6 +124,8 @@ impl Shared {
                     op: job.request.call.op().into(),
                     deadline,
                     confirmation: None,
+                    handler_add: matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")),
+                    _activity: job._activity.as_ref().unwrap().clone(),
                 },
             );
         }
@@ -138,6 +141,7 @@ impl Shared {
         true
     }
     pub(super) fn answer(&self, job: &Job, answer: ApiResult<Reply>) {
+        if answer.is_err() && matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")) { self.daemon.notifier.failed(); }
         if let Some(ticket) = &job.mutation {
             let active = self
                 .mutation_active
@@ -198,6 +202,7 @@ impl Shared {
         } else {
             result
         };
+        if result.is_err() && task.handler_add { self.daemon.notifier.failed(); }
         let (outcome, failure, result) = match result {
             Ok(Reply::TorrentsRecheck(RecheckReply::Complete(report))) if !report.failed.is_empty() => (
                 MutationOutcome::Failed,
@@ -220,7 +225,7 @@ impl Shared {
             ),
         };
         let event = Event::MutationResult {
-            seq: self.event_sequence.fetch_add(1, Ordering::Relaxed),
+            seq: 0, // The instance-wide bus assigns every event sequence.
             ts: now(),
             reference: task.ticket.reference.clone(),
             op: task.op,
@@ -228,6 +233,8 @@ impl Shared {
             error: failure,
             result,
         };
+        let event: Event = serde_json::from_value(self.bus.publish(serde_json::to_value(event).unwrap()))
+            .expect("bus preserves typed mutation events");
         task.ticket
             .finish(event.clone(), |delivery| self.deliver_mutation(delivery));
         let mut events = self.mutation_events.lock().unwrap();
@@ -262,7 +269,9 @@ impl Shared {
             let result = match entry.confirmation {
                 Some(Confirmation::Move(batch))=>batch.result().map(ops::moving::complete),
                 Some(Confirmation::Recheck(batch)) => batch.result().map(|report| Ok(ops::recheck::complete(report))),
-                Some(Confirmation::Metadata(Reply::TorrentsAdd(mut added))) => {
+                Some(Confirmation::Metadata(reply)) => {
+                    let search = matches!(&reply, Reply::SearchGrab(_));
+                    let mut added = match reply { Reply::TorrentsAdd(added) | Reply::SearchGrab(added) => added, _ => unreachable!("metadata add receipt") };
                     let hash = added.hash.as_ref().unwrap().as_str();
                     // Reading the restore receipt never waits on a runtime or on
                     // payload I/O, including while the owner replaces a slot.
@@ -284,7 +293,7 @@ impl Shared {
                                 added.name = Some(detail.torrent.name);
                             }
                             added.status = MutationResult::Done;
-                            Some(Ok(Reply::TorrentsAdd(added)))
+                            Some(Ok(if search { Reply::SearchGrab(added) } else { Reply::TorrentsAdd(added) }))
                         }
                         Some(crate::engine::RestoreOutcome::Failed { message, .. }) => {
                             Some(Err(error(

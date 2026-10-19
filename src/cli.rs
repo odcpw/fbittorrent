@@ -1,9 +1,15 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
 pub mod shapes;
+pub(super) mod logs;
+pub(super) mod stream;
+pub(super) mod raw;
+pub(super) mod restart;
 mod native;
+mod handler;
 mod offline;
 pub(super) mod settings;
+pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
 
 #[derive(Parser)]
@@ -30,9 +36,32 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Cmd {
+    /// Replay retained daemon events; --follow streams until EOF or Ctrl+C
+    Events {
+        #[arg(long)] follow: bool,
+        #[arg(long)] since_seq: Option<u64>,
+        #[arg(long, value_delimiter=',')] kinds: Vec<String>,
+    },
+    /// Send a raw API operation or list its compiled catalogue
+    Api {
+        #[arg(required_unless_present="list")] op: Option<String>,
+        #[arg(long, conflicts_with="op")] list: bool,
+        #[arg(long="arg", requires="op")] args: Vec<String>,
+        #[arg(long, requires="op")] json_args: Option<String>,
+        #[arg(long="ref", requires="op")] reference: Option<String>,
+    },
+    /// Read daemon history without starting it; --follow streams NDJSON
+    Log {
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, value_parser=["error","warn","info","debug"])]
+        level: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Run the torrent engine daemon (other commands start it on demand)
     Serve {
-        /// Idle shutdown delay; 0 disables the idle safety net
+        /// Override the configured idle delay (default 300); 0 disables it
         #[arg(long)]
         idle_exit_secs: Option<u64>,
         /// Disable desktop notifications (systemd readiness is still sent)
@@ -63,8 +92,16 @@ pub(super) enum Cmd {
     /// Start the daemon; --ui also opens the dashboard or TUI
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
-    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
-    /// Restart the running engine; daemon upgrade handling follows in P1-17
+    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String>, #[arg(long)] hash: Option<String> },
+    /// Read or persist primary and turtle limits; zero means unlimited
+    Limits {
+        #[arg(long)] down: Option<String>,
+        #[arg(long)] up: Option<String>,
+        #[arg(long, value_parser = ["on", "off"])] alt: Option<String>,
+        #[arg(long)] alt_down: Option<String>,
+        #[arg(long)] alt_up: Option<String>,
+    },
+    /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)
     Down,
@@ -107,6 +144,9 @@ pub(super) enum Cmd {
         /// Suppress the desktop notification
         #[arg(long)]
         quiet: bool,
+        /// Show a plain notification even when stdout is not a TTY (never with --json)
+        #[arg(long)]
+        notify: bool,
         /// Block until the download completes (see `wait`)
         #[arg(long)]
         wait: bool,
@@ -202,9 +242,21 @@ pub(super) enum Cmd {
         /// Also register fbittorrent as the magnet: handler
         #[arg(long)]
         magnet: bool,
-        /// Remove the static native systemd user unit; saved data is kept
-        #[arg(long, conflicts_with_all = ["magnet", "save"])]
+        /// Link the checkout's plugin or copy it for a stable installation
+        #[arg(long, value_parser=["link", "copy"])]
+        plugin: Option<String>,
+        /// List exact planned actions without writing files or running commands
+        #[arg(long)]
+        dry_run: bool,
+        /// Remove desktop integration while keeping saved data
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
         uninstall: bool,
+        /// Remove integration and application data (never downloaded payloads)
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        purge: bool,
+        /// Confirm application-data removal with --purge
+        #[arg(long)]
+        yes: bool,
     },
     /// Register fbittorrent as the magnet: / .torrent handler
     RegisterMagnet,
@@ -309,6 +361,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn serve_idle_override_preserves_config_default_and_short_test_delays() {
+        let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Serve { idle_exit_secs: None, .. })));
+        let cli = Cli::try_parse_from(["fbittorrent", "serve", "--idle-exit-secs", "2"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Serve { idle_exit_secs: Some(2), .. })));
+    }
+    #[test]
     fn robot_docs_keys_selects_each_surface_and_json() {
         for surface in ["tui","dashboard","popup","all"] {
             let cli=Cli::try_parse_from(["fbittorrent","robot-docs","keys","--surface",surface,"--json"]).unwrap();
@@ -326,13 +385,17 @@ mod tests {
 /// Documentation is available even when configuration is invalid or absent.
 pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Code> {
     match section {
+        "api" => {
+            if json { println!("{}", serde_json::json!({"ok":true,"operations":crate::api::ops::TABLE})); }
+            else { print!("{}",crate::api::ops::markdown()); }
+        }
         "keys" => {
             if json { println!("{}", tui::actions::keymap(surface)); }
             else { print!("{}", tui::actions::markdown(surface)); }
         }
         "guide" => if json { println!("{}", agent::with_warnings(serde_json::json!({"ok":true,"section":"guide","text":agent::ROBOT_GUIDE.to_string()}))); } else { print!("{}", agent::ROBOT_GUIDE); },
         _ => return Err(AppError::new(Code::Usage, format!("unknown docs section '{section}'"))
-            .hint("fbittorrent robot-docs guide   # or: robot-docs keys --surface all").into()),
+            .hint("fbittorrent robot-docs guide   # or: robot-docs api / robot-docs keys --surface all").into()),
     }
     Ok(Code::Ok)
 }

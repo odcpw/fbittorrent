@@ -75,6 +75,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
         "done" => app.tor_list.borrow_mut().select(Some(1)),
         "search" => { let _ = app.set_screen(Screen::Search); },
         "shows" => { let _ = app.set_screen(Screen::Shows); },
@@ -95,7 +96,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
             });
         },
         "settings" => app.settings = Some(SettingsModal {
-            cfg: app.cfg.clone(), list: selected_list(), connections: vec![Some("proton".into()), None],
+            cfg: app.cfg.clone(), list: selected_list(), saving:false, connections: vec![Some("proton".into()), None],
             error: String::new(),
         }),
         "prompt" => {

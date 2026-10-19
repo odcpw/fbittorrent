@@ -2,7 +2,8 @@
 
 Servers bind only loopback and own their threads. Callers own payload directories;
 ``magnet_fixture()`` also works as a context manager with its own temporary tree.
-No fixture starts a torrent client or contacts an external service.
+Payload/server helpers never start a torrent client or contact an external service.
+The explicit daemon_pair context owns two real, isolated serve processes.
 """
 import base64
 from contextvars import ContextVar
@@ -341,6 +342,12 @@ def corrupt_byte(path, offset):
         output.seek(offset)
         output.write(bytes([old ^ 0xff]))
     return old, old ^ 0xff
+
+
+def daemon_pair(case, binary, systemd=False, throttle=32768, state="downloading"):
+    """Owned seed/leech fixture, imported lazily to keep payload helpers independent."""
+    from fixture_serving import Pair
+    return Pair(case, binary, systemd, throttle, state)
 
 class tracker_server:
     """A bounded local announce fixture; logs no URL or query-string secrets."""

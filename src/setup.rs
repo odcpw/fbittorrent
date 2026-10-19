@@ -1,5 +1,9 @@
 //! Configure native app storage and desktop handlers, with explicit legacy setup.
 
+pub mod desktop;
+mod jsonc;
+mod menu;
+
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
@@ -21,6 +25,7 @@ WantedBy=default.target
 
 pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     let mut cfg = crate::config::Config::load()?;
+    install_icon()?;
     if cfg.native() {
         let save = save_path.or(cfg.save_path.clone()).unwrap_or_else(|| {
             dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads"))
@@ -219,15 +224,16 @@ pub fn uninstall() -> Result<()> {
 
 /// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
 pub fn register_magnet_handler() -> Result<()> {
+    install_icon()?;
     let exe = std::env::current_exe()?;
     let command = desktop_executable(&exe.to_string_lossy())?;
     let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
     std::fs::create_dir_all(&apps)?;
     std::fs::write(apps.join("fbittorrent.desktop"), format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
     let desktop = apps.join("fbittorrent-magnet.desktop");
     std::fs::write(&desktop, format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add --origin handler %u\nIcon=qbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add --origin handler %u\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
     for mime in ["x-scheme-handler/magnet", "application/x-bittorrent"] {
         let st = Command::new("xdg-mime").args(["default", "fbittorrent-magnet.desktop", mime]).status()?;
         if !st.success() { bail!("xdg-mime default failed for {mime}"); }
@@ -282,6 +288,33 @@ mod tests {
     }
 
     #[test]
+    fn unit_text_matches_plan() {
+        let expected = r#"[Unit]
+Description=fbittorrent torrent engine (started on demand)
+Documentation=https://github.com/odcpw/fbittorrent
+# On-demand units start often; avoid wedging after normal idle/upgrade cycles.
+StartLimitIntervalSec=60
+StartLimitBurst=20
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart="/fixture/fbittorrent" serve
+KillSignal=SIGTERM
+# Signal the owner first; kill any remaining children only at the deadline.
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=2
+RestartForceExitStatus=75
+SuccessExitStatus=75
+NoNewPrivileges=yes
+# Static by design: no login enablement links.
+"#;
+        assert_eq!(super::daemon_unit(std::path::Path::new("/fixture/fbittorrent")).unwrap(), expected);
+    }
+
+    #[test]
     fn static_daemon_unit_policy_and_exec_escaping() {
         let unit = super::daemon_unit(std::path::Path::new("/tmp/a path/%/$/fbittorrent")).unwrap();
         for line in ["Type=notify", "NotifyAccess=main", "KillMode=mixed", "TimeoutStopSec=20", "Restart=on-failure", "RestartSec=2", "RestartForceExitStatus=75", "SuccessExitStatus=75", "StartLimitIntervalSec=60", "StartLimitBurst=20", "NoNewPrivileges=yes"] {
@@ -305,4 +338,11 @@ mod tests {
         assert_eq!(super::desktop_executable("/tmp/percent%/fbittorrent").unwrap(),
             "\"/tmp/percent%%/fbittorrent\"");
     }
+}
+
+fn install_icon() -> Result<()> {
+    let directory = dirs::data_local_dir().context("no data directory")?.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::write(directory.join("fbittorrent.svg"), include_str!("../assets/fbittorrent.svg"))?;
+    Ok(())
 }

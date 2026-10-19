@@ -9,10 +9,15 @@ mod app;
 pub use app::{TuiApp, Screen, Msg, ImdbState};
 use app::*;
 mod connection;
+mod remote;
+mod attach;
 #[path = "screens/torrents.rs"]
 mod screens_torrents;
 #[path = "screens/search.rs"]
 mod screens_search;
+#[path = "screens/search_view.rs"]
+mod screens_search_view;
+use screens_search_view::*;
 use screens_search::*;
 #[path = "screens/rss.rs"]
 mod screens_rss;
@@ -21,6 +26,9 @@ mod screens_shows;
 #[path = "modals/files.rs"]
 mod modals_files;
 use modals_files::*;
+#[path = "modals/details.rs"]
+mod modals_details;
+use modals_details::*;
 #[path = "modals/providers.rs"]
 mod modals_providers;
 use modals_providers::*;
@@ -50,6 +58,9 @@ mod palette;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 #[cfg(test)]
+#[path = "tests/responsive.rs"]
+mod responsive_tests;
+#[cfg(test)]
 #[path = "tests/golden.rs"]
 mod golden;
 
@@ -74,18 +85,22 @@ impl Model for TuiApp {
             }
         }
         self.rss_loaded = true;
-        let mut cmds = vec![self.poll(), self.load_plugins(), self.load_ratings(), self.load_rss()];
+        let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
+        let mut cmds = vec![first, self.load_plugins(), self.load_ratings(), self.load_rss()];
         cmds.push(self.refresh_shows(false));
         Cmd::batch(cmds)
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Msg>>> {
         let mut v: Vec<Box<dyn Subscription<Msg>>> = vec![
-            Box::new(Every::with_id(1, Duration::from_millis(2000), || Msg::Poll)),
             Box::new(Every::with_id(2, Duration::from_millis(300), || Msg::Hover)),
         ];
-        if let Some((id, q)) = &self.search_sub {
-            v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone() }));
+        if !self.cfg.native()||self.presence.as_ref().is_some_and(|connection|connection.alive()) {
+            v.push(Box::new(Every::with_id(1,Duration::from_millis(2000),||Msg::Poll)));
+        }
+        if let Some(connection)=self.presence.as_ref().filter(|connection|connection.alive()) {v.push(Box::new(remote::ApiSub {connection:connection.clone()}));}
+        if let Some((id, q)) = self.search_sub.as_ref().filter(|_|!self.cfg.native()) {
+            v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone(),presence:self.presence.clone() }));
         }
         if self.rss_retry_until.is_some_and(|until| std::time::Instant::now() < until) && self.feeds.iter().any(|f| f.is_loading) {
             v.push(Box::new(Every::with_id(3, Duration::from_secs(1), || Msg::RssReload)));
@@ -109,14 +124,18 @@ impl Model for TuiApp {
             }
             Msg::Raw(_) => Cmd::none(),
             Msg::Poll => {
-                if self.cfg.native() && crate::network_app::check_transition(&self.cfg, &self.lifecycle) { return Cmd::quit(); }
+                // CLI settings can reopen the daemon slot while this UI stays attached.
+                if self.cfg.native() {
+                    if let Ok(cfg) = Config::load() { self.cfg = cfg; }
+                }
                 self.tick += 1; self.maybe_reload_theme(); self.poll()
             }
             Msg::Hover => {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
                 if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); }
-                self.on_hover()
+                let recovery=self.recovery_tick();
+                Cmd::batch(vec![recovery,self.on_hover()])
             }
             Msg::Ids(pairs) => {
                 self.ids_inflight = false;
@@ -128,14 +147,22 @@ impl Model for TuiApp {
                 match r { Ok(idx) => self.ratings = Some(idx), Err(e) => self.set_status(format!("ratings index: {e}"), true) }
                 Cmd::none()
             }
+            Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
+            Msg::ApiRead {connection,result} => {
+                if self.presence.as_ref().map(|active|active.id)!=connection || self.presence.as_ref().is_some_and(|active|!active.alive()) {return Cmd::none();}
+                self.apply_api_read(result)
+            },
             Msg::Torrents(r) => {
                 self.poll_inflight = false;
                 match r {
-                    Ok((ts, ti)) => {
+                    Ok((mut ts, ti)) => {
+                        if !self.cfg.native(){ts.sort_by(|left,right|store::legacy_order(left,right,self.torrent_sort,self.torrent_descending));}
                         self.online = true;
+                        self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
                         let sel_hash = self.selected_torrent().map(|t| t.hash.clone());
                         self.torrents = ts;
+                        self.torrent_revision=self.torrent_revision.wrapping_add(1);
                         let mut st = self.tor_list.borrow_mut();
                         let cur = st.selected().unwrap_or(0);
                         match sel_hash.and_then(|h| self.torrents.iter().position(|t| t.hash == h)) {
@@ -145,10 +172,26 @@ impl Model for TuiApp {
                         }
                         self.transfer = ti;
                     }
-                    Err(e) => { self.online = false; self.backend_error = e; }
+                    Err(e) => {
+                        self.online = false; self.backend_error = e;
+                        if self.cfg.native() {self.store.disconnected();}
+                        self.failed_polls = self.failed_polls.saturating_add(1);
+                        self.daemon_stopped = self.cfg.native() && !self.recovery.active && self.failed_polls >= 2;
+                    }
                 }
                 Cmd::none()
             }
+            Msg::Attached(result) => match result {
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume]) }
+                Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
+            },
+            Msg::OwnerShutdown(result) => match result {
+                Ok(()) => Cmd::quit(), Err(error) => { self.set_status(error,true); Cmd::none() }
+            },
+            Msg::SettingsSaved(result) => match result {
+                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_status("download settings saved",false); self.poll() }
+                Err(error) => { if let Some(modal)=self.settings.as_mut() { modal.saving=false; modal.error=error; } Cmd::none() }
+            },
             Msg::ActionDone(r) => {
                 match r { Ok(s) => self.set_status(s, false), Err(e) => self.set_status(e, true) }
                 self.poll()
@@ -162,13 +205,24 @@ impl Model for TuiApp {
                 self.imdb.insert(key, st);
                 Cmd::none()
             }
+            Msg::NativeSearchStarted {connection,sequence,result} => self.native_search_started(connection,sequence,result),
+            Msg::SearchDisposed => Cmd::none(),
+            Msg::NativeBrowse {connection,sequence,label,result} => {
+                if self.presence.as_ref().map(|c|c.id)!=connection || sequence!=self.search_seq {return Cmd::none();}
+                self.browse_loading=None;
+                match result {
+                    Ok(Some(mut rows))=>{rows.sort_by(|a,b|store::search_order(a,b,self.search_sort,self.search_descending));self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
+                    Ok(None)=>{self.set_status(format!("opened {label} in browser"),false);Cmd::none()},
+                    Err(error)=>{self.set_status(error,true);Cmd::none()}
+                }
+            },
             Msg::SearchBatch { id, results, done, error } => {
                 if self.search_sub.as_ref().map(|(i, _)| *i) != Some(id) { return Cmd::none(); }
                 if let Some(e) = error.as_ref() { self.set_status(format!("search failed: {e}"), true); }
                 if !results.is_empty() || done {
                     let sel_url = self.selected_result().map(|r| r.file_url.clone());
                     let mut rs = dedupe_results(results);
-                    rs.sort_by(|a, b| b.seeders.cmp(&a.seeders));
+                    rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
                     // Best 100 by seeders is all anyone reads; dedupe first so the cap
                     // is not spent on the same torrent from five providers.
                     rs.truncate(MAX_RESULTS);
@@ -197,7 +251,8 @@ impl Model for TuiApp {
             Msg::Browse(label, r) => {
                 self.browse_loading = None;
                 match r {
-                    Ok(rs) => {
+                    Ok(mut rs) => {
+                        if !self.cfg.native(){rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));}
                         self.search_sub = None; self.search_running = false;
                         let n = rs.len();
                         self.search_results = rs;
@@ -226,6 +281,10 @@ impl Model for TuiApp {
                     Err(e) => { if let Some(m) = self.providers.as_mut() { m.loading = false; m.error = e; } }
                 }
                 Cmd::none()
+            }
+            Msg::ApiFiles {connection,hash,result} => {
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                self.update(Msg::Files(hash,result))
             }
             Msg::Files(hash, r) => {
                 if let Some(m) = self.files.as_mut() {
@@ -345,9 +404,12 @@ impl Model for TuiApp {
     fn view(&self, frame: &mut Frame) {
         let th = &self.theme;
         self.last_bounds.set(frame.bounds());
+        self.rects.borrow_mut().begin();
         self.poster_drawn.set(false);
+        let banner=self.priority_banner();
+        let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
-            .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(2)])
+            .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(u16::from(strip)),Constraint::Fixed(u16::from(banner.is_some())),Constraint::Fixed(2)])
             .split(frame.bounds());
         self.view_tabs(root[0], frame);
         match self.screen {
@@ -356,6 +418,15 @@ impl Model for TuiApp {
             Screen::Rss => self.view_rss(root[1], frame),
             Screen::Shows => self.view_shows(root[1], frame),
         }
+        if strip {self.view_selected_strip(root[3],frame);}
+        if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
+        self.rects.borrow_mut().footer=root[5];
+        if self.details.is_none(){self.view_status(root[5], frame);}
+        if self.details.is_some() { self.view_details(frame); }
+        else if self.files.is_some() { self.view_files(frame); }
+        if self.providers.is_some() { self.view_providers(frame); }
+        if self.settings.is_some() { self.view_settings(frame); }
+        if self.show_help { self.view_help(frame); }
         if let Some(p) = &self.prompt {
             let title = p.title();
             let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title).padding(Sides::horizontal(1));
@@ -367,15 +438,11 @@ impl Model for TuiApp {
                 p.input.render(inner, frame);
             }
         }
-        self.view_status(root[3], frame);
-        if self.files.is_some() { self.view_files(frame); }
-        if self.providers.is_some() { self.view_providers(frame); }
-        if self.settings.is_some() { self.view_settings(frame); }
-        if self.show_help { self.view_help(frame); }
+
         // Graphics-layer posters sit above text, so anything drawn over the card
         // (modals, other screens) needs the placement gone.
         if let Some(k) = &self.kitty {
-            let overlay = self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
+            let overlay = self.details.is_some() || self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
             if !self.poster_drawn.get() || overlay { k.borrow_mut().clear(); }
         }
     }

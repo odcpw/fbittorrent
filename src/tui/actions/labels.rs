@@ -2,14 +2,15 @@
 use super::*;
 
 pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
+    let id=match id { "details.pause"=>"torrents.pause", "details.seed"=>"torrents.seed", _=>id };
     Some(
         match id {
             "torrents.pause" => {
                 let torrent = app.selected_torrent()?;
-                if torrent.complete_no_seed() {
+                if app.complete_no_seed(torrent) {
                     return None;
                 }
-                if torrent.is_stopped() {
+                if app.torrent_paused(torrent) {
                     "Resume"
                 } else {
                     "Pause"
@@ -17,14 +18,15 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
             }
             "torrents.seed" => {
                 let torrent = app.selected_torrent()?;
-                if torrent.complete_no_seed() {
+                if app.complete_no_seed(torrent) {
                     "Seed"
-                } else if torrent.seed_allowed() {
+                } else if app.seed_allowed(torrent) {
                     "Seed off"
                 } else {
                     "Seed on"
                 }
             }
+            "search.card" if app.search_card => "Results",
             "search.submit" if app.search_input.value().trim().is_empty() => "Browse lists",
             "browse.open" => {
                 if app
@@ -103,7 +105,8 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
             }
             "shows.refresh" => "Check all",
             "shows.reload" => "Check show",
-            "prompt.submit" => match app.prompt.as_ref()?.kind {
+            "prompt.confirm" if app.prompt.as_ref().is_some_and(|p|p.kind==PromptKind::Shutdown) => "Stop fbittorrent",
+        "prompt.submit" => match app.prompt.as_ref()?.kind {
                 PromptKind::FollowShow => "Follow",
                 PromptKind::AddFeed => "Add feed",
                 _ => "Add",

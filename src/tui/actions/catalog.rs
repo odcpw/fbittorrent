@@ -24,6 +24,7 @@ macro_rules! action {
         }
     };
 }
+mod details;
 mod global;
 mod modals;
 mod prompt;
@@ -33,6 +34,8 @@ mod shows;
 mod torrents;
 pub(super) const TABLE: &[&[Action]] = &[
     global::ACTIONS,
+    global::STOPPED,
+    details::ACTIONS,
     torrents::ACTIONS,
     search::ACTIONS,
     rss::ACTIONS,

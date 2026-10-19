@@ -4,9 +4,9 @@
 Run locally or in CI with --no-systemd (default), or use --systemd for disposable
 transient units and disposable static-unit links. Static-unit fixtures verify
 all private XDG paths and working directory before launch and in the child.
-P1-06 adds ApiConn. P1-07's fixture-serving and daemon
-seed/leech follow-up waits for those items; no --serve-fixture capability is
-claimed by this skeleton. There is no --self-test mode.
+P1-06 adds ApiConn. --serve-fixture provides owned real-engine UI preconditions
+through managed recipes; stopping the launcher or closing an initially open
+stdin tears down every child. There is no --self-test mode.
 """
 import argparse
 import base64
@@ -111,16 +111,21 @@ def process_alive(pid):
 
 
 class DaemonContract:
-    """Process contract; future API assumptions remain confined to this adapter.
+    """Process/fixture compatibility contract. Future API assumptions stay here.
 
-    No v1 messages are implemented here. ApiConn belongs to P1-06; fixture
-    recipes, transfer.set_limits and the daemon peer pair follow that API.
+    P5-04 global transfer.set_limits controls the managed fixture seed.
     """
     unit_variable = "FBITTORRENT_UNIT"
 
     @staticmethod
     def command(binary, idle_exit_secs=300, no_notify=False):
         return [str(binary), "serve", "--idle-exit-secs", str(idle_exit_secs), *(["--no-notify"] if no_notify else [])]
+
+    @staticmethod
+    def throttle(client, hash_, bps):
+        frame=client.call("transfer.set_limits", dict(upload_bps=bps))
+        if frame.get("ok") is not True:raise ValueError("fixture throttle failed: "+json.dumps(frame))
+        return frame
 
     @staticmethod
     def socket_path(sandbox):
@@ -137,7 +142,9 @@ class NotifySocket:
 
     def receive(self, timeout=5):
         self.socket.settimeout(timeout)
-        return self.socket.recv(65536).decode()
+        value=self.socket.recv(65536).decode()
+        self.received_at=time.monotonic()
+        return value
 
     def close(self):
         self.socket.close()
@@ -319,7 +326,7 @@ class Harness:
         return Path(self.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
 
     def engine_call(self, path, method="GET", args=(), timeout=2):
-        """Temporary legacy framing until P1-06's API v1 connection exists."""
+        """Legacy framing retained for compatibility regressions; fixtures/probes use API v1."""
         request = json.dumps(dict(method=method, path=path, args=list(args), file=None)).encode()
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(timeout)
@@ -357,8 +364,12 @@ class Harness:
         return self.case.suite.stderr_path.read_bytes()[self.case.stderr_offset:].decode(errors="replace")
 
     def wait_engine(self):
-        return self.wait_for(lambda: ((response := self.engine_call("app/version")).get("error") is None,
-                                     f"Legacy version response={response!r}."), "engine session answers")
+        def observed():
+            with ApiConn(self) as client:
+                client.hello()
+                response=client.call("app.info")
+                return response.get("result",{}).get("state") in ("running","parked"),json.dumps(response)
+        return self.wait_for(observed,"daemon API reports a ready engine slot")
 
     def stop_serve(self, process, number=signal.SIGTERM, code=0):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
@@ -418,85 +429,38 @@ class Harness:
         return step.fail(f"Timed out; last observation: {observed}.")
 
 
-# Keep the original TUI-hosted socket case as a compatibility regression while
-# P1-15 moves TUI attachment. It shares the legacy wire helper with serve cases.
-class InterimEngine:
-    def __init__(self, harness, bead="fbt-p1-03-ghy"):
+class ApiEngine:
+    """One serialized v1 test connection to a real managed serve process."""
+    def __init__(self, harness):
         self.harness = harness
-        self.path = Path(harness.sandbox.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
-        self.server = "fbt-" + bead + "-" + harness.sandbox.root.name
-        self.session = "fbt-" + bead
+        self.path = DaemonContract.socket_path(harness.sandbox)
+        self.process = harness.start_serve(idle_exit_secs=0)
+        if not (harness.receive_ready() and harness.wait_engine()):
+            raise RuntimeError("owned cap daemon did not become ready")
+        self.client = ApiConn(harness)
+        self.client.hello()
+        self.lock = threading.RLock()
+        harness.resources.callback(self.client.close)
 
-    def call(self, path, args=(), method="GET"):
-        request = json.dumps(dict(method=method, path=path, args=list(args), file=None)).encode()
-        with socket.socket(socket.AF_UNIX) as connection:
-            connection.settimeout(.5)
-            connection.connect(str(self.path))
-            connection.sendall(struct.pack(">I", len(request)) + request)
-
-            def read(size):
-                value = bytearray()
-                while len(value) < size:
-                    part = connection.recv(size - len(value))
-                    if not part:
-                        raise EOFError("engine socket closed during frame")
-                    value.extend(part)
-                return value
-
-            size = struct.unpack(">I", read(4))[0]
-            if size > 1024 * 1024:
-                raise ValueError(f"interim probe frame too large: {size}")
-            return json.loads(read(size))
-
-    def start(self):
-        # Keep a foreground owner for the detached tmux server in either mode.
-        # The child handles SIGTERM so its finally block also kills that server.
-        program = '''import os,shlex,signal,subprocess,sys,time
-server,session,binary,stderr,exitfile=sys.argv[1:]
-tmux=['tmux','-L',server,'-f','/dev/null']
-def stop(*_): raise SystemExit(143)
-signal.signal(signal.SIGTERM,stop)
-launch=shlex.join([binary,'tui'])+' 2>>'+shlex.quote(stderr)+'; result=$?; printf "%s" "$result" >'+shlex.quote(exitfile)+'; exit "$result"'
-try:
-    subprocess.run(tmux+['new-session','-d','-s',session,'-x','120','-y','30',launch],check=True)
-    while subprocess.run(tmux+['has-session','-t',session],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: time.sleep(.05)
-    sys.exit(int(open(exitfile).read()) if os.path.exists(exitfile) else 1)
-finally:
-    subprocess.run(tmux+['kill-server'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-'''
-        h = self.harness
-        self.process = h.spawn([sys.executable, "-c", program, self.server, self.session, h.binary,
-                                str(h.case.suite.stderr_path), str(h.sandbox.root / "tui.exit")], "interim")
-        h.resources.callback(self.close)
-
-    def close(self):
-        if self.process.child.poll() is None and self.path.exists():
-            try:
-                self.harness.engine_call("app/shutdown", method="POST")
-            except (OSError, ValueError, EOFError):
-                pass
-        # The generic spawner reaps its owner after this callback returns.
+    def call(self, op, args=None):
+        # The observation thread and cap edits share no unsynchronized reader.
+        with self.lock:
+            return self.client.call(op, {} if args is None else args)
 
 
 def cap_engine(harness):
-    """Real current-engine adapter, not a claim of a serve/v1 endpoint."""
-    engine = InterimEngine(harness, "fbt-p6-07-9bt")
-    engine.start()
-    if not harness.wait_for(lambda: (str(engine.call("app/version").get("value", "")).startswith("native librqbit"),
-                                     "current engine socket answered"), "isolated engine socket"):
-        raise RuntimeError("current engine did not become available")
-    return engine
+    return ApiEngine(harness)
 
 
-def engine_value(engine, path, args=(), method="GET"):
-    response = engine.call(path, args, method)
-    if response.get("error") or response.get("value") is None:
-        raise ValueError(f"{path}: {response!r}")
-    return json.loads(response["value"])
+def engine_value(engine, op, args=None):
+    response = engine.call(op, args)
+    if response.get("ok") is not True:
+        raise ValueError(f"{op}: {response!r}")
+    return response["result"]
 
 
 def engine_row(engine, hash_):
-    return next(row for row in engine_value(engine, "torrents/info") if row["hash"] == hash_)
+    return next(row for row in engine_value(engine, "torrents.list")["torrents"] if row["hash"] == hash_)
 
 
 @contextmanager
@@ -513,8 +477,8 @@ def cap_observations(case, engines, hash_):
             for name, engine in engines.items():
                 row = engine_row(engine, hash_)
                 observations.append(dict(after_s=time.monotonic()-began, engine=name,
-                                         state=row["state"], completed=row["completed"],
-                                         dl_bps=row["dlspeed"], ul_bps=row["upspeed"],
+                                         state=row["state"], completed=row["completed_bytes"],
+                                         dl_bps=row.get("dl_bps"), ul_bps=row.get("ul_bps"),
                                          metadata_token=fingerprint() if name == "seed" else None))
         except (OSError, ValueError, EOFError, StopIteration) as error:
             errors.append(str(error))
@@ -562,18 +526,18 @@ def cap_change_no_check(binary, systemd):
             fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
             seed, leech = cap_engine(seedh), cap_engine(leechh)
             seedh.cli("add", str(fixture.torrent), "--seed", "--quiet")
-            if not seedh.wait_for(lambda: (engine_row(seed, fixture.info_hash)["state"] == "uploading",
+            if not seedh.wait_for(lambda: (engine_row(seed, fixture.info_hash)["state"] == "seeding",
                                           str(engine_row(seed, fixture.info_hash))), "verified seed"):
                 return
 
             def set_cap(bps):
                 step = case.step(f"set live upload cap to {bps}", "synchronous success from the real engine")
-                reply = seed.call("torrents/setUploadLimit", [("hashes", fixture.info_hash), ("limit", str(bps))], "POST")
-                step.close(reply.get("value") == "Ok." and not reply.get("error"), str(reply))
+                reply = seed.call("torrents.set_upload_limit", dict(hashes=[fixture.info_hash], bps=bps))
+                step.close(reply.get("ok") is True and reply["result"]["state"] == "done", str(reply))
 
             set_cap(32768)
             leechh.cli("add", str(fixture.torrent), "--quiet")
-            if not leechh.wait_for(lambda: ((row := engine_row(leech, fixture.info_hash))["completed"] >= 32768 and
+            if not leechh.wait_for(lambda: ((row := engine_row(leech, fixture.info_hash))["completed_bytes"] >= 32768 and
                                            not row["state"].startswith("checking"), str(row)), "real leecher payload", timeout=15):
                 return
             with cap_observations(case, dict(seed=seed, leech=leech), fixture.info_hash):
@@ -582,14 +546,14 @@ def cap_change_no_check(binary, systemd):
                     set_cap(bps)
                     samples, matched = [], False
                     while time.monotonic()-began < 5:
-                        start, before = time.monotonic(), engine_row(leech, fixture.info_hash)["completed"]
+                        start, before = time.monotonic(), engine_row(leech, fixture.info_hash)["completed_bytes"]
                         time.sleep(1)
                         row = engine_row(leech, fixture.info_hash)
                         elapsed = time.monotonic()-start
-                        rate = (row["completed"]-before)/elapsed
+                        rate = (row["completed_bytes"]-before)/elapsed
                         samples.append(dict(after_s=time.monotonic()-began, measured_bps=rate,
-                                            reported_dl_bps=row["dlspeed"], completed=row["completed"]))
-                        if lower <= rate <= upper and .75*bps <= row["dlspeed"] <= 1.25*bps and time.monotonic()-began < 5:
+                                            reported_dl_bps=row["dl_bps"], completed=row["completed_bytes"]))
+                        if lower <= rate <= upper and .75*bps <= row["dl_bps"] <= 1.25*bps and time.monotonic()-began < 5:
                             matched = True
                             break
                     step = case.step(f"measure leecher after cap {bps}",
@@ -607,8 +571,8 @@ def seed_toggle_no_check(binary, systemd):
         fixture = fixtures.torrent_fixture(sandbox.root, [payload])
         engine = cap_engine(harness)
         harness.cli("add", str(fixture.torrent), "--quiet")
-        if not harness.wait_for(lambda: ((row := engine_row(engine, fixture.info_hash))["completion_on"] > 0 and
-                                         row["state"] == "stoppedUP", str(row)), "verified stop-on-complete fixture"):
+        if not harness.wait_for(lambda: ((row := engine_row(engine, fixture.info_hash)).get("completed_at", 0) > 0 and
+                                         row["state"] == "done", str(row)), "verified stop-on-complete fixture"):
             return
         policies = []
         with cap_observations(case, dict(seed=engine), fixture.info_hash) as sample:
@@ -616,13 +580,13 @@ def seed_toggle_no_check(binary, systemd):
                 if verb:
                     harness.cli(verb, fixture.info_hash)
                 row = engine_row(engine, fixture.info_hash)
-                policy = "unlimited" if row["up_limit"] == 0 and row["ratio_limit"] == -2 else \
-                    "default_cap" if row["up_limit"] == 32768 and row["ratio_limit"] == 0 else "custom"
+                policy = "unlimited" if row.get("upload_limit_bps") is None and row["seed"] else \
+                    "default_cap" if row.get("upload_limit_bps") == 32768 and not row["seed"] else "custom"
                 policies.append(policy)
                 sample()
                 case.step(f"observe upload policy after {verb or 'initial completion'}", expected).close(
-                    policy == expected and row["state"] in ("stoppedUP", "uploading"),
-                    f"Policy={policy}; torrent={row}; transfer.info={engine_value(engine, 'transfer/info')}.")
+                    policy == expected and row["state"] in ("done", "seeding"),
+                    f"Policy={policy}; torrent={row}; transfer.info={engine_value(engine, 'transfer.info')}.")
         case.check(policies == ["default_cap", "unlimited", "default_cap"],
                    "seed then noseed restores the default policy", str(policies))
 
@@ -831,27 +795,25 @@ def systemd_without_bus_address(binary, systemd):
                 os.environ["DBUS_SESSION_BUS_ADDRESS"] = address
 
 
-def interim_engine_socket(binary, systemd):
-    with Case("daemon", "interim_engine_socket") as case, Sandbox() as sandbox, \
+def daemon_api_probe(binary, systemd):
+    with Case("daemon", "daemon_api_probe") as case, Sandbox() as sandbox, \
             fixtures.magnet_fixture() as fixture, \
             Harness(case, binary, sandbox, systemd) as harness:
         allow_manager_reads(harness)
         status = harness.cli("status")
         case.check(status.get("backend") == "stopped" and status.get("app_open") is False,
                    "fresh isolated engine is closed before launch", f"Status={status!r}.")
-        engine = InterimEngine(harness)
-        engine.start()
+        engine = ApiEngine(harness)
         def available():
-            value = engine.call("app/version")
-            version = value.get("value")
-            return isinstance(version, str) and version.startswith("native librqbit"), f"Response={value!r}."
-        ready = harness.wait_for(available, "current engine framed socket answers app/version")
+            value = engine.call("app.info")
+            return value.get("result", {}).get("state") == "running", f"Response={value!r}."
+        ready = harness.wait_for(available, "managed daemon API answers app.info")
         if ready:
             case.check(engine.path.stat().st_mode & 0o777 == 0o600,
                        "current engine socket is private to this sandbox", str(engine.path))
             status = harness.cli("status")
-            case.check(status.get("ok") is True and status.get("app_open") is True,
-                       "real CLI agrees that the isolated current engine is open", f"Status={status!r}.")
+            case.check(status.get("ok") is True and status.get("running") is True and status.get("app_open") is False,
+                       "real CLI reports a live daemon without inventing an open TUI", f"Status={status!r}.")
             added = harness.cli("add", str(fixture.torrent), "--stopped", "--quiet")
             shown = harness.cli("show", fixture.info_hash)
             case.check(added.get("hash") == fixture.info_hash and shown.get("hash") == fixture.info_hash
@@ -865,7 +827,7 @@ def interim_engine_socket(binary, systemd):
                        [entry.get("size") for entry in shown.get("files", [])] == [16384 + 123, 256 * 1024],
                        "the real current engine accepts the mid-piece two-file torrent and preserves both lengths",
                        f"Shown={shown!r}.")
-            harness.cli("down")
+            engine.call("app.shutdown", {})
             engine.process.wait(timeout=15)
             harness.wait_for(lambda: (not engine.path.exists(), f"socket exists={engine.path.exists()}"), "current engine removes its socket")
 
@@ -1527,19 +1489,6 @@ def api_collection_cap(binary, systemd):
             harness.lock_free()
 
 
-def api_subscriptions_deferred(binary, systemd):
-    with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
-        hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add", "imdb"], "P1-06, P1-09, P7-09 and P3-04 advertise exactly their implemented capabilities", str(hello["caps"]))
-
-        for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
-            frame = client.call(op, args, error="unknown_op")
-            nearest = ["torrents.list"] if op == "torrents.lis" else []
-            case.check(frame["error"]["details"]["nearest"] == nearest and bool(frame["error"].get("hint")),
-                       "unknown_op includes only implemented nearby names and a hint", str(frame))
-        client.call("app.info")
-
-
 def api_start_results(binary, systemd):
     with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         client.hello()
@@ -1578,6 +1527,15 @@ def offline_ledger_case(binary, systemd, name, remove=False, draining=False):
     with Case("daemon", name) as case, Sandbox() as sandbox, Harness(case,binary,sandbox,systemd) as h:
         select_replay_interface(Path(sandbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml","fbmissing0")
         if not systemd: allow_manager_reads(h)
+        elif draining:
+            controller = shutil.which("systemctl",path=os.defpath)
+            if controller is None: raise RuntimeError("systemd fixture controller missing")
+            # This concurrent-down case must permit exactly its owned unit's
+            # manager shutdown; the default refusal shim remains for every
+            # unrelated unit/action. Retain the calls in the case evidence.
+            allowed = "--user:--no-ask-password:show:"+sandbox.unit+"|--user:--no-ask-password:stop:"+sandbox.unit
+            fixtures.path_shim("systemctl", 'case "$1:$2:$3:$4" in '+allowed+') exec '+shlex.quote(controller)+' "$@";; *) exit 99;; esac',sandbox.root)
+            h.resources.callback(lambda:shutil.copyfile(sandbox.root/"shims/systemctl.log",case.path.with_suffix(".systemctl.log")))
         process=h.start_serve()
         try:
             h.receive_ready();h.wait_engine()
@@ -1771,7 +1729,7 @@ def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     if not validator or not Path(validator).is_file():
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
     output = case.path.with_suffix("." + kind + ".validation.log")
-    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND=kind)
+    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND="fixture" if kind == "fixture" else "live")
     if optional:
         optional_path = case.path.with_suffix(".extra-optional.json")
         optional_path.write_text(json.dumps(optional, indent=2, sort_keys=True) + "\n")
@@ -2623,6 +2581,9 @@ def contract_group(group, binary, systemd):
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
+                        if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
+
                         if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
@@ -2820,8 +2781,13 @@ class InstalledUnit:
                                        "actual owned child keeps every private environment path and working directory", f"pid={pid}; isolated={isolated}; cwd={cwd}"):
                     self.control("stop", self.sandbox.unit)
                     raise RuntimeError("stopped owned unit after failed child isolation verification")
-            except FileNotFoundError:
-                self.case.check(False, "owned child remains available for isolation verification", f"pid={pid} exited during verification")
+            except (FileNotFoundError, ProcessLookupError):
+                # A shutdown CLI can complete between MainPID and the /proc read.
+                # Still refuse an unreadable live child; a reaped child has no
+                # remaining environment or working directory to verify.
+                alive = process_alive(pid)
+                self.case.check(not alive, "child disappearing during isolation verification has exited",
+                                f"pid={pid}; live={alive}")
 
     def state(self):
         return self.control("show", self.sandbox.unit, "--property=ActiveState", "--value").output
@@ -2916,9 +2882,10 @@ def status_never_starts(binary, systemd):
         unit.autostart()
         value = h.cli("status", start=True)
         case.check(value.get("app_open") is False and unit.state() == "inactive", "status leaves the disposable unit inactive", str(value))
-        for args in (("list",), ("show", "abcd"), ("stop", "all"), ("delete", "all")):
-            value = h.cli(*args, start=True, code=4)
-            case.check(value.get("hint") == "fbittorrent up" and unit.state() == "inactive", "read/offline-intent command does not start the daemon", str(value))
+        for args, code in ((("list",),0), (("show", "abcd"),6), (("stop", "all"),0), (("delete", "all"),0)):
+            value = h.cli(*args, start=True, code=code)
+            shape = (value.get("ok") is True and value.get("running") is False) if code == 0 else (value.get("code_name") == "not_found" and "fbittorrent list" in value.get("hint", ""))
+            case.check(shape and unit.state() == "inactive", "P1-11 offline reads/intents retain canonical exits and never start the daemon", str(value))
         unit.no_launcher()
 
 
@@ -3211,8 +3178,12 @@ def setup_desktop_handlers(binary, systemd):
         h.cli("setup", "--magnet")
         apps = Path(sandbox.env["XDG_DATA_HOME"]) / "applications"
         app, magnet = [(apps / name).read_text() for name in ("fbittorrent.desktop", "fbittorrent-magnet.desktop")]
-        case.check(" dashboard\n" in app and " add %u\n" in magnet and "Terminal=false" in magnet,
+        case.check(" dashboard\n" in app and " add --origin handler %u\n" in magnet and "Terminal=false" in magnet,
                    "setup writes dashboard and direct headless magnet desktop entries", app + magnet)
+        icon = Path(sandbox.env["XDG_DATA_HOME"]) / "icons/hicolor/scalable/apps/fbittorrent.svg"
+        case.check("Icon=fbittorrent" in app and "Icon=fbittorrent" in magnet and
+                   icon.read_text() == (REPO / "assets/fbittorrent.svg").read_text(),
+                   "both desktop entries and the private hicolor SVG use fbittorrent's download glyph", str(icon))
         calls = [json.loads(line) for line in (sandbox.root / "shims/xdg-mime.log").read_text().splitlines()]
         case.check(len(calls) == 2 and all(call[:2] == ["default", "fbittorrent-magnet.desktop"] for call in calls),
                    "both magnet and torrent-file MIME registrations use the direct add handler", str(calls))
@@ -3275,6 +3246,28 @@ def install_atomic(binary, systemd):
             case.check(not installed.with_suffix(".tmp").exists(), "installer leaves no temporary executable")
             h.cli("down", start=True)
 
+
+if __name__ == "__main__":
+    sys.modules["daemon"] = sys.modules[__name__]
+from daemon_search import CASES as SEARCH_CASES
+from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
+                        structural_frame_within_100ms, detail_topic_released,
+                        engine_restart_keeps_connection, slow_client_closed_others_live,
+                        rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay, mutation_bus_sequence)
+
+from daemon_notify import (notify_completed, notify_action_open, notify_action_default,
+    notify_action_folder, notify_added_undo, notify_off, notify_failed, notify_queue_bounded,
+    notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
+
+from daemon_log import log_injected_error, log_follow, hello_counters, log_down_never_starts
+from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check
+from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
+from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
+
+from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
+    idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
+    idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
+    idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
 
 # P1-09: every mutation records its complete envelope, including resend identity.
 def mutation_request(client, op, args, ref=None, instance=None, error=None):
@@ -3602,6 +3595,9 @@ def imdb_owned(name, binary, systemd, oversized=False):
         (cache / "title.ratings.tsv").write_bytes((directory / "ratings.tsv").read_bytes())
         with fixtures.imdb_server(directory) as source:
             sandbox.env["FBT_IMDB_BASE_URL"] = source.base
+            sandbox.keys.append("FBT_IMDB_BASE_URL")
+            case.check(urllib.parse.urlparse(source.base).hostname == "127.0.0.1" and "FBT_IMDB_BASE_URL" in sandbox.keys,
+                       "local IMDb endpoint is explicitly forwarded before either launch mode", source.base)
             with Harness(case, binary, sandbox, systemd) as harness:
                 process = harness.start_serve()
                 if not (harness.receive_ready() and harness.wait_engine()):
@@ -3816,6 +3812,191 @@ def settings_offline_no_start(binary, systemd):
                    "settings reads and writes never invoke a manager or create a live engine", json.dumps(bad))
 
 
+def tui_single_connection(binary, systemd):
+    """Disable engine.sock to prove native rows/files travel on the one v1 connection."""
+    import native
+    with api_owned("tui_single_connection", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client,"tui-observer")
+        directory=sandbox.root / "ui-payload"
+        directory.mkdir()
+        fixture=fixtures.two_file_fixture(directory)
+        for path in fixture.files: fixtures.corrupt_byte(path,0)
+        mutation_request(client,"torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True,save_path=str(directory)))
+        cache=Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent/imdb/by-name-v2/two_files.json"
+        cache.write_text('{"missing":true}')
+        before=client.call("app.stats")["result"]["active_clients"]
+        case.check(before["tui"]==0,"no TUI presence before the real terminal starts",json.dumps(before))
+        hidden=harness.engine_path.with_name("hidden-compat.sock")
+        harness.engine_path.rename(hidden)
+        ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p")
+        try:
+            target,done=ui.start()
+            ui.assert_pane(target,"two-files")
+            def one_client():
+                info=client.call("app.stats")["result"]
+                return info["active_clients"]["tui"]==1,json.dumps(info["active_clients"])
+            harness.wait_for(one_client,"one TUI connection after loading its real API rows")
+            ui.keys(target,"Enter",literal=False)
+            ui.assert_pane(target,"[Overview]  Files")
+            ui.keys(target,"]")
+            ui.assert_pane(target,"first.bin")
+            ui.assert_pane(target,"second.bin")
+            ui.keys(target," ")
+            def first_skipped():
+                reply=client.call("torrents.files",dict(hash=fixture.info_hash))
+                files=reply["result"]["files"]
+                return not files[0]["included"] and files[1]["included"],json.dumps(files)
+            harness.wait_for(first_skipped,"Space changes the actual engine selection over API v1")
+            ui.keys(target,"Escape",literal=False)
+            ui.assert_pane(target,"two-files")
+            ui.assert_pane(target,"(p) Resume")
+            ui.keys(target,"p")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["intent"]=="run" and row["state"] in ("downloading","stalled"),json.dumps(row)),
+                             "p starts the incomplete native torrent over API v1")
+            ui.assert_pane(target,"(p) Pause")
+            ui.keys(target,"u")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["seed"],json.dumps(row)),
+                             "u changes the actual per-torrent seed intent over API v1")
+            ui.assert_pane(target,"(u) Seed off")
+            ui.keys(target,"p")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["intent"]=="pause",json.dumps(row)),
+                             "p stops the native torrent over API v1")
+            ui.assert_pane(target,"(p) Resume")
+            added_payload=sandbox.root / "api-add.bin"
+            added_payload.write_bytes(os.urandom(16384))
+            added_fixture=fixtures.torrent_fixture(sandbox.root,[added_payload],name="api-add.bin")
+            native.prepare_imdb_fixture(sandbox.env,["api-add.bin","two-files"])
+            with fixtures.HttpFixture(sandbox.root) as source:
+                ui.keys(target,"a")
+                ui.keys(target,source.base+"/"+added_fixture.torrent.name)
+                ui.keys(target,"Enter",literal=False)
+                harness.wait_for(lambda:((rows:=client.call("torrents.list",{})["result"]["torrents"]) and any(row["hash"]==added_fixture.info_hash for row in rows),json.dumps(rows)),
+                                 "add prompt admits real local HTTP metainfo through the pending API operation")
+                ui.assert_pane(target,"api-add.bin")
+                case.check(len(source.requests)==1,"one Enter fetches metainfo only once",str(source.requests))
+            # Selection is preserved by hash when the API read inserts the new row.
+            expected_target=client.call("torrents.open_target",dict(hash=fixture.info_hash))["result"]["path"]
+            ui.keys(target,"o")
+            opener=sandbox.root / "shims/xdg-open.log"
+            harness.wait_for(lambda:(opener.exists() and json.loads(opener.read_text().splitlines()[-1])==[expected_target],opener.read_text() if opener.exists() else "opener not called"),
+                             "o resolves its real target through API v1 before invoking the private opener")
+            ui.keys(target,"d")
+            ui.assert_pane(target,"Remove 'two-files' (keep files)? y/N")
+            ui.keys(target,"y")
+            harness.wait_for(lambda:((rows:=client.call("torrents.list",{})["result"]["torrents"]) is not None and all(row["hash"]!=fixture.info_hash for row in rows),json.dumps(rows)),
+                             "d/y removes the selected record through API v1")
+            case.check(all(path.exists() for path in fixture.files),"remove-keeping-files preserves both real payload files",str(fixture.files))
+            # Keep the UI through another scheduled refresh with the compat path unavailable.
+            time.sleep(2.2)
+            case.check("offline" not in ui.capture(target) and not harness.engine_path.exists(),
+                       "native torrent and file reads remain online with engine.sock absent",ui.capture(target))
+            harness.wait_for(one_client,"data and file operations retain the same one TUI connection")
+            ui.keys(target,"q")
+            harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches the API client")
+            harness.wait_for(lambda:((counts:=client.call("app.stats")["result"]["active_clients"])["tui"]==0,json.dumps(counts)),
+                             "TUI presence is released on detach")
+        finally:
+            ui.close()
+            if hidden.exists(): hidden.rename(harness.engine_path)
+
+
+from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
+
+def handler_confirm_stages(binary, systemd=False):
+    # Reuse the private native shell fixture; the daemon case retains its own JSONL.
+    sys.path.insert(0, str(REPO / "plugin/tests"))
+    import private_net
+    private_net.enter()
+    from add_sheet import handler
+    handler(binary, "daemon", "handler_confirm_stages")
+
+
+
+def tui_reconnect_existing_owner(binary, systemd):
+    import native
+    with api_owned("tui_reconnect_existing_owner",binary,systemd) as (case,sandbox,harness,process):
+        with ApiConn(harness) as observer:
+            first=mutation_hello(observer,"first-ui-owner")["instance"]
+            fixture,_=mutation_add_path(observer,sandbox)
+        native.prepare_imdb_fixture(sandbox.env,["two-files"])
+        ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p-reconnect")
+        replacement=None
+        try:
+            target,done=ui.start()
+            ui.assert_pane(target,"two-files")
+            harness.stop_serve(process)
+            ui.assert_pane(target,"fbittorrent stopped")
+            case.check("two-files" in ui.capture(target) and not done.exists(),
+                       "confirmed rows remain visible when the daemon exits",ui.capture(target))
+            # Let a real automatic reconnect attempt reach an absent socket.
+            time.sleep(1.1)
+            case.check(not DaemonContract.socket_path(sandbox).exists(),
+                       "automatic socket retries never start a replacement daemon",ui.capture(target))
+            # Discard the old owner's queued STATUS datagrams before its successor's READY.
+            harness.notify.close()
+            replacement=harness.start_serve()
+            if not (harness.receive_ready() and harness.wait_engine()):
+                raise RuntimeError("replacement API fixture did not start")
+            with ApiConn(harness) as observer:
+                hello=mutation_hello(observer,"replacement-ui-owner")
+                case.check(hello["instance"]!=first,"the replacement has a new daemon instance",json.dumps(hello))
+                harness.wait_for(lambda:((counts:=observer.call("app.stats")["result"]["active_clients"])["tui"]==1,json.dumps(counts)),
+                                 "existing terminal reconnects without an Enter key")
+                harness.wait_for(lambda:("fbittorrent stopped" not in ui.capture(target) and "Connecting" not in ui.capture(target),ui.capture(target)),
+                                 "fresh API data clears the recovery banner")
+                # A later authoritative mutation proves the screen is live, not just a cached row.
+                mutation_request(observer,"torrents.remove",dict(hashes=[fixture.info_hash],delete_files=False))
+                ui.assert_pane(target,"No torrents")
+                case.check("two-files" not in ui.capture(target),"fresh data replaces the old confirmed rows",ui.capture(target))
+                ui.keys(target,"q")
+                harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after automatic reconnection")
+                harness.wait_for(lambda:((counts:=observer.call("app.stats")["result"]["active_clients"])["tui"]==0,json.dumps(counts)),
+                                 "recovered client releases its one connection")
+        finally:
+            ui.close()
+            if replacement is not None and replacement.child.poll() is None:
+                harness.stop_serve(replacement)
+
+
+def tui_pending_rss_failure(binary, systemd):
+    import native
+    with api_owned("tui_pending_rss_failure",binary,systemd) as (case,sandbox,harness,process), ApiConn(harness) as client:
+        client.hello()
+        ui=None
+        try:
+            with stalled_api_source(case) as (url,entered), fixtures.HttpFixture(sandbox.root) as feed:
+                (sandbox.root / "rss.xml").write_text('<rss version="2.0"><channel><title>Pending feed</title><item><title>Pending local failure</title><guid>pending-local</guid><link>'+url+'</link></item></channel></rss>')
+                harness.cli("rss","add",feed.base+"/rss.xml","--name","Pending feed")
+                native.prepare_imdb_fixture(sandbox.env,["Pending local failure"])
+                ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p-rss")
+                hidden=harness.engine_path.with_name("hidden-compat.sock")
+                harness.engine_path.rename(hidden)
+                try:
+                    target,done=ui.start()
+                    ui.keys(target,"4")
+                    ui.assert_pane(target,"Pending local failure")
+                    ui.keys(target,"Enter",literal=False)
+                    ui.keys(target,"Enter",literal=False)
+                    case.check(entered.wait(5),"real daemon URL fetch reaches the held loopback source",f"entered={entered.is_set()}")
+                    ui.assert_pane(target,"Adding")
+                    items=harness.cli("rss","items","Pending feed")["items"]
+                    case.check(len(items)==1 and not items[0]["isRead"],"pending admission does not mark the local RSS item read",json.dumps(items))
+                    ui.keys(target,"?")
+                    ui.assert_pane(target,"GLOBAL")
+                    ui.keys(target,"Escape",literal=False)
+                    case.check(client.call("app.stats")["result"]["active_clients"]["tui"]==1,
+                               "held URL confirmation does not block other RPCs or the UI",ui.capture(target))
+                    # Leaving this source context below releases an actual HTTP 404.
+                finally:
+                    if hidden.exists(): hidden.rename(harness.engine_path)
+            ui.assert_pane(target,"could not fetch valid torrent metainfo")
+            items=harness.cli("rss","items","Pending feed")["items"]
+            case.check(not items[0]["isRead"],"failed mutation confirmation leaves RSS unread",json.dumps(items))
+            case.check(client.call("torrents.list",{})["result"]["torrents"]==[],"failed URL creates no torrent record")
+            ui.keys(target,"q")
+            harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after the failed admission")
+        finally:
+            if ui is not None: ui.close()
 
 def recheck_reply(client, hash_, ref, timeout=15):
     reply = client.call("torrents.recheck", dict(hashes=[hash_]), ref=ref)
@@ -4702,8 +4883,119 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (staged_magnet_metadata_only,staged_metadata_timeout,staged_discard_keeps_files,staged_queue_excluded,staged_commit_joins_queue,staged_discarded_at_restart,commit_non_staged_invalid_state,move_same_fs,move_cross_fs,move_failed_copy_keeps_source,tracker_saved_views,tracker_status,reannounce,reannounce_rate_limited,reannounce_not_live_invalid_state,tracker_url_redacted,resume_trusted,resume_touched_file,resume_after_kill9,recheck_drops_resume_file,origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
-          systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
+         (staged_magnet_metadata_only,
+          staged_metadata_timeout,
+          staged_discard_keeps_files,
+          staged_queue_excluded,
+          staged_commit_joins_queue,
+          staged_discarded_at_restart,
+          commit_non_staged_invalid_state,
+          move_same_fs,
+          move_cross_fs,
+          move_failed_copy_keeps_source,
+          tracker_saved_views,
+          tracker_status,
+          reannounce,
+          reannounce_rate_limited,
+          reannounce_not_live_invalid_state,
+          tracker_url_redacted,
+          resume_trusted,
+          resume_touched_file,
+          resume_after_kill9,
+          recheck_drops_resume_file,
+          origin_persists,
+          undo_restore,
+          undo_incomplete_download,
+          bulk_remove_mixed_sizes,
+          undo_expired,
+          undo_owner_lifetime,
+          force_start_bypasses_limit,
+          queue_move_order,
+          force_off_returns_to_queue,
+          queue_parked_persists,
+          recheck_failed_receipt,
+          recheck_corrupt_byte,
+          recheck_corrupt_byte_256k,
+          recheck_dormant,
+          recheck_paused_stays_paused,
+          recheck_resets_completion,
+          recheck_staged_invalid_state,
+          settings_invalid_named,
+          settings_live_queue,
+          settings_restart_class_keeps_clients,
+          settings_offline_no_start,
+          imdb_index_loaded_once,
+          imdb_poster_cap,
+          imdb_poster_atomic,
+          fixture_payloads,
+          fixture_servers,
+          path_shims,
+          notify_and_process,
+          launcher_exit_cleanup,
+          systemd_without_bus_address,
+          ready_notify,
+          parked_start,
+          sigterm_drains,
+          alt_limit_holds,
+          global_unlimited_keeps_cap,
+          alt_survives_restart,
+          handler_confirm_stages,
+          lazy_restore_no_checks,
+          dormant_seed_checks,
+          dormant_missing_files,
+          dormant_open_no_check,
+          fixture_serving_states,
+          fixture_launcher_killed,
+          fixture_daemon_killed,
+          fixture_stdin_lifetime,
+          fixture_peer_pair,
+          upgrade_idle_exit_75,
+          upgrade_pending_while_busy,
+          restart_now,
+          restart_closed_never_starts,
+          log_injected_error,
+          log_follow,
+          hello_counters,
+          log_down_never_starts,
+          tui_single_connection,
+          tui_reconnect_existing_owner,
+          tui_pending_rss_failure,
+          offline_stop_ledger,
+          offline_delete_keep_files_ledger,
+          offline_write_waits_for_draining_daemon,
+          notify_completed,
+          notify_action_open,
+          notify_action_default,
+          notify_action_folder,
+          notify_added_undo,
+          notify_off,
+          notify_failed,
+          notify_queue_bounded,
+          notify_vpn_once_per_transition,
+          notify_cli_policy,
+          notify_killed_handler,
+          notify_handler_cli_once,
+          idle_exit_no_torrents,
+          idle_exit_download_keeps_alive,
+          idle_exit_interactive_keeps_alive,
+          idle_exit_bar_does_not,
+          idle_exit_parked_keeps_alive,
+          idle_exit_disabled_never_exits,
+          idle_exit_disabled_shutdown_drains,
+          idle_exit_glance_pauses,
+          idle_exit_glance_drop_resumes,
+          idle_exit_mutation_keeps_alive,
+          bus_subscriptions,
+          events_since_seq_replay,
+          state_watcher_cancellation_stress,
+          mutation_bus_sequence,
+          subscribe_gap_recovery,
+          structural_frame_within_100ms,
+          detail_topic_released,
+          engine_restart_keeps_connection,
+          slow_client_closed_others_live,
+          rev_soak_10min,
+          daemon_api_probe,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
           killmode_mixed, start_limit_not_hit, start_while_deactivating, down_cancels_restart,
@@ -4712,10 +5004,17 @@ CASES = {function.__name__: function for function in
           cap_change_no_check, seed_toggle_no_check,
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
-          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
-          offline_stop_ledger, offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon, api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
+          api_concurrent_adds, api_collection_cap, api_replay_normalization, api_start_results,
+          api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
+CASES.update((function.__name__, function) for function in SEARCH_CASES)
+from daemon_staging import staged_not_busy
+CASES["staged_not_busy"] = staged_not_busy
+from desktop_setup import CASES as DESKTOP_SETUP_CASES
+CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
+from daemon_responsive import CASES as RESPONSIVE_CASES
+CASES.update((function.__name__, function) for function in RESPONSIVE_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",
@@ -4726,29 +5025,63 @@ SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_un
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
+    parser.add_argument("--serve-fixture", choices=("empty", "idle", "downloading", "seeding", "paused", "table-200"),
+                        help="hold a private real-engine UI state until stdin EOF")
+    parser.add_argument("--fixture-worker",action="store_true",help=argparse.SUPPRESS)
+    parser.add_argument("--throttle",type=int,help="fixture seed upload bytes/s (0 unlimited, else at least 16384)")
+    parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
+    parser.add_argument("--prepare-upgrade-fixtures",action="store_true",help="build/cache both real upgrade binaries before the timed CI matrix")
+    parser.add_argument("--jobs",type=int,default=4,help="bounded isolated case workers (1..4; default 4)")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
     parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
-    parser.add_argument("--case", choices=CASES,
-                        help="run one named case; systemd_without_bus_address requires --systemd")
+    parser.add_argument("--case", action="append", choices=CASES,
+                        help="run named cases (repeatable); systemd_without_bus_address requires --systemd")
     parser.add_argument("--contract-validator", type=Path,
                         help="fbittorrent Rust unit-test executable for live P1-05 frame validation")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--systemd", action="store_true", help="use disposable transient user units, never installed owner units")
     mode.add_argument("--no-systemd", action="store_true", help="foreground children (default; CI mode)")
     args = parser.parse_args()
+    if args.log_root or os.environ.get("FBT_TEST_LOG_ROOT"):
+        import fbtlog
+        fbtlog.LOG_ROOT=Path(args.log_root or os.environ["FBT_TEST_LOG_ROOT"]).resolve()
+    if args.serve_fixture:
+        if args.throttle is not None and args.throttle!=0 and args.throttle<16384:
+            parser.error("--throttle must be 0 or at least 16384 bytes/s")
+        # Keep the namespace-contained 200-row visual recipe while the managed
+        # pair owns the basic idle/paused/seeding/downloading fixture states.
+        if args.serve_fixture == "table-200":
+            from visual_fixture import serve
+            return serve(args.binary, args.serve_fixture)
+        from fixture_serving import serve, proxy
+        return serve(args.binary,args.serve_fixture,args.systemd,args.throttle) if args.fixture_worker else proxy(args)
+    if args.fixture_worker or args.throttle is not None:
+        parser.error("fixture worker/throttle requires --serve-fixture")
     if args.contract_validator:
         os.environ["FBT_API_CONTRACT_VALIDATOR"] = str(args.contract_validator.resolve())
-    if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":
+    if "install_atomic" in (args.case or []) and os.environ.get("FBT_TEST_INSTALL") != "1":
         parser.error("install_atomic requires FBT_TEST_INSTALL=1 and the outer release-lock/memory-scope wrapper")
-    if args.case == "deferred_add" and os.environ.get("FBT_TEST_VPN") != "1":
+    if "deferred_add" in (args.case or []) and os.environ.get("FBT_TEST_VPN") != "1":
         parser.error("deferred_add requires FBT_TEST_VPN=1 (owned VPN namespace fixture)")
-    if args.case in SYSTEMD_CASES and not args.systemd:
+    if set(args.case or []) & SYSTEMD_CASES and not args.systemd:
         parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
+    if args.prepare_upgrade_fixtures:
+        from daemon_upgrade import binaries
+        with Case('daemon','upgrade_fixture_builds') as case,Sandbox() as box:
+            old,new=binaries(case,box)
+            print(json.dumps(dict(old=str(old),new=str(new))))
+        return suite_status('daemon')
+    if not 1<=args.jobs<=4:parser.error("--jobs must be 1..4")
+    selected=(args.case if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)])
+    if args.jobs>1 and len(selected)>1:
+        from daemon_runner import run
+        return run(args.binary.resolve(),selected,args.systemd,args.jobs,args.contract_validator,
+                   budget=180 if not args.case and not args.mutations and os.environ.get("FBT_TEST_SOAK")!="1" else None)
     started = time.monotonic()
-    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in selected:
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")

@@ -47,7 +47,7 @@ pub(super) fn add(
     };
     let client = crate::api::client::Client::connect(cfg, false)?;
     let mut args =
-        json!({"source":source,"stopped":options.stopped,"seed":options.seed,"origin":"manual"});
+        json!({"source":source,"stopped":options.stopped,"seed":options.seed,"origin":options.origin.as_deref().unwrap_or("manual")});
     if let Some(path) = &options.save_path {
         args["save_path"] = json!(path);
     }

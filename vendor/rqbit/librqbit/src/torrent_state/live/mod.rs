@@ -201,7 +201,7 @@ pub struct TorrentStateLive {
     // returned by the selected tracker. Forget this provenance on each run.
     private_tracker_peers: RwLock<HashSet<SocketAddr>>,
 
-    finished_notify: Notify,
+    pub(super) finished_notify: Notify,
     new_pieces_notify: Notify,
 
     down_speed_estimator: SpeedEstimator,

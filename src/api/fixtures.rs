@@ -12,7 +12,10 @@ const GROUPS: &[(&str, &str)] = &[
     ("trackers",include_str!("../../contracts/ipc/v1/trackers.ndjson")),
     ("origin",include_str!("../../contracts/ipc/v1/origin.ndjson")),
     ("queue",include_str!("../../contracts/ipc/v1/queue.ndjson")),
+    ("search", include_str!("../../contracts/ipc/v1/search.ndjson")),
     ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
+    ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
+    ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
     ("imdb", include_str!("../../contracts/ipc/v1/imdb.ndjson")),
     ("hello", include_str!("../../contracts/ipc/v1/hello.ndjson")),
@@ -273,7 +276,7 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
             if child.is_null() {
                 if path.contains("/changed/")
                     || key == "id" && map.get("ok") == Some(&Value::Bool(false))
-                    || key == "bps" && path.ends_with("/args")
+                    || matches!(key.as_str(), "bps" | "download_bps" | "upload_bps" | "alt_download_bps" | "alt_upload_bps") && path.ends_with("/args")
                 {
                     continue;
                 }
@@ -446,7 +449,11 @@ fn operation_event_error_and_document_coverage() {
         "torrents.reannounce",
         "torrents.force_start",
         "torrents.queue_move",
+        "search.start", "search.stop", "search.providers", "search.set_provider",
+        "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
+        "app.log",
+        "app.stats",
         "app.settings.get",
         "app.settings.set",
         "imdb.lookup",
@@ -457,6 +464,8 @@ fn operation_event_error_and_document_coverage() {
         "app.restart",
         "app.network",
         "transfer.info",
+        "transfer.set_limits",
+        "transfer.set_alt",
         "torrents.list",
         "torrents.get",
         "torrents.add",

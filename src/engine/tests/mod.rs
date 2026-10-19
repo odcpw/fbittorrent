@@ -77,6 +77,8 @@
         let generation = ledger.generation.clone();
         let inner = Arc::new(Inner {
             session,
+            bus_changed: rqbit_runtime::sync::Notify::new(),
+            completions: Default::default(),
             ledger: Arc::new(Mutex::new(ledger)),
             additions: Arc::new(Mutex::new(())),
             operations: Default::default(), moves: Default::default(),
@@ -169,6 +171,7 @@
 include!("ownership.rs");
 include!("startup.rs");
 include!("dormant.rs");
+include!("dormant_delete.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");

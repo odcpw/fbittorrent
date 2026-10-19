@@ -1,5 +1,6 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("search.card",Scope::Screen(Screen::Search),&[KeyChord::plain(KeyCode::Char('v'))],"Card",20,|a|!a.search_focus_input && !a.search_browse && a.selected_result().is_some(),Some(|a|a.on_search_action(Intent::Card)),T,None,None,None),
     action!(
         "search.next",
         Scope::Screen(Screen::Search),

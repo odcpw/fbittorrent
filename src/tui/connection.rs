@@ -1,18 +1,34 @@
 //! Connection actions, lifetime and quit handling.
 use super::*;
 
-pub fn run(cfg: Config, screen: Screen, lifecycle: Lifecycle) -> Result<()> {
-    let mut model = TuiApp::with_lifecycle(cfg, screen, Shows::load()?, lifecycle);
+pub fn run(cfg: Config, screen: Screen) -> Result<()> {
+    // Attach-only invocations must fail before entering fullscreen when closed.
+    // Normal opening stays asynchronous so startup can display its status.
+    let existing=if cfg.native()&&crate::backend::start_prevented() {
+        Some(attach::connect(&cfg)?)
+    } else {None};
+    // This guard owns only UI cleanup, never an engine or the instance lock.
+    let _terminal=signals::AppGuard::new(());
+    let native=cfg.native();
+    let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+    if let Some(connection)=existing {
+        model.recovery.connected(&connection.hello.server.version,env!("CARGO_PKG_VERSION"));
+        model.store.hello(connection.hello.clone());
+        model.presence=Some(connection);
+    }
     model.pointer_motion_on_start = true;
-    // AppBuilder::run exits the process on a signal, skipping the outer engine
-    // guard. Program returns instead, so our application owner drains first.
+    // Program returns on signals, allowing the presence connection and terminal
+    // to close while the separate daemon continues its work.
     let mut program = ftui::Program::with_config(model, ftui::ProgramConfig::fullscreen().with_mouse())?;
     let result = program.run();
+    if let Some(connection)=program.model().presence.as_ref() {connection.close();}
     signals::event("shutdown_once end (Program::run returned)");
     let signal = program.model().termination_signal;
+    let notice = native && program.model().quit_notice;
     drop(program);
     if let Some(signal) = signal { return Err(SignalTermination(signal).into()); }
     result?;
+    attach::after_detach(notice);
     Ok(())
 }
 
@@ -32,9 +48,18 @@ impl TuiApp {
     pub(super) fn poll(&mut self) -> Cmd<Msg> {
         if self.poll_inflight { return Cmd::none(); }
         self.poll_inflight = true;
-        let cfg = self.cfg.clone();
+        let mut cfg = self.cfg.clone();
+        if cfg.native() { cfg.timeout_secs=1; }
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            if cfg.native() {
+                let identity=presence.as_ref().map(|connection|connection.id);
+                let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection| {
+                    anyhow::ensure!(connection.alive(),"fbittorrent stopped");remote::read(&connection)
+                });
+                return Msg::ApiRead {connection:identity,result:result.map_err(|error|error.to_string())};
+            }
+            let c = Client::from_config(&cfg, presence.clone());
             let r = c.login().and_then(|_| Ok((c.torrents()?, c.transfer_info()?)));
             Msg::Torrents(r.map_err(|e| e.to_string()))
         })
@@ -43,9 +68,10 @@ impl TuiApp {
     pub(super) fn action<F>(&self, label: impl Into<String>, f: F) -> Cmd<Msg>
     where F: FnOnce(&Client) -> anyhow::Result<()> + Send + 'static {
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         let label = label.into();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             match c.login().and_then(|_| f(&c)) {
                 Ok(()) => Msg::ActionDone(Ok(label)),
                 Err(e) => Msg::ActionDone(Err(e.to_string())),
@@ -55,6 +81,7 @@ impl TuiApp {
 
     pub(super) fn add_opts(&self) -> AddOptions {
         AddOptions {
+                origin: None,
             sequential: self.cfg.native() || self.cfg.sequential,
             first_last: self.cfg.native() || self.cfg.first_last,
             seed: self.cfg.seed_by_default,

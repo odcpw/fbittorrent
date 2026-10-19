@@ -34,6 +34,7 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
 pub(crate) mod staging;
+mod bus;
 mod queue;
 mod queue_policy;
 mod queue_ops;
@@ -47,6 +48,7 @@ mod settings;
 pub mod ops;
 mod restore;
 mod dormant;
+mod dormant_delete;
 pub mod view;
 mod parked;
 mod legacy_import;
@@ -89,6 +91,8 @@ struct RestoreTask {
 
 struct Inner {
     session: Arc<Session>,
+    bus_changed: rqbit_runtime::sync::Notify,
+    completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
     operations: Arc<Mutex<()>>,
@@ -196,6 +200,8 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     settings::apply_limits(&session, cfg);
     let inner = Arc::new(Inner {
         session,
+        bus_changed: rqbit_runtime::sync::Notify::new(),
+        completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
         operations: Default::default(), moves: Default::default(),
@@ -239,8 +245,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
                 eprintln!("WARN resume periodic snapshot error={error:?}");
             }
             if let Err(error) = inner.maintain(cx).await {
-                // Keep the failure available without writing over a running TUI.
-                let _ = inner.write_store(cx, "last-error.txt", format!("{error:#}\n").as_bytes()).await;
+                eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
             }
         }
     });

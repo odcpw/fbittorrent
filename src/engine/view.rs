@@ -528,6 +528,9 @@ impl Inner {
 impl EngineDispatcher {
     pub(super) async fn info(&self, cx: &Cx) -> Result<Vec<TorrentView>> {
         let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+        Ok(self.info_locked(&ledger))
+    }
+    pub(super) fn info_locked(&self, ledger: &Ledger) -> Vec<TorrentView> {
         let mut torrents = Vec::new();
         let mut queue_position=0;
         for record in &ledger.records {
@@ -569,7 +572,7 @@ impl EngineDispatcher {
             torrents.push(view);
         }
         torrents.sort_by(|a, b| b.added_at.cmp(&a.added_at));
-        Ok(torrents)
+        torrents
     }
 }
 

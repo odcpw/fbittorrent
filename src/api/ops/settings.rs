@@ -112,7 +112,7 @@ pub fn prepare(cfg: &Config, patch: &Map<String, Value>) -> ApiResult<(Config, S
 pub fn get(daemon: &Daemon) -> ApiResult<Settings> {
     let _transaction = daemon.settings.transaction.lock().unwrap();
     let mut cfg = Config::load().map_err(engine_error)?;
-    cfg.idle_exit_secs = daemon.idle_exit_secs.load(Ordering::Acquire);
+    cfg.idle_exit_secs = daemon.idle_exit_secs();
     if daemon.no_notify {
         cfg.notify = false;
     }
@@ -126,7 +126,7 @@ pub fn set(daemon: &Daemon, patch: &Map<String, Value>) -> ApiResult<SettingsSet
     // A serve --idle-exit-secs override is effective process policy. An explicit
     // API write must replace it even if the durable file already has that value.
     if patch.contains_key("idle_exit_secs")
-        && cfg.idle_exit_secs != daemon.idle_exit_secs.load(Ordering::Acquire)
+        && cfg.idle_exit_secs != daemon.idle_exit_secs()
         && !result.applied.iter().any(|key| key == "idle_exit_secs")
     {
         result.applied.push("idle_exit_secs".into());
@@ -149,9 +149,7 @@ pub fn set(daemon: &Daemon, patch: &Map<String, Value>) -> ApiResult<SettingsSet
         return Err(engine_error(failure));
     }
     if patch.contains_key("idle_exit_secs") {
-        daemon
-            .idle_exit_secs
-            .store(cfg.idle_exit_secs, Ordering::Release);
+        daemon.policy.lock().unwrap().replace_delay(cfg.idle_exit_secs, std::time::Instant::now());
     }
     daemon.settings.generation.fetch_add(1, Ordering::Release);
     if result.restart {

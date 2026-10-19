@@ -63,6 +63,14 @@ pub fn legacy(values: &[api::Torrent]) -> anyhow::Result<Vec<qbt::Torrent>> {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "process-level live CLI shape bridge; requires private input/output paths"]
+    fn live_shape_bridge() {
+        let input = std::env::var("FBT_TEST_SHAPES_INPUT").unwrap();
+        let output = std::env::var("FBT_TEST_SHAPES_OUTPUT").unwrap();
+        let values: Vec<api::Torrent> = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+        std::fs::write(output,serde_json::to_vec(&rows(&values)).unwrap()).unwrap();
+    }
+    #[test]
     fn unknown_values_preserve_legacy_sentinels_only() {
         let text = include_str!("../../contracts/ipc/v1/deferred-add.ndjson");
         let v: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();

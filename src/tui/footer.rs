@@ -27,9 +27,11 @@ impl TuiApp {
             },
             Scope::Modal(kind) => match kind {
                 ModalKind::Files => "Files",
+                ModalKind::Details => "Details",
                 ModalKind::Providers => "Providers",
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",
+                ModalKind::Stopped => "Stopped",
             },
             Scope::Prompt => {
                 if self.prompt.as_ref().is_some_and(|p| p.yes_no) {
@@ -67,6 +69,8 @@ impl TuiApp {
     }
 
     pub(super) fn footer_selection(&self) -> Option<String> {
+        if let Some(notice)=self.connection_banner() {return Some(notice.into_owned());}
+        if self.daemon_stopped {return Some("fbittorrent stopped · Enter starts it again".into());}
         if let Some(files) = &self.files {
             return files
                 .list

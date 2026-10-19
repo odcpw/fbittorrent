@@ -20,10 +20,10 @@ pub(super) use ftui::widgets::{StatefulWidget, StatusLine, Tab, Tabs, TabsState,
 pub(super) use ftui::{Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
 
 pub(super) use crate::config::Config;
-pub(super) use crate::daemon::lifecycle::{Lifecycle, RestartReason, StopReason};
 pub(super) use crate::imdb::{self, Title};
 pub(super) use crate::browse;
 pub(super) use crate::shows::{self, Episode, Show, Shows};
-pub(super) use crate::qbt::{human_bytes, human_eta, human_rate, ymd, AddOptions, Client, RssFeed, SearchPlugin, SearchResult, Torrent, TorrentFile, TransferInfo};
+pub(super) use crate::qbt::{human_bytes, human_eta, human_rate, ymd, AddOptions, Client as LegacyClient, RssFeed, SearchPlugin, SearchResult, Torrent, TorrentFile, TransferInfo};
+pub(super) use super::remote::ScreenClient as Client;
 pub(super) use super::poster::{KittyPlacer, Poster};
 pub(super) use super::theme::Theme;

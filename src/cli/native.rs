@@ -208,6 +208,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             save,
             category,
             quiet,
+            notify: explicit_notify,
             wait,
             timeout,
             origin,
@@ -219,6 +220,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
             }
             let client = connect(cfg, true, no_start, json_mode)?;
+            if origin=="handler" && cfg.handler=="confirm" {
+                let value=super::handler::confirm(&client,cfg,source,*stopped,*seed,save.clone(),category.clone())?;
+                crate::emit(json_mode,value,||println!("Review torrent in the dashboard; download has not started."));return Ok(Code::Ok);
+            }
             let added = add(
                 &client,
                 cfg,
@@ -227,9 +232,11 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 *seed,
                 save.clone(),
                 category.clone(),
-                origin,
+                if origin == "handler" && (*quiet || json_mode) { "agent" } else { origin },
+                false,
             )?;
-            if !quiet && cfg.notify {
+            if !quiet && cfg.notify && !json_mode && origin != "handler" && origin != "agent"
+                && (*explicit_notify || crate::agent::stdout_is_tty()) {
                 crate::notify(
                     if added["deferred"] == true {
                         "Waiting for VPN"
@@ -274,7 +281,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 .output()?;
             let source = String::from_utf8_lossy(&out.stdout).trim().to_owned();
             let client = connect(cfg, true, no_start, json_mode)?;
-            let mut value = add(&client, cfg, &source, false, false, None, None, "manual")?;
+            let mut value = add(&client, cfg, &source, false, false, None, None, "manual", false)?;
             value["ok"] = json!(true);
             value["action"] = json!("add");
             emit(json_mode, value);
@@ -496,12 +503,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             }
         }
         Cmd::Restart => {
-            let c = connect(cfg, false, true, json_mode)?;
-            c.call("app.restart", json!({"scope":"engine"}))?;
-            emit(
-                json_mode,
-                json!({"ok":true,"action":"restart","scope":"engine","count":0,"hashes":[]}),
-            );
+            emit(json_mode, super::restart::daemon(cfg,json_mode)?);
         }
         _ => unreachable!("non-native CLI command"),
     }
@@ -566,7 +568,7 @@ fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     )
     .into())
 }
-fn add(
+pub(super) fn add(
     c: &ApiClient,
     cfg: &Config,
     source: &str,
@@ -575,15 +577,9 @@ fn add(
     save: Option<String>,
     category: Option<String>,
     origin: &str,
+    stage: bool,
 ) -> Result<Value> {
-    let local = crate::cli_sources::local_torrent_source(source)?;
-    let input = if source.starts_with("magnet:") {
-        json!({"magnet":source})
-    } else if source.starts_with("http://") || source.starts_with("https://") {
-        json!({"url":source})
-    } else {
-        json!({"path":std::fs::canonicalize(local).map_err(|_|AppError::new(Code::Usage,"torrent source must be an accessible local file, magnet or HTTP URL"))?.to_string_lossy()})
-    };
+    let input=super::handler::source(source)?;
     let mut args =
         json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});
     if let Some(save) = save.or(cfg.save_path.clone()) {
@@ -592,6 +588,7 @@ fn add(
     if let Some(category) = category.or(cfg.category.clone()) {
         args["category"] = json!(category);
     }
+    if stage {args["stage"]=json!(true);}
     let result = c.call("torrents.add", args)?;
     if result["deferred"] == true || result["state"] != "pending" || result.get("hash").is_some() {
         return Ok(result);
@@ -600,7 +597,7 @@ fn add(
 }
 fn counts(rows: &[api::Torrent]) -> Value {
     let visible:Vec<_>=rows.iter().filter(|r|!r.staged).collect();
-    json!({"total":visible.len(),"active":visible.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
+    json!({"total":visible.len(),"active":visible.iter().filter(|r|matches!(r.state,api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
 }
 fn status(
     c: Option<&ApiClient>,

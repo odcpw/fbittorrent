@@ -32,10 +32,8 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use engine::migrate_legacy;
 #[cfg(test)]
 use engine::LegacyMigration;
-use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -62,7 +60,7 @@ fn main() {
         // No search session, TUI signal owner or background thread may start
         // before serve has blocked its shutdown signals.
         let result = std::panic::catch_unwind(|| Config::load()
-            .and_then(|cfg| { let idle = idle_exit_secs.unwrap_or(cfg.idle_exit_secs); daemon::run_serve(cfg, idle, *no_notify) }));
+            .and_then(|cfg| daemon::run_serve(cfg, *idle_exit_secs, *no_notify)));
         std::process::exit(match result {
             Ok(result) => result.unwrap_or_else(|error| {
                 let (_, message, hint) = agent::classify(&error);
@@ -99,6 +97,7 @@ fn run(cli: Cli) -> Result<Code> {
     if let Some(Cmd::RobotDocs { section, surface }) = &cli.cmd {
         return cli::robot_docs(section, surface, cli.json);
     }
+    if matches!(&cli.cmd,Some(Cmd::Api { list:true,.. })) { return cli::raw::catalog(cli.json); }
     let _search_cleanup = SearchCleanup;
     search::begin_session()?;
     let cfg = Config::load()?;
@@ -125,7 +124,14 @@ fn run(cli: Cli) -> Result<Code> {
     // Commands that never touch the backend.
     match cmd {
         Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
-        Cmd::Setup { port, save, magnet, uninstall } => {
+        Cmd::Setup { port, save, magnet, plugin, dry_run, uninstall, purge, yes } => {
+            if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
+            if cfg.native() {
+                let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,dry_run,uninstall,purge})?;
+                emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
+                return Ok(Code::Ok);
+            }
+            if dry_run || plugin.is_some() || purge { return Err(AppError::new(Code::Usage,"extended desktop setup requires the native engine").into()); }
             if uninstall {
                 setup::uninstall()?;
                 emit(json, serde_json::json!({"ok":true,"action":"setup-uninstall"}), || {});
@@ -179,6 +185,10 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
+        Cmd::Events { follow, since_seq, kinds } => return cli::stream::events(&cfg, follow, since_seq, kinds),
+        Cmd::Api { op, list, args, json_args, reference } => return cli::raw::run(&cfg, json, no_start, op, list, args, json_args, reference),
+        Cmd::Limits { down, up, alt, alt_down, alt_up } => return cli::limits::run(&cfg, json, down, up, alt, alt_down, alt_up),
+        Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
         Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
             return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
         }
@@ -225,18 +235,20 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
         }
-        Cmd::Dashboard { view, query } => {
+        Cmd::Dashboard { view, query, hash } => {
+            if let Some(hash)=&hash {api::Hash::new(hash.clone()).map_err(|message|AppError::new(Code::Usage,message))?;}
             let mut explicit = cfg.clone();
             explicit.autostart = !no_start;
             backend::ensure_running(&explicit, &c)?;
-            backend::dashboard(view.as_deref(), query.as_deref())?;
+            backend::dashboard_hash(view.as_deref(), query.as_deref(), hash.as_deref())?;
             emit(json, serde_json::json!({"ok":true,"action":"dashboard","count":0,"hashes":[]}), || {});
             Ok(Code::Ok)
         }
         Cmd::Restart => {
             if cfg.native() {
-                api::client::ensure_daemon(&cfg, true)?;
-                ipc::request(&cfg, "POST", "app/restart", &[], None)?;
+                let result = cli::restart::daemon(&cfg,json)?;
+                emit(json,result,|| println!("daemon restarted"));
+                return Ok(Code::Ok);
             } else {
                 backend::stop(&cfg)?;
                 let mut explicit = cfg.clone(); explicit.autostart = !no_start;
@@ -258,9 +270,8 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() && ipc::is_running(&cfg) { tui::run(cfg, screen, Lifecycle::default())?; }
-            else if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
-            else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
+            if !cfg.native() { connect(&cfg, &c)?; }
+            tui::run(cfg, screen)?;
             Ok(Code::Ok)
         }
         Cmd::List { active } => {
@@ -305,13 +316,16 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, wait, timeout, origin: _ } => {
+        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, notify: explicit_notify, origin, wait, timeout } => {
             if cfg.native() && (no_seq || no_first_last) {
                 return Err(AppError::new(Code::Usage, "the native engine downloads sequentially with first/last pieces prioritised; those settings cannot be disabled")
                     .hint("drop --no-seq and --no-first-last, or explicitly configure engine = \"qbittorrent\" for legacy scheduling").into());
             }
             connect(&cfg, &c)?;
+            let plain_notify = cfg.notify && !quiet && !json && origin != "handler" && origin != "agent"
+                && (explicit_notify || agent::stdout_is_tty());
             let opts = AddOptions {
+                origin: Some(if origin == "handler" && (quiet || json) { "agent".into() } else { origin.clone() }),
                 sequential: cfg.native() || (cfg.sequential && !no_seq),
                 first_last: cfg.native() || (cfg.first_last && !no_first_last),
                 seed: cfg.seed_by_default || seed,
@@ -330,13 +344,13 @@ fn run(cli: Cli) -> Result<Code> {
                 let filename = std::path::Path::new(&local).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| "file.torrent".into());
                 let before: std::collections::HashSet<String> = c.torrents()?.into_iter().map(|t| t.hash).collect();
                 if let Err(e) = c.add_file(&filename, &bytes, &opts) {
-                    if cfg.notify && !quiet { notify("Torrent add failed", &e.to_string(), true); }
+                    if plain_notify { notify("Torrent add failed", "Could not add this torrent. Inspect the log for details.", true); }
                     return Err(e);
                 }
                 std::thread::sleep(Duration::from_millis(400));
                 let added = c.torrents()?.into_iter().find(|t| !before.contains(&t.hash));
                 let (hash, name) = match &added { Some(t) => (Some(t.hash.clone()), t.name.clone()), None => (None, filename.clone()) };
-                if cfg.notify && !quiet { notify("Torrent added", &name, false); }
+                if plain_notify { notify("Torrent added", &name, false); }
                 if wait {
                     let Some(h) = hash.clone() else {
                         return Err(AppError::new(Code::Failure, "added, but could not determine the torrent hash to wait for")
@@ -355,10 +369,10 @@ fn run(cli: Cli) -> Result<Code> {
             let label = magnet_name(&source).unwrap_or_else(|| source.chars().take(60).collect());
             let before: std::collections::HashSet<String> = c.torrents()?.into_iter().map(|t| t.hash).collect();
             if let Err(e) = c.add_url(&source, &opts) {
-                if cfg.notify && !quiet { notify("Torrent add failed", &e.to_string(), true); }
+                if plain_notify { notify("Torrent add failed", "Could not add this torrent. Inspect the log for details.", true); }
                 return Err(e);
             }
-            if cfg.notify && !quiet { notify("Torrent added", &label, false); }
+            if plain_notify { notify("Torrent added", &label, false); }
             // The hash is in the magnet; for URLs we look for the torrent that appeared.
             let hash = magnet_hash(&source).or_else(|| {
                 std::thread::sleep(Duration::from_millis(400));
@@ -425,19 +439,20 @@ fn run(cli: Cli) -> Result<Code> {
             let out = Command::new("wl-paste").arg("--no-newline").output()?;
             let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !(text.starts_with("magnet:") || text.starts_with("http://") || text.starts_with("https://")) {
-                if cfg.notify { notify("Nothing to add", "Clipboard holds no magnet link or URL", true); }
+                if cfg.notify && !json && agent::stdout_is_tty() { notify("Nothing to add", "Clipboard holds no magnet link or URL", true); }
                 return Err(AppError::new(Code::Usage, "clipboard holds no magnet link or URL").hint("fbittorrent add \"<magnet>\"").into());
             }
             let opts = AddOptions {
+                origin: None,
                 sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,
                 save_path: cfg.save_path.clone(), category: cfg.category.clone(),
             };
             let label = magnet_name(&text).unwrap_or_else(|| text.chars().take(60).collect());
             if let Err(e) = c.add_url(&text, &opts) {
-                if cfg.notify { notify("Torrent add failed", &e.to_string(), true); }
+                if cfg.notify && !json && agent::stdout_is_tty() { notify("Torrent add failed", "Could not add this torrent. Inspect the log for details.", true); }
                 return Err(e);
             }
-            if cfg.notify { notify("Torrent added", &label, false); }
+            if cfg.notify && !json && agent::stdout_is_tty() { notify("Torrent added", &label, false); }
             emit(json, serde_json::json!({"ok": true, "action": "add", "hash": magnet_hash(&text), "name": label}), || println!("added: {label}"));
             Ok(Code::Ok)
         }
@@ -534,7 +549,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 
@@ -623,52 +638,6 @@ fn reconcile_result(cfg: &Config, legacy: impl FnOnce() -> Result<usize>) -> Res
 struct SearchCleanup;
 impl Drop for SearchCleanup {
     fn drop(&mut self) { search::shutdown_all(); }
-}
-
-fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
-    if ipc::is_running(&cfg) { return backend::open_app(); }
-    let lifecycle = Lifecycle::default();
-    loop {
-    let snapshot = network_app::state(&cfg);
-    lifecycle.set_expected_network(Some(snapshot.clone()));
-    if !snapshot.ready {
-        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot, lifecycle.clone())?);
-        let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-        drop(parked);
-        result?;
-        if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-            cfg = Config::load()?;
-            continue;
-        }
-        return Ok(());
-    }
-    let mut engine_cfg = cfg.clone();
-    if cfg.network_interface.is_some() { engine_cfg.network_interface = snapshot.interface.clone(); }
-    let mut app = match engine::start(&engine_cfg, lifecycle.clone()) {
-        Ok(app) => app,
-        Err(error) if error.to_string().contains("already open") => return backend::open_app(),
-        Err(_) if cfg.network_interface.is_some() && network_app::state(&cfg) != snapshot => continue,
-        Err(error) => return Err(error),
-    };
-    let dispatcher = app.dispatcher();
-    migrate_legacy(&cfg, &dispatcher)?;
-    let controls_lifecycle = lifecycle.clone();
-    app.serve(&cfg, move |request| {
-        network_app::controls(request, &snapshot, &controls_lifecycle).or_else(|| dispatcher.dispatch(request))
-            .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
-    })?;
-    let app = tui::signals::AppGuard::new(app);
-    // The guard drops before run() returns, including a TUI initialization error.
-    // main() only calls process::exit after network activity and searches stop.
-    let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-    drop(app);
-    result?;
-    if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-        cfg = Config::load()?;
-        continue;
-    }
-    return Ok(());
-    }
 }
 
 #[cfg(test)]
@@ -765,6 +734,6 @@ pub fn host_of(url: &str) -> Option<String> {
 
 fn notify(title: &str, body: &str, error: bool) {
     let _ = Command::new("notify-send")
-        .args(["-a", "fbittorrent", "-i", "qbittorrent", "-u", if error { "critical" } else { "normal" }, title, body])
+        .args(["-a", "fbittorrent", "-i", "fbittorrent", "-u", if error { "critical" } else { "normal" }, &daemon::notify::escape_markup(title), &daemon::notify::escape_markup(body)])
         .spawn();
 }

@@ -6,6 +6,7 @@ pub(super) struct SettingsModal {
     pub(super) list: RefCell<ListState>,
     pub(super) connections: Vec<Option<String>>,
     pub(super) error: String,
+    pub(super) saving: bool,
 }
 
 impl TuiApp {
@@ -18,7 +19,7 @@ impl TuiApp {
         if !connections.contains(&cfg.network_interface) { connections.push(cfg.network_interface.clone()); }
         let mut list = ListState::default();
         list.select(Some(0));
-        self.settings = Some(SettingsModal { cfg, connections, list: RefCell::new(list), error: String::new() });
+        self.settings = Some(SettingsModal { cfg, connections, list: RefCell::new(list), error: String::new(), saving:false });
     }
 
     pub(super) fn on_settings_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
@@ -27,36 +28,32 @@ impl TuiApp {
 
     pub(super) fn on_settings_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         if intent == actions::Intent::Cancel { self.settings = None; return Cmd::none(); }
-        if intent == actions::Intent::CloseUi { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
+        if intent == actions::Intent::CloseUi { return self.close_ui(); }
+        if self.settings.as_ref().is_some_and(|modal|modal.saving) {return Cmd::none();}
         if intent == actions::Intent::Primary {
-            let values = self.settings.as_ref().unwrap().cfg.clone();
-            let result = (|| -> Result<Config> {
-                let mut latest = Config::load()?;
-                let queue_changed = latest.max_active_downloads != values.max_active_downloads;
-                let reopen = latest.peer_encryption != values.peer_encryption || latest.network_interface != values.network_interface;
-                latest.max_active_downloads = values.max_active_downloads;
-                latest.peer_encryption = values.peer_encryption;
-                latest.network_interface = values.network_interface;
-                latest.reduce_motion = values.reduce_motion;
-                latest.validate()?;
-                if reopen {
-                    latest.save()?;
-                    self.lifecycle.request_restart(RestartReason::Settings);
-                } else {
-                    if queue_changed { Client::from_config(&self.cfg).set_queue_limit(latest.max_active_downloads)?; }
-                    latest.save()?;
-                }
-                Ok(latest)
-            })();
-            return match result {
-                Ok(cfg) => {
-                    self.cfg = cfg;
-                    self.settings = None;
-                    if self.lifecycle.pending_request().is_some() { Cmd::quit() }
-                    else { self.set_status("download settings saved", false); self.poll() }
-                }
-                Err(error) => { self.settings.as_mut().unwrap().error = format!("{error:#}"); Cmd::none() }
-            };
+            let values=self.settings.as_ref().unwrap().cfg.clone();
+            self.settings.as_mut().unwrap().saving=true;
+            let presence=self.presence.clone();let previous=self.cfg.clone();
+            return Cmd::task(move|| {
+                let result=(||->Result<Config> {
+                    let mut latest=Config::load()?;
+                    let queue_changed=latest.max_active_downloads!=values.max_active_downloads;
+                    let reopen=latest.peer_encryption!=values.peer_encryption || latest.network_interface!=values.network_interface;
+                    latest.max_active_downloads=values.max_active_downloads;
+                    latest.peer_encryption=values.peer_encryption;latest.network_interface=values.network_interface;
+                    latest.reduce_motion=values.reduce_motion;latest.validate()?;
+                    if reopen {
+                        latest.save()?;
+                        presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?
+                            .request("app.restart",serde_json::json!({"scope":"engine"}))?;
+                    } else {
+                        if queue_changed {Client::from_config(&previous,presence.clone()).set_queue_limit(latest.max_active_downloads)?;}
+                        latest.save()?;
+                    }
+                    Ok(latest)
+                })();
+                Msg::SettingsSaved(result.map_err(|error|format!("{error:#}")))
+            });
         }
         let modal = self.settings.as_mut().unwrap();
         let selected = modal.list.borrow().selected().unwrap_or(0);
@@ -88,6 +85,7 @@ impl TuiApp {
 
     pub(super) fn view_settings(&self, frame: &mut Frame) {
         let Some(modal) = &self.settings else { return };
+        self.rects.borrow_mut().overlay();
         let area = settings_area(frame.bounds());
         let th = &self.theme;
         let bg = Style::new().bg(th.selection).fg(th.fg);
@@ -95,11 +93,15 @@ impl TuiApp {
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).padding(Sides::horizontal(1)).title(" Download settings ");
         let inner = block.inner(area);
         block.render(area, frame);
-        let encryption = match modal.cfg.peer_encryption.as_str() { "require" => "Require encryption", "off" => "Off", _ => "Prefer encryption" };
-        let vpn = match modal.cfg.network_interface.as_deref() { None => "Off · ordinary connection".into(), Some("proton") => "ProtonVPN · required".into(), Some(name) => format!("{name} · required") };
-        let items = vec![li(Line::raw(format!("Simultaneous downloads   {}", modal.cfg.max_active_downloads))), li(Line::raw(format!("Peer encryption          {encryption}"))), li(Line::raw(format!("VPN connection           {vpn}"))), li(Line::raw(format!("Reduce motion            {}",if modal.cfg.reduce_motion { "On" } else { "Off" })))];
-        let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(4));
-        StatefulWidget::render(&List::new(items).style(bg).highlight_style(th.selected()).highlight_symbol("▌"), rows, frame, &mut modal.list.borrow_mut());
+        let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(4));
+        self.view_rows(MouseList::Settings,rows,4,
+            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion)),
+            |i|Line::raw(match i {
+                0=>format!("Simultaneous downloads   {}",modal.cfg.max_active_downloads),
+                1=>format!("Peer encryption          {}",match modal.cfg.peer_encryption.as_str(){"require"=>"Require encryption","off"=>"Off",_=>"Prefer encryption"}),
+                2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
+                _=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
+            }),frame);
         let description = if !modal.error.is_empty() { modal.error.clone() } else {
             format!("↑/↓ choose · ←/→ change · Enter save · Esc cancel\n\nExtra downloads wait their turn. Encryption protects peer traffic; your IP remains visible.\n\nA required VPN blocks torrent transfers when disconnected. Feed and search websites use your usual connection.\n\n{}\nChanging encryption or VPN reopens the app's engine.", crate::network_app::state(&modal.cfg).message)
         };
