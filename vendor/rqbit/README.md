@@ -34,6 +34,9 @@ P6-01 keeps `TrackerStats` on `ManagedTorrentShared`, outside run regions.
 coalescing forced announces for sixty seconds. Unsupported schemes and private
 secondary URLs remain visible as not_contacted. Tracker diagnostics strip URL
 queries, including remote error text, before logging or surfacing messages.
+Handle replacement during P7-02 moves transfers the serde-skipped, app-only
+`AddTorrentOptions::tracker_stats` Arc, preserving observation history and the
+monotonic forced-announcement limit across relocation.
 Real local HTTP/UDP tracker tests cover failure, forced success, rate limiting
 and pause retention; the existing private-torrent discovery rules stay intact.
 

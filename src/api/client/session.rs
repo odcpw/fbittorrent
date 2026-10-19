@@ -213,6 +213,7 @@ impl Client {
         let connection = self.connection.lock().unwrap().clone();
         let timeout = Duration::from_secs(if op == "torrents.add" {
             self.cfg.timeout_secs.max(95)
+        } else if op=="torrents.move" { self.cfg.timeout_secs.max(65)
         } else {
             self.cfg.timeout_secs.max(1)
         });

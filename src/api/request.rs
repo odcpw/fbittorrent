@@ -262,6 +262,8 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.move")]
+    TorrentsMove {args: MoveArgs},
     #[serde(rename="torrents.trackers")]
     TorrentsTrackers { args: HashArgs },
     #[serde(rename="torrents.reannounce")]
@@ -337,6 +339,7 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsMove {..}=>"torrents.move",
             Self::TorrentsTrackers {..} => "torrents.trackers",
             Self::TorrentsReannounce {..} => "torrents.reannounce",
             Self::TorrentsForceStart {..} => "torrents.force_start",
@@ -393,3 +396,7 @@ pub enum QueueTo { Top, Up, Down, Bottom }
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueueMoveArgs { pub hash: Hash, pub to: QueueTo }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveArgs {pub hashes:Hashes,pub save_path:String}

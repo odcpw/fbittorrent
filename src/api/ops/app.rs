@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb","settings","recheck","queue","origin","trackers"];
+pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb","settings","recheck","queue","origin","trackers","move"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();

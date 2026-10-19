@@ -21,6 +21,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Start { .. }
             | Cmd::Stop { .. }
             | Cmd::Reannounce { .. }
+            | Cmd::Move { .. }
             | Cmd::Delete { .. }
             | Cmd::Seed { .. }
             | Cmd::Noseed { .. }
@@ -191,6 +192,15 @@ fn snapshot(cfg: &Config, json_mode: bool) -> Result<(Option<ApiClient>, Vec<api
 }
 pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> Result<Code> {
     match cmd {
+        Cmd::Move {selector,save_path}=>{
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            for batch in hashes.chunks(256) {
+                let pending=c.call("torrents.move",json!({"hashes":batch,"save_path":save_path}))?;
+                await_move(&c,pending)?;
+            }
+            emit(json_mode,json!({"ok":true,"action":"move","count":hashes.len(),"hashes":hashes}));
+        }
         Cmd::Add {
             source,
             stopped,
@@ -510,6 +520,19 @@ fn bulk(c: &ApiClient, op: &str, hashes: &[String], extra: Value) -> Result<()> 
         }
     }
     Ok(())
+}
+fn await_move(c:&ApiClient,result:Value)->Result<Value> {
+    let reference=result["ref"].as_str().context("move acknowledgement omitted ref")?;
+    loop {
+        let unknown=||AppError::new(Code::Timeout,"move outcome is unknown after the owner connection closed").hint("fbittorrent list --json");
+        if let Some(event)=c.event(Duration::from_millis(100)).map_err(|_|unknown())? {
+            if event["ev"]=="mutation.result" && event["ref"]==reference {
+                if event["outcome"]=="done" {return Ok(event.get("result").cloned().unwrap_or(json!({"state":"done"})));}
+                return Err(api::errors::app_error(serde_json::from_value(event["error"].clone())?));
+            }
+            if event["ev"]=="bye" || event["ev"]=="client.disconnected" {return Err(unknown().into());}
+        }
+    }
 }
 fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]

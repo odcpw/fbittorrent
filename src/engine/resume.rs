@@ -60,6 +60,13 @@ pub(super) struct Prepared {
     pending: StdMutex<HashMap<String, Measurement>>,
 }
 impl Prepared {
+    pub(super) fn install(&self,record:&Record,metadata:&[u8],bytes:Vec<u8>)->Result<()> {
+        let measurement=measurement(record,metadata,&bytes)?;
+        self.pending.lock().unwrap().insert(record.hash.clone(),measurement);
+        self.candidates.lock().unwrap().insert(record.hash.clone(),Candidate{bytes,measurement});
+        Ok(())
+    }
+
     pub(super) fn take(&self, hash: &str) -> Option<Vec<u8>> {
         let candidate = self.candidates.lock().unwrap().remove(hash)?;
         Some(candidate.bytes)
@@ -200,7 +207,7 @@ impl Store {
         }
         Ok(())
     }
-    fn snapshot(&self, record: &Record, handle: &ManagedTorrent, clean: bool) -> Result<()> {
+    pub(super) fn snapshot(&self, record: &Record, handle: &ManagedTorrent, clean: bool) -> Result<()> {
         let bits = handle
             .have_pieces_snapshot()
             .context("torrent has no verified have snapshot")?;

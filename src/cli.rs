@@ -127,6 +127,8 @@ pub(super) enum Cmd {
     /// Start (resume) torrents
     #[command(alias = "resume")]
     Start { selectors: Vec<String> },
+    /// Move a torrent (or all) to another directory, waiting for the move receipt
+    Move { selector:String, save_path:String },
     /// Ask live torrents to announce now (at most once per tracker per minute)
     Reannounce { selectors: Vec<String> },
     /// Stop (pause) torrents

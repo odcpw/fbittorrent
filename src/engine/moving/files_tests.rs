@@ -181,3 +181,45 @@ fn symlinked_descendants_and_destination_collisions_never_replace_data() {
         b"source"
     );
 }
+
+#[test]
+fn missing_required_payload_never_becomes_a_trusted_empty_destination() {
+    let tree = Tree::new();
+    assert!(
+        Prepared::new(
+            &tree.source(),
+            &tree.target(),
+            &[PathBuf::from("missing.bin")]
+        )
+        .is_err()
+    );
+    assert_eq!(std::fs::read_dir(tree.target()).unwrap().count(), 0);
+}
+#[test]
+fn cancellation_after_staging_rolls_back_source() {
+    let tree = Tree::new();
+    let paths = vec![PathBuf::from("payload.bin")];
+    std::fs::write(tree.source().join(&paths[0]), b"verified bytes").unwrap();
+    let checks = std::cell::Cell::new(0usize);
+    let result = Prepared::with_checks(
+        &tree.source(),
+        &tree.target(),
+        &paths,
+        &paths.iter().cloned().collect(),
+        &Default::default(),
+        strategy,
+        |source, target| copy(&mut &*source, target),
+        || {
+            let count = checks.get() + 1;
+            checks.set(count);
+            ensure!(count < 3, "fixture cancellation before publication");
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        std::fs::read(tree.source().join(&paths[0])).unwrap(),
+        b"verified bytes"
+    );
+    assert_eq!(std::fs::read_dir(tree.target()).unwrap().count(), 0);
+}

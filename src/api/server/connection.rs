@@ -85,7 +85,7 @@ impl Connection {
             Pending {
                 generation,
                 deadline: Instant::now() + Duration::from_secs(after),
-                no_timeout: matches!(&request.call, Call::TorrentsRecheck { .. }) || matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
+                no_timeout: matches!(&request.call, Call::TorrentsRecheck { .. }|Call::TorrentsMove {..}) || matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
                 after,
             },
         );

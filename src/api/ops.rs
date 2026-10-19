@@ -7,6 +7,7 @@ pub struct Operation {
     pub since: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation{name:"torrents.move",mutating:true,idempotent:false,since:"P7-02"},
     Operation {name:"torrents.trackers",mutating:false,idempotent:false,since:"P6-01"},
     Operation {name:"torrents.reannounce",mutating:true,idempotent:true,since:"P6-01"},
     Operation { name:"torrents.force_start",mutating:true,idempotent:true,since:"P6-05" },
@@ -147,6 +148,7 @@ pub mod settings;
 pub mod recheck;
 pub mod queue;
 pub mod trackers;
+pub mod moving;
 pub mod imdb;
 pub mod torrents;
 pub mod transfer;
@@ -183,6 +185,11 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
             ("hash".into(), state.hash.clone().into()),
             ("reason".into(), state.reason.into()),
         ]));
+        return failure;
+    }
+    if value.downcast_ref::<crate::engine::moving::Busy>().is_some() {
+        let mut failure=error(Busy,"busy",None);
+        failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));
         return failure;
     }
     let text = format!("{value:#}");

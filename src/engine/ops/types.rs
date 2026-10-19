@@ -64,6 +64,7 @@ pub enum EngineOp {
     OpenTarget {
         hash: String,
     },
+    Move { hashes: Vec<String>, save_path: PathBuf },
     Trackers { hash: String },
     Reannounce { hashes: Vec<String> },
     Recheck {
@@ -267,6 +268,7 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    Move(Arc<super::super::moving::Batch>),
     Trackers(Vec<librqbit::TrackerStat>),
     RemovedUndo { undo_until: u64 },
     QueuePosition(u64),
@@ -287,6 +289,7 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::Move(_) => bail!("payload relocation has no legacy route"),
             Self::Trackers(_) => bail!("tracker observations have no legacy route"),
             Self::RemovedUndo { .. } => bail!("undo removal has no legacy route"),
             Self::QueuePosition(_) => bail!("queue movement has no legacy route"),

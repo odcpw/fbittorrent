@@ -62,6 +62,14 @@ impl EngineDispatcher {
         })
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
+        // A move pins its verified bytes and record options until re-admission.
+        // Read-only snapshots continue while its bounded blocking copy runs.
+        if let EngineOp::Move{hashes,save_path}=op {
+            return Ok(EngineResult::Move(self.inner.begin_move(cx,hashes,save_path).await?));
+        }
+        let read=matches!(&op,EngineOp::Version|EngineOp::Shutdown|EngineOp::Restart|EngineOp::Network|EngineOp::Settings|EngineOp::Queue|EngineOp::TransferInfo|EngineOp::Info|EngineOp::Get{..}|EngineOp::Files{..}|EngineOp::Trackers{..});
+        if !read && self.inner.moves.any() {return Err(moving::Busy.into());}
+        let _serial=if read {None}else{Some(OwnedMutexGuard::lock(self.inner.operations.clone(),cx).await?)};
         match &op {
             EngineOp::Trackers {hash} => return self.trackers(cx,hash).await,
             EngineOp::Reannounce {hashes} => return self.reannounce(cx,hashes).await,

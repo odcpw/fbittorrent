@@ -203,6 +203,7 @@ impl Inner {
             .create(true)
             .truncate(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&temporary)
             .await?;
         // mode() only applies to creation; a pre-upgrade temporary may be 0644.
@@ -244,6 +245,7 @@ pub(super) fn save_parked_ledger(directory: &Path, ledger: &Ledger) -> Result<()
         .create(true)
         .truncate(true)
         .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&temporary)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(&serde_json::to_vec_pretty(ledger)?)?;

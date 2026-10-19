@@ -4491,8 +4491,72 @@ def tracker_saved_views(binary,systemd):
             if process.child.poll() is None:h.stop_serve(process)
 
 
+def move_receive(client,h,hash_,destination,ref):
+    pending=client.call("torrents.move",dict(hashes=[hash_],save_path=str(destination)),ref=ref)
+    client.case.check(pending.get("result")==dict(state="pending",ref=ref),"move acknowledges its pending ref before a terminal result",json.dumps(pending))
+    deadline=time.monotonic()+15;states=[];event=None
+    while time.monotonic()<deadline:
+        row=client.call("torrents.get",dict(hash=hash_))["result"]["torrent"];states.append(row)
+        for frame in client.pushed:
+            if frame.get("ev")=="mutation.result" and frame.get("ref")==ref:
+                event=frame;client.pushed.remove(frame);break
+        if event is not None:break
+        time.sleep(.005)
+    client.case.check(event is not None,"move always publishes a terminal mutation.result",json.dumps(dict(event=event,states=states)))
+    if event is None:raise RuntimeError("move result missing")
+    return event,states
+
+
+def move_case(name,binary,systemd,cross=False,failing=False):
+    import tempfile
+    with api_owned(name,binary,systemd) as (case,sandbox,h,process), ApiConn(h) as client, ExitStack() as stack:
+        client.hello()
+        root=sandbox.root/"move-source";root.mkdir();a=root/"first.bin";a.write_bytes(os.urandom(256*1024))
+        paths=[a]
+        if failing:
+            b=root/"second.bin";b.write_bytes(os.urandom(256*1024));paths.append(b)
+        fixture=fixtures.torrent_fixture(root,paths,name=name)
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(root)))
+        h.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"fixture is durably complete with seeding off")
+        before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        hashes={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+        if cross:
+            if not Path("/dev/shm").is_dir():
+                case.check(True,"cross-filesystem case is environment conditional","SKIP: /dev/shm tmpfs is unavailable");return
+            temporary=stack.enter_context(tempfile.TemporaryDirectory(prefix="fbt-move-",dir="/dev/shm"));destination=Path(temporary)/"payload"
+            if root.stat().st_dev==Path(temporary).stat().st_dev:
+                case.check(True,"cross-filesystem case requires a distinct device","SKIP: /tmp and /dev/shm have equal st_dev");return
+        else:destination=sandbox.root/"move-destination"
+        destination.mkdir()
+        if failing:
+            # A real collision after the first file has been staged. The
+            # transaction must retain both sources and this unrelated target.
+            (destination/paths[-1].name).write_bytes(b"unrelated destination data")
+        case.check(True,"record filesystem strategy and source hashes",json.dumps(dict(source_device=root.stat().st_dev,destination_device=destination.stat().st_dev,save_path_before=before["save_path"],sha256=hashes)))
+        event,states=move_receive(client,h,fixture.info_hash,destination,"move-"+name)
+        after=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        if failing:
+            actual={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+            case.check(event["outcome"]=="failed" and event["error"]["code"]=="invalid_args" and actual==hashes and after["save_path"]==before["save_path"],"failed copy transaction preserves every source byte and the original location",json.dumps(dict(event=event,sha256_before=hashes,sha256_after=actual,row=after)))
+            case.check((destination/paths[-1].name).read_bytes()==b"unrelated destination data" and not list(destination.glob(".fbittorrent-move-*")),"failure keeps unrelated destination data and removes its own staging",str(destination))
+        else:
+            actual={path.name:hashlib.sha256((destination/path.name).read_bytes()).hexdigest() for path in paths}
+            case.check(event["outcome"]=="done" and actual==hashes and all(not path.exists() for path in paths),"move completes with identical destination bytes and removed sources",json.dumps(dict(event=event,sha256_after=actual)))
+            case.check(all(row["state"]=="done" and row["checked"] for row in states) and after["save_path"]==str(destination) and after["state"]=="done" and after["intent"]==before["intent"],"completed torrent stays done, checked and preserves intent throughout relocation",json.dumps(dict(states=states,after=after)))
+            ledger=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+            case.check(ledger["records"][0]["output_folder"]==str(destination),"new output folder is durable before the done receipt",json.dumps(ledger))
+        if cross:
+            # Stop before the outer temporary tmpfs context removes payloads.
+            h.stop_serve(process)
+
+
+def move_same_fs(binary,systemd):move_case("move_same_fs",binary,systemd)
+def move_cross_fs(binary,systemd):move_case("move_cross_fs",binary,systemd,cross=True)
+def move_failed_copy_keeps_source(binary,systemd):move_case("move_failed_copy_keeps_source",binary,systemd,cross=True,failing=True)
+
+
 CASES = {function.__name__: function for function in
-         (tracker_saved_views,tracker_status,reannounce,reannounce_rate_limited,reannounce_not_live_invalid_state,tracker_url_redacted,resume_trusted,resume_touched_file,resume_after_kill9,recheck_drops_resume_file,origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (move_same_fs,move_cross_fs,move_failed_copy_keeps_source,tracker_saved_views,tracker_status,reannounce,reannounce_rate_limited,reannounce_not_live_invalid_state,tracker_url_redacted,resume_trusted,resume_touched_file,resume_after_kill9,recheck_drops_resume_file,origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

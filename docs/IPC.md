@@ -86,6 +86,7 @@ when a required cap is missing.
 | `imdb` | `imdb.lookup` | P3-04 |
 | `peers` | `torrents.peers`, topic `torrent:<h>.peers`, `seeds` field | P5-01 |
 | `recheck` | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.move` | `hashes` (1..256), `save_path` | `{state:"pending",ref}` then `mutation.result` | yes | P7-02 |
 | `torrents.trackers` | `hash` | `{trackers: [Tracker]}` sorted by URL | no | P6-01 |
 | `torrents.reannounce` | `hashes` (1..256) | `{state: "done"}` (triggered) | yes | P6-01 |
 | `torrents.queue_move` | `hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
@@ -670,3 +671,18 @@ a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subs
 URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
 topic/item registration and pushed-delivery qualification remain pending that
 integration, alongside the TUI/dashboard rendering owned by their tracks.
+
+### Payload moves (P7-02, contract 1.2.7)
+
+The `move` capability adds `torrents.move {hashes, save_path}`. The absolute
+save path must contain no parent traversal; payload traversal rejects symlinked
+parents/leaves and destination collisions. Only initialized handles qualify;
+staged, unresolved and dormant records require activation first. A move pauses
+transfer, uses rename on the same device or flushed copy across devices, durably
+saves the new location, and re-admits the owned verified bitfield without a hash
+scan. Completion and saved pause/seed intent are preserved. A failed copy keeps
+the source intact. Moves answer pending with a ref and always conclude through
+`mutation.result`; they have no operation timeout and are never resent. CLI
+`move <sel> <path>` waits for that result, prints the act envelope and returns
+exit 8 with `fbittorrent list --json` if the pending connection is lost.
+The Overview action and folder picker remain owned by the dashboard track.

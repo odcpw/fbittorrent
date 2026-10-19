@@ -529,7 +529,7 @@ impl EngineDispatcher {
             if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
                 if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
                     view=TorrentView::trusted_pending(record,value);
-                } else {self.inner.resume_prepared.finish(&record.hash);}
+                } else if !self.inner.moves.active(&record.hash) {self.inner.resume_prepared.finish(&record.hash);}
             }
             if view.error.is_none() {
                 view.error = self
