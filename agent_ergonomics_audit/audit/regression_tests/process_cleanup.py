@@ -130,10 +130,16 @@ class ProcessRun:
                 return remaining
             time.sleep(.05)
 
-    def cleanup(self, roots=None):
+    def cleanup(self, roots=None, *, deadline=None):
         # Rescan after TERM to catch children forked during teardown. A second
         # KILL pass also covers children created just before their parent died.
         for sig, seconds in ((signal.SIGTERM, 3), (signal.SIGKILL, 2), (signal.SIGKILL, 1)):
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    sig, seconds = signal.SIGKILL, .1
+                else:
+                    seconds = min(seconds, remaining)
             for process in self.survivors(roots):
                 self.send(process, sig)
             if not self.wait(roots, seconds):

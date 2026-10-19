@@ -20,8 +20,8 @@ pub struct Config {
     /// Intrinsic streaming defaults.
     pub sequential: bool,
     pub first_last: bool,
-    /// Allow uploading/seeding for new torrents. Off = upload cap and stop when complete.
-    pub seed_by_default: bool,
+    /// Payload upload permission, independent of speed limits.
+    pub upload: String,
     /// Optional save path override for new torrents.
     pub save_path: Option<String>,
     /// Optional category for new torrents.
@@ -58,7 +58,7 @@ impl Default for Config {
             network_interface: None,
             sequential: true,
             first_last: true,
-            seed_by_default: false,
+            upload: "off".into(),
             save_path: None,
             category: None,
             notify: true,
@@ -78,6 +78,8 @@ impl Default for Config {
         }
     }
 }
+
+pub fn upload_off() -> String { "off".into() }
 
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
@@ -121,6 +123,7 @@ impl Config {
         if let Some(name) = &self.network_interface {
             anyhow::ensure!(!name.is_empty() && name.len() < libc::IFNAMSIZ && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')), "network_interface: choose proton or a valid network interface name");
         }
+        anyhow::ensure!(matches!(self.upload.as_str(), "off" | "on"), "upload: must be off or on");
         anyhow::ensure!(self.timeout_secs > 0, "timeout_secs: must be positive");
         anyhow::ensure!(matches!(self.handler.as_str(), "add" | "confirm"), "handler: must be add or confirm");
         anyhow::ensure!(!self.open_command.trim().is_empty(), "open_command: must not be empty");
@@ -236,9 +239,10 @@ mod tests {
     }
     #[test]
     fn existing_settings_gain_queue_and_encryption_defaults() {
-        let cfg: Config = toml::from_str("engine = 'native'\nseed_by_default = false\n").unwrap();
+        let cfg: Config = toml::from_str("engine = 'native'\n").unwrap();
         cfg.validate().unwrap();
         assert_eq!(cfg.max_active_downloads, 3);
+        assert_eq!(cfg.upload, "off");
         assert_eq!(cfg.peer_encryption, "prefer");
         assert_eq!(cfg.network_interface, None);
     }

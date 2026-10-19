@@ -19,7 +19,7 @@ ColumnLayout {
   readonly property bool trackerEditing:trackers.item && trackers.item.editing
   function renameTitle(){flow.selectTab("overview");Qt.callLater(function(){if(overview.item)overview.item.renameTitle()})}
   signal recheckRequested(string hash)
-  function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(trackers.item && trackers.item.key(event))return true;if(files.item && files.item.key(event))return true;return false}
+  function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(root.tab==="overview" && event.text==="u" && root.torrent){root.service.toggleSeed(root.torrent.hash);return true}if(trackers.item && trackers.item.key(event))return true;if(files.item && files.item.key(event))return true;return false}
   spacing:Commons.Style.spacing.sm
   Rectangle {Layout.fillWidth:true;Layout.preferredHeight:Commons.Style.space(2);color:Commons.Color.accent;opacity:root.focused ? 1 : 0}
   Flow {

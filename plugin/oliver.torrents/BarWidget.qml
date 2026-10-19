@@ -27,6 +27,9 @@ Ui.Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string tuiCommand: String(setting("tuiCommand", "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"))
 
+  implicitWidth: button.implicitWidth
+  implicitHeight: button.implicitHeight
+
   visible: !!svc && (svc.online || setting("showWhenStopped",false) || root.opened || svc.stoppedRecently || svc.reconnecting)
   function popupItem() { return panel.loadedContent }
   function geometry() { return root.opened && popupItem() ? Geometry.describe(popupItem(),Style.font.title) : null }

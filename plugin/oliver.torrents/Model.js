@@ -39,6 +39,7 @@ function stateLabel(t) {
     var p=t.playable
     return p.stall_free===true || (p.stall_free===undefined && Number(p.buffered_s)>=120) ? "Ready to watch" : "Playable · may stall"
   }
+  if (t.state==="error" && t.reason==="missing_files") return "Files missing"
   if (t.state==="error" && t.reason==="disk_full") return "Disk full"
   if (words[t.state]) return words[t.state]
   return t.state || "?"
@@ -73,7 +74,6 @@ function meta(t) {
   if(t.dl_bps!==undefined && t.dl_bps!==null)values.push(rate(t.dl_bps))
   if(t.eta_s!==undefined && t.eta_s!==null)values.push(Formats.eta(t.eta_s,false))
   if(!values.length && t.size!==undefined && t.size!==null)values.push(Formats.size(t.size,false))
-  values.push(t.seed ? "seeding allowed" : "seed off")
   return values.join(" · ")
 }
 

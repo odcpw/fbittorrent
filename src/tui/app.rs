@@ -23,7 +23,6 @@ pub struct TuiApp {
     pub(super) screen: Screen,
     pub(super) removal_undo: Option<(String,u64)>,
     pub(super) release_sort: release_sort::ReleaseSort,
-    pub(super) release_descending: bool,
     pub(super) tabs: RefCell<TabsState>,
     pub(super) show_help: bool,
     pub(super) help_scroll: u16,
@@ -84,6 +83,8 @@ pub struct TuiApp {
     pub(super) feed_list: RefCell<ListState>,
     pub(super) item_list: RefCell<ListState>,
     pub(super) rss_focus_items: bool,
+    pub(super) rss_sort:super::rss_sort::RssSort,
+    pub(super) rss_descending:bool,
     pub(super) rss_loaded: bool,
     pub(super) rss_revision: u64,
     pub(super) rss_busy: bool,
@@ -92,9 +93,11 @@ pub struct TuiApp {
     pub(super) show_grabbing: HashSet<String>,
     // shows
     pub(super) shows: Shows,
+    pub(super) show_controls: ShowControls,
     pub(super) show_list: RefCell<ListState>,
     pub(super) ep_list: RefCell<ListState>,
     pub(super) shows_focus_eps: bool,
+    pub(super) release_descending: bool,
     pub(super) shows_refreshing: HashSet<String>,
     pub(super) inbox_rows: Vec<ShowReleaseTarget>,
     /// Explicit undo restores the exact release last marked read in the inbox.
@@ -147,6 +150,7 @@ pub enum Msg {
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
     TopicsSelected{connection:u64,active:Vec<(u64,crate::api::Topic)>,result:Result<(),String>},
     ServiceDone{connection:Option<u64>,op:&'static str,args:serde_json::Value,label:String,result:Result<serde_json::Value,String>},
+    ShowFilterRead {connection:u64,revision:u64,result:Result<crate::api::ReleasesResult,String>},
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
@@ -154,6 +158,7 @@ pub enum Msg {
     ApiDetail {connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>},
     Trackers {connection:Option<u64>,hash:String,request:u64,forced:bool,result:Result<Vec<crate::api::Tracker>,String>},
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
+    FilesSaved {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
 
 }
@@ -243,6 +248,8 @@ impl TuiApp {
             feed_list: RefCell::new(ListState::default()),
             item_list: RefCell::new(ListState::default()),
             rss_focus_items: false,
+            rss_sort:super::rss_sort::RssSort::Date,
+            rss_descending:true,
             rss_loaded: false,
             rss_revision: 0,
             rss_busy: false,
@@ -250,6 +257,7 @@ impl TuiApp {
             rss_retry_until: None,
             show_grabbing: HashSet::new(),
             shows,
+            show_controls:ShowControls::default(),
             show_list: RefCell::new(ListState::default()),
             ep_list: RefCell::new(ListState::default()),
             shows_focus_eps: true,

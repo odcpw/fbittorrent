@@ -201,3 +201,40 @@ mod batch_tests {
         assert!(matches!(receive_batch(&receiver),Err(mpsc::RecvTimeoutError::Disconnected)));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn burst_updates_keep_order_and_stay_bounded_before_the_next_ack() {
+        let (sender, receiver) = mpsc::sync_channel(128);
+        for i in 0..80 {
+            sender
+                .send(Update::Acknowledged {
+                    reference: crate::api::MutationRef::new(format!("burst-{i}")).unwrap(),
+                    pending: false,
+                })
+                .unwrap();
+        }
+        let mut seen = Vec::new();
+        for length in [16, 16, 16, 16, 16] {
+            let batch = receive_batch(&receiver).unwrap();
+            assert_eq!(batch.len(), length);
+            for update in batch {
+                let Update::Acknowledged { reference, .. } = update else {
+                    panic!("wrong update")
+                };
+                seen.push(reference.to_string());
+            }
+        }
+        assert_eq!(
+            seen,
+            (0..80).map(|i| format!("burst-{i}")).collect::<Vec<_>>()
+        );
+        drop(sender);
+        assert!(matches!(
+            receive_batch(&receiver),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
+    }
+}

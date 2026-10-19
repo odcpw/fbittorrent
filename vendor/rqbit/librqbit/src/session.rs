@@ -6,7 +6,7 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -147,6 +147,7 @@ pub struct Session {
     // Feature flags
     #[cfg(feature = "disable-upload")]
     _disable_upload: bool,
+    pub(crate) upload_enabled: Arc<AtomicBool>,
     pub ipv4_only: bool,
     pub peer_limit: Option<usize>,
     client_name_and_version: String,
@@ -227,6 +228,10 @@ fn merge_two_optional_streams<T>(
 // Serialize/deserialize is for Tauri.
 #[derive(Default, Serialize, Deserialize)]
 pub struct AddTorrentOptions {
+    /// Explicit payload permission. None inherits the session policy; the
+    /// limiter remains independent (None/zero rates mean unlimited).
+    #[serde(default)]
+    pub upload_enabled: Option<bool>,
     /// Start in paused state.
     #[serde(default)]
     pub paused: bool,
@@ -414,6 +419,8 @@ impl Default for DhtSessionConfig {
 }
 
 pub struct SessionOptions {
+    /// Payload upload permission for torrents without an explicit override.
+    pub upload_enabled: bool,
     /// Encryption policy for incoming peers, outgoing peers and magnet metadata.
     pub peer_encryption: crate::PeerEncryption,
 
@@ -485,6 +492,7 @@ pub struct SessionOptions {
 impl Default for SessionOptions {
     fn default() -> Self {
         Self {
+            upload_enabled: true,
             peer_encryption: crate::PeerEncryption::default(),
             dht: Some(DhtSessionConfig::default()),
             bind_device_name: None,
@@ -756,6 +764,7 @@ impl Session {
 
                 #[cfg(feature = "disable-upload")]
                 _disable_upload: opts.disable_upload,
+                upload_enabled: Arc::new(AtomicBool::new(opts.upload_enabled)),
                 blocklist,
                 allowlist,
                 lsd,
@@ -952,6 +961,16 @@ impl Session {
             region.close().await?;
         }
         Ok(())
+    }
+
+    pub fn upload_enabled(&self) -> bool { self.upload_enabled.load(Ordering::Acquire) }
+
+    /// Refresh peers outside the session database lock: live state has its own lock.
+    pub fn set_upload_enabled(&self, enabled: bool) {
+        if self.upload_enabled.swap(enabled, Ordering::AcqRel) != enabled {
+            let handles = self.with_torrents(|items| items.map(|(_, h)| h.clone()).collect::<Vec<_>>());
+            for handle in handles { handle.refresh_upload_policy(); }
+        }
     }
 
     /// Run a callback given the currently managed torrents.
@@ -1259,6 +1278,8 @@ impl Session {
                     ratelimits: Limits::new(opts.ratelimits),
                     initial_peers: opts.initial_peers.clone().unwrap_or_default(),
                     peer_limit: opts.peer_limit.or(self.peer_limit),
+                    session_upload_enabled: self.upload_enabled.clone(),
+                    upload_override: std::sync::atomic::AtomicU8::new(match opts.upload_enabled {None=>0,Some(false)=>1,Some(true)=>2}),
                     #[cfg(feature = "disable-upload")]
                     _disable_upload: self._disable_upload,
                 },

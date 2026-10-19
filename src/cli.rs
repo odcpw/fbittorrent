@@ -302,6 +302,9 @@ pub(super) enum Cmd {
         clipboard_watch: Option<bool>,
         #[arg(long)]
         port: Option<u16>,
+        /// Allow payload upload while downloading; completed torrents still require explicit seed opt-in
+        #[arg(long, value_parser=["off", "on"])]
+        upload: Option<String>,
     },
     /// Look a release name up on IMDb (title, rating, blurb, poster)
     Imdb {

@@ -15,6 +15,7 @@ function describe(svc) {
     else if (svc.stoppedRecently) { result.state="stopped_recently"; result.tooltip=svc.byeReason==="idle" ? "fbittorrent stopped (idle)" : "fbittorrent stopped" }
     return result
   }
+  result.tone="normal"
   var active=(counts.downloading || 0)+(counts.metadata || 0)+(counts.checking || 0)+(counts.stalled || 0)
   var error=svc.store && svc.store.firstError ? svc.store.firstError() : null
   var ready=svc.client && svc.client.caps.indexOf("watch")>=0 ? (summary.top || []).find(function(t) {

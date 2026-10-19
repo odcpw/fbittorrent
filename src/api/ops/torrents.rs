@@ -253,12 +253,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 return Err(error(InvalidArgs, "unsupported origin", Some("origin")));
             }
             let cfg = crate::config::Config::load().map_err(engine_error)?;
-            let seed = args.seed.unwrap_or(cfg.seed_by_default);
+            let seed = args.seed.unwrap_or(false);
             let mut add = engine::ops::AddRequest {
                 sources: Vec::new(),
                 torrent: None,
                 save_path: args.save_path.clone().or(cfg.save_path.clone()),
-                upload_limit: if seed { 0 } else { 32768 },
+                upload_limit: 0,
                 ratio_limit: if seed { -2.0 } else { 0.0 },
                 stopped: args.stopped.unwrap_or(false),
                 category: args.category.clone().unwrap_or_default(),

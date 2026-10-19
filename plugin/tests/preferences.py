@@ -75,7 +75,7 @@ def run(binary):
                         save.mkdir()
                         values = [
                             ('max_active_downloads', '4', 4), ('save_path', str(save), str(save)),
-                            ('seed_by_default', True, True), ('idle_exit_secs', '600', 600),
+                            ('upload', 'on', 'on'), ('idle_exit_secs', '600', 600),
                             ('peer_encryption', 'prefer', 'prefer'), ('network_interface', '', None),
                             ('peer_port', '0', 0), ('download_limit_bps', '64K', 65536),
                             ('upload_limit_bps', '64K', 65536), ('alt_download_limit_bps', '32K', 32768),

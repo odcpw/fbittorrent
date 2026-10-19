@@ -53,6 +53,19 @@ def run(binary):
                         keys(['m'],lambda:len(state().get('rows',[]))==1)
                         keys(['u'],lambda:len(state().get('rows',[]))==2)
                         keys(['M'],lambda:not state().get('rows'))
+                        # Read history comes from the real daemon; the pushed
+                        # inbox is unread-only. Exercise both independent controls
+                        # through the actual Dropdown buttons and keyboard focus.
+                        assert q.ipc('showsDropdown','read')=='true';q.wait(lambda:view().get('controls',{}).get('readOpen'))
+                        keys(['j','-k','Return'],lambda:state().get('readFilter')=='all' and len(state().get('rows',[]))==2)
+                        assert q.ipc('showsDropdown','read')=='true';q.wait(lambda:view().get('controls',{}).get('readOpen'))
+                        keys(['j','-k','Return'],lambda:state().get('readFilter')=='read' and len(state().get('rows',[]))==2)
+                        assert q.ipc('showsDropdown','quality')=='true';q.wait(lambda:view().get('controls',{}).get('qualityOpen'))
+                        keys(['jjj','-k','Return'],lambda:state().get('qualityFilter')=='720p' and not state().get('rows'))
+                        assert q.ipc('showsDropdown','quality')=='true';q.wait(lambda:view().get('controls',{}).get('qualityOpen'))
+                        keys(['kkk','-k','Return'],lambda:state().get('qualityFilter')=='' and len(state().get('rows',[]))==2)
+                        assert q.ipc('showsDropdown','read')=='true';q.wait(lambda:view().get('controls',{}).get('readOpen'))
+                        keys(['kk','-k','Return'],lambda:state().get('readFilter')=='unread' and not state().get('rows'))
                         keys(['hj'],lambda:state().get('selected')==IMDB)
                         keys(['l'],lambda:state().get('focus')=='releases' and len(state().get('rows',[]))==2)
                         keys(['-k','space'],lambda:any(not row['read'] for row in state().get('rows',[])))

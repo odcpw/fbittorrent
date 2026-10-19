@@ -103,7 +103,7 @@ PanelKeyCatcher {
     else if(t==="z")svc.toggleTurtle()
     else if(t==="p")svc.toggleTorrent(selected())
     else if(t==="o")svc.openTorrent(selected())
-    else if(t==="u")svc.toggleSeeding(selected())
+    else if(t==="u"){svc.openTorrentDetails(selected());owner.close()}
     else if(t==="d")requestRemoval(selected())
   }
   function cursor(){var strip=currentStrip();return {keySerial:keySerial,qtFocus:activeFocus,section:focusSection,row:rowIndex,header:headerIndex,active:cursorActive,rows:rows.length,hashes:rows.map(function(t){return t.hash}),confirming:!!pendingRemoval,stopping:stopping,confirmFocused:strip && strip.cancelFocused ? "cancel" : "other",selected:strip ? strip.selected : null,group:sections[groupIndex] ? sections[groupIndex].key : "",pendingHash:pendingRemoval ? pendingRemoval.hash : "",hints:hints}}

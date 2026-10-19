@@ -23,6 +23,9 @@ use screens_search::*;
 mod screens_rss;
 #[path = "screens/shows.rs"]
 mod screens_shows;
+#[path="screens/show_controls.rs"]
+mod show_controls;
+use show_controls::{ShowControls,ReadFilter};
 #[path = "modals/files.rs"]
 mod modals_files;
 use modals_files::*;
@@ -68,10 +71,8 @@ mod layout;
 use layout::*;
 mod footer;
 mod clipboard;
-mod everyday;
 #[cfg(test)]
-#[path="tests/everyday.rs"] mod everyday_tests;
-mod release_sort;
+#[path="tests/journeys.rs"] mod journey_tests;
 #[cfg(test)]
 #[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
@@ -86,6 +87,14 @@ mod palette;
 mod feedback;
 mod limits;
 mod statistics;
+mod everyday;
+#[path="screens/release_sort.rs"]
+mod release_sort;
+#[path="screens/rss_sort.rs"]
+mod rss_sort;
+#[cfg(test)]
+#[path="tests/everyday.rs"]
+mod everyday_tests;
 #[cfg(test)]
 #[path="tests/statistics.rs"]
 mod statistics_tests;
@@ -101,6 +110,9 @@ mod overview_tests;
 #[cfg(test)]
 #[path="tests/services.rs"]
 mod service_tests;
+#[cfg(test)]
+#[path="tests/shows_selection.rs"]
+mod shows_selection_tests;
 #[cfg(test)]
 #[path="tests/disk.rs"]
 mod disk_tests;
@@ -231,7 +243,7 @@ impl Model for TuiApp {
                 self.refresh_details()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); self.store.details.clear();if let Some(details)=self.details.as_mut(){details.loading=false;}let overview=self.refresh_details(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,overview,self.subscribe_ui()]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.show_controls.inflight=None;self.show_controls.rows=None;self.show_controls.dirty=true;self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); self.store.details.clear();if let Some(details)=self.details.as_mut(){details.loading=false;}let overview=self.refresh_details(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,overview,self.subscribe_ui()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -341,19 +353,23 @@ impl Model for TuiApp {
                 if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
                 self.update(Msg::Files(hash,result))
             }
+            Msg::FilesSaved {connection,hash,result}=>{
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                if let Some(panel)=self.files.as_mut().filter(|m|m.hash==hash){panel.saving=false;}
+                self.update(Msg::Files(hash,result))
+            }
             Msg::Files(hash, r) => {
                 if let Some(m) = self.files.as_mut() {
-                    if m.hash == hash {
+                    if m.hash == hash && !m.saving {
                         m.loading = false;
                         match r {
                             Ok(fs) => {
                                 let n = fs.len();
+                                m.error.clear();
+                                let selected=m.list.borrow().selected().and_then(|i|m.files.get(i)).map(|f|f.index);
                                 m.files = fs;
                                 let mut st = m.list.borrow_mut();
-                                match st.selected() {
-                                    Some(i) if i < n => {}
-                                    _ => st.select(if n > 0 { Some(0) } else { None }),
-                                }
+                                st.select(selected.and_then(|index|m.files.iter().position(|f|f.index==index)).or_else(||(n>0).then_some(0)));
                             }
                             Err(e) => m.error = e,
                         }
@@ -361,6 +377,7 @@ impl Model for TuiApp {
                 }
                 Cmd::none()
             }
+            Msg::ShowFilterRead {connection,revision,result}=>self.show_filter_read(connection,revision,result),
             Msg::TopicsSelected {connection,active,result}=>self.topics_selected(connection,active,result),
             Msg::Trackers {connection,hash,request,forced,result}=>self.trackers_loaded(connection,hash,request,forced,result),
             Msg::ServiceDone {connection,op,args,label,result}=>self.service_done(connection,op,args,label,result),

@@ -242,7 +242,7 @@ impl EngineDispatcher {
                 }
                 let only_files = magnet.get_select_only();
                 let record = Record {
-                    display_name:None,
+                    upload: None, display_name:None,
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
@@ -444,6 +444,7 @@ impl EngineDispatcher {
                 }
                 EngineOp::SetShareLimits { ratio, .. } => {
                     record.ratio_limit = *ratio;
+                    record.upload = Some(*ratio != 0.0);
                     if let Some(handle) = &handle {
                         if *ratio == 0.0 && handle.stats().finished && !handle.is_paused() {
                             self.inner.pause_handle(cx, handle).await?;
@@ -476,6 +477,9 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
+            }
+            if matches!(op, EngineOp::SetShareLimits {..}) {
+                if let Some(handle) = &handle { handle.set_upload_enabled(ledger.records[index].upload); }
             }
             if matches!(op,EngineOp::SetDownloadLimit{..}){
                 handle.as_ref().expect("validated download-cap handle").set_download_bps(ledger.records[index].download_limit)?;
@@ -533,7 +537,7 @@ impl EngineDispatcher {
         }
         let paused = options.stopped;
         let mut record = Record {
-            display_name:None,
+            upload: None, display_name:None,
             hash: String::new(),
             name: options
                 .torrent

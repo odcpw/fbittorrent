@@ -1,5 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("rss.sort",Scope::Pane(Screen::Rss,Pane::Items),&[KeyChord::plain(KeyCode::Char('s'))],"Sort items",90,
+        |_|true,Some(|a|a.sort_rss(false)),T,None,None,None),
+    action!("rss.reverse_sort",Scope::Pane(Screen::Rss,Pane::Items),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse item sort",90,
+        |_|true,Some(|a|a.sort_rss(true)),T,None,None,None),
     action!(
         "rss.next",
         Scope::Screen(Screen::Rss),
@@ -110,7 +114,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::Enter)],
         "Open/download",
         10,
-        |a| a.selected_feed().is_some_and(|f| !f.articles.is_empty()),
+        |a| a.selected_feed().is_some_and(|f| !a.rss_focus_items || !f.articles.is_empty()),
         Some(|a| a.on_rss_action(Intent::Primary)),
         TD,
         None,

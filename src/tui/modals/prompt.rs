@@ -26,6 +26,8 @@ pub(super) enum PromptKind {
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
+    ShowQuality {imdb:String},
+    ShowFilters,
     Shutdown,
     ConfirmUnfollow { imdb: String, title: String },
 }
@@ -40,9 +42,12 @@ impl TuiApp {
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         if matches!(kind,PromptKind::RenameTorrent {..}) {input=input.with_max_length(512);}
         if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
+        if kind==PromptKind::SettingIdleExit {input=input.with_max_length(20);}
+        if kind==PromptKind::SettingDestination {input=input.with_max_length(4096);}
+        if matches!(kind,PromptKind::ShowQuality {..}) {input=input.with_max_length(16);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        let add_flags = (true, true, self.cfg.seed_by_default);
+        let add_flags = (true, true, false);
         self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 
@@ -89,7 +94,6 @@ impl TuiApp {
         }
         match intent {
             actions::Intent::Cancel => { self.close_prompt(); Cmd::none() }
-            actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             actions::Intent::Primary => {
                 let raw=p.input.value().to_string();
                 let value = raw.trim().to_string();
@@ -105,6 +109,8 @@ impl TuiApp {
                 }
                 if kind==PromptKind::SettingDestination {return self.apply_destination(&value);}
                 if kind==PromptKind::SettingIdleExit {return self.apply_idle_exit(&value);}
+                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
+                if kind==PromptKind::ShowFilters {return self.apply_show_filters(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {
@@ -133,6 +139,6 @@ impl Prompt {
     /// Title with the live flag state, so the toggles are discoverable while typing.
     pub(super) fn title(&self) -> String {
         if self.kind != PromptKind::AddMagnet { return self.label.clone(); }
-        format!("{} · streaming automatic · F4 seed:{} ", self.label, if self.add_flags.2 { "on" } else { "off" })
+        format!("{} · streaming automatic", self.label)
     }
 }

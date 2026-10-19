@@ -62,12 +62,16 @@ impl TuiApp {
         self.service_busy = false;
         self.rss_busy = false;
         self.show_grabbing.clear();
+        if op.starts_with("shows."){self.show_controls.dirty=true;}
         match result {
             Ok(value) => {
                 if op=="torrents.remove" {
                     self.removal_undo=if args["delete_files"]==false {
                         args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(hash,until)|(hash.into(),until))
                     }else{None};
+                }
+                if op=="torrents.add" && args["source"]["restore"].is_string() {
+                    self.removal_undo=None;
                 }
                 if op == "shows.set_read" && args["read"] == true {
                     if let (Some(imdb), Some(key)) = (args["imdb"].as_str(), args["key"].as_str()) {
@@ -112,7 +116,7 @@ impl TuiApp {
             args["read"] = json!(read);
         }
         if op == "rss.grab" {
-            args["seed"] = json!(self.cfg.seed_by_default);
+            args["seed"] = json!(false);
         }
         self.service_action(op, args, label)
     }
@@ -163,8 +167,7 @@ impl TuiApp {
             .collect();
         self.feeds.sort_by(|a, b| a.name.cmp(&b.name));
         for feed in &mut self.feeds {
-            feed.articles
-                .sort_by(|a, b| b.ts.cmp(&a.ts).then(a.id.cmp(&b.id)));
+            feed.articles.sort_by(|a,b|self.rss_sort.compare(a,b,self.rss_descending));
         }
         self.feed_list.borrow_mut().select(
             selected
@@ -256,6 +259,7 @@ impl TuiApp {
     pub(in crate::tui) fn sync_native_shows(&mut self) {
         let parent = self.selected_show().map(|s| s.imdb.clone());
         let selected = self.selected_release_target();
+        let old_index = self.ep_list.borrow().selected().unwrap_or(0);
         self.shows_refreshing = self
             .store
             .shows
@@ -263,6 +267,8 @@ impl TuiApp {
             .filter(|s| s.checking)
             .map(|s| s.imdb.clone())
             .collect();
+        let full=self.show_controls.rows.as_ref().filter(|_|self.full_show_inbox());
+        let release_topic=if full.is_some(){Some("inbox")}else{self.store.releases_topic.as_deref()};
         self.shows.shows = self
             .store
             .shows
@@ -276,15 +282,13 @@ impl TuiApp {
                 show.last_checked = s.last_check_at.unwrap_or(0) as i64;
                 show.catalogue_complete = s.catalogue_complete;
                 show.error = s.warning.clone();
-                if let Some(topic) = &self.store.releases_topic {
-                    if topic == "inbox" || topic == &s.imdb {
+                if let Some(topic) = release_topic {
+                    if topic == "inbox" || topic == s.imdb.as_str() {
                         show.episodes.clear();
                         show.seen.clear();
                         show.grabbed.clear();
-                        for r in self
-                            .store
-                            .show_releases
-                            .values()
+                        for r in self.store.show_releases.values().filter(|_|full.is_none())
+                            .chain(full.into_iter().flat_map(|rows|rows.iter()))
                             .filter(|r| r.show_imdb == s.imdb)
                         {
                             show.episodes.push(Episode {
@@ -328,16 +332,7 @@ impl TuiApp {
             self.follow_target = None;
             self.shows_focus_eps = false;
         }
-        self.order_release_rows();
-        self.rebuild_inbox();
-        if let Some(target) = selected {
-            if !self.shows_inbox() {
-                let pos = self
-                    .selected_show()
-                    .filter(|s| s.imdb == target.imdb)
-                    .and_then(|s| s.episodes.iter().position(|e| e.key == target.key));
-                self.ep_list.borrow_mut().select(pos);
-            }
-        }
+        self.reorder_releases();
+        self.restore_release_selection(selected, old_index);
     }
 }

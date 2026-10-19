@@ -31,8 +31,8 @@ impl TuiApp {
                 }
             }
             actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
-                let allow = !self.seed_allowed(&t);
-                return self.action(if allow { "seeding allowed" } else { "seeding off · upload capped" },
+                let allow = !self.store.torrents.get(&t.hash).map_or_else(||self.seed_allowed(&t), |row|row.upload_enabled);
+                return self.action(if allow { "Upload: on" } else { "Upload: off" },
                     move |c| if allow { c.allow_seeding(&[t.hash]) } else { c.deny_seeding(&[t.hash]) });
             },
             actions::Intent::Remove => if let Some(t) = self.selected_torrent().cloned() {

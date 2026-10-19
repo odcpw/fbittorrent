@@ -28,6 +28,7 @@ impl TuiApp {
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.can_undo_removal().hash(&mut hash);
+        self.service_busy.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
         self.status_success.hash(&mut hash);
         self.poster_open.hash(&mut hash);
@@ -43,6 +44,7 @@ impl TuiApp {
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
             self.seed_allowed(torrent).hash(&mut hash);
+            self.store.torrents.get(&torrent.hash).map(|row|row.upload_enabled).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);

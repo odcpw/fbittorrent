@@ -47,7 +47,7 @@ pub(super) fn torrent(row: &api::Torrent) -> Torrent {
         up_limit: row
             .upload_limit_bps
             .map(signed)
-            .unwrap_or(if row.seed { 0 } else { 32768 }),
+            .unwrap_or(0),
         ratio_limit: if row.seed { -1.0 } else { 0.0 },
         tags: if row.seed {
             "seed".into()
@@ -65,6 +65,11 @@ pub(super) fn file(row: &api::File) -> TorrentFile {
         progress_known: true,
         priority: i64::from(row.included),
     }
+}
+pub(super) fn files<'a>(rows:impl IntoIterator<Item=&'a api::File>)->Vec<TorrentFile> {
+    let mut rows=rows.into_iter().collect::<Vec<_>>();
+    rows.sort_by(|a,b|a.sort_key.cmp(&b.sort_key).then(a.index.cmp(&b.index)));
+    rows.into_iter().map(file).collect()
 }
 pub(super) fn transfer(
     row: &api::TransferInfo,
@@ -91,6 +96,7 @@ pub(super) struct Metrics<'a> {
 impl Metrics<'_> {
     pub fn progress(&self) -> String {
         if let Some(row) = self.api {
+            if row.reason.as_deref()==Some("missing_files") { return "Files missing".into(); }
             return row.progress.map_or_else(
                 || {
                     if row.state == api::TorrentState::WaitingVpn {
@@ -170,24 +176,14 @@ impl Metrics<'_> {
         )
     }
     pub fn upload(&self) -> String {
-        if let Some(row) = self.api {
-            if row.seed {
-                return "seeding allowed  (u to turn off)".into();
-            }
-            return format!(
-                "{} · stops when complete  (u to seed)",
-                row.upload_limit_bps.map_or_else(
-                    || "default upload cap".into(),
-                    |limit| format!("{} cap", rate(Some(limit)))
-                )
-            );
+        let enabled=self.api.map_or_else(||self.legacy.seed_allowed(),|row|row.upload_enabled);
+        let mut text=format!("Upload: {}",if enabled {"on"}else{"off"});
+        if let Some(limit)=self.api.and_then(|row|row.upload_limit_bps).filter(|limit|*limit>0) {
+            text.push_str(&format!(" · {} upload cap",rate(Some(limit))));
         }
-        if self.legacy.seed_allowed() {
-            "seeding allowed  (u to turn off)".into()
-        } else {
-            "32 KiB/s cap · stops when complete  (u to seed)".into()
-        }
+        text
     }
+
 }
 pub(super) fn rate(value: Option<u64>) -> String {
     value.map_or_else(|| "—".into(), |value| human_rate(signed(value)))

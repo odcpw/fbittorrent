@@ -9,6 +9,7 @@ import base64
 from contextlib import ExitStack, contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import struct
@@ -67,6 +68,27 @@ class PaneUi(native.AttachedTui):
 
     def contains(self,key,text,*,literal=True):
         return self.press(key,'pane contains '+text,lambda pane:text in pane,literal=literal)
+
+    def details_tab(self,name):
+        def selected(pane):
+            match=re.search(r'\[(Overview|Files|Peers|Trackers|Pieces|Log)\]',pane)
+            return match.group(1) if match else None
+        for _ in range(8):
+            pane=self.capture(self.target);current=selected(pane)
+            if current==name:return True
+            header=next((line for line in pane.splitlines() if current and '['+current+']' in line),'')
+            if not current or name not in header:break
+            key=']' if header.index(name)>header.index(current) else '['
+            if not self.press(key,'details changes tab toward '+name,lambda p:selected(p) not in (None,current)):return False
+        return self.observe('open '+name+' details','the named detail tab is visible',lambda p:selected(p)==name,timeout=0)
+
+    def settings_row(self,label):
+        def selected(pane):return next((line for line in pane.splitlines() if '▌' in line and any(name in line for name in ('Simultaneous downloads','Peer encryption','VPN connection','Reduce motion','limit','Peer port','Download destination','Seed by default','Idle exit','Clipboard offers'))),'')
+        for _ in range(24):
+            before=selected(self.capture(self.target))
+            if label in before:return True
+            if not self.press('Down','choose Settings field '+label,lambda p:selected(p)!=before,literal=False):return False
+        return self.observe('select '+label,'the named Settings row is selected',lambda p:label in selected(p),timeout=0)
 
     def select_active(self,client):
         rows=client.call('torrents.list',{})['result']['torrents']
@@ -147,10 +169,13 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
                 ui.contains(']','Overview  [Files]')
                 ui.observe('read files','real file names and include controls are visible',
                            lambda pane:all(text in pane for text in('The.Diplomat.S04E01.mkv','English.srt','sample.mkv','include/skip')))
-                ui.contains(']','Overview  Files  [Log]')
-                ui.contains(']','Overview  Files  [Log]')
-                ui.contains('[','Overview  [Files]')
-                ui.contains('[','[Overview]  Files')
+                ui.details_tab('Log')
+                header=next(line for line in ui.capture(ui.target).splitlines() if '[Log]' in line)
+                last=re.findall(r'\b(?:Overview|Files|Peers|Trackers|Pieces|Log)\b',header)[-1]
+                ui.details_tab(last)
+                ui.contains(']','['+last+']')
+                ui.details_tab('Files')
+                ui.details_tab('Overview')
                 ui.contains('Escape','[Torrents]',literal=False)
                 before=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']['intent']
                 ui.contains('d','keep files')
@@ -301,7 +326,7 @@ def peer_port(binary,setup,sandbox,h,ui,process,torrent):
         with Case('tui_smoke','peer_port')as case:
             ui.case=case
             ui.contains('F6','Download settings',literal=False)
-            ui.press('Up','select the peer port field',lambda pane:'Peer port'in pane,literal=False)
+            ui.settings_row('Peer port')
             ui.contains('Right','Peer port · 0 automatic',literal=False)
             ui.press('C-a','select the current port text',lambda pane:'Peer port · 0 automatic'in pane,literal=False)
             ui.press(str(port),'type a free private peer port',lambda pane:str(port)in pane)
@@ -330,6 +355,7 @@ def log_history(binary):
     import shutil
     with Case('tui_smoke_setup','log_fixtures')as setup, fixtures.Sandbox()as sandbox:
         source=sandbox.downloads/'history.mkv';source.write_bytes(b'local log fixture'*1024)
+        hidden=sandbox.root/'history.hidden'
         item=fixtures.torrent_fixture(sandbox.root,[source]);fixtures.corrupt_byte(source,0)
         sandbox.env['FBT_TEST_INJECT_ERROR']=item.info_hash;sandbox.keys.append('FBT_TEST_INJECT_ERROR')
         theme=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
@@ -345,7 +371,7 @@ def log_history(binary):
                     h.wait_for(lambda:((info:=client.call('app.info')['result'])['subscriptions']['by_topic'].get('log',0)==1,json.dumps(info['subscriptions'])),'the TUI subscribes before the injected diagnostic occurs')
                     client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(sandbox.downloads),stopped=True))
                     h.wait_for(lambda:((entries:=client.call('app.log',dict(hash=item.info_hash,level='error'))['result']['entries'])and any('injected engine error'in row['message']for row in entries),json.dumps(entries)),'the real error-injection hook writes the engine log')
-                    source.unlink()
+                    source.rename(hidden)
                     with Case('tui_smoke','log_history')as case:
                         ui.case=case;ui.context=f'private theme={theme}; injected hash={item.info_hash}'
                         ui.observe('load torrent','the incomplete fixture appears in the attached terminal',lambda pane:'history.mkv'in pane)
@@ -359,6 +385,9 @@ def log_history(binary):
                         ui.press('q','q detaches the log test while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
             finally:
                 ui.close()
+                # Undo the deliberate missing-file fault before demanding a
+                # healthy resume snapshot during fixture shutdown.
+                if hidden.exists():hidden.rename(source)
                 if process.child.poll()is None:h.stop_serve(process)
                 h.lock_free()
 

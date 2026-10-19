@@ -9,11 +9,14 @@ pub(in crate::tui) struct Selection {
 }
 impl TuiApp {
     pub(in crate::tui) fn sync_topics(&mut self) -> Cmd<Msg> {
+        let topics=self.select_topics();let releases=self.refresh_show_filter();Cmd::batch(vec![topics,releases])
+    }
+    fn select_topics(&mut self) -> Cmd<Msg> {
         let Some(connection) = self.presence.clone().filter(|c| c.alive()) else {
             return Cmd::none();
         };
         let mut desired = Vec::with_capacity(3);
-        if connection.hello.caps.iter().any(|c| c == "shows") {
+        if connection.hello.caps.iter().any(|c| c == "shows") && !self.full_show_inbox() {
             let id = if self.screen == Screen::Shows {
                 self.selected_show().map(|s| s.imdb.clone())
             } else {

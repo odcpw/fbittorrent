@@ -2,6 +2,7 @@
 use super::*;
 
 pub(super) fn apply_limits(session: &Session, cfg: &Config) {
+    session.set_upload_enabled(cfg.upload == "on");
     let (down, up) = if cfg.alt_limits_on {
         (cfg.alt_download_limit_bps, cfg.alt_upload_limit_bps)
     } else {

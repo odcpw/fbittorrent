@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "Plugin/Model.js" as Model
 import "Plugin/Palette.js" as Palette
+import "Plugin/DetailText.js" as DetailText
 
 ShellRoot {
   FileView {id:input;blockLoading:true;blockAllReads:true;preload:false}
@@ -15,6 +16,7 @@ ShellRoot {
     var cases=JSON.parse(input.text())
     check("format","load literal cases","at least 40 boundary cases",cases.length,cases.length>=40)
     cases.forEach(function(test){var actual=Model[test.fn].apply(null,test.args);check("format",test.fn+JSON.stringify(test.args),JSON.stringify(test.expect),actual,actual===test.expect)})
+    check("format","downloading rows do not describe upload caps as seeding","plain progress and explicit Details policy",Model.meta({state:"downloading",seed:false,progress:0.5}),Model.meta({state:"downloading",seed:false,progress:0.5})==="50%" && DetailText.policy({seed:false})==="Upload: off" && DetailText.policy({seed:true})==="Upload: on")
     verdict("format")
     input.path=Quickshell.shellPath("ThemeExpected.json")
     var themes=JSON.parse(input.text()),names=Object.keys(themes)

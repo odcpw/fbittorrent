@@ -4,8 +4,9 @@ pub(in crate::tui) struct ApiSub {
     pub connection: Arc<attach::Presence>,
 }
 impl Subscription<Msg> for ApiSub {
+    // Presence generations must never collide with local timer/search IDs.
     fn id(&self) -> SubId {
-        self.connection.id
+        (1 << 63) | self.connection.id
     }
     fn run(&self, sender: Sender<Msg>, stop: StopSignal) {
         while !stop.is_stopped() {
@@ -129,7 +130,7 @@ impl TuiApp {
                     match &event {
                         api::Event::SnapshotEnd{topic:api::Topic::Trackers(_),..}|api::Event::Delta{topic:api::Topic::Trackers(_),..}=>self.sync_tracker_panel(),
                         api::Event::SnapshotEnd{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}|api::Event::Delta{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}=>self.sync_native_feeds(),
-                        api::Event::SnapshotEnd{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}|api::Event::Delta{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}=>self.sync_native_shows(),
+                        api::Event::SnapshotEnd{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}|api::Event::Delta{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}=>{self.show_controls.dirty=true;self.sync_native_shows();},
                         api::Event::State{data:api::StateData::Settings(settings),..}=>{if let Err(e)=settings_fields::native_settings(&mut self.cfg,settings){self.set_status(e.to_string(),true);}},
                         api::Event::State{data:api::StateData::Summary(summary),..}=>{
                             let transfer=api::TransferInfo {session_downloaded:0,session_uploaded:0,dl_bps:summary.dl_bps,ul_bps:summary.ul_bps};
@@ -137,7 +138,7 @@ impl TuiApp {
                         },
                         api::Event::SnapshotEnd{topic:api::Topic::Files(hash),..}|api::Event::Delta{topic:api::Topic::Files(hash),..}=>{
                             if self.files.as_ref().is_some_and(|m|m.hash==hash.as_str()) {
-                                let files=self.store.files.get(hash).into_iter().flat_map(|rows|rows.values()).map(format::file).collect();
+                                let files=format::files(self.store.files.get(hash).into_iter().flat_map(|rows|rows.values()));
                                 self.update(Msg::Files(hash.to_string(),Ok(files)));
                             }
                         },

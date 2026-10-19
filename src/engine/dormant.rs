@@ -19,6 +19,7 @@ impl std::error::Error for InvalidTorrentState {}
 pub(super) struct SavedTorrent {
     pub(super) files: Vec<TorrentFile>,
     pub(super) selected_bytes: u64,
+    pub(super) selected_files_present: bool,
 }
 
 impl Inner {
@@ -51,6 +52,7 @@ impl Inner {
         let lengths = info.lengths();
         let mut selected_end = 0;
         let mut selected_bytes = 0;
+        let mut selected_files_present = true;
         let files = info
             .iter_file_details_ext()
             .enumerate()
@@ -71,6 +73,10 @@ impl Inner {
                     selected_bytes += end_bytes - u64::from(start) * piece_length;
                     selected_end = file.pieces.end;
                 }
+                if record.dormant_on_restore() && selected && !file.details.attrs().padding {
+                    selected_files_present &= std::fs::metadata(Path::new(&record.output_folder).join(file.details.filename.to_pathbuf()))
+                        .is_ok_and(|m| m.is_file() && m.len() == file.details.len);
+                }
                 TorrentFile {
                     index: index as i64,
                     name: file.details.filename.to_pathbuf().to_string_lossy().into(),
@@ -85,6 +91,7 @@ impl Inner {
         Ok(SavedTorrent {
             files,
             selected_bytes,
+            selected_files_present,
         })
     }
 
@@ -131,8 +138,8 @@ impl Inner {
         .into())
     }
 
-    /// Only stat selected data on an explicit action. In particular no startup
-    /// path calls this: a disconnected disk must not spoil the saved library.
+    /// Explicit actions verify selected paths before admitting storage. Listing
+    /// dormant records also checks presence, without admitting or changing them.
     async fn require_saved_data(&self, cx: &Cx, ledger: &mut Ledger, index: usize) -> Result<()> {
         let record = &ledger.records[index];
         for file in self
@@ -143,7 +150,7 @@ impl Inner {
             match rqbit_runtime::fs::metadata(Path::new(&record.output_folder).join(file.name))
                 .await
             {
-                Ok(metadata) if metadata.is_file() => {}
+                Ok(metadata) if metadata.is_file() && metadata.len() == file.size.max(0) as u64 => {}
                 Ok(_) => return Err(self.missing_files(cx, ledger, index).await?),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     return Err(self.missing_files(cx, ledger, index).await?)
@@ -230,8 +237,8 @@ impl EngineDispatcher {
                         let index = ledger.records.iter().position(|r| r.hash == hash).unwrap();
                         if ledger.records[index].staged {return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());}
                         let mut changed = ledger.records[index].clone();
+                        changed.upload = Some(*on);
                         changed.ratio_limit = if *on { -2.0 } else { 0.0 };
-                        changed.upload_limit = if *on { 0 } else { NO_UPLOAD_LIMIT };
                         let mut tags: Vec<_> = changed
                             .tags
                             .split(',')
@@ -269,6 +276,7 @@ impl EngineDispatcher {
                             // for existing and newly admitted dormant handles.
                             // Queue reconciliation owns pause/resume; neither a
                             // cap change nor a seed toggle needs another check.
+                            handle.set_upload_enabled(Some(*on));
                             let limit = ledger.records[index].upload_limit;
                             handle.set_upload_bps((limit != 0).then_some(limit as u64))?;
                         } else if *on {

@@ -18,8 +18,19 @@ function parse(input) {
   }
   if(/[\x00-\x1f\x7f]/.test(value))return null
   if(/^magnet:\?/i.test(value)) {
-    match=/[?&]xt=urn:btih:([0-9a-f]{40}|[a-z2-7]{32})(?:&|$)/i.exec(value)
-    return match ? {source:{magnet:value},hash:match[1].length===40 ? match[1].toLowerCase() : base32(match[1])} : null
+    var hash="",parts=value.slice(value.indexOf("?")+1).split("#")[0].split("&")
+    for(var i=0;i<parts.length;i++){
+      var equal=parts[i].indexOf("="),key,parameter
+      if(equal<0)continue
+      try{key=decodeURIComponent(parts[i].slice(0,equal));parameter=decodeURIComponent(parts[i].slice(equal+1))}catch(error){return null}
+      if(key.toLowerCase()!=="xt")continue
+      match=/^urn:btih:([0-9a-f]{40}|[a-z2-7]{32})$/i.exec(parameter)
+      if(!match)continue
+      var digest=match[1].length===40 ? match[1].toLowerCase() : base32(match[1])
+      if(hash && hash!==digest)return null
+      hash=digest
+    }
+    return hash ? {source:{magnet:value},hash:hash} : null
   }
   if(/^https?:\/\/[^\s/?#]+(?:[/?#]|$)/i.test(value))return {source:{url:value},hash:""}
   if(value[0]==="/" && /\.torrent$/i.test(value))return {source:{path:value},hash:""}

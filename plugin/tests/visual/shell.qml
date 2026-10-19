@@ -13,7 +13,7 @@ ShellRoot {
   property var captures: ({})
   property var facade: QtObject {
     function serviceFor(id) {return service}
-    function summon(id,args) {return false}
+    function summon(id,args) {console.log("FBTVISUAL-SUMMON "+id+" "+args);return false}
   }
   Service {id:service;shell:root.facade}
   QtObject {

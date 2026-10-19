@@ -184,6 +184,7 @@ Item {
     }
     updatePopup()
   }
+  function closePopups() {widgets.slice().forEach(function(widget){widget.close()});updatePopup()}
   function updatePopup() { popupOpen = widgets.some(function(w) { return w.opened }) }
 
 
@@ -244,7 +245,7 @@ Item {
   function resume(hash) { return mutate("torrents.start", {hashes:[hash]}) }
   function toggleSeed(hash) {
     var row = store.torrents[hash]
-    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.seed}) : false
+    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
   function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
@@ -346,6 +347,7 @@ Item {
   function removeTorrent(t) { return t ? remove(t.hash, false) : false }
   function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
+  function openTorrentDetails(t) {return !!(t && shell && shell.summon("oliver.torrents",JSON.stringify({view:"torrents",hash:t.hash})))}
   function stopBackend() { return quit() }
   function startBackend() { startDaemon() }
   property bool clipboardTooLarge: false

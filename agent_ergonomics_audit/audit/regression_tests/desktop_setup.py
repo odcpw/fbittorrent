@@ -11,7 +11,7 @@ import fixtures
 ROOT=Path(__file__).resolve().parents[3]
 
 def prepare(sandbox):
-    for name in ('systemctl','omarchy','update-desktop-database'):
+    for name in ('systemctl','omarchy','omarchy-restart-shell','update-desktop-database'):
         fixtures.path_shim(name,'printf "external integration chatter\\n"\nexit 0',sandbox.root)
     # Keep the real xdg-mime's isolated output and association semantics; suppress
     # desktop-environment discovery so it uses its generic MIME writer.

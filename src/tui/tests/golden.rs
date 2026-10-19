@@ -71,11 +71,11 @@ fn assert_render(surface: &str, width: u16, height: u16) {
         "rss"=>&["RSS","Blender releases","Unread","Read","Sintel","Big.Buck.Bunny","Elephants.Dream"],
         "files"=>&["Files","FILE","SIZE","DONE","PRIO","Subtitles/English.srt","42%","include","skip"],
         "providers"=>&["Search providers","EZTV","YTS","The Pirate Bay","nova"],
-        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Download destination","Seed by default","Idle exit","Clipboard offers","Enter save","Esc cancel"],
-        "prompt"=>&["Add magnet link or URL","streaming automatic","seed:off","magnet:?xt=urn:btih:"],
+        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Download destination","Upload: off","Idle exit","Clipboard offers","Enter save","Esc cancel"],
+        "prompt"=>&["Add magnet link or URL","streaming automatic","magnet:?xt=urn:btih:"],
         "help"=>&["GLOBAL","Torrents","Search","Shows","RSS","Settings","Log"],
         "confirm"=>&["DELETE","AND ITS FILES? y/N"],
-        "details"=>&["[Overview]","Files","state","progress","speed","peers","upload","path","downloading","42.0%"],
+        "details"=>&["[Overview]","Files","state","progress","speed","peers","Upload: off","path","downloading","42.0%"],
         "poster"=>&["The Diplomat (2023)","TV series","7.9","Keri Russell"],
         "disk"=>&["! Disk","Not enough space","needed","free"],
         "clipboard"=>&["Add 'Sintel.2010.1080p'? (y/Esc)","(y) Add","(Esc) Dismiss"],
@@ -101,15 +101,16 @@ macro_rules! goldens {
 goldens!(peers,clipboard,torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk, pieces);
 
 #[test]
-fn done_row_offers_seed_instead_of_resume() {
+fn done_row_opens_upload_details_instead_of_resuming() {
     let mut app = fixture::app("torrents");
     app.on_torrents_key(KeyEvent::new(KeyCode::Down));
     let text = render(&app, 80, 24);
     let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
     println!("asserted footer: {footer}");
-    assert!(footer.contains("(u) Seed"));
+    assert!(footer.contains("(u) Upload details"));
     assert!(!footer.contains("(p) Resume"));
-    assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('u'))), Cmd::Task(..)));
+    let _=app.on_torrents_key(KeyEvent::new(KeyCode::Char('u')));
+    assert!(app.details.is_some() && !app.service_busy);
 }
 
 #[test]
@@ -168,7 +169,7 @@ fn footer_overflow_80x24() {
 fn watch_ready_and_may_stall_goldens() {
     for (name,stall,buffer,finish) in [("watch-ready",true,240,42),("watch-may-stall",false,30,1080)] {
         let mut app=fixture::app("torrents");
-        let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"default_cap","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
+        let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
         let legacy=super::format::torrent(&row);
         app.torrents[0]=legacy.clone();app.store.torrents.insert(row.hash.to_string(),row);
         let _=app.open_details(&legacy);
@@ -184,7 +185,7 @@ fn watch_ready_and_may_stall_goldens() {
 fn private_overview_explains_networking_only_for_known_private_metainfo() {
     for (private,known) in [(true,true),(false,true),(true,false)] {
         let mut app=fixture::app("details");
-        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"default_cap","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
+        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"off","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
         if known {value["size"]=serde_json::json!(1024);}
         let detail:crate::api::TorrentDetail=serde_json::from_value(value).unwrap();
         let hash=detail.torrent.hash.clone();
@@ -200,3 +201,60 @@ fn private_overview_explains_networking_only_for_known_private_metainfo() {
 
 #[test]
 fn details_trackers_medium() {assert_render("details-trackers",120,30);}
+
+#[test]
+fn shows_quality_key_and_independent_inbox_filters() {
+    let mut app=fixture::app("shows");
+    app.select_show_parent(1);
+    let original=app.selected_show().unwrap().quality.clone();
+    let _=app.on_key(KeyEvent::new(KeyCode::Char('=')));
+    assert!(matches!(app.prompt.as_ref().unwrap().kind,PromptKind::ShowQuality {..}));
+    app.prompt.as_mut().unwrap().input.set_value("4k");
+    let _=app.on_prompt_key(KeyEvent::new(KeyCode::Enter));
+    assert!(!app.service_busy && app.selected_show().unwrap().quality==original,"invalid preference never sends or edits a show");
+    let _=app.on_key(KeyEvent::new(KeyCode::Char('=')));
+    app.prompt.as_mut().unwrap().input.set_value("720p");
+    let command=app.on_prompt_key(KeyEvent::new(KeyCode::Enter));
+    assert!(matches!(command,Cmd::Task(..)) && app.service_busy);
+    assert_eq!(app.selected_show().unwrap().quality,original,"preference waits for confirmed daemon state");
+    app.service_busy=false;
+    app.shows.shows[0].episodes[0].quality="720p".into();
+    let key=app.shows.shows[0].episodes[0].key.clone();app.shows.shows[0].seen.insert(key);
+    for (filter,count) in [("unread all",1),("all all",2),("read 720p",1),("unread 720p",0),("all 1080p",1)] {
+        let _=app.apply_show_filters(filter);assert_eq!(app.inbox_rows.len(),count,"{filter}");
+        assert!(app.shows_inbox());
+    }
+    let _=app.apply_show_filters("read 720p");
+    let rendered=render(&app,120,30);assert!(rendered.contains("read 720p"));
+    let _=app.apply_show_filters("all 4k");assert!(app.show_controls.read==ReadFilter::Read);
+}
+#[test]
+fn add_and_seeding_controls_keep_new_downloads_off() {
+    let mut app=fixture::app("torrents");app.cfg.upload="on".into();
+    app.open_prompt(PromptKind::AddMagnet,"Add",false);
+    assert!(!app.prompt.as_ref().unwrap().add_flags.2);
+    assert!(!app.prompt.as_ref().unwrap().title().to_lowercase().contains("seed"));
+    let _=app.on_key(KeyEvent::new(KeyCode::F(4)));
+    assert!(!app.prompt.as_ref().unwrap().add_flags.2 && !render(&app,120,30).contains("F4"));
+    app.close_prompt();let _=app.on_key(KeyEvent::new(KeyCode::Char('u')));
+    assert!(app.details.is_some() && !app.service_busy,"the list opens Details without changing seed policy");
+    let hash=app.details.as_ref().unwrap().hash.clone();
+    let value=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines()
+        .map(|line|serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|line|line["frame"]["result"]["torrents"].is_array()).unwrap();
+    let mut row:crate::api::Torrent=serde_json::from_value(value["frame"]["result"]["torrents"][0].clone()).unwrap();
+    row.hash=crate::api::Hash::new(hash.clone()).unwrap();
+    assert!(app.presence.is_none(), "request control uses no daemon connection");
+    for (seed,enabled) in [(false,false),(false,true),(true,false),(true,true)] {
+        row.seed=seed;row.upload_enabled=enabled;app.service_busy=false;
+        app.store.torrents.insert(hash.clone(),row.clone());
+        let Cmd::Task(_,task)=app.on_key(KeyEvent::new(KeyCode::Char('u'))) else {
+            panic!("Details retains an explicit upload toggle");
+        };
+        assert!(app.service_busy);
+        let Msg::ServiceDone {op,args,..}=task() else {panic!("upload mutation completion");};
+        assert_eq!(op,"torrents.set_seed");
+        assert_eq!(args,serde_json::json!({"hashes":[hash],"on":!enabled}),
+            "Details must invert effective permission independently of completion seeding");
+    }
+}

@@ -187,7 +187,7 @@
 
     pub(super) fn review_record(hash: &str, downloads: &Path) -> Record {
         Record {
-            display_name:None,
+            upload: None, display_name:None,
             hash: hash.into(),
             name: "saved fixture".into(),
             source: String::new(),
