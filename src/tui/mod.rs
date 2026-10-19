@@ -62,6 +62,9 @@ mod palette;
 mod feedback;
 mod limits;
 #[cfg(test)]
+#[path="tests/history.rs"]
+mod history_tests;
+#[cfg(test)]
 #[path="tests/limits.rs"]
 mod limit_tests;
 #[cfg(test)]

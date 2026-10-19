@@ -936,3 +936,21 @@ track beads and no hosted Actions.
 Final `cargo test --locked -- --nocapture` passed 554/0 with three existing
 opt-in ignores (`full/development_full/`, 8.28 s test runtime). Python compile,
 diff check, changed-source size gate and existing-fixture preservation passed.
+
+## P6-03 vertical slice — history UI
+
+Dashboard and popup share a rate/status row with a bounded, data-driven Canvas
+sparkline; the TUI uses ftui's sparkline in free tab-bar space, with stack storage
+and no new timer/animation. Offline/stale data is hidden. Focused history render
+and QML behavior tests passed; all 49 existing TUI layout tests passed after the
+two existing disk baselines gained only their intended history header glyphs.
+No new frozen fixtures. Logs: `target/test-logs/fbt-p6-03-n6s/ui-history-unit/`,
+`ui-history-qml-geometry/`, `ui-history-layout-final/`. Actual private-compositor
++ tmux smoke passed 70 steps (`ui-history-live-green/processes/telemetry_ui/`),
+showing pushed real loopback rates on both UIs, a changing chart, and daemon/transfer
+survival after UI close; inspected the dashboard PNG and retained the pane.
+Neighbour hooks are one-line additions in Dashboard, popup content, Model and
+TUI layout/module registration. Initial smoke setup failures (missing local Sway,
+missing QML Io import and a Path passed to the string-only tmux helper) were
+corrected; Sway was reused read-only from cod_3's ignored test tools. No full gate
+or hosted CI per the new focused-test model. All P6-03 surfaces now implemented.

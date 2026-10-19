@@ -144,6 +144,7 @@ function apiStatus(store, online) {
   var result = {ok:online, loaded:!!summary.counts || store.hasTorrents, total:counts.total || 0,
     active:(counts.downloading || 0) + (counts.metadata || 0) + (counts.checking || 0) + (counts.stalled || 0),
     seeding:counts.seeding || 0, stopped:(counts.paused || 0) + (counts.done || 0), queued:counts.queued || 0,
+    history:Array.isArray(summary.history) ? summary.history : [],
     dl:summary.dl_bps === undefined ? store.transfer.dl_bps : summary.dl_bps,
     up:summary.ul_bps === undefined ? store.transfer.ul_bps : summary.ul_bps}
   if (store.info.state === "parked" || (summary.network && summary.network.state !== "ready")) result.connection = "vpn_waiting"

@@ -232,6 +232,7 @@ Item {
             Item {Layout.fillWidth:true;Layout.fillHeight:true}
           }
         }
+        Components.RateStatus {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Text {
           visible:root.routeError!=="" || (!!root.svc && root.svc.lastError!=="")
           text:root.routeError || (root.svc ? root.svc.lastError : "")
