@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::config::Config;
+mod native_api;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -406,6 +407,9 @@ impl Client {
         Ok(serde_json::from_str(&body)?)
     }
     pub fn add_url(&self, url: &str, o: &AddOptions) -> Result<()> {
+        if self.cfg.native() && crate::ipc::socket_path(&self.cfg).with_file_name("api.sock").exists() {
+            return native_api::add(&self.cfg, serde_json::json!({"magnet":url}), o, None);
+        }
         let mut form: Vec<(&str, &str)> = vec![
             ("urls", url),
             ("sequentialDownload", bool_s(o.sequential)),
@@ -445,6 +449,9 @@ impl Client {
 
     /// Add a .torrent file (bytes). Same defaults as `add_url`.
     pub fn add_file(&self, filename: &str, bytes: &[u8], o: &AddOptions) -> Result<()> {
+        if self.cfg.native() && crate::ipc::socket_path(&self.cfg).with_file_name("api.sock").exists() {
+            return native_api::add(&self.cfg, serde_json::Value::Null, o, Some(bytes));
+        }
         let no_up = NO_UPLOAD_LIMIT.to_string();
         let mut fields: Vec<(&str, &str)> = vec![
             ("sequentialDownload", bool_s(o.sequential)),

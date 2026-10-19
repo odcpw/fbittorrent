@@ -75,15 +75,15 @@ def launcher_never_called(binary):
         probes = (
             (("status",), 0, {}, "stopped"),
             (("reconcile", "--recent", "180"), 0, {}, "intrinsic"),
-            (("--no-start", "list"), 4, {}, "closed"),
-            (("list", "--no-start"), 4, {}, "closed"),
-            (("list",), 4, {"FBITTORRENT_NO_START": "1"}, "closed"),
-            (("--no-start", "stop", "all"), 4, {}, "closed"),
+            (("--no-start", "list"), 0, {}, "offline"),
+            (("list", "--no-start"), 0, {}, "offline"),
+            (("list",), 0, {"FBITTORRENT_NO_START": "1"}, "offline"),
+            (("--no-start", "stop", "all"), 0, {}, "offline"),
             (("--no-start", "up"), 4, {}, "closed"),
             (("up",), 4, {"FBITTORRENT_NO_START": "1"}, "closed"),
             (("--no-start", "status"), 0, {}, "stopped"),
             (("--no-start", "start", "all"), 4, {}, "closed"),
-            (("--no-start", "delete", "all"), 4, {}, "closed"),
+            (("--no-start", "delete", "all"), 0, {}, "offline"),
             (("--no-start", "open", "deadbeef"), 4, {}, "closed"),
             (("--no-start", "seed", "all"), 4, {}, "closed"),
             (("--no-start", "noseed", "all"), 4, {}, "closed"),
@@ -109,6 +109,8 @@ def launcher_never_called(binary):
                 value = {}
             if outcome == "stopped":
                 expected = value.get("backend") == "stopped" and value.get("app_open") is False
+            elif outcome == "offline":
+                expected = value.get("ok") is True and value.get("running") is False and value.get("count") == 0
             elif outcome == "intrinsic":
                 expected = value == dict(ok=True, touched=0, note="native scheduling is intrinsic")
             else:
@@ -122,14 +124,14 @@ def launcher_never_called(binary):
         # Service.qml collects action errors from stderr without --json.
         argv = [binary, "--no-start", "stop", "all"]
         step = case.step("Widget action " + shlex.join(argv),
-                         "Exit 4, empty stdout, and 'fbittorrent is closed' on stderr; zero launcher calls.")
+                         "Exit 0, empty offline stop count on stdout, no stderr error and zero launcher calls.")
         offset = case.suite.stderr_path.stat().st_size
         child = case.popen(argv, env=env, stdout=subprocess.PIPE, text=True)
         try:
             stdout, _ = child.communicate(timeout=5)
             stderr = case.suite.stderr_path.read_bytes()[offset:].decode(errors="replace")
-            step.close(child.returncode == 4 and not stdout and "fbittorrent is closed" in stderr
-                       and "fbittorrent up" in stderr and not calls.read_text(),
+            step.close(child.returncode == 0 and "stop: 0 torrent(s)" in stdout and not stderr
+                       and not calls.read_text(),
                        f"argv={argv!r}; exit {child.returncode}; stdout={stdout!r}; "
                        f"stderr={stderr!r}; launcher calls={calls.read_text()!r}.", [calls])
         except subprocess.TimeoutExpired:

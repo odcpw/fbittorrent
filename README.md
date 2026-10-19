@@ -103,6 +103,26 @@ omarchy bar put oliver.torrents --before omarchy.tailscale
 Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 `torrents.*`.
 
+## Lifecycle
+
+`fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
+`down` drains it, and `restart` replaces the engine slot while its sockets stay
+available. `dashboard` summons the desktop view. The static user unit starts on
+writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
+never start an owner. When it is down, saved reads report `running:false`; `stop`
+and keep-files `delete` update the saved ledger under the same instance lock.
+`--no-start` and `autostart=false` prevent automatic startup. Without a user
+manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
+replacement are delivered by their lifecycle work; this checkout reports the
+available daemon state without inventing missing idle counters.
+
+The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
+wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
+checked/reason/origin and optional `eta_s`/`seeds`. Stopped `status --json` now
+returns `ok:true,running:false`; `status --quiet` exits 4 when stopped. Magnets
+and local metainfo added while waiting for VPN return `deferred:true` and keep
+the requested intent until the interface returns. URL adds require a live engine.
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become
@@ -157,8 +177,7 @@ It never enables or starts the unit. `setup --uninstall` removes the unit while
 keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
 harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
-stages; the current CLI uses the existing framed socket.
+unit, outside the CLI's 0–8 dictionary. The CLI uses API v1; TUI attachment follows in P1-15.
 
 ### For agents
 
