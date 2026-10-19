@@ -12,7 +12,7 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.0";
+pub const CONTRACT_VERSION: &str = "1.2.1";
 
 const NATIVE_LIFETIME: &str = "fbittorrent serve owns the daemon and its replaceable engine; clients connect through api.sock. Reads never start it; writes start it on demand.";
 const SERVE_LIMITATIONS: &str = "serve has no idle exit yet; API v1 serves torrents, files, mutations and IMDb; subscriptions and automatic idle/upgrade policy follow their owner beads. Settings uses the compatibility adapter until P3-05.";
@@ -203,7 +203,8 @@ pub fn capabilities_json() -> serde_json::Value {
             "list[].num_seeds": "always 0 in native mode: unknown",
             "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
         },
-        "changes": [{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
+        "caps": crate::api::ops::app::CAPS,
+        "changes": [{"since":"1.2.1","version":"1.2.1","breaking":false,"field":"add.deferred","note":"parked magnet/local metainfo adds return deferred:true and retain intent until VPN returns"},{"since":"1.2.0","breaking":true,"field":"status.ok","note":"stopped status is successful with running:false"},{"since":"1.2.0","breaking":false,"field":"list[].eta","note":"legacy sentinel remains 8640000; read eta_s for known values"},{"since":"1.2.0","breaking":false,"field":"list[].native_state","note":"normalized state, checked, reason and origin are additive"},{"since":"1.2.0","breaking":false,"field":"add.duplicate","note":"atomic API result; add --origin manual|handler|agent"},{
             "since":"1.2.0", "version": "1.2.0", "field": "list[].num_seeds", "breaking": false,
             "note": "always 0 in native mode: unknown; list[].num_leechs is the connected peer count",
         }],
@@ -374,7 +375,7 @@ mod tests {
         assert_eq!(capabilities["field_notes"]["list[].num_seeds"], "always 0 in native mode: unknown");
         let change = capabilities["changes"].as_array().unwrap().iter()
             .find(|change| change["field"] == "list[].num_seeds").unwrap();
-        assert_eq!(change["version"], CONTRACT_VERSION);
+        assert_eq!(change["version"], "1.2.0");
         assert_eq!(change["breaking"], false);
         assert!(change["note"].as_str().unwrap().contains("unknown"));
         assert!(capabilities["field_notes"]["list[].num_leechs"].as_str().unwrap()

@@ -534,3 +534,17 @@ Evidence root `target/test-logs/fbt-p1-11-zqb/`: debug build `build-offline.json
 | Source ceiling | `bash scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src` | `size-final.{jsonl,log}` | PASS; no source exceeds its ceiling |
 
 **P1-11 remains in progress**: the branch lacks P1-08, P1-12, P1-14 and P1-17. Live summary subscription/presence, idle exit, usage/log integration, and wait across an upgrade/idle exit cannot yet be qualified. Status uses Summary.daemon when the subscribe cap exists; until that integration it reports the available state/upgrade field without invented idle counters or busy reasons. Cumulative app.info client counters are not used for presence. The existing TUI-hosted path remains for P1-15: v0.1-style hosts permit compatibility reads and refuse writes with the quit-Q hint. No complete native TUI suite or final integrated gate is claimed here. Follow-ups: qualify those owner-dependent cases after merges; preserve actual category/tag values if a later normalized contract exposes them (current A.9 lacks those legacy fields). P7-09's CLI field works in the live offline_records case; its patch-version bookkeeping follows separately.
+
+
+## P7-09 — fbt-p7-09-duv — completed CLI/contract integration
+
+Completes the earlier API/engine checkpoint 4a61554 using the real CLI path landed in P1-11 checkpoint 6cb936e. `add --json` retains the API's atomic hash, duplicate result and `deferred:true`; human output says waiting for VPN. Capabilities now advertise the shared server capability list, including deferred_add, and contract **1.2.1** records `add.deferred` while preserving the 1.2.0 status break and legacy sentinel notes. The engine, durable marker, queue ordering and frozen pre-existing fixtures are unchanged in this completion commit.
+
+| Acceptance / check | Command | Evidence under `target/test-logs/fbt-p7-09-duv/` | Result |
+|---|---|---|---|
+| Missing interface: add answers deferred | `agent_contract.py ... --case contract --case offline_records` | `cli-final/agent_contract/offline_records.jsonl` | PASS through the actual CLI, missing fbmissing0; returned hash/deferred, saved record, offline pause and keep-files deletion |
+| Interface appears: metadata resolves and torrent starts | `FBT_TEST_VPN=1 daemon.py::deferred_add` through retained run.py/run-daemon.py | `vpn-cli-final/daemon/deferred_add.jsonl` | PASS with real public BEP 9 seed inside the owned loopback-only namespace; timestamped fixture0 appearance, metadata then positive-rate downloading; stopped local metadata and selection preserved |
+| Contract patch / CLI regressions | `cargo test --locked -p fbittorrent agent:: -- --nocapture`; real contract case | `cli-contract-unit.{jsonl,log}`, `cli-final/agent_contract/contract.jsonl` | Five agent unit tests and CLI round trip pass; version 1.2.1 and add.deferred change present |
+| Full Rust suite once for completion | `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture` | `full-cli-unit.{jsonl,log}` | PASS: 315 passed, 2 ignored |
+
+Both acceptance criteria and the previously missing CLI/patch steps are met. No all.sh/release build between track beads, per owner track policy. The old full-suite saturated-stderr failure from the initial checkpoint remains retained; the current full suite is green. Namespace evidence proves this isolated interface, not the owner's real proton0 configuration. Follow-ups are the separate P1-11 bus/idle/upgrade integration items already recorded above.

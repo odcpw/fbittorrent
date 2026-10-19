@@ -7,13 +7,15 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
+pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb"];
+
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
     if daemon.is_stopping() {
         info["state"] = json!("stopping");
     }
     info["proto"] = json!(PROTO);
-    info["caps"] = json!(["torrents", "files", "mutations", "deferred_add", "imdb"]);
+    info["caps"] = json!(CAPS);
     info["limits"] =
         json!({"line_in":LINE_IN,"line_out":LINE_OUT,"inflight":8,"subs":16,"hashes":256});
     serde_json::from_value(info).expect("daemon identity has the contract shape")

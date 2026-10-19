@@ -544,3 +544,9 @@ mode and version skew. `SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
 ledger timestamps are preserved. Live summary/idle/upgrade qualification follows
 the P1-08/P1-12/P1-17 integration; cumulative app.info client counters never stand
 in for live interactive presence.
+
+P7-09 CLI completion: contract **1.2.1** advertises `deferred_add` in capabilities
+and records the additive `add.deferred` field. `add --json` preserves the atomic
+API reply's `deferred:true`; human output says “waiting for VPN”. The desktop
+handler passes `--origin handler`. The API/engine implementation and new fixture
+remain unchanged; the CLI uses the returned hash without list differencing.
