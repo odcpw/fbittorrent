@@ -2,13 +2,10 @@
 use super::*;
 
 pub fn run(cfg: Config, screen: Screen) -> Result<()> {
-    let presence=if cfg.native() { Some(attach::connect(&cfg)?) } else { None };
     // This guard owns only UI cleanup, never an engine or the instance lock.
     let _terminal=signals::AppGuard::new(());
     let native=cfg.native();
     let mut model = TuiApp::new(cfg, screen, Shows::load()?);
-    if let Some(connection)=presence.as_ref() {model.store.hello(connection.hello.clone());}
-    model.presence=presence;
     model.pointer_motion_on_start = true;
     // Program returns on signals, allowing the presence connection and terminal
     // to close while the separate daemon continues its work.

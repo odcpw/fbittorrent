@@ -1136,6 +1136,7 @@ class AttachedTui:
                               env=self.sandbox.env, capture_output=True, text=True, timeout=5)
 
     def start(self):
+        before = self.clients() if daemon.DaemonContract.socket_path(self.sandbox).exists() else 0
         self.counter += 1
         done = self.sandbox.root / f"ui-{self.counter}.exit"
         stderr = self.case.path.with_suffix(f".tui-{self.counter}.stderr")
@@ -1145,6 +1146,8 @@ class AttachedTui:
         target = result.stdout.strip()
         self.case.check(result.returncode == 0, "a new TUI starts in this terminal", f"target={target}; {result.stderr}")
         self.h.wait_for(lambda: ("Torrents" in self.capture(target), self.capture(target)), "attached TUI draws its first frame")
+        self.h.wait_for(lambda: ((count := self.clients()) == before + 1, f"tui clients={count}; before={before}"),
+                        "new terminal completes its interactive API hello")
         self.status()
         return target, done
 

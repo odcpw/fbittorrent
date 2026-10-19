@@ -129,6 +129,15 @@ impl Wire {
             let error: crate::api::Error = serde_json::from_value(frame["error"].clone())?;
             return Err(RemoteError(error).into());
         }
+        if op == "hello" {
+            if let Some(protocol) = frame["result"]["proto"].as_u64().filter(|protocol|*protocol!=crate::api::PROTO) {
+                return Err(RemoteError(crate::api::Error {
+                    code:crate::api::ErrorCode::ProtoUnsupported,
+                    message:"proto unsupported".into(),retryable:false,hint:None,
+                    details:Some(serde_json::Map::from_iter([("server_proto".into(),json!(protocol))])),
+                }).into());
+            }
+        }
         let reply = crate::api::Reply::decode(op, frame["result"].clone())?;
         reply.validate()?;
         Ok(frame["result"].clone())

@@ -76,16 +76,19 @@ impl Model for TuiApp {
             }
         }
         self.rss_loaded = true;
-        let mut cmds = vec![self.poll(), self.load_plugins(), self.load_ratings(), self.load_rss()];
+        let first=if self.cfg.native() {self.start_daemon()} else {self.poll()};
+        let mut cmds = vec![first, self.load_plugins(), self.load_ratings(), self.load_rss()];
         cmds.push(self.refresh_shows(false));
         Cmd::batch(cmds)
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Msg>>> {
         let mut v: Vec<Box<dyn Subscription<Msg>>> = vec![
-            Box::new(Every::with_id(1, Duration::from_millis(2000), || Msg::Poll)),
             Box::new(Every::with_id(2, Duration::from_millis(300), || Msg::Hover)),
         ];
+        if !self.cfg.native()||self.presence.as_ref().is_some_and(|connection|connection.alive()) {
+            v.push(Box::new(Every::with_id(1,Duration::from_millis(2000),||Msg::Poll)));
+        }
         if let Some(connection)=self.presence.as_ref().filter(|connection|connection.alive()) {v.push(Box::new(remote::ApiSub {connection:connection.clone()}));}
         if let Some((id, q)) = &self.search_sub {
             v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone(),presence:self.presence.clone() }));
@@ -122,7 +125,8 @@ impl Model for TuiApp {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
                 if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); }
-                self.on_hover()
+                let recovery=self.recovery_tick();
+                Cmd::batch(vec![recovery,self.on_hover()])
             }
             Msg::Ids(pairs) => {
                 self.ids_inflight = false;
@@ -136,7 +140,7 @@ impl Model for TuiApp {
             }
             Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
             Msg::ApiRead {connection,result} => {
-                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                if self.presence.as_ref().map(|active|active.id)!=connection || self.presence.as_ref().is_some_and(|active|!active.alive()) {return Cmd::none();}
                 self.apply_api_read(result)
             },
             Msg::Torrents(r) => {
@@ -161,14 +165,14 @@ impl Model for TuiApp {
                         self.online = false; self.backend_error = e;
                         if self.cfg.native() {self.store.disconnected();}
                         self.failed_polls = self.failed_polls.saturating_add(1);
-                        self.daemon_stopped = self.cfg.native() && self.failed_polls >= 2;
+                        self.daemon_stopped = self.cfg.native() && !self.recovery.active && self.failed_polls >= 2;
                     }
                 }
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
-                Err(error) => { self.set_status(error,true); Cmd::none() }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
+                Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
                 Ok(()) => Cmd::quit(), Err(error) => { self.set_status(error,true); Cmd::none() }

@@ -57,6 +57,9 @@ impl TuiApp {
         }
         match update {
             attach::ApiUpdate::Event(event) => {
+                if let api::Event::Bye {reason}=&event {
+                    self.connection_lost(matches!(reason,api::ByeReason::Shutdown|api::ByeReason::Idle));
+                }
                 let rows_changed = matches!(
                     &event,
                     api::Event::SnapshotEnd {
@@ -126,12 +129,8 @@ impl TuiApp {
                 self.set_status(error, true);
             }
             attach::ApiUpdate::Closed(error) => {
-                let pending = !self.store.pending.is_empty();
-                self.store.disconnected();
                 self.backend_error = error;
-                if pending {
-                    self.set_status("Result unknown; the list will tell.", true);
-                }
+                self.connection_lost(false);
             }
         }
         Cmd::none()

@@ -131,3 +131,16 @@ fn domain_errors_keep_the_transport_distinct_from_malformed_replies() {
         "malformed data must close the connection"
     );
 }
+
+#[test]
+fn protocol_mismatch_is_preserved_as_a_persistent_banner_before_decoding_foreign_shapes() {
+    for frame in [
+        serde_json::json!({"id":1,"ok":false,"error":{"code":"proto_unsupported","message":"proto unsupported","retryable":false,"details":{"server_proto":2}}}),
+        serde_json::json!({"id":1,"ok":true,"result":{"proto":2,"a_future_shape":true}}),
+    ] {
+        let error=wire::Wire::result("hello",&frame).unwrap_err();
+        let failure=Failure::capture(error);
+        assert!(failure.permanent);
+        assert!(failure.message.contains("This fbittorrent speaks API 1; the running fbittorrent speaks API 2"),"{}",failure.message);
+    }
+}

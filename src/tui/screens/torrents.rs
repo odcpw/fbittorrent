@@ -82,8 +82,8 @@ impl TuiApp {
         let inner = block.inner(cols[0]);
         block.render(cols[0], frame);
 
-        if !self.online {
-            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
+        if !self.online && !(self.recovery.active && !self.torrents.is_empty()) {
+            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else if let Some(notice)=self.connection_banner() {notice.into_owned()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
             Paragraph::new(msg).style(th.err()).wrap(WrapMode::Word).render(pad(inner), frame);
         } else if self.torrents.is_empty() {
             let text = if !network_ready { format!("{}\n\nConnect your VPN to start transfers.\n(F6) Download and VPN settings\n\nYour saved downloads stay here.", network_message) }
@@ -96,7 +96,7 @@ impl TuiApp {
             Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.torrents.iter().enumerate().map(|(i, t)|
-                li(torrent_line(t, self.store.torrents.get(&t.hash), self.store.pending_for_key(&t.hash), inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
+                li(torrent_line(t, self.store.torrents.get(&t.hash), self.store.pending_for_key(&t.hash), self.recovery.active&&self.store.stale, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.tor_list.borrow_mut());
         }
@@ -161,7 +161,7 @@ pub(super) fn state_label(t: &Torrent) -> String {
     }.to_string()
 }
 
-pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pending:Option<&str>, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
+pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pending:Option<&str>, stale:bool, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
     let bar_w: u16 = 10;
     let percent = if t.progress_known { format!("{:>6.1}%", t.progress * 100.0) } else { "      —".into() };
     let right = format!(" {percent} {:>11} {:>7} {}{}{}", if t.is_active() { api.map_or_else(||human_rate(t.dlspeed),|row|row.dl_bps.map_or_else(||"—".into(),|rate|human_rate(i64::try_from(rate).unwrap_or(i64::MAX)))) } else { api.map_or_else(||human_bytes(t.size),|row|row.size.map_or_else(||"—".into(),|size|human_bytes(i64::try_from(size).unwrap_or(i64::MAX)))) },
@@ -175,8 +175,8 @@ pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pendin
         else if t.is_queued() { "  Queued  ".into() }
         else if t.state == "waitingVPN" { " Wait VPN ".into() }
         else { MiniBar::new(t.progress, bar_w).show_percent(false).filled_char('█').empty_char('░').render_string() };
-    let bar_style = if pending.is_some() {th.dimmed()} else if t.is_active() { Style::new().fg(th.accent) } else if t.is_stopped() { th.dimmed() } else { th.ok() };
-    let name_style = if pending.is_some()||t.is_stopped() { th.dimmed() } else if t.state == "error" || t.state == "missingFiles" { th.err() } else { th.text() };
+    let bar_style = if stale||pending.is_some() {th.dimmed()} else if t.is_active() { Style::new().fg(th.accent) } else if t.is_stopped() { th.dimmed() } else { th.ok() };
+    let name_style = if stale||pending.is_some()||t.is_stopped() { th.dimmed() } else if t.state == "error" || t.state == "missingFiles" { th.err() } else { th.text() };
     Line::from_spans([
         Span::styled(name, name_style),
         Span::raw(" ".repeat(padn + 1)),

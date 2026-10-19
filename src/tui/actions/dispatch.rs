@@ -143,9 +143,11 @@ pub(super) fn refresh(app: &mut TuiApp) -> Cmd<Msg> {
     if app.online {
         return app.poll();
     }
+    if app.cfg.native() {
+        return if app.presence.as_ref().is_some_and(|connection|connection.alive()) {app.poll()} else {app.start_daemon()};
+    }
     let cfg = app.cfg.clone();
     Cmd::task(move || {
-        if cfg.native() {return Msg::Attached(attach::connect(&cfg).map_err(|error|error.to_string()));}
         let client = LegacyClient::from_config(&cfg);
         match crate::backend::ensure_running(&cfg, &client) {
             Ok(_) => Msg::ActionDone(Ok("torrent engine ready".into())),

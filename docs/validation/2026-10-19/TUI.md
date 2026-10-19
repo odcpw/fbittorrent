@@ -259,3 +259,38 @@ The bead remains incomplete: the branch lacks the bus/shared-client/settings
 and Track B service integrations; its two-second fallback timer remains until
 push is available. Reconnect UI is the next independent step. No full-suite or
 all.sh run at this coherent intermediate checkpoint.
+
+P4-03 recovery checkpoint: initial attachment runs off the UI thread and shows
+Connecting; connection loss preserves dimmed confirmed rows, marks in-flight
+results unknown, and retries only the socket at 0.5/1/2/4/8/10 seconds (then 10).
+Only explicit opening/Enter can start a daemon. One handshake runs at a time;
+success resets the backoff and the connection-scoped mirror. Unsupported
+protocols produce a persistent banner before decoding foreign reply shapes;
+newer installed stable versions show the restart-to-update notice. The footer
+cache hashes the notice/countdown without formatting on unchanged frames.
+The full `cargo test --locked` run is green: **327 passed, 2 ignored**, including
+**110 TUI tests** and all **34 unchanged goldens** (`full_cargo_test.*`). Debug
+build and source size self-test pass (`recovery_binary.*`, `recovery_sizes.*`).
+The original lifecycle/owner-request assertion is unchanged and passes; a
+session-less poll still has no effect on the daemon owner's lifecycle.
+The six real lifetime cases pass in `recovery_lifetime/native/`; the terminal
+helper now waits for the new interactive hello before asserting owner state.
+The core mutations and failed RSS admission cases pass in
+`recovery_live/daemon/`. The replacement-owner case passes in
+`recovery_owner_verified/daemon/tui_reconnect_existing_owner.jsonl` (5.180 s):
+shutdown keeps the cached row and terminal, retries leave the socket absent,
+an independently started owner has a different instance, the same terminal
+reattaches without Enter with exactly one TUI connection, fresh removal clears
+the old row, and q releases the connection. The receiver is closed/reopened
+between daemon generations so stale STATUS datagrams cannot satisfy or spoil
+the successor's exact READY=1 check; failed development attempts are retained.
+Python compilation and git diff checks pass. No release build/all.sh is needed
+for this track checkpoint. Remaining P4-03 acceptance is explicitly unmet:
+remove the native timer and local service/legacy bridge after bus, shared
+api::Client, settings and Track B namespaces are merged into this branch.
+The regex for qbt::Client alone is insufficient proof while the isolated
+LegacyClient bridge still exists. P4-04 is skipped pending the missing
+P2-08 contracts/ui/states.json and the remaining P4-03 integration; P4-10 and
+P4-11 require its modal/layout, P4-07 additionally needs the Track B services,
+and P4-09 requires the completed API migration. No frozen fixture or old golden
+was changed; no daemon lifecycle/teardown implementation was touched.

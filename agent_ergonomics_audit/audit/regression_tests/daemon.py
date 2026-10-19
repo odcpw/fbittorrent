@@ -3364,6 +3364,53 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+
+def tui_reconnect_existing_owner(binary, systemd):
+    import native
+    with api_owned("tui_reconnect_existing_owner",binary,systemd) as (case,sandbox,harness,process):
+        with ApiConn(harness) as observer:
+            first=mutation_hello(observer,"first-ui-owner")["instance"]
+            fixture,_=mutation_add_path(observer,sandbox)
+        native.prepare_imdb_fixture(sandbox.env,["two-files"])
+        ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p-reconnect")
+        replacement=None
+        try:
+            target,done=ui.start()
+            ui.assert_pane(target,"two-files")
+            harness.stop_serve(process)
+            ui.assert_pane(target,"fbittorrent stopped")
+            case.check("two-files" in ui.capture(target) and not done.exists(),
+                       "confirmed rows remain visible when the daemon exits",ui.capture(target))
+            # Let a real automatic reconnect attempt reach an absent socket.
+            time.sleep(1.1)
+            case.check(not DaemonContract.socket_path(sandbox).exists(),
+                       "automatic socket retries never start a replacement daemon",ui.capture(target))
+            # Discard the old owner's queued STATUS datagrams before its successor's READY.
+            harness.notify.close()
+            replacement=harness.start_serve()
+            if not (harness.receive_ready() and harness.wait_engine()):
+                raise RuntimeError("replacement API fixture did not start")
+            with ApiConn(harness) as observer:
+                hello=mutation_hello(observer,"replacement-ui-owner")
+                case.check(hello["instance"]!=first,"the replacement has a new daemon instance",json.dumps(hello))
+                harness.wait_for(lambda:((counts:=observer.call("app.info")["result"]["clients"])["tui"]==1,json.dumps(counts)),
+                                 "existing terminal reconnects without an Enter key")
+                harness.wait_for(lambda:("fbittorrent stopped" not in ui.capture(target) and "Connecting" not in ui.capture(target),ui.capture(target)),
+                                 "fresh API data clears the recovery banner")
+                # A later authoritative mutation proves the screen is live, not just a cached row.
+                mutation_request(observer,"torrents.remove",dict(hashes=[fixture.info_hash],delete_files=False))
+                ui.assert_pane(target,"No torrents")
+                case.check("two-files" not in ui.capture(target),"fresh data replaces the old confirmed rows",ui.capture(target))
+                ui.keys(target,"q")
+                harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after automatic reconnection")
+                harness.wait_for(lambda:((counts:=observer.call("app.info")["result"]["clients"])["tui"]==0,json.dumps(counts)),
+                                 "recovered client releases its one connection")
+        finally:
+            ui.close()
+            if replacement is not None and replacement.child.poll() is None:
+                harness.stop_serve(replacement)
+
+
 def tui_pending_rss_failure(binary, systemd):
     import native
     with api_owned("tui_pending_rss_failure",binary,systemd) as (case,sandbox,harness,process), ApiConn(harness) as client:
@@ -3405,7 +3452,7 @@ def tui_pending_rss_failure(binary, systemd):
             if ui is not None: ui.close()
 
 CASES = {function.__name__: function for function in
-         (tui_single_connection, tui_pending_rss_failure, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (tui_single_connection, tui_reconnect_existing_owner, tui_pending_rss_failure, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
