@@ -375,12 +375,8 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             })
         }
         Call::TorrentsStart { args } => {
-            if args.force.is_some() {
-                return Err(error(
-                    InvalidArgs,
-                    "force is not implemented",
-                    Some("force"),
-                ));
+            if args.force==Some(true) {
+                return super::queue::start_forced(daemon,args);
             }
             // A read of already-durable run intent is a no-op. Do not claim
             // that another start changed it; failed restores still retry.

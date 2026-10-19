@@ -95,7 +95,7 @@ impl ParkedLedger {
             | EngineOp::Files { .. }
             | EngineOp::Start { .. }
             | EngineOp::Stop { .. }
-            | EngineOp::Delete { .. } => {}
+            | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
             // Typed API additions save intent without constructing a session.
             EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } => {}
             _ => bail!(
@@ -160,14 +160,14 @@ impl ParkedLedger {
                 }));
             }
             EngineOp::Info => {
-                ledger.records.sort_by(|a, b| b.added_on.cmp(&a.added_on));
-                return Ok(EngineResult::Torrents(
-                    ledger
-                        .records
-                        .iter()
-                        .map(|record| parked_view(record, &self.directory))
-                        .collect::<Result<_>>()?,
-                ));
+                let mut queue_position=0;
+                let mut rows=ledger.records.iter().map(|record| {
+                    let mut view=parked_view(record,&self.directory)?;
+                    view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
+                    Ok(view)
+                }).collect::<Result<Vec<_>>>()?;
+                rows.sort_by(|a,b|b.added_at.cmp(&a.added_at));
+                return Ok(EngineResult::Torrents(rows));
             }
             EngineOp::Files { hash } => {
                 let record = ledger
@@ -205,7 +205,13 @@ impl ParkedLedger {
             }
             _ => {}
         }
+        if let EngineOp::QueueMove {hash,to}=&op {
+            let position=queue_policy::move_record(&mut ledger,hash,*to)?;
+            save_parked_ledger(&self.directory,&ledger)?;
+            return Ok(EngineResult::QueuePosition(position));
+        }
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
+        if let EngineOp::ForceStart {on,..}=&op {queue_policy::validate_force(&ledger,&hashes,*on)?;}
         if let EngineOp::Delete { files, .. } = op {
             if files {
                 bail!(
@@ -222,7 +228,11 @@ impl ParkedLedger {
         } else {
             for record in &mut ledger.records {
                 if hashes.contains(&record.hash) {
-                    record.paused = matches!(op, EngineOp::Stop { .. });
+                    match &op {
+                        EngineOp::ForceStart {on,..}=>{record.force=*on;if *on {record.paused=false;}},
+                        EngineOp::Stop {..}=>{record.paused=true;record.force=false;},
+                        _=>record.paused=false,
+                    }
                     record.resume_after_migration = false;
                 }
             }

@@ -202,6 +202,8 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsForceStart(DoneResult),
+    TorrentsQueueMove(QueueMoveResult),
     TorrentsRecheck(RecheckReply),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
@@ -230,6 +232,8 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
+            "torrents.queue_move" => serde_json::from_value(result).map(Self::TorrentsQueueMove),
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
@@ -297,3 +301,6 @@ pub struct RecheckResult {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecheckFailure { pub hash: Hash, pub message: String }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }

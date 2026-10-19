@@ -85,7 +85,9 @@ when a required cap is missing.
 | `shows` | `shows.*`, topics `shows`, `shows.releases:*` | P3-03 |
 | `imdb` | `imdb.lookup` | P3-04 |
 | `peers` | `torrents.peers`, topic `torrent:<h>.peers`, `seeds` field | P5-01 |
-| `recheck` | `torrents.recheck` | P5-03 |
+| `recheck` | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.queue_move` | `hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
+| `torrents.recheck` | P5-03 |
 | `limits` | `transfer.set_limits/set_alt`, `summary.alt`, `summary.limits` | P5-04 |
 | `watch` | `playable` fields, `torrent.playable` event, `wait --until playable` | P5-05 |
 | `trackers` | `torrents.trackers/reannounce`, topic `torrent:<h>.trackers` | P6-01 |
@@ -596,3 +598,24 @@ before shutdown bye. The independent `recheck.ndjson` transcript and contract
 patch 1.2.3 document the new operation without modifying earlier transcripts.
 Dashboard/TUI/CLI surfaces are integrated by their owner tracks; completion
 notifications and the pending busy reason consume P1-08/P1-12/P1-13's channels.
+
+### P6-05: force start and queue order
+
+Capability `queue` adds idempotent `torrents.force_start` and non-idempotent
+`torrents.queue_move`, and implements `torrents.start {force:true}` (already-running
+hashes remain in `started`). Force-on clears user pause and bypasses the ordinary
+queue limit; force-off rejoins the ordinary queue. Stop and completion clear force.
+Staged torrents are refused; completed stop-on-complete records give the explicit
+`fbittorrent seed <hash>` hint. Failed records retry through the existing start
+path. Parked force/order changes persist without opening a session.
+
+Ledger order remains queue order. `queue_pos` is one-based among unforced,
+unstaged records with running intent and no positive completion timestamp,
+including metadata/error/waiting rows. Unknown negative legacy completion dates
+remain incomplete. Up/down skip paused, completed and forced rows; top/bottom
+move within positioned rows. A reorder protects transfers already occupying
+ordinary slots until pause, stop, completion, error or an explicit limit decrease
+releases them, while ordinary FIFO resume behavior is preserved. The independent
+`queue.ndjson` transcript and contract patch 1.2.4 add these operations and row
+fields without changing previous transcripts. Dashboard/TUI controls and CLI
+verbs are separate surface integration work.

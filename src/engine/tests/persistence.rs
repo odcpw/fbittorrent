@@ -213,7 +213,7 @@
             added_on: 1,
             completion_on: 0,
             paused: false,
-            resume_after_migration: false, deferred: false, staged: false,
+            resume_after_migration: false, deferred: false, staged: false, force: false,
         };
         let stored = serde_json::to_vec(&record).unwrap();
         let restored: Record = serde_json::from_slice(&stored).unwrap();

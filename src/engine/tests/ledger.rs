@@ -129,3 +129,24 @@ fn parked_ledger_generations_survive_reads_and_each_durable_save() {
     );
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn save_preserves_order() {
+    let directory=review_directory("queue-order");
+    std::fs::create_dir_all(&directory).unwrap();
+    let records:Vec<_>=[3,1,2].into_iter().map(|n| {
+        let mut r=crate::engine::tests::review_record(&format!("{n:040x}"),&directory);
+        r.added_on=n;r
+    }).collect();
+    let expected:Vec<_>=records.iter().map(|r|r.hash.clone()).collect();
+    let ledger=Ledger{records,..Default::default()};
+    save_parked_ledger(&directory,&ledger).unwrap();
+    let saved=read_ledger(&directory.join("torrents.json")).unwrap();
+    assert_eq!(saved.records.iter().map(|r|r.hash.clone()).collect::<Vec<_>>(),expected);
+    let parked=crate::engine::ParkedLedger::new(directory.clone(),Lifecycle::default());
+    let crate::engine::ops::EngineResult::Torrents(rows)=parked.execute(crate::engine::ops::EngineOp::Info).unwrap() else {panic!("rows");};
+    assert_eq!(rows.iter().map(|r|r.queue_pos.unwrap()).collect::<Vec<_>>(),[1,3,2],"display sort cannot change ledger positions");
+    assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records.iter().map(|r|r.hash.clone()).collect::<Vec<_>>(),expected);
+    println!("saved ledger order stays 3,1,2 independently of added_on and display sort");
+    std::fs::remove_dir_all(directory).unwrap();
+}

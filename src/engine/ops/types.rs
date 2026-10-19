@@ -1,3 +1,4 @@
+pub use super::super::queue_policy::Direction as QueueDirection;
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +67,8 @@ pub enum EngineOp {
         hash: String,
     },
     RecheckBatch { hashes: Vec<String> },
+    ForceStart { hashes: HashSelection, on: bool },
+    QueueMove { hash: String, to: super::super::queue_policy::Direction },
     SetFiles {
         hash: String,
         include: Vec<usize>,
@@ -148,7 +151,8 @@ impl EngineOp {
     }
     pub(super) fn selection(&self) -> Option<&HashSelection> {
         match self {
-            Self::Start { hashes, .. }
+            Self::ForceStart { hashes, .. }
+            | Self::Start { hashes, .. }
             | Self::Stop { hashes }
             | Self::Delete { hashes, .. }
             | Self::SetUploadLimit { hashes, .. }
@@ -258,6 +262,7 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    QueuePosition(u64),
     Recheck(Arc<super::super::recheck::Batch>),
     Acknowledged,
     Version(String),
@@ -275,6 +280,7 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::QueuePosition(_) => bail!("queue movement has no legacy route"),
             Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
             Self::Detail(_) => bail!("torrent detail has no legacy route"),

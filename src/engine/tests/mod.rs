@@ -84,6 +84,7 @@
             rechecks: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
+            queue_pins: Default::default(),
             network_blocked: AtomicBool::new(false),
             restores: std::sync::Mutex::new(HashMap::new()),
             retired_restores: std::sync::Mutex::new(Vec::new()),

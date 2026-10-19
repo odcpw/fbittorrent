@@ -1379,7 +1379,8 @@ def api_torrent_operations(binary, systemd):
         client.call("transfer.info")
         client.call("app.network")
         client.call("torrents.get", dict(hash="f" * 40), error="not_found")
-        client.call("torrents.start", dict(hashes=[fixture.info_hash], force=False), error="invalid_args")
+        # P6-05 implements the reserved force flag; false is ordinary start.
+        client.call("torrents.start", dict(hashes=[fixture.info_hash], force=False))
         client.call("torrents.add", dict(source=dict(restore=fixture.info_hash)), error="invalid_args")
         client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
         link = sandbox.root / "symlink.torrent"
@@ -3967,8 +3968,140 @@ def recheck_failed_receipt(binary,systemd):
         finally:
             cached.rmdir();cached.write_bytes(metadata)
 
+@contextmanager
+def queue_fixture(name,binary,systemd):
+    with api_owned(name,binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client, \
+            Sandbox() as seedbox,Harness(case,binary,seedbox,systemd) as seedh:
+        seedprocess=seedh.start_serve();seedh.receive_ready();seedh.wait_engine()
+        try:
+            with ApiConn(seedh) as seed:
+                client.hello();seed.hello()
+                client.call("app.settings.set",dict(max_active_downloads=1))
+                seed.call("app.settings.set",dict(upload_limit_bps=65536))
+                port=tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml").read_text())["peer_port"]
+                tracker=fixtures.bencode(dict(interval=1,complete=1,incomplete=0,peers=socket.inet_aton("127.0.0.1")+struct.pack("!H",port)))
+                with fixtures.HttpFixture(seedbox.root,{"/announce":dict(base64=base64.b64encode(tracker).decode())}) as http:
+                    hashes=[]
+                    for i in range(3):
+                        payload=seedbox.downloads/f"queue-{i}.bin";payload.write_bytes(os.urandom(8*fixtures.MIB))
+                        fixture=fixtures.torrent_fixture(seedbox.root,[payload],name=f"queue-{i}",tracker=http.base+"/announce")
+                        seed.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(seedbox.downloads),seed=True))
+                        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(sandbox.downloads),stopped=True))
+                        hashes.append(fixture.info_hash)
+                    h.wait_for(lambda: (all(r["checked"] for r in client.call("torrents.list",{})["result"]["torrents"]),"three real 8 MiB payloads checked; no leech data present"),"queue fixtures complete initial checks")
+                    seedh.wait_for(lambda: (all(r["state"]=="seeding" for r in seed.call("torrents.list",{})["result"]["torrents"]),"three verified local seeds ready"),"seed fixtures ready")
+                    client.call("torrents.start",dict(hashes=hashes))
+                    h.wait_for(lambda: queue_sequence(client,hashes,[True,False,False]),"limit one admits only the first torrent")
+                    yield case,sandbox,h,client,hashes
+        finally:
+            seedh.stop_serve(seedprocess);seedh.lock_free()
+
+
+def queue_sequence(client,hashes,active):
+    rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
+    ok=all((rows[hash_]["state"] in ("downloading","stalled"))==running for hash_,running in zip(hashes,active))
+    return ok,json.dumps([rows[h] for h in hashes])
+
+
+def force_start_bypasses_limit(binary,systemd):
+    with queue_fixture("force_start_bypasses_limit",binary,systemd) as (case,sandbox,h,client,hashes):
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
+        h.wait_for(lambda:queue_sequence(client,hashes,[True,True,False]),"forced second transfer bypasses the one ordinary slot")
+        rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
+        q=json.loads(h.engine_call("app/queue")["value"])
+        case.check(rows[hashes[1]]["force"] and "queue_pos" not in rows[hashes[1]]
+                   and all(rows[hash_]["intent"]=="run" for hash_ in hashes[:2])
+                   and q["active_downloads"]==2 and q["max_active_downloads"]==1
+                   and all(rows[hash_].get("completed_bytes",0)<8*fixtures.MIB for hash_ in hashes),
+                   "two incomplete live transfers run, force has no position, and no fixture completed",json.dumps(dict(rows=rows,queue=q)))
+        started=client.call("torrents.start",dict(hashes=[hashes[1]],force=True))["result"]
+        case.check(started["started"]==[hashes[1]] and started["skipped"]==[],
+                   "start force lists an already-running hash as started",json.dumps(started))
+        completed=sandbox.downloads/"queue-completed.bin";completed.write_bytes(os.urandom(16384))
+        fixture=fixtures.torrent_fixture(sandbox.root,[completed],name="queue-completed")
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(sandbox.downloads)))
+        h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done",json.dumps(row)),"completed no-seed row ready")
+        refused=client.call("torrents.force_start",dict(hashes=[fixture.info_hash],on=True),error="invalid_state")
+        case.check(refused["error"].get("hint")=="fbittorrent seed "+fixture.info_hash,
+                   "completed no-seed force refusal has the copy-pasteable seed command",json.dumps(refused))
+        case.step("record summary integration", "P1-08 summary counts the two live transfers as downloading").ok(
+            "Both normalized rows and physical engine queue report two running transfers; pushed Summary frame awaits track A.")
+
+
+def queue_move_order(binary,systemd):
+    with queue_fixture("queue_move_order",binary,systemd) as (case,sandbox,h,client,hashes):
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
+        h.wait_for(lambda:queue_sequence(client,hashes,[True,True,False]),"forced second starts before reorder")
+        moved=client.call("torrents.queue_move",dict(hash=hashes[2],to="top"))["result"]
+        case.check(moved==dict(state="done",queue_pos=1),"third moves to queue position one",json.dumps(moved))
+        # Check again after the periodic reconciler runs: pins must survive the
+        # immediate request and every normal reconciliation, not just one frame.
+        time.sleep(1.1)
+        h.wait_for(lambda:queue_sequence(client,hashes,[True,True,False]),"reorder does not pause either existing transfer")
+        refused=client.call("torrents.queue_move",dict(hash=hashes[1],to="up"),error="invalid_state")
+        case.check(refused["error"].get("details",{}).get("reason")=="no_queue_position",
+                   "a forced torrent cannot be moved in the ordinary queue",json.dumps(refused))
+        client.call("torrents.stop",dict(hashes=[hashes[0]]))
+        h.wait_for(lambda:queue_sequence(client,hashes,[False,True,True]),"stopping the first transfer frees the slot for the moved third")
+        rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
+        case.check(rows[hashes[2]]["queue_pos"]==1 and rows[hashes[0]]["intent"]=="pause",
+                   "moved torrent retains position one when admitted",json.dumps(rows))
+        identifier=client.next_id;client.next_id+=1
+        client.send_frame(dict(id=identifier,op="torrents.queue_move",args=dict(hash=hashes[2],to="bottom"),instance="0"*32,ref="stale-queue-move"))
+        stale=client.response(identifier)
+        case.check(stale.get("error",{}).get("code")=="invalid_state",
+                   "queue move is refused for a stale daemon instance",json.dumps(stale))
+
+
+def force_off_returns_to_queue(binary,systemd):
+    with queue_fixture("force_off_returns_to_queue",binary,systemd) as (case,sandbox,h,client,hashes):
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
+        h.wait_for(lambda:queue_sequence(client,hashes,[True,True,False]),"force on admits second outside cap")
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=False))
+        h.wait_for(lambda:queue_sequence(client,hashes,[True,False,False]),"force off puts second behind the occupied ordinary slot")
+        rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
+        case.check(not rows[hashes[1]]["force"] and rows[hashes[1]]["queue_pos"]==2
+                   and rows[hashes[1]]["state"]=="queued" and rows[hashes[1]]["reason"]=="queue_full",
+                   "force off restores queue position and reason",json.dumps(rows[hashes[1]]))
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
+        client.call("torrents.stop",dict(hashes=[hashes[1]]))
+        row=client.call("torrents.get",dict(hash=hashes[1]))["result"]["torrent"]
+        case.check(not row["force"] and row["intent"]=="pause" and "queue_pos" not in row,
+                   "explicit stop durably clears force and removes queue position",json.dumps(row))
+
+
+def queue_parked_persists(binary,systemd):
+    with api_owned("queue_parked_persists",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        hello=client.hello()["result"]
+        client.call("app.settings.set",dict(network_interface="fbtqmissing"))
+        h.wait_for(lambda: ((info:=client.call("app.info")["result"])["state"]=="parked",json.dumps(info)),"park engine on a deliberately absent private-test interface")
+        hashes=[f"{n:040x}" for n in (1,2,3)]
+        for hash_ in hashes:
+            client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+hash_)))
+        client.call("torrents.force_start",dict(hashes=[hashes[1]],on=True))
+        moved=client.call("torrents.queue_move",dict(hash=hashes[2],to="top"))["result"]
+        client.call("app.restart",dict(scope="engine"),ref="parked-queue-restart")
+        event=None;began=time.monotonic()
+        while time.monotonic()-began<5:
+            client.call("app.info")
+            for pushed in client.pushed:
+                if pushed.get("ref")=="parked-queue-restart":event=pushed
+            if event is not None:break
+            time.sleep(.02)
+        case.check(event is not None and event["outcome"]=="done",
+                   "engine restart confirms success for a ready parked slot",json.dumps(event))
+        rows={r["hash"]:r for r in client.call("torrents.list",{})["result"]["torrents"]}
+        saved=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+        case.check(moved["queue_pos"]==1 and rows[hashes[2]]["queue_pos"]==1
+                   and rows[hashes[1]]["force"] and "queue_pos" not in rows[hashes[1]]
+                   and [r["hash"] for r in saved["records"]]==[hashes[2],hashes[1],hashes[0]]
+                   and all(r["state"]=="waiting_vpn" for r in rows.values()),
+                   "parked force/order persist through slot restart and reads do not reorder the ledger",json.dumps(dict(rows=rows,ledger=saved)))
+        case.check(client.call("app.info")["result"]["instance"]==hello["instance"],
+                   "parked queue changes retain daemon identity",hello["instance"])
+
 CASES = {function.__name__: function for function in
-         (recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

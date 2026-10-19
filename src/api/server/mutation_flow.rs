@@ -305,7 +305,7 @@ impl Shared {
                         continue;
                     };
                     (slot.engine_epoch > epoch
-                        && matches!(slot.slot, crate::daemon::slot::Slot::Running(_)))
+                        && matches!(slot.slot, crate::daemon::slot::Slot::Running(_) | crate::daemon::slot::Slot::Parked(_)))
                     .then(|| Ok(Reply::TorrentsSetUploadLimit(MutationResult::Done)))
                 }
                 _ => None,

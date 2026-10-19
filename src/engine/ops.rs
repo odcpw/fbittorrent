@@ -61,6 +61,9 @@ impl EngineDispatcher {
         if let EngineOp::RecheckBatch { hashes } = &op {
             return Ok(EngineResult::Recheck(self.inner.begin_recheck(cx, hashes.clone()).await?));
         }
+        if let EngineOp::QueueMove { hash, to } = &op {
+            return self.move_queue(cx,hash,*to).await;
+        }
         if let Some(result) = self.execute_dormant(cx, &op).await {
             return result;
         }
@@ -216,7 +219,7 @@ impl EngineDispatcher {
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
-                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false,
+                    added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
                 ledger.records.push(record.clone());
                 self.inner.save(cx, &ledger).await?;
@@ -349,7 +352,20 @@ impl EngineDispatcher {
                 .await?;
             return Ok(EngineResult::Acknowledged);
         }
-        let retry_errors = if matches!(op, EngineOp::Start { .. }) {
+        if let EngineOp::ForceStart { on, .. } = &op {
+            queue_policy::validate_force(&ledger,&hashes,*on)?;
+            for hash in &hashes {
+                let record=ledger.records.iter().find(|r|&r.hash==hash).unwrap();
+                if *on && record.stop_on_complete() && self.inner.handle(hash).is_ok_and(|h|h.stats().finished) {
+                    return Err(InvalidTorrentState{hash:hash.clone(),reason:"complete_no_seed"}.into());
+                }
+                if self.inner.handle(hash).is_err() && !self.inner.restores.lock().unwrap().get(hash)
+                    .is_some_and(|r|matches!(r.outcome,RestoreOutcome::Failed { .. })) {
+                    return Err(InvalidTorrentState {hash:hash.clone(),reason:"no_live_handle"}.into());
+                }
+            }
+        }
+        let retry_errors = if matches!(op, EngineOp::Start { .. } | EngineOp::ForceStart { on:true, .. }) {
             hashes.iter().cloned().collect()
         } else {
             HashSet::new()
@@ -364,7 +380,8 @@ impl EngineDispatcher {
             let mut record = old.clone();
             let handle = self.inner.handle(&hash).ok();
             match &op {
-                EngineOp::Start { .. } => {
+                EngineOp::Start { .. } | EngineOp::ForceStart { on:true, .. } => {
+                    if matches!(op,EngineOp::ForceStart { .. }) {record.force=true;}
                     record.paused = false;
                     record.resume_after_migration = false;
                     if handle.as_ref().is_some_and(|handle| {
@@ -373,7 +390,9 @@ impl EngineDispatcher {
                         self.inner.rebuild(cx, &old, &record).await?;
                     }
                 }
+                EngineOp::ForceStart { on:false, .. } => { record.force=false; }
                 EngineOp::Stop { .. } => {
+                    record.force=false;
                     record.paused = true;
                     record.resume_after_migration = false;
                 }
@@ -433,7 +452,7 @@ impl EngineDispatcher {
                     }
                 }
             }
-            if matches!(op, EngineOp::Start { .. }) && handle.is_none() {
+            if matches!(op, EngineOp::Start { .. } | EngineOp::ForceStart { on:true, .. }) && handle.is_none() {
                 self.inner
                     .spawn_restore(cx, ledger.records[index].clone())?;
             }
@@ -488,7 +507,7 @@ impl EngineDispatcher {
             added_on: now(),
             completion_on: 0,
             paused,
-            resume_after_migration: false, deferred: false, staged: false,
+            resume_after_migration: false, deferred: false, staged: false, force: false,
         };
         let sources = if options.torrent.is_some() {
             vec![String::new()]

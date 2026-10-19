@@ -147,6 +147,8 @@ pub struct TorrentView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
     pub force: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_pos: Option<u64>,
     #[serde(skip)]
     legacy: Legacy,
 }
@@ -208,7 +210,8 @@ impl TorrentView {
             content_path: None,
             added_at: record.added_on,
             completed_at: (record.completion_on > 0).then_some(record.completion_on),
-            force: false,
+            force: record.force,
+            queue_pos: None,
             legacy: Legacy {
                 source,
                 facts,
@@ -499,6 +502,7 @@ impl EngineDispatcher {
     pub(super) async fn info(&self, cx: &Cx) -> Result<Vec<TorrentView>> {
         let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
         let mut torrents = Vec::new();
+        let mut queue_position=0;
         for record in &ledger.records {
             let mut view = match self.inner.handle(&record.hash) {
                 Ok(handle) => TorrentView::handle(
@@ -527,6 +531,7 @@ impl EngineDispatcher {
                 view.completed_bytes = None;
                 view.progress = None;
             }
+            view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
             view.retain_restore_reason();
             torrents.push(view);
         }

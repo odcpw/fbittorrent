@@ -139,6 +139,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
                 .as_array()
                 .is_some_and(|values| values.iter().all(Value::is_string)),
             "reason" | "save_path" | "category" | "origin" => value.is_string(),
+            "to" if op=="torrents.queue_move" => serde_json::from_value::<QueueTo>(value.clone()).is_ok(),
             "scope" => serde_json::from_value::<RestartScope>(value.clone()).is_ok(),
             "source" => serde_json::from_value::<AddSource>(value.clone()).is_ok(),
             "client" => {
