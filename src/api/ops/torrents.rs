@@ -159,6 +159,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     use ErrorCode::*;
     Ok(match call {
+        Call::ImdbLookup { args } => return super::imdb::lookup(&daemon.imdb, args),
         Call::TorrentsList { args } => {
             let mut rows = list(daemon)?;
             rows.retain(|row| {

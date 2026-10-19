@@ -8,6 +8,12 @@ pub struct Operation {
 }
 pub const TABLE: &[Operation] = &[
     Operation {
+        name: "imdb.lookup",
+        mutating: false,
+        idempotent: false,
+        since: "P3-04",
+    },
+    Operation {
         name: "hello",
         mutating: false,
         idempotent: false,
@@ -130,6 +136,7 @@ pub const TABLE: &[Operation] = &[
 ];
 
 pub mod app;
+pub mod imdb;
 pub mod torrents;
 pub mod transfer;
 

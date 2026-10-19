@@ -14,6 +14,8 @@ pub fn hello(daemon: &Daemon) -> HelloResult {
     }
     info["proto"] = json!(PROTO);
     info["caps"] = json!(["torrents", "files", "mutations", "deferred_add"]);
+
+    info["caps"] = json!(["torrents", "files", "imdb"]);
     info["limits"] =
         json!({"line_in":LINE_IN,"line_out":LINE_OUT,"inflight":8,"subs":16,"hashes":256});
     serde_json::from_value(info).expect("daemon identity has the contract shape")

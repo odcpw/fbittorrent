@@ -1519,6 +1519,8 @@ def api_subscriptions_deferred(binary, systemd):
     with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         hello = client.hello()["result"]
         case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add"], "P1-06, P1-09 and P7-09 advertise exactly their implemented capabilities", str(hello["caps"]))
+
+        case.check(hello["caps"] == ["torrents", "files", "imdb"], "daemon advertises exactly its implemented capabilities (P3-04 adds imdb)", str(hello["caps"]))
         for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
             frame = client.call(op, args, error="unknown_op")
             nearest = ["torrents.list"] if op == "torrents.lis" else []
@@ -3469,9 +3471,126 @@ MUTATION_CASES = (ref_replay_remove, ref_per_client, remove_requires_flag, add_u
                   duplicate_add, ref_reused_different_args, stale_instance_remove_refused,
                   stale_instance_stop_applies, hashes_cap_257, mutation_magnets_and_file_removal, mutation_url_input_bounds, ref_survives_engine_restart)
 
+@contextmanager
+def imdb_owned(name, binary, systemd, oversized=False):
+    """Real daemon + local IMDb HTTP endpoints in one private cache tree."""
+    import gzip
+    import shutil
+    with Case("daemon", name) as case, Sandbox() as sandbox:
+        directory = sandbox.root / "imdb-http"
+        shutil.copytree(fixtures.HERE / "fixtures/imdb", directory)
+        (directory / "ratings.tsv.gz").write_bytes(gzip.compress((directory / "ratings.tsv").read_bytes(), mtime=0))
+        if oversized:
+            # Generated locally rather than checking an 8 MiB padding blob into git.
+            poster = directory / "poster-oversized.jpg"
+            poster.write_bytes((directory / "poster.jpg").read_bytes() + b"x" * (8 * 1024 * 1024))
+            routes = json.loads((directory / "routes.json").read_text())
+            routes["/poster.jpg"]["file"] = poster.name
+            (directory / "routes.json").write_text(json.dumps(routes))
+        cache = Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent"
+        (cache / "title.ratings.tsv").write_bytes((directory / "ratings.tsv").read_bytes())
+        with fixtures.imdb_server(directory) as source:
+            sandbox.env["FBT_IMDB_BASE_URL"] = source.base
+            with Harness(case, binary, sandbox, systemd) as harness:
+                process = harness.start_serve()
+                if not (harness.receive_ready() and harness.wait_engine()):
+                    raise RuntimeError("private IMDb daemon did not start")
+                try:
+                    yield case, sandbox, harness, source, directory, cache
+                finally:
+                    harness.stop_serve(process)
+                    harness.lock_free()
+
+
+def imdb_index_loaded_once(binary, systemd):
+    import gzip
+    with imdb_owned("imdb_index_loaded_once", binary, systemd) as (case, sandbox, harness, source, directory, cache):
+        with ApiConn(harness) as client:
+            hello = client.hello()
+            case.check("imdb" in hello["result"]["caps"], "daemon advertises implemented IMDb capability", str(hello))
+            first = client.call("imdb.lookup", dict(name="Local Fixture"))["result"]["card"]
+            second = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+            count = harness.stderr().count("imdb index loaded")
+            case.check(count == 1 and first == second and first["rating"] == 8.2 and first["kind"] == "tvSeries",
+                       "two lookups reuse one lazy index", f"imdb index loaded count={count}; cards={first!r}, {second!r}")
+            poster = Path(first["poster_path"])
+            case.check(poster == cache / "posters/tt1234001.jpg" and 0 < poster.stat().st_size < 8 * 1024 * 1024,
+                       "poster_path is an existing bounded local id cache file", f"path={poster}; bytes={poster.stat().st_size}")
+            changed = b"tconst\taverageRating\tnumVotes\ntt1234001\t9.1\t4321\n"
+            (directory / "ratings.tsv.gz").write_bytes(gzip.compress(changed, mtime=0))
+            refreshed = client.call("imdb.lookup", dict(id="tt1234001", refresh=True))["result"]["card"]
+            case.check(refreshed["rating"] == 9.1 and refreshed["votes"] == 4321 and harness.stderr().count("imdb index loaded") == 2,
+                       "forced refresh redownloads and replaces a live daemon index", str(refreshed))
+            (directory / "ratings.tsv.gz").write_bytes(gzip.compress(b"tconst\taverageRating\tnumVotes\n", mtime=0))
+            unknown = client.call("imdb.lookup", dict(id="tt1234001", refresh=True))["result"]["card"]
+            case.check("rating" not in unknown and "votes" not in unknown,
+                       "ratings absent at source remain absent after refresh", str(unknown))
+            source.routes["/title.ratings.tsv.gz"] = dict(status=503, json={})
+            client.call("imdb.lookup", dict(id="tt1234001", refresh=True), error="upstream")
+            for args in ({}, dict(id="tt1234001", name="Local Fixture"), dict(id="tt../../unsafe"), dict(name=" ")):
+                client.call("imdb.lookup", args, error="invalid_args")
+
+
+def imdb_poster_cap(binary, systemd):
+    with imdb_owned("imdb_poster_cap", binary, systemd, oversized=True) as (case, sandbox, harness, source, directory, cache):
+        with ApiConn(harness) as client:
+            client.hello()
+            card = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+            errors = [json.loads(line.split("WARN imdb poster ", 1)[1]) for line in harness.stderr().splitlines() if "WARN imdb poster " in line]
+            size = (directory / "poster-oversized.jpg").stat().st_size
+            case.check(size > 8 * 1024 * 1024 and "poster_path" not in card and not (cache / "posters/tt1234001.jpg").exists()
+                       and errors and errors[-1]["code"] == "upstream" and errors[-1]["retryable"] and errors[-1]["details"]["source"] == "imdb.poster",
+                       "oversized poster is refused, typed upstream diagnostic retained, card remains usable",
+                       f"fixture bytes={size}; card={card!r}; error envelope={errors!r}")
+            # Distinct ids avoid title-cache hits and exercise each JSON read cap.
+            for route, title_id in (("/suggestion/t/tt1234002.json", "tt1234002"), ("/w/api.php", "tt1234003"),
+                                    ("/api/rest_v1/page/summary/Local_Fixture", "tt1234004")):
+                suggestion = json.loads((directory / "suggest.json").read_text())
+                suggestion["d"][0]["id"] = title_id
+                source.routes["/suggestion/t/" + title_id + ".json"] = dict(json=suggestion)
+                old = source.routes.get(route)
+                source.routes[route] = dict(json={"padding": "x" * (2 * 1024 * 1024)})
+                failure = client.call("imdb.lookup", dict(id=title_id), error="upstream")
+                case.check(failure["error"]["retryable"] and failure["error"]["details"]["source"] == "imdb",
+                           "2 MiB JSON cap returns typed upstream", f"route={route}; envelope={failure!r}")
+                if old is None: source.routes.pop(route, None)
+                else: source.routes[route] = old
+
+
+def imdb_poster_atomic(binary, systemd):
+    with imdb_owned("imdb_poster_atomic", binary, systemd) as (case, sandbox, harness, source, directory, cache):
+        path = cache / "posters/tt1234001.jpg"
+        final = (directory / "poster.jpg").read_bytes()
+        stop, started, seen_final = threading.Event(), threading.Event(), threading.Event()
+        observations = []
+        artifact = case.path.with_suffix(".reader-sizes.jsonl")
+        def reader():
+            with artifact.open("w") as output:
+                while not stop.is_set():
+                    try: data = path.read_bytes()
+                    except FileNotFoundError: data = b""
+                    observations.append(len(data))
+                    output.write(json.dumps(dict(bytes=len(data))) + "\n"); output.flush()
+                    started.set()
+                    if data == final: seen_final.set()
+                    stop.wait(.001)
+        thread = threading.Thread(target=reader)
+        thread.start()
+        try:
+            if not started.wait(2): raise TimeoutError("poster reader did not start")
+            with ApiConn(harness) as client:
+                client.hello()
+                card = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+                completed = seen_final.wait(2)
+        finally:
+            stop.set(); thread.join(2)
+        step = case.step("observe local poster during HTTP lookup", "concurrent reader sees only absent or complete atomic poster")
+        step.close(completed and not thread.is_alive() and set(observations) == {0, len(final)} and path.read_bytes() == final,
+                   f"every observed size={observations}; final bytes={len(final)}; card={card!r}", [artifact])
+
 
 CASES = {function.__name__: function for function in
-         (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

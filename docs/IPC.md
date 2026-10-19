@@ -171,6 +171,22 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `subscribe` | `topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the "on change" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7) | `{sub: u64, topics: [str]}` | no | P1-08 |
 | `unsubscribe` | `sub: u64` | `{}` | no | P1-08 |
 
+## IMDb (P3-04)
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `imdb.lookup` | exactly one of `name: str` (1..1024 characters) or `id: str` (`tt` + 1..10 digits), `refresh: bool?` | `{card: ImdbCard?}` | no | P3-04 |
+
+`ImdbCard = {id: str, title: str, year: u16?, kind: str, rating: f64?,
+votes: u32?, stars: str?, blurb: str?, wiki_url: str?, url: str,
+poster_url: str?, poster_path: str?}`. Unknown ratings and unavailable posters
+are omitted. `poster_path` names a local atomic cache file; clients load it as
+`file://` without fetching network images. The index loads once per daemon;
+`refresh: true` redownloads and replaces it before the response. Suggestion and
+Wikipedia reads are capped at 2 MiB; posters at 8 MiB. Poster failure retains
+the card without `poster_path` and logs a typed `upstream` diagnostic. Other
+upstream failures return retryable `upstream` with `details.source`.
+
 ## P1 topics
 
 | Topic | Kind | Key | Item type | Default interval | Used by |
@@ -439,6 +455,10 @@ other validation. LogEntry examples in diagnostic error details exercise the
 specified object without introducing its later operation or topic.
 
 ## Changelog
+
+- **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
+  `ImdbCard` with optional local `poster_path`, and an additive IMDb transcript.
+
 
 - **v1 (P1-05):** establishes P1 envelopes, strict args, contextual result types,
   error/CLI-exit mapping, operation metadata, topic payloads, A.8 events and
