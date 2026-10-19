@@ -164,6 +164,25 @@ mod tests {
         assert!(p.expired(at+Duration::from_secs(130)));
     }
     #[test]
+    fn configured_default_expires_at_300_seconds_on_the_policy_clock() {
+        let mut cfg = crate::config::Config::default();
+        assert_eq!(cfg.idle_exit_secs, 300);
+        cfg.validate().unwrap();
+        let at = Instant::now();
+        let mut p = idle(cfg.idle_exit_secs, at);
+        assert_eq!(p.snapshot(at).idle_exit_in_s, Some(300));
+        assert!(!p.expired(at + Duration::from_secs(299)));
+        assert_eq!(p.snapshot(at + Duration::from_secs(299)).idle_exit_in_s, Some(1));
+        assert!(p.expired(at + Duration::from_secs(300)));
+        cfg.idle_exit_secs = 29;
+        assert!(cfg.validate().is_err());
+        cfg.idle_exit_secs = 30;
+        cfg.validate().unwrap();
+        let mut minimum = idle(cfg.idle_exit_secs, at);
+        assert!(!minimum.expired(at + Duration::from_secs(29)));
+        assert!(minimum.expired(at + Duration::from_secs(30)));
+    }
+    #[test]
     fn countdown_pause_resume() {
         let at=Instant::now(); let mut p=idle(30,at);
         p.client(1,false,true,at+Duration::from_secs(10));

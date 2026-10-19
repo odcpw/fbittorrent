@@ -177,6 +177,14 @@ def cases(mode, binary, env, registry):
                 command += ['--jobs', '1', '--systemd' if name in registry['daemon'].SYSTEMD_CASES else '--no-systemd']
             timeout = 720 if name == 'rev_soak_10min' and opted_in(env, 'SOAK') else float(env.get('FBT_GATE_CASE_TIMEOUT_SECS', '180'))
             result.append(Check(suite + '/' + name, command, case=True, timeout=timeout))
+    # These drive the actual plugin client on a private headless compositor.
+    result.append(python_check('plugin_stop_rule','plugin/tests/stop_policy.py',
+                              '--binary',str(binary),'--case','power','--log-root','{logs}'))
+    if mode == 'full':
+        result += [python_check('plugin_glance_policy','plugin/tests/stop_policy.py',
+                                '--binary',str(binary),'--case','glance','--log-root','{logs}'),
+                   python_check('plugin_default_idle','plugin/tests/stop_policy.py',
+                                '--binary',str(binary),'--case','default_delay','--log-root','{logs}')]
     return result
 
 
@@ -425,7 +433,7 @@ def main():
         if not run_checks([build], logs, env): return summary(checks, time.monotonic()-started, logs, args.mode)
         binary = artifacts(Path(build.log), test=False)
         env['FBT_BINARY'] = env['FBT_BIN'] = str(binary)
-        sway = headless_sway(env) if args.mode == 'full' else env.get('FBT_TEST_SWAY')
+        sway = headless_sway(env)
         if sway: env['FBT_TEST_SWAY'] = sway
         selected = cases(args.mode, binary, env, registry)
         checks[2:] = selected
