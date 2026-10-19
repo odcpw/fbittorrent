@@ -90,7 +90,13 @@ impl TuiApp {
     pub(super) fn complete_no_seed(&self, torrent: &Torrent) -> bool {
         self.store.torrents.get(&torrent.hash).map_or_else(
             || torrent.complete_no_seed(),
-            |row| row.state == api::TorrentState::Done && !row.seed,
+            |row| (row.state == api::TorrentState::Done || row.completed_at.is_some()) && !row.seed,
+        )
+    }
+    pub(super) fn torrent_paused(&self, torrent: &Torrent) -> bool {
+        self.store.torrents.get(&torrent.hash).map_or_else(
+            || torrent.is_stopped(),
+            |row| row.intent == api::Intent::Pause,
         )
     }
     pub(super) fn network_banner(&self) -> (bool, std::borrow::Cow<'_, str>) {
@@ -222,5 +228,35 @@ mod tests {
         });
         assert!(app.online && app.poll_inflight);
         assert!(app.backend_error.is_empty());
+    }
+
+    #[test]
+    fn vpn_waiting_controls_follow_saved_intent_and_known_completion() {
+        let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
+        let mut row = torrents().into_iter().find(|row|row.state==api::TorrentState::Done).unwrap();
+        row.state=api::TorrentState::WaitingVpn;
+        row.reason=Some("vpn_down".into());
+        row.intent=api::Intent::Pause;
+        row.completed_at=None;
+        row.seed=false;
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        app.torrents=vec![format::torrent(&row)];
+        app.tor_list.borrow_mut().select(Some(0));
+        let action=actions::all().find(|action|action.id=="torrents.pause").unwrap();
+        assert_eq!((action.label)(&app).as_deref(),Some("Resume"));
+        assert!(app.torrent_paused(&app.torrents[0]));
+        assert!(!app.complete_no_seed(&app.torrents[0]));
+        let paused=app.footer_signature(120);
+        row.intent=api::Intent::Run;
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        assert_eq!((action.label)(&app).as_deref(),Some("Pause"));
+        assert!(!app.torrent_paused(&app.torrents[0]));
+        assert_ne!(paused,app.footer_signature(120),"intent changes must refresh the legend while the VPN state stays the same");
+        row.completed_at=Some(123);
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        assert!((action.label)(&app).is_none(),"known complete no-seed records never offer Resume");
+        row.seed=true;
+        app.store.torrents.insert(row.hash.to_string(),row);
+        assert_eq!((action.label)(&app).as_deref(),Some("Pause"));
     }
 }

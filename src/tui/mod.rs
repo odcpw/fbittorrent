@@ -76,7 +76,7 @@ impl Model for TuiApp {
             }
         }
         self.rss_loaded = true;
-        let first=if self.cfg.native() {self.start_daemon()} else {self.poll()};
+        let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
         let mut cmds = vec![first, self.load_plugins(), self.load_ratings(), self.load_rss()];
         cmds.push(self.refresh_shows(false));
         Cmd::batch(cmds)

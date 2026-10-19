@@ -12,6 +12,8 @@ use crate::qbt::Client;
 // or save Config without losing --no-start or persisting it as autostart=false.
 static NO_START: AtomicBool = AtomicBool::new(false);
 
+pub fn start_prevented()->bool {NO_START.load(Ordering::Relaxed)}
+
 pub fn prevent_start() {
     NO_START.store(true, Ordering::Relaxed);
 }

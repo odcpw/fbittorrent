@@ -24,7 +24,7 @@ impl TuiApp {
             actions::Intent::Last => self.tor_list.borrow_mut().select(n.checked_sub(1)),
             actions::Intent::Pause => {
                 if let Some(t) = self.selected_torrent().cloned() {
-                    let stopped = t.is_stopped();
+                    let stopped = self.torrent_paused(&t);
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }

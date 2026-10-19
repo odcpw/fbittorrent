@@ -294,3 +294,36 @@ P2-08 contracts/ui/states.json and the remaining P4-03 integration; P4-10 and
 P4-11 require its modal/layout, P4-07 additionally needs the Track B services,
 and P4-09 requires the completed API migration. No frozen fixture or old golden
 was changed; no daemon lifecycle/teardown implementation was touched.
+
+P1-15/P4-03 native gate repair: each attachment fixture now has a sandbox-specific
+tmux socket and asserts server creation; q is checked against the same live
+daemon PID/instance rather than interactive presence. The stderr allowlist
+already recognized daemon startup; it now also accepts the named Settings
+restart reason and explicitly rejects unknown lines/reasons. Parked readiness
+uses app.info/app.network; unknown completion remains absent on API v1, is
+shaped as zero by the API CLI or retained as -1 by the legacy adapter, and the
+saved -1 is still asserted unchanged on disk. The TUI now uses saved intent for
+Pause/Resume and its footer cache, including VPN-waiting rows; positive
+completion dates keep Resume hidden when seeding is off. The timestamp case
+presses p twice and verifies both real ledger intents through the API. All
+three requested cases pass against the final debug binary via the unmodified
+native.py entrypoint with --case (`native_gate_final_{q_detaches,quit_restart_down,
+resume_unknown_timestamp}/native/*.jsonl`). The one all-native invocation
+(`native_gate_all/native/summary.json`) ran 26 cases: 24 passed, two failed.
+The run exposed an additional asynchronous-attach regression: --no-start tui
+waited instead of returning exit 4. Attach-only opening now checks the existing
+owner before fullscreen and avoids opening a second connection; the adjacent
+backend policy getter is identical to the one already on main. Its existing
+real-terminal/zero-launcher control now passes
+(`native_gate_final_launcher_never_called/native/launcher_never_called.jsonl`),
+as do the three requested cases on the final binary. The remaining full-native
+failure is startup_survives_bad_record: legacy CLI show exited 4 after a 211 ms
+probe, followed by a missing-state KeyError (steps 46/47); retained unchanged
+for the API CLI integration, which is not on this branch. Full cargo test
+--locked passed once: 328 passed, 2 ignored (`native_gate_cargo_test.*`); after
+the small attach-only correction, the touched TUI suite passed 111 tests with
+34 unchanged goldens (`native_gate_attach_units.*`). Debug build, Python
+compilation, size gate and diff checks pass. settings_queue_vpn_restart was
+verified byte-identical and passed locally; its main-gate repair remains the
+integrator's. No release/all.sh run, frozen fixture change, or state-table
+change. All log paths above are under target/test-logs/fbt-p4-03-r5p/.

@@ -32,6 +32,7 @@ impl TuiApp {
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
+            self.torrent_paused(torrent).hash(&mut hash);
             self.seed_allowed(torrent).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {

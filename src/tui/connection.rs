@@ -2,10 +2,20 @@
 use super::*;
 
 pub fn run(cfg: Config, screen: Screen) -> Result<()> {
+    // Attach-only invocations must fail before entering fullscreen when closed.
+    // Normal opening stays asynchronous so startup can display its status.
+    let existing=if cfg.native()&&crate::backend::start_prevented() {
+        Some(attach::connect(&cfg)?)
+    } else {None};
     // This guard owns only UI cleanup, never an engine or the instance lock.
     let _terminal=signals::AppGuard::new(());
     let native=cfg.native();
     let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+    if let Some(connection)=existing {
+        model.recovery.connected(&connection.hello.server.version,env!("CARGO_PKG_VERSION"));
+        model.store.hello(connection.hello.clone());
+        model.presence=Some(connection);
+    }
     model.pointer_motion_on_start = true;
     // Program returns on signals, allowing the presence connection and terminal
     // to close while the separate daemon continues its work.
