@@ -25,6 +25,7 @@ Item {
   readonly property string runtimeDir: runtimeOverride || Quickshell.env("XDG_RUNTIME_DIR")
   readonly property string bin: String(settings.binary || "fbittorrent")
   readonly property bool online: status.ok === true && status.running !== false
+  property bool resultUnknown:false
   property bool reconnecting: false
   property bool stoppedRecently: false
   property string byeReason: ""
@@ -33,19 +34,61 @@ Item {
   property string instance: ""
   property string backendState: "stopped"
   property string lastError: ""
+  property real lastMessageAt:0
+  property string lastMessageText:""
   property string actionStatus: ""
   property var pending: []
   readonly property bool busy: pending.length > 0
   property var torrents: []
+  property var badgeCounts:({})
   property string sortKey: "added"
   property bool sortReverse: false
+  property bool preferencesLoaded:false
+  property int actionRevision:0
+  property int pendingFrame:0
+  property var toast:null
+  property real now:Date.now()
+  function sortChanged() {syncRows();if(preferencesLoaded)savePreferences.restart()}
+  function cycleSort() {
+    var keys=["added","name","progress","rate","size","state","eta"]
+    sortKey=keys[(keys.indexOf(sortKey)+1)%keys.length];sortReverse=false
+  }
+  function sortBy(key) {if(sortKey===key)sortReverse=!sortReverse;else{sortKey=key;sortReverse=false}}
+  function rowPending(hash) {var revision=actionRevision;return !!store.pendingByHash[hash]}
+  function rowFailed(hash) {var revision=actionRevision;return !!store.failedByHash[hash]}
+  function pendingAction(hash) {
+    if(!client)return null
+    var actions=client.actions,refs=Object.keys(actions)
+    for(var i=0;i<refs.length;i++){var action=actions[refs[i]],args=action.args || {};if(action.status==="pending" && ((args.hashes || []).indexOf(hash)>=0 || args.hash===hash))return action}
+    return null
+  }
+  function pendingGlyph(hash) {var revision=actionRevision;return store.pendingByHash[hash] ? (Commons.Style.reduceMotion ? "…" : "⠋⠙⠹⠸⠼⠴⠦⠧"[pendingFrame]) : ""}
+  function clearFailures(){if(client){store.clearFailures(client.actions);actionRevision++}}
+  function notify(text){lastMessageText=text;lastMessageAt=Date.now();toast={text:text,until:Date.now()+5000};toastTimer.restart()}
+  function copyMagnet(hash){Quickshell.execDetached(["wl-copy","--","magnet:?xt=urn:btih:"+hash]);notify("Magnet copied")}
+  function titleLink(hash,wikipedia) {
+    var row=store.torrents[hash]
+    if(!row)return
+    var url=wikipedia ? "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(row.name) : row.imdb_id ? "https://www.imdb.com/title/"+row.imdb_id+"/" : "https://www.imdb.com/find/?q="+encodeURIComponent(row.name)
+    Quickshell.execDetached(["xdg-open",url])
+  }
+  function follow(hash) {
+    var row=store.torrents[hash]
+    if(!row)return false
+    if(client.caps.indexOf("shows")<0){notify("Shows is unavailable; update the daemon");return false}
+    return mutate("shows.follow",row.imdb_id ? {imdb:row.imdb_id} : {query:row.name},"shows")
+  }
   readonly property alias torrentModel: rowsModel
   ListModel { id: rowsModel; dynamicRoles: true }
+  property bool modelReordering:false
+  function orderBoundary(starting){modelReordering=starting;if(starting)rowOrderChanging();else rowOrderChanged()}
+  signal rowOrderChanging()
+  signal rowOrderChanged()
   function syncRows() {
-    if (store.syncModel(rowsModel, sortKey, sortReverse)) torrents = store.rows(store.modelOrder())
+    if (store.syncModel(rowsModel, sortKey, sortReverse,orderBoundary)) torrents = store.rows(store.modelOrder())
   }
-  onSortKeyChanged: syncRows()
-  onSortReverseChanged: syncRows()
+  onSortKeyChanged: sortChanged()
+  onSortReverseChanged: sortChanged()
   readonly property var activeTorrents: torrents.filter(Model.isActive)
   readonly property var otherTorrents: torrents.filter(function(t) { return !Model.isActive(t) })
   readonly property bool transferring: Number(status.dl) > 0 || Number(status.up) > 0
@@ -78,23 +121,30 @@ Item {
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     pending = c.state().pending
-    lastError = c.lastError ? c.lastError.message : ""
+    resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
+    store.syncActions(c.actions);actionRevision++
+    var errorText=c.lastError ? c.lastError.message : ""
+    if(errorText && errorText!==lastError)lastMessageAt=Date.now()
+    lastError=errorText
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
   }
   function applyFrame(frame, request) {
     var rowsChanged
     try { rowsChanged = store.apply(frame, request) }
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
-    syncRows()
+    syncRows();badgeCounts=store.badges
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
+    if(request && !frame.ok && request.ref)notify(frame.error.message+" · Refresh to check the current state")
+    if(frame.ev==="mutation.result" && frame.outcome!=="done")notify((frame.error ? frame.error.message : "No answer")+" · Refresh to check the current state")
     if (frame.ev === "bye") { byeReason=frame.reason; stoppedRecently = true; stoppedTimer.restart() }
   }
   function mutate(op, args, cap, callback) {
     if (!client) return false
     if (cap && client.caps.indexOf(cap) < 0) {
       lastError = "This daemon does not support " + cap
+      actionStatus=lastError;noticeTimer.restart()
       return false
     }
     return client.request(op, args, {mutating:true, callback:callback})
@@ -114,7 +164,7 @@ Item {
     var args = {hash:hash}
     if (file !== undefined) args.file = file
     return client.request("torrents.open_target", args, {callback:function(result) {
-      if (result && result.path) Commons.Util.execArgv(["xdg-open", result.path])
+      if (result && result.path) Quickshell.execDetached(["xdg-open", result.path])
     }})
   }
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
@@ -162,8 +212,9 @@ Item {
   function startDaemon() {
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
-    Commons.Util.execArgv([bin,"up"])
+    Quickshell.execDetached([bin,"up"])
   }
+  function openDashboardFilter(filter) { if(shell)shell.summon("oliver.torrents",JSON.stringify({view:"torrents",filter:filter})) }
   function openDashboard(view) {
     if (!shell || !shell.summon("oliver.torrents",JSON.stringify({view:view || "torrents"}))) {
       actionStatus="Dashboard is not available; update the plugin"; noticeTimer.restart()
@@ -206,6 +257,23 @@ Item {
   onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
   onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
 
+  FileView {
+    id:preferences
+    path:(Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME")+"/.local/state")+"/fbittorrent/dashboard.json"
+    atomicWrites:true;blockLoading:true;blockAllReads:true
+    onLoaded:{
+      try {
+        var saved=JSON.parse(text())
+        if(["added","name","progress","rate","size","state","eta","up","peers","ratio"].indexOf(saved.key)>=0)root.sortKey=saved.key
+        root.sortReverse=saved.reverse===true
+      }catch(error){}
+      root.preferencesLoaded=true
+    }
+    onLoadFailed:root.preferencesLoaded=true
+  }
+  Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify({key:root.sortKey,reverse:root.sortReverse})+"\n")}
+  Timer {id:toastTimer;interval:5000;onTriggered:root.toast=null}
+  Timer {interval:125;repeat:true;running:(root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
   Socket {
     id: socket
     path: root.runtimeDir + "/fbittorrent/api.sock"
@@ -226,7 +294,7 @@ Item {
       if (!socket.connected) restart()
     }
   }
-  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.client.tick(); root.syncRows() } }
+  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows() } }
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }

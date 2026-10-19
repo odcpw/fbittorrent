@@ -11,3 +11,10 @@ var download=glyph("download"), upload=glyph("upload"), paused=glyph("paused"), 
 var vpn=glyph("vpn"), error=glyph("error"), add=glyph("add"), power=glyph("power"), refresh=glyph("refresh")
 var terminal=glyph("terminal"), play=glyph("play"), folder=glyph("folder"), trash=glyph("trash"), turtle=glyph("turtle")
 var metadata=glyph("metadata"), checking=glyph("checking"), stalled=glyph("stalled"), queued=glyph("queued"), ready=glyph("ready")
+
+var progressBars=(function(){
+  var values=[],parts=["","▏","▎","▍","▌","▋","▊","▉"]
+  for(var i=0;i<=64;i++){var full=Math.floor(i/8),part=i%8;values.push("█".repeat(full)+parts[part]+" ".repeat(Math.max(0,8-full-(part ? 1 : 0))))}
+  return values
+})()
+function blocks(progress) {return progress===undefined || progress===null ? "        " : progressBars[Math.max(0,Math.min(64,Math.floor(progress*64)))]}
