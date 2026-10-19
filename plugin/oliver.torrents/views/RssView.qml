@@ -46,7 +46,7 @@ FocusScope {
     if(event.key===Qt.Key_End || event.text==="G"){flow.move(0,-1);return true}
     if(event.key===Qt.Key_PageDown){flow.move(10);return true}
     if(event.key===Qt.Key_PageUp){flow.move(-10);return true}
-    if(event.text==="m" || event.text==="M"){flow.read(event.text==="M");return true}
+    if(event.text==="m" || event.text==="M" || event.key===Qt.Key_Space){flow.read(event.text==="M");return true}
     if(event.text==="r" || event.text==="R"){flow.refresh(event.text==="R");return true}
     if(event.text==="n"){flow.addOpen();return true}
     if(event.text==="x" || event.text==="d"){flow.removeOpen();return true}

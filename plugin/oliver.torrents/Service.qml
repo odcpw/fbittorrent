@@ -195,6 +195,7 @@ Item {
 
 
   function syncClient(c) {
+    var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
       var connectionStatus = Object.assign({}, status)
       connectionStatus.ok = c.online; connectionStatus.running = c.online
@@ -206,6 +207,7 @@ Item {
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
+    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=({});toastTimer.stop();actionStatus=""}
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
@@ -280,6 +282,9 @@ Item {
       if(result)notify(result.state==="pending" ? "Recheck accepted · Checking files…" : "Recheck complete")
     })
   }
+  function needsStopConfirm(){return Number(status.active)>0 || Number(status.seeding)>0 || transferring}
+  function shutdownPrompt(){return "Stop fbittorrent? Transfers pause until it starts again."}
+  readonly property string idleLabel:{var confirmed=status;return PopupState.idle(store.summary.daemon,online)}
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard(hash) { return mutate("app.clipboard.dismiss", {hash:hash}, "clipboard") }
   function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}

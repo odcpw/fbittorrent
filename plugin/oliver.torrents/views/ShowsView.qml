@@ -20,6 +20,7 @@ FocusScope {
   function focusResults(){followInput.focus=false;resultsFocus.forceActiveFocus();root.focusRequested()}
   function handleKey(event){
     if(controls.popupOpen)return false
+    if(event.text==="F" && !root.dialogOpen){controls.openFilters();return true}
     if(event.text==="=" && !root.dialogOpen){controls.openPreference();return true}
     if(model.panel==="follow"){
       if(event.key===Qt.Key_Escape){flow.cancel();root.forceActiveFocus();return true}

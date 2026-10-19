@@ -1,11 +1,11 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
     action!("torrents.copy_magnet",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
-        |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),T,None,None,None),
+        |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),TD,None,None,None),
     action!("torrents.rename",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
         |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
     action!("torrents.undo_remove",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",20,
-        |a|a.online&&!a.service_busy&&a.removal_undo.is_some(),Some(TuiApp::undo_removal),T,None,None,None),
+        |a|a.online&&!a.service_busy&&a.removal_undo.is_some(),Some(TuiApp::undo_removal),TD,None,None,None),
     action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort",90,
         |_|true,Some(|a|a.cycle_torrent_sort(false)),TD,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
     action!("torrents.reverse_sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse sort",90,
@@ -229,4 +229,8 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
+    action!("torrents.select_visible",Scope::Screen(Screen::Torrents),&[],"Select all visible",90,|_|true,None,D,Some(&[KeyChord::ctrl(KeyCode::Char('a'))]),None,None),
+    action!("torrents.filter",Scope::Screen(Screen::Torrents),&[],"Filter torrents",90,|_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('/'))]),None,None),
+    action!("torrents.focus_left",Scope::Screen(Screen::Torrents),&[],"Parent pane",90,|_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('h')),KeyChord::plain(KeyCode::Left)]),None,None),
+    action!("torrents.focus_right",Scope::Screen(Screen::Torrents),&[],"Child pane",90,|_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('l')),KeyChord::plain(KeyCode::Right)]),None,None),
 ];

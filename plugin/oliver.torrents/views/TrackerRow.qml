@@ -21,7 +21,8 @@ ColumnLayout {
   }
   Text {
     id:announces
-    Layout.fillWidth:true;text:{var clock=root.now;return "Last "+Model.when(root.tracker.last_announce_at)+" · Next "+Model.when(root.tracker.next_announce_at)};textFormat:Text.PlainText;wrapMode:Text.Wrap
+    Layout.fillWidth:true;text:{var clock=root.now;return "Last "+Model.when(root.tracker.last_announce_at)+" · Next "+Model.when(root.tracker.next_announce_at)}
+    textFormat:Text.PlainText;wrapMode:Text.Wrap
     color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall
   }
   Text {

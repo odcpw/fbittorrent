@@ -101,6 +101,7 @@ function create(io, options) {
   }
   c.disconnected = function() {
     var wasOnline = c.online
+    c.lastError=null
     subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null;subscriptionForced=false; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (!c.graceful && wasOnline) c.reconnecting = true
     c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
@@ -120,6 +121,7 @@ function create(io, options) {
         delete c.awaiting[ref]
       }
     })
+    c.lastError=null
     changed()
   }
   c.attempt = function() {
@@ -131,8 +133,8 @@ function create(io, options) {
     return c.retryDelay
   }
   c.reset = function(message) {
-    c.lastError = { code: "invalid_message", message: message, retryable: false }
     io.disconnect(); c.disconnected()
+    c.lastError = { code: "invalid_message", message: message, retryable: false };changed()
   }
   function presence() {
     var args = { interactive: c.dashboardVisible || c.quickVisible, glance: c.popupOpen, overlay_visible:c.quickVisible }
@@ -256,7 +258,7 @@ function create(io, options) {
         })
         Object.keys(c.awaiting).forEach(function(ref){if(c.awaiting[ref].op==="app.shutdown"){c.actions[ref].status="confirmed";delete c.awaiting[ref]}})
       }
-      if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false }
+      if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false; c.lastError=null }
       if (frame.ev === "error") c.lastError = frame.error
       if (frame.ev === "mutation.result") {
         delete c.awaiting[frame.ref]
@@ -294,7 +296,7 @@ function create(io, options) {
       if (frame.result.proto !== 1) { c.protocolMismatch = true; c.mode = "protocol_mismatch"; io.disconnect(); changed(); return }
       if (!/^[0-9a-f]{32}$/.test(frame.result.instance) || !Array.isArray(frame.result.caps) ||
           frame.result.caps.some(function(cap) { return typeof cap !== "string" })) { c.reset("invalid hello result"); return }
-      c.protocolMismatch = false
+      c.protocolMismatch = false; c.lastError=null
       var previous = c.instance
       c.instance = frame.result.instance; c.caps = frame.result.caps || []; c.hello = frame.result
       c.online = true; c.connecting = false; c.reconnecting = false; c.retryIndex = 0; c.mode = "subscribe"
@@ -320,6 +322,7 @@ function create(io, options) {
         c.awaiting[entry.ref] = entry
       }
     }
+    if(frame.ok && !entry.internal && !entry.quiet)c.lastError=null
     if (entry.callback && frame.ok) entry.callback(frame.result, null)
     deliver(frame, entry); pump(); changed()
   }

@@ -4,7 +4,7 @@
 
 // Declare optional display roles when a row is first inserted. The native
 // proxy cannot expose a role added later (for example, after staging ends).
-var DISPLAY_ROLES={playable:null,size:null,progress:null,dl_bps:null,ul_bps:null,eta_s:null,peers:null,seeds:null,ratio:null,added_at:null,completed_at:null,reason:null}
+var DISPLAY_ROLES={staged:false,playable:null,size:null,progress:null,dl_bps:null,ul_bps:null,eta_s:null,peers:null,seeds:null,ratio:null,added_at:null,completed_at:null,reason:null}
 var STATES = ["metadata", "checking", "downloading", "stalled", "queued", "paused", "done", "seeding", "waiting_vpn", "error"]
 function dictionary() { return Object.create(null) }
 function equal(a, b) {
@@ -345,7 +345,7 @@ function create(options) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
           model.append(modelRow(change.hash,row)); structural = true
         } else {
-          change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? null : row[field]) })
+          change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? (field==="staged" ? false : null) : row[field]) })
           if(change.fields.some(function(field){return ["playable","name","state","staged"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
           if(change.fields.indexOf("playable")>=0 || change.fields.indexOf("staged")>=0)model.setProperty(index,"uiReady",ready(row))
           if(change.fields.indexOf("name")>=0)model.setProperty(index,"uiName",s.sortNames[change.hash])
@@ -379,7 +379,6 @@ function create(options) {
     mirror.order.forEach(function(hash,index){var row=s.torrents[hash];mirror.model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[hash],state,text))})
   }
   s.pendingByHash=dictionary();s.failedByHash=dictionary();s.pendingActions=dictionary()
-  s.pendingActions=dictionary()
   s.syncActions=function(actions) {
     var pending=dictionary(),failed=dictionary(),pendingActions=dictionary()
     Object.keys(actions).forEach(function(ref) {

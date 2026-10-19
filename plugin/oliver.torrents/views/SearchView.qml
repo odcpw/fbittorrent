@@ -51,7 +51,7 @@ FocusScope {
     if(event.text==="y"){flow.copy();return true}
     if(event.text==="O"){flow.link("source");return true}
     if(event.text==="i" || event.text==="w"){flow.link(event.text==="i" ? "imdb" : "wiki");return true}
-    if(event.text==="f"){flow.follow();return true}
+    if(event.text==="f" || event.text==="F"){flow.follow();return true}
     if(event.text==="q"){dismissRequested();return true}
     return false
   }

@@ -20,6 +20,11 @@ ShellRoot {
   check("action_transitions",svc.actionRevision===revision && svc.pendingAction("a".repeat(40)).op==="torrents.recheck","unchanged pending actions retain their revision and keyed lookup",svc.actionRevision)
   client.actions.one.status="confirmed";svc.syncClient(client)
   check("action_confirmation",svc.actionRevision===revision+1 && !svc.pendingAction("a".repeat(40)),"confirmation publishes exactly one removal",svc.actionRevision)
+  client.lastError={code:"timeout",message:"old timeout"};svc.syncClient(client);svc.notify("old timeout · Refresh")
+  client.lastError=null;svc.syncClient(client)
+  check("error_success",!svc.lastError && !svc.lastMessageText && !svc.toast.text,"successful client recovery clears the stale footer and toast",{error:svc.lastError,message:svc.lastMessageText,toast:svc.toast})
+  svc.notify("old timeout");client.instance="new-instance";svc.syncClient(client)
+  check("error_restart",!svc.lastMessageText && !svc.toast.text,"instance reset clears stale toast and footer",svc.lastMessageText)
   var a="a".repeat(40),b="b".repeat(40)
   svc.client=client
   svc.applyFrame({id:1,ok:true,result:{torrents:[{hash:a,name:"Selected",state:"downloading",size:4096,checked:true},{hash:b,name:"Other",state:"downloading"}]}},{op:"torrents.list"})

@@ -95,7 +95,7 @@ FocusScope {
     if(editing)return false
     service.clearFailures()
     var text=event.text,control=!!(event.modifiers & Qt.ControlModifier)
-    if(event.key===Qt.Key_Q){if(text==="Q" || control)service.quit();else dismissRequested();return true}
+    if(event.key===Qt.Key_Q && text==="q" && !control){dismissRequested();return true}
     if(event.key===Qt.Key_Down || text==="j"){move(1,undefined,event.modifiers);return true}
     if(event.key===Qt.Key_Up || text==="k"){move(-1,undefined,event.modifiers);return true}
     if(event.key===Qt.Key_PageDown){move(table.pageRows(),undefined,event.modifiers);return true}
