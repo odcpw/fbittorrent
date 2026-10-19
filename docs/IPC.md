@@ -176,7 +176,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
 | `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
 | `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
-| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, `stage?: bool`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
 | `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
 | `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
 | `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
