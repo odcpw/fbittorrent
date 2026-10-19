@@ -5,6 +5,7 @@ import Quickshell
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "Model.js" as Model
+import "Glyphs.js" as Glyphs
 import "AddSource.js" as Source
 import "views" as Views
 import "components" as Components
@@ -36,7 +37,7 @@ Item {
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+      turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
     if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
@@ -99,7 +100,7 @@ Item {
   onFilterChanged:publish()
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
-  Connections {target:root.svc;function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
+  Connections {target:root.svc;function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
   Component.onDestruction:{disposing=true;if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window);svc.hideDetail()}}
 
   FloatingWindow {
@@ -126,6 +127,7 @@ Item {
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
         if(root.currentView==="search" && root.search && root.search.handleKey(event)){event.accepted=true;return}
         if((root.currentView==="torrents" && torrents && torrents.editing) || (root.currentView==="search" && root.search && root.search.editing))return
+        if(event.text==="z" && !(event.modifiers & (Qt.ControlModifier|Qt.AltModifier))){root.svc.toggleTurtle();event.accepted=true;return}
         if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(event.key===Qt.Key_Escape) {
           if(root.query!==""){root.query="";event.accepted=true}
@@ -150,6 +152,7 @@ Item {
           Layout.margins:Commons.Style.spacing.panelPadding
           Text {text:"fbittorrent";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading;font.bold:true}
           Item {Layout.fillWidth:true}
+          Ui.Button {objectName:"dashboard-turtle";visible:!!root.svc && root.svc.hasCap("limits");text:Glyphs.turtle+" Turtle "+(root.svc && root.svc.turtleOn ? "on" : "off")+" (z)";onClicked:root.svc.toggleTurtle()}
           Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }

@@ -1,5 +1,7 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("limits.toggle",Scope::Global,&[KeyChord::plain(KeyCode::Char('z'))],"Turtle limits",90,
+        |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
     action!(
         "screen.torrents",
         Scope::Global,

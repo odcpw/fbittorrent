@@ -480,6 +480,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
 | --- | --- | --- | --- | --- | --- |
+| `global` | Turtle limits | — | `z` | `z` |  |
 | `global` | Torrents | `1` | `1` | — |  |
 | `global` | Search | `2` | `2` | — |  |
 | `global` | Shows | `3` | `3` | — |  |

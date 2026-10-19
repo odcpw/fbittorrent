@@ -221,6 +221,8 @@ Item {
       }
     }})
   }
+  readonly property bool turtleOn: {var confirmed=status;return store.summary.alt===true}
+  function toggleTurtle(){return setTurtle(!turtleOn)}
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
   function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }

@@ -1,6 +1,20 @@
 {
   "actions": [
     {
+      "id": "limits.toggle",
+      "keys": {
+        "dashboard": [
+          "z"
+        ],
+        "popup": [
+          "z"
+        ],
+        "tui": null
+      },
+      "label": "Turtle limits",
+      "scope": "global"
+    },
+    {
       "id": "screen.torrents",
       "keys": {
         "dashboard": [
