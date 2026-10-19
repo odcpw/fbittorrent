@@ -41,10 +41,28 @@ impl Shared {
             .map(|ticket| ticket.reference.to_string())
             .unwrap_or_default();
         if !self.daemon.is_stopping() {
+            if let Call::TorrentsRecheck { args } = &job.request.call {
+                match ops::recheck::begin(&self.daemon, args) {
+                    Ok(batch) => {
+                        self.begin_confirmation(&job, Reply::TorrentsRecheck(RecheckReply::Pending(PendingResult {
+                            state: PendingState::Pending, reference: MutationRef::new(&reference).unwrap(),
+                        })), Confirmation::Recheck(batch), true);
+                    }
+                    Err(failure) => self.answer(&job, Err(failure)),
+                }
+                return;
+            }
             if let Call::TorrentsAdd { args } = &job.request.call {
                 if matches!(args.source, AddSource::Url(_)) {
                     if let Err(failure) = ops::torrents::validate_url_add(args) {
                         self.answer(&job, Err(failure));
+                        return;
+                    }
+                    let parked = matches!(&self.daemon.slot.read().unwrap().slot, crate::daemon::slot::Slot::Parked(_));
+                    if parked {
+                        self.answer(&job, Err(ops::engine_error(anyhow::anyhow!(
+                            "connect ProtonVPN before adding a URL; engine_unavailable state=parked"
+                        ))));
                         return;
                     }
                     let pending = Reply::TorrentsAdd(AddResult {
@@ -82,7 +100,9 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppInfo { .. }
+                Call::AppSettingsGet { .. }
+                | Call::AppSettingsSet { .. }
+                | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
                 | Call::AppShutdown { .. }
                 | Call::AppRestart { .. } => ops::app::dispatch(
@@ -91,7 +111,10 @@ impl Shared {
                     &reference,
                     serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
                     self.began.elapsed().as_secs(),
+                    self.bus.counts(),
                 ),
+                Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
+                Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
                 Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }
@@ -99,6 +122,7 @@ impl Shared {
         if let Ok(Reply::TorrentsAdd(added)) = &result {
             if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)))
                 && added.duplicate != Some(true)
+                && added.deferred != Some(true)
             {
                 let mut pending = added.clone();
                 pending.status = MutationResult::Pending {
@@ -120,6 +144,15 @@ impl Shared {
                 return;
             }
         }
-        self.answer(&job, result);
+        if let Ok(Reply::Subscribe(subscription)) = &result {
+            let sub = subscription.sub;
+            if job.connection.complete(job.request.id.get(), job.generation, result) {
+                self.bus.activate(job.connection.number, sub);
+            } else {
+                self.bus.unsubscribe(job.connection.number, sub);
+            }
+        } else {
+            self.answer(&job, result);
+        }
     }
 }

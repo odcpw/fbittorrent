@@ -107,6 +107,51 @@ omarchy bar put oliver.torrents --before omarchy.tailscale
 Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 `torrents.*`.
 
+## Lifecycle
+
+`fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
+`down` drains it, and `restart` replaces the engine slot while its sockets stay
+available. `dashboard` summons the desktop view. The static user unit starts on
+writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
+never start an owner. When it is down, saved reads report `running:false`; `stop`
+and keep-files `delete` update the saved ledger under the same instance lock.
+`--no-start` and `autostart=false` prevent automatic startup. Without a user
+manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
+replacement are delivered by their lifecycle work; this checkout reports the
+available daemon state without inventing missing idle counters.
+
+The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
+wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
+checked/reason/origin and optional `eta_s`/`seeds`. Stopped `status --json` now
+returns `ok:true,running:false`; `status --quiet` exits 4 when stopped. Magnets
+and local metainfo added while waiting for VPN return `deferred:true` and keep
+the requested intent until the interface returns. URL adds require a live engine.
+
+## Dashboard window
+
+The plugin exposes a separate window entry point while the bar keeps its popup:
+
+```sh
+omarchy-shell shell summon oliver.torrents '{"view":"search","query":"sintel"}'
+```
+
+The window shell routes Torrents, Search, Shows, RSS, Settings and Log. Their views
+land separately; this command currently proves window routing and query focus.
+The bar service owns its API connection across window closes. `q` closes the
+window; Esc clears one layer and leaves the window open at the top level.
+
+No window-manager rule is installed. The window tiles by default. To float it,
+an optional [Hyprland Lua window rule](https://wiki.hypr.land/configuring/core/rules/window-rules/)
+can match its initial title and Quickshell class:
+
+```lua
+hl.window_rule({
+  name = "fbittorrent-dashboard",
+  match = { initial_title = "^fbittorrent$", class = "^org[.]quickshell$" },
+  float = true,
+})
+```
+
 ## CLI
 
 Ordinary CLI commands take `--json` and print one JSON object; errors become
@@ -153,16 +198,34 @@ interface starts it parked, with saved history and start/stop/remove-keeping-fil
 available; the engine reopens when that exact interface returns.
 
 `serve --no-notify` disables desktop notifications while retaining systemd
-readiness datagrams. `--idle-exit-secs N` defaults to 300 (0 means disabled) and
-is exposed in daemon policy metadata; the automatic idle policy follows in P1-12. The current core runs until stopped.
+readiness datagrams. `idle_exit_secs` defaults to 300 in the config (minimum 30,
+or 0 to disable); `serve --idle-exit-secs N` overrides it. The daemon stops when
+its idle countdown reaches zero. Downloads, explicit seeding, waiting downloads
+behind an unavailable interface, interactive clients, search sessions and pending
+mutations cancel that countdown. The bar alone never keeps it running; opening
+the popup pauses the remaining time and closing it resumes that time. The
+`summary` subscription reports the countdown and busy reasons. Owner shutdown
+always drains, even while busy, and preserves download intent for the next start.
 `setup --magnet` writes the on-demand static `fbittorrent.service` using the
 current executable path, reloads the user manager and registers desktop handlers.
 It never enables or starts the unit. `setup --uninstall` removes the unit while
 keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
 harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
 run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. API v1 and TUI attachment are subsequent
-stages; the current CLI uses the existing framed socket.
+unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
+`api.sock`: clients can subscribe to summary, torrents, files, network, settings
+and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
+
+The daemon posts completion notifications with Open File / Open Folder actions.
+Browser handlers use `add --origin handler`: the daemon posts Added with Undo
+(keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
+or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
+Notification bodies escape markup, duplicate pending notices collapse, and four
+workers drain a bounded queue. VPN notices name the selected interface and limit
+rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
+`setup` installs the monochrome download SVG under
+`$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
+desktop entries and notifications use fbittorrent.
 
 ### For agents
 
@@ -305,6 +368,15 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
   --write-baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
   --output target/test-logs/resources/measurement.json
 ```
+
+The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
+It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
+three 60-second windows per configuration, plus matched CLI polling references
+(about 24 minutes total). The daemon entries share `baselines/resources.json`
+with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
+--seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
+against the same median and spread rule; `--write-baseline` records a complete
+matrix deliberately. Use the reference host and the release-lock/memory scope.
 
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.

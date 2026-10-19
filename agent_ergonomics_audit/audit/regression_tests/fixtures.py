@@ -202,8 +202,8 @@ def eztv_server():
     return HttpFixture(HERE / "fixtures/eztv")
 
 
-def imdb_server():
-    return HttpFixture(HERE / "fixtures/imdb")
+def imdb_server(directory=None):
+    return HttpFixture(directory or HERE / "fixtures/imdb")
 
 
 def torznab_server():

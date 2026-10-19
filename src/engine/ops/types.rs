@@ -65,6 +65,7 @@ pub enum EngineOp {
     Recheck {
         hash: String,
     },
+    RecheckBatch { hashes: Vec<String> },
     SetFiles {
         hash: String,
         include: Vec<usize>,
@@ -204,6 +205,7 @@ pub struct AddedTorrent {
     pub hash: String,
     pub name: String,
     pub duplicate: bool,
+    pub deferred: bool,
 }
 
 #[derive(Debug)]
@@ -256,6 +258,7 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    Recheck(Arc<super::super::recheck::Batch>),
     Acknowledged,
     Version(String),
     Torrents(Vec<super::super::view::TorrentView>),
@@ -272,6 +275,7 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
             Self::Detail(_) => bail!("torrent detail has no legacy route"),
             Self::Version(version) => Ok(version.clone()),

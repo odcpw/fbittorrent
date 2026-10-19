@@ -14,7 +14,7 @@ import fbtlog
 from fbtlog import Case, suite_status
 
 
-def run(suite, command):
+def run(suite, command, on_line=None):
     cases = {}
     capture_suite = fbtlog.get_suite(suite)
 
@@ -26,6 +26,8 @@ def run(suite, command):
     with subprocess.Popen(command, env=dict(os.environ, NO_COLOR="1"),
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as child:
         for line in child.stdout:
+            if on_line is not None:
+                on_line(line)
             with capture_suite.stderr_path.open("a") as capture:
                 capture.write(line)
             # Quickshell decorates both stdout and stderr (e.g. DEBUG qml:).

@@ -81,6 +81,7 @@ impl TuiApp {
 
     pub(super) fn add_opts(&self) -> AddOptions {
         AddOptions {
+                origin: None,
             sequential: self.cfg.native() || self.cfg.sequential,
             first_last: self.cfg.native() || self.cfg.first_last,
             seed: self.cfg.seed_by_default,

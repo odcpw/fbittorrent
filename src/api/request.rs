@@ -249,8 +249,33 @@ pub struct UploadLimitArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImdbLookupArgs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "torrents.recheck")]
+    TorrentsRecheck { args: HashesArgs },
+    #[serde(rename = "app.settings.get")]
+    AppSettingsGet {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "app.settings.set")]
+    AppSettingsSet {
+        #[serde(deserialize_with = "deserialize_settings_patch")]
+        args: serde_json::Map<String, serde_json::Value>,
+    },
+    #[serde(rename = "imdb.lookup")]
+    ImdbLookup { args: ImdbLookupArgs },
     #[serde(rename = "hello")]
     Hello { args: HelloArgs },
     #[serde(rename = "app.info")]
@@ -304,6 +329,10 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsRecheck { .. } => "torrents.recheck",
+            Self::AppSettingsGet { .. } => "app.settings.get",
+            Self::AppSettingsSet { .. } => "app.settings.set",
+            Self::ImdbLookup { .. } => "imdb.lookup",
             Self::Hello { .. } => "hello",
             Self::AppInfo { .. } => "app.info",
             Self::AppClient { .. } => "app.client",
@@ -326,4 +355,22 @@ impl Call {
             Self::Unsubscribe { .. } => "unsubscribe",
         }
     }
+}
+
+pub const SETTINGS_KEYS: &[&str] = &[
+    "max_active_downloads", "peer_encryption", "network_interface", "save_path",
+    "seed_by_default", "autostart", "idle_exit_secs", "notify", "timeout_secs",
+    "handler", "open_command", "clipboard_watch", "reduce_motion", "peer_port",
+    "show_quality", "download_limit_bps", "upload_limit_bps", "alt_download_limit_bps",
+    "alt_upload_limit_bps", "alt_limits_on",
+];
+
+fn deserialize_settings_patch<'de, D: Deserializer<'de>>(d: D) -> Result<serde_json::Map<String, serde_json::Value>, D::Error> {
+    let patch = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
+    for key in patch.keys() {
+        if !SETTINGS_KEYS.contains(&key.as_str()) {
+            return Err(serde::de::Error::custom(format!("unknown field `{key}`")));
+        }
+    }
+    Ok(patch)
 }

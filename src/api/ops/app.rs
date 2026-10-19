@@ -7,13 +7,15 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck"];
+
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
     if daemon.is_stopping() {
         info["state"] = json!("stopping");
     }
     info["proto"] = json!(PROTO);
-    info["caps"] = json!(["torrents", "files", "mutations"]);
+    info["caps"] = json!(CAPS);
     info["limits"] =
         json!({"line_in":LINE_IN,"line_out":LINE_OUT,"inflight":8,"subs":16,"hashes":256});
     serde_json::from_value(info).expect("daemon identity has the contract shape")
@@ -25,14 +27,17 @@ pub fn dispatch(
     reference: &str,
     counts: Value,
     uptime: u64,
+    subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
     Ok(match call {
+        Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),
+        Call::AppSettingsSet { args } => Reply::AppSettingsSet(super::settings::set(daemon, args)?),
         Call::AppInfo { .. } => {
             let mut value = serde_json::to_value(hello(daemon)).unwrap();
             value["uptime_s"] = json!(uptime);
             value["upgrade_pending"] = json!(false);
             value["clients"] = counts;
-            value["subscriptions"] = json!({"total":0,"by_topic":{}});
+            value["subscriptions"] = serde_json::to_value(subscriptions).unwrap();
             Reply::AppInfo(serde_json::from_value(value).unwrap())
         }
         Call::AppNetwork { .. } => {

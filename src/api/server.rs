@@ -76,6 +76,7 @@ type Frame = Value;
 #[derive(Clone)]
 enum Confirmation {
     Worker,
+    Recheck(Arc<crate::engine::recheck::Batch>),
     Metadata(Reply),
     Engine(u64),
 }
@@ -85,6 +86,8 @@ struct Background {
     op: String,
     deadline: Option<Instant>,
     confirmation: Option<Confirmation>,
+    _activity: Arc<crate::daemon::policy::Mutation>,
+    handler_add: bool,
 }
 struct Pending {
     generation: u64,
@@ -123,6 +126,7 @@ struct Job {
     request: Request,
     generation: u64,
     mutation: Option<mutations::Ticket>,
+    _activity: Option<Arc<crate::daemon::policy::Mutation>>,
 }
 #[derive(Default)]
 struct Work {
@@ -136,12 +140,12 @@ struct Pool {
 }
 struct Shared {
     daemon: Arc<Daemon>,
+    bus: Arc<bus::Bus>,
     pool: Pool,
     clients: Mutex<HashMap<u64, Arc<Connection>>>,
     counts: Mutex<ClientCounts>,
     began: Instant,
     stopping: AtomicBool,
-    event_sequence: AtomicU64,
     mutation_ring: Mutex<mutations::Ring>,
     mutation_sequence: AtomicU64,
     mutation_active: Mutex<HashMap<(u64, u64), Background>>,
@@ -155,6 +159,7 @@ pub struct Server {
     connections: Arc<Mutex<Vec<JoinHandle<()>>>>,
     dispatch: Vec<JoinHandle<()>>,
     mutation_observer: Option<JoinHandle<()>>,
+    bus_worker: Option<JoinHandle<()>>,
     _lock: Arc<InstanceLock>,
 }
 impl Server {
@@ -172,8 +177,10 @@ impl Server {
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
+        let bus = bus::Bus::new(daemon.clone());
         let shared = Arc::new(Shared {
             daemon,
+            bus: bus.clone(),
             pool: Pool::default(),
             clients: Mutex::new(HashMap::new()),
             counts: Mutex::new(ClientCounts {
@@ -185,7 +192,6 @@ impl Server {
             }),
             began: Instant::now(),
             stopping: AtomicBool::new(false),
-            event_sequence: AtomicU64::new(1),
             mutation_ring: Mutex::new(mutations::Ring::default()),
             mutation_sequence: AtomicU64::new(1),
             mutation_active: Mutex::new(HashMap::new()),
@@ -202,6 +208,7 @@ impl Server {
             connections: connections.clone(),
             dispatch: Vec::new(),
             mutation_observer: None,
+            bus_worker: Some(bus.start()?),
             _lock: lock,
         };
         let observer = shared.clone();
@@ -350,6 +357,10 @@ impl Server {
     }
 
     pub fn stop_accepting(&mut self) {
+        self.shared.bus.stop();
+        if let Some(worker) = self.bus_worker.take() {
+            let _ = worker.join();
+        }
         {
             let _active = self.shared.mutation_active.lock().unwrap();
             self.shared.stopping.store(true, Ordering::Release);
@@ -373,6 +384,9 @@ impl Server {
             StopReason::Upgrade => ByeReason::Upgrade,
             _ => ByeReason::Shutdown,
         };
+        // Engine-slot drain joins rechecks before API drain. Publish their
+        // terminal receipts before bye, even though the observer has stopped.
+        self.shared.observe_mutations();
         for client in self.shared.clients.lock().unwrap().values() {
             let mut pending = client.pending.lock().unwrap();
             for id in pending.keys() {
@@ -399,8 +413,40 @@ impl Drop for Server {
 #[derive(Clone)]
 pub(crate) struct EventSink(Arc<Connection>);
 impl EventSink {
+    #[cfg(test)]
+    pub(crate) fn testing() -> Self {
+        Self(Arc::new(tests::connection().0))
+    }
+    #[cfg(test)]
+    pub(crate) fn take_frames(&self) -> Vec<Value> {
+        self.0.out.lock().unwrap().frames.drain(..).collect()
+    }
+    #[cfg(test)]
+    pub(crate) fn terminal(&self) -> Option<Value> {
+        self.0.out.lock().unwrap().terminal.clone()
+    }
     pub fn id(&self) -> u64 {
         self.0.number
+    }
+    pub fn summary_interval(&self) -> u64 {
+        let state = self.0.client.lock().unwrap();
+        if !state.interactive
+            && !state.glance
+            && state
+                .client
+                .as_ref()
+                .is_some_and(|c| c.kind == ClientKind::Bar)
+        {
+            5000
+        } else {
+            1000
+        }
+    }
+    pub fn closed(&self) -> bool {
+        self.0.closed.load(Ordering::Acquire) || self.0.out.lock().unwrap().ending
+    }
+    pub fn close(&self) {
+        self.0.finish(ByeReason::InvalidMessage);
     }
     fn checked(&self, event: Event) -> ApiResult<()> {
         event
@@ -428,6 +474,12 @@ impl EventSink {
         items: Vec<Item>,
         reason: SnapshotReason,
     ) -> ApiResult<u64> {
+        self.snapshot_resync(sub, topic, previous, items, reason, None)
+    }
+    pub fn snapshot_resync(
+        &self, sub: u64, topic: Topic, previous: u64, items: Vec<Item>,
+        reason: SnapshotReason, oldest_seq: Option<u64>,
+    ) -> ApiResult<u64> {
         let _emission = self.0.emission.lock().unwrap();
         let count = items.len() as u64;
         let mut chunks = Vec::new();
@@ -454,6 +506,9 @@ impl EventSink {
         }
         if !chunk.is_empty() {
             chunks.push(chunk);
+        }
+        if chunks.is_empty() && reason != SnapshotReason::EngineRestart {
+            chunks.push(Vec::new());
         }
         let final_rev = previous
             .checked_add(chunks.len() as u64 + 2)
@@ -494,7 +549,7 @@ impl EventSink {
             rev,
             count,
             reason,
-            oldest_seq: None,
+            oldest_seq,
         })?;
         for items in chunks {
             rev += 1;

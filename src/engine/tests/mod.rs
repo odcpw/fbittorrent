@@ -77,10 +77,13 @@
         let generation = ledger.generation.clone();
         let inner = Arc::new(Inner {
             session,
+            bus_changed: rqbit_runtime::sync::Notify::new(),
+            completions: Default::default(),
             ledger: Arc::new(Mutex::new(ledger)),
             additions: Arc::new(Mutex::new(())),
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
+            rechecks: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
             network_blocked: AtomicBool::new(false),

@@ -57,8 +57,12 @@ pub fn stop(cfg: &Config) -> Result<()> {
         loop {
             // Shutdown is an owner control and works while the engine slot is
             // Starting. A version probe would wait for the session unnecessarily.
-            if !sent && crate::ipc::socket_path(cfg).exists() {
-                sent = crate::ipc::request(&request_cfg, "POST", "app/shutdown", &[], None).is_ok();
+            if !sent && crate::ipc::socket_path(cfg).with_file_name("api.sock").exists() {
+                sent = crate::api::client::Client::connect(&request_cfg, false)
+                    .and_then(|client| client.call("app.shutdown", serde_json::json!({}))).is_ok();
+            } else if !sent && crate::ipc::socket_path(cfg).exists() {
+                return Err(crate::agent::AppError::new(crate::agent::Code::Backend,
+                    "an older fbittorrent app is running; quit it with Q and retry").into());
             }
             if engine_idle()? {
                 if !sent && NO_START.load(Ordering::Relaxed) {

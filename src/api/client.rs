@@ -1,4 +1,6 @@
-//! On-demand owner startup. P1-11 replaces only the legacy probe with API hello.
+//! On-demand owner startup and the bounded API v1 session.
+mod session;
+pub use session::{Client, Subscription};
 use crate::{
     agent::{AppError, Code},
     config::Config,
@@ -314,7 +316,7 @@ fn connect_probe(path: &std::path::Path, deadline: Instant) -> Result<UnixStream
 }
 
 pub fn probe(cfg: &Config) -> Result<()> {
-    probe_path(&crate::ipc::socket_path(cfg))
+    Client::connect(cfg, false).map(|_| ()).or_else(|_| probe_path(&crate::ipc::socket_path(cfg)))
 }
 
 fn probe_path(path: &std::path::Path) -> Result<()> {

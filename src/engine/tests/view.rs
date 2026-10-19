@@ -207,6 +207,44 @@ fn policy_and_restore_reason_are_normalized_without_fabricated_completion() {
 }
 
 #[test]
+fn retained_missing_files_error_keeps_its_reason_after_stop_and_during_retry() {
+    use crate::api::validation::Validate;
+    let mut record = review_record(
+        "0000000000000000000000000000000000000001",
+        Path::new("/fixture"),
+    );
+    record.paused = true;
+    let message = format!("{} restore failed: missing files", record.name);
+    for (outcome, state, legacy_state) in [
+        (
+            RestoreOutcome::Failed { reason: "missing_files", message: message.clone() },
+            TorrentState::Error,
+            "error",
+        ),
+        (RestoreOutcome::Stopped, TorrentState::Paused, "stoppedDL"),
+        (RestoreOutcome::Checking, TorrentState::Checking, "checkingDL"),
+    ] {
+        let restore = RestoreTask {
+            generation: 1, outcome, last_error: Some(message.clone()),
+            task: None, cancel: CancellationToken::new(),
+        };
+        let view = TorrentView::unrestored(&record, Some(&restore));
+        assert_eq!(view.state, state);
+        assert_eq!(view.reason.as_deref(), Some("missing_files"));
+        assert_eq!(view.error.as_deref(), Some(message.as_str()));
+        let wire: crate::api::Torrent = serde_json::from_value(serde_json::to_value(&view).unwrap()).unwrap();
+        wire.validate().unwrap();
+        let legacy: Torrent = serde_json::from_str(&view.to_legacy_json().unwrap()).unwrap();
+        assert_eq!(legacy.state, legacy_state);
+        assert_eq!(legacy.error_message.as_deref(), Some(message.as_str()));
+    }
+    let recovered = TorrentView::unrestored(&record, None);
+    assert!(recovered.error.is_none());
+    assert_ne!(recovered.reason.as_deref(), Some("missing_files"));
+    println!("missing-files error/reason survive stop and retry; paused/checking states and legacy errors stay intact; clearing the error clears its reason");
+}
+
+#[test]
 fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
     let record = review_record(
         "0000000000000000000000000000000000000001",
@@ -280,4 +318,18 @@ fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
     println!(
         "normalized stats: progress=0.2 completed=2MiB uploaded=1MiB dl=1MiB/s ul=0.5MiB/s eta=8s ratio=0.5 peers=3; paused/zero-rate ETA absent"
     );
+}
+
+#[test]
+fn rechecking_set_forces_checking() {
+    for paused in [false, true] {
+        let record = crate::engine::tests::review_record("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Path::new("/fixture"));
+        let mut view = TorrentView::record(&record, StateFacts { activity: Activity::Checking,
+            paused, finished: false, stop_on_complete: true, record_paused: paused,
+            check_cancelled: true, receiving: false, parked: false }, Source::Handle);
+        view.rechecking();
+        assert_eq!(view.state, TorrentState::Checking);
+        assert!(!view.checked);
+        assert!(view.completed_at.is_none());
+    }
 }

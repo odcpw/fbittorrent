@@ -155,11 +155,14 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `app.settings.get` | none | `Settings` | no | P3-05 |
+| `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
 | `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
@@ -170,6 +173,22 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder)}` | no | P1-06 |
 | `subscribe` | `topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the "on change" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7) | `{sub: u64, topics: [str]}` | no | P1-08 |
 | `unsubscribe` | `sub: u64` | `{}` | no | P1-08 |
+
+## IMDb (P3-04)
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `imdb.lookup` | exactly one of `name: str` (1..1024 characters) or `id: str` (`tt` + 1..10 digits), `refresh: bool?` | `{card: ImdbCard?}` | no | P3-04 |
+
+`ImdbCard = {id: str, title: str, year: u16?, kind: str, rating: f64?,
+votes: u32?, stars: str?, blurb: str?, wiki_url: str?, url: str,
+poster_url: str?, poster_path: str?}`. Unknown ratings and unavailable posters
+are omitted. `poster_path` names a local atomic cache file; clients load it as
+`file://` without fetching network images. The index loads once per daemon;
+`refresh: true` redownloads and replaces it before the response. Suggestion and
+Wikipedia reads are capped at 2 MiB; posters at 8 MiB. Poster failure retains
+the card without `poster_path` and logs a typed `upstream` diagnostic. Other
+upstream failures return retryable `upstream` with `details.source`.
 
 ## P1 topics
 
@@ -371,11 +390,26 @@ positive measured chunk rate before the first piece verifies. Missing-file resto
 preconditions complete the payload, delete it, restart dormant history and
 explicitly activate it, preserving startup's lazy restore policy. The diagnostic
 remains `<name> restore failed: missing files`, with reason `missing_files`.
-The integrated receipt records the remaining active-check field mismatches and
-the frozen checker's rejection of changing completed-byte counts in a live
-precondition/query history. These remain failures; no comparison mask or new
-deferral is added. Previously approved capability/protocol/error deferrals remain
-listed individually, alongside P6-08's post-remove scenarios.
+Ruling 7 treats checking measurements as state-conditioned volatile values:
+when the live torrent is checking, completed_bytes must be a u64 no greater than
+size, and finite progress must equal completed_bytes/size within 1e-9 absolute
+(zero size requires both zero). Presence is preserved. Checked and size remain
+exact; other states still compare completed_bytes/progress exactly. P1-05d's
+fixture correction to checked=false for an active check is integrated.
+Live validation checks every original frame against the frozen types, bounds,
+capabilities and canonical round trips, and retains revision checks. Its
+cross-reply agreement still checks static sizes and file totals. For any hash
+observed checking, its measurements are excluded from that history's agreement,
+including earlier samples and later cancellation; their raw values remain
+validated and non-checking fixture comparisons remain exact. Fixture transcripts
+continue to use the unchanged strict whole-group agreement hook. Deferrals record
+file:line, pointer, class, target bead and reason. Capability/protocol deferrals
+apply only while that feature is unavailable; advertised features stay under
+active comparison. The receipt distinguishes undrivable catalogue frames from
+error codes that can be produced with a different shape and retains the bounded
+starting-window retry evidence. A retained missing-files restore error keeps its
+missing_files reason through Stop and retry until the error clears. Nonvolatile
+validation failures are recorded without a new mask or deferral.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
@@ -390,6 +424,7 @@ listed individually, alongside P6-08's post-remove scenarios.
 | `/result/server/pid` | timestamp | positive u64; presence preserved |
 | `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
 | `/result/server/version` | version | semantic version string; presence preserved |
+| `/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress` | checking only | live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals |
 | `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
 | `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 
@@ -440,6 +475,10 @@ specified object without introducing its later operation or topic.
 
 ## Changelog
 
+- **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
+  `ImdbCard` with optional local `poster_path`, and an additive IMDb transcript.
+
+
 - **v1 (P1-05):** establishes P1 envelopes, strict args, contextual result types,
   error/CLI-exit mapping, operation metadata, topic payloads, A.8 events and
   Torrent/TorrentDetail/File/Summary/Limits/NetworkState/Settings/LogEntry.
@@ -469,6 +508,18 @@ wire compatibility. `torrents.set_seed` must use the same live setter for
 existing handles. The v1 adapter is not present in this checkout, so this entry
 does not advertise a new operation, capability or active NDJSON endpoint.
 
+### P7-09 — deferred adds while waiting for the VPN
+
+The `deferred_add` capability enables parked `torrents.add` for magnets and local
+`.torrent` paths. It saves the record and local metadata privately, keeps the
+requested run/pause and upload policies, appends to queue order, and returns
+`state:done`, the hash, and `deferred:true`. Rows remain `waiting_vpn` with unknown
+progress until the interface returns. Activation resolves metadata and restores
+the saved queue intent; the deferred marker clears after admission. Duplicate
+adds preserve the existing record. URL sources are refused while parked before
+fetching or returning a pending receipt. Characterization: `deferred-add.ndjson`;
+live cases: `deferred_add_saved_record` and opt-in `deferred_add`.
+
 ### P4-06 — optional reduced motion
 
 Adds `Settings.reduce_motion?: bool` (absent = false), preserving all earlier
@@ -478,3 +529,70 @@ null and non-boolean values; explicit false remains present on a typed roundtrip
 This extends the v1 object contract without adding an operation or advertising
 a not-yet-implemented service. The standalone TUI persists and applies the same
 preference from `config.toml`; API-client attachment consumes it in P4-03.
+
+
+### P1-11 — CLI client and contract 1.2.0
+
+The CLI uses the bounded blocking API session, matches up to eight requests by
+ID, keeps events separate, and decodes subscription revisions using the frozen
+per-subscription counter across topics. Reads never open a daemon; offline stop
+and keep-files removal share engine.lock and the durable parked ledger. A lost
+idempotent request can reconnect once with the original ref and observed
+instance; destructive unknown outcomes return timeout without replay. Native
+add uses the returned hash and accepts `--origin manual|handler|agent`.
+Contract 1.2.0 declares the stopped-status `ok:true` change and additive normalized
+torrent fields while preserving the legacy numeric sentinels. Capabilities are
+generated from clap, with starts/since metadata. JSON warnings identify legacy
+mode and version skew. `SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
+ledger timestamps are preserved. Live summary/idle/upgrade qualification follows
+the P1-08/P1-12/P1-17 integration; cumulative app.info client counters never stand
+in for live interactive presence.
+
+P7-09 CLI completion: contract **1.2.1** advertises `deferred_add` in capabilities
+and records the additive `add.deferred` field. `add --json` preserves the atomic
+API reply's `deferred:true`; human output says “waiting for VPN”. The desktop
+handler passes `--origin handler`. The API/engine implementation and new fixture
+remain unchanged; the CLI uses the returned hash without list differencing.
+
+### P3-05: durable settings operations
+
+`app.settings.get` returns `Settings`. `app.settings.set` accepts any subset of
+its writable keys, validates the whole patch with `Config::validate`, and names
+an invalid key in `error.details.key` before making changes. `restart_class` is
+read-only and equals `peer_encryption`, `network_interface`, `peer_port`.
+An explicit null clears `network_interface` or an optional speed limit; other
+keys require their declared type. Speed limits range from 16384 through
+4294967295 bytes/second; absence means unlimited.
+
+Settings changes are not pending mutations: no `mutation.result` follows them.
+A restart-class change answers `{applied: [keys], restart: true}` after the durable
+save, the supervisor restarts the engine slot, and clients observe completion
+through `engine.changed` (and the `network` state when the binding changed).
+Live changes answer `restart:false` after save and apply. Repeating an unchanged
+patch returns an empty `applied` list and does not restart. The `settings` state
+is published on change by P1-08; this branch exposes the settings generation and
+snapshot for that integration. The CLI uses these operations when running and
+saves the private config without starting the daemon when stopped.
+
+Adds capability `settings`, the two operation-table rows, and the independent
+`settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
+`applied`, `restart` and `running`; existing CLI settings keys remain available.
+
+### P5-03: asynchronous verification
+
+Capability `recheck` adds `torrents.recheck`. Admission refuses staged or
+metadata-less torrents with `invalid_state`, unknown hashes with `not_found`,
+and parked engines with `engine_unavailable`. It immediately acknowledges the
+ref as pending; one terminal `mutation.result` carries measured verified bytes,
+successes and per-hash failures. Work is engine-owned, serial by hash and outside
+the dispatch pool/ledger lock during hashing, and has no operation timeout.
+Concurrent requests for a hash already in flight share its check and outcome.
+Checks preserve durable paused/run intent and take no queue slot. Completion is
+cleared durably before payload I/O and remains absent when data is missing, so a
+restart during repair cannot restore a corrupt record as dormant done. Restoring
+a dormant record performs the check once. Engine restart/shutdown cancels and
+joins this work before releasing its owner; clients receive the terminal receipt
+before shutdown bye. The independent `recheck.ndjson` transcript and contract
+patch 1.2.3 document the new operation without modifying earlier transcripts.
+Dashboard/TUI/CLI surfaces are integrated by their owner tracks; completion
+notifications and the pending busy reason consume P1-08/P1-12/P1-13's channels.

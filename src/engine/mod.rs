@@ -33,7 +33,10 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+mod bus;
 mod queue;
+pub mod recheck;
+mod settings;
 pub mod ops;
 mod restore;
 mod dormant;
@@ -79,10 +82,13 @@ struct RestoreTask {
 
 struct Inner {
     session: Arc<Session>,
+    bus_changed: rqbit_runtime::sync::Notify,
+    completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
     directory: PathBuf,
     default_folder: PathBuf,
+    rechecks: recheck::Rechecks,
     stopping: AtomicBool,
     max_active_downloads: AtomicUsize,
     network_blocked: AtomicBool,
@@ -174,12 +180,16 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             options,
         ))
         .context("starting the native torrent engine")?;
+    settings::apply_limits(&session, cfg);
     let inner = Arc::new(Inner {
         session,
+        bus_changed: rqbit_runtime::sync::Notify::new(),
+        completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
         directory,
         default_folder,
+        rechecks: Default::default(),
         stopping: AtomicBool::new(false),
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
         network_blocked: AtomicBool::new(false),
@@ -234,6 +244,8 @@ impl AppEngine {
     pub(crate) fn quiesce(&self) {
         self.dispatcher.inner.stopping.store(true, Ordering::Release);
         self.dispatcher.inner.session.cancellation_token().cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }
@@ -271,6 +283,7 @@ impl AppEngine {
             .inner
             .stopping
             .store(true, Ordering::Release);
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }

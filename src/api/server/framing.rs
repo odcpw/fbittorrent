@@ -119,6 +119,9 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
         return Some("args".into());
     };
     let op = raw["op"].as_str().unwrap_or("");
+    // Settings validate the entire patch against Config before any side effects,
+    // retaining the exact offending key for both types and semantic bounds.
+    if op == "app.settings.set" { return None; }
     for (key, value) in args {
         let valid = match key.as_str() {
             "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
@@ -300,10 +303,9 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
         }
     })
 }
-// TABLE remains the frozen full contract. Availability follows the phase's
-// negotiated capabilities; P1-08 installs subscription routing.
+// TABLE remains the frozen full contract. Subscription routing uses the bus.
 pub(super) fn implemented(op: &str) -> bool {
-    !matches!(op, "subscribe" | "unsubscribe") && ops::TABLE.iter().any(|row| row.name == op)
+    ops::TABLE.iter().any(|row| row.name == op)
 }
 pub(super) fn distance(a: &str, b: &str) -> usize {
     if a.len() > 128 {

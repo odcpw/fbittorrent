@@ -324,6 +324,31 @@ pub struct TorrentDetail {
     pub created_by: Option<String>,
 }
 
+/// A local-file poster is optional; unknown ratings stay absent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImdbCard {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub year: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub votes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stars: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blurb: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wiki_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub poster_path: Option<String>,
+}
+
 impl Settings {
     /// Older daemons omit this preference. Their clients keep hover motion on.
     pub fn reduce_motion(&self) -> bool {

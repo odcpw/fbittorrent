@@ -152,6 +152,25 @@ pub struct TorrentView {
 }
 
 impl TorrentView {
+    fn rechecking(&mut self) {
+        self.state = TorrentState::Checking;
+        self.checked = false;
+        self.reason = None;
+        self.completed_at = None;
+    }
+
+    fn retain_restore_reason(&mut self) {
+        if self
+            .error
+            .as_deref()
+            .is_some_and(|message| message.ends_with(" restore failed: missing files"))
+        {
+            // Stop and retry retain the last restore error until success. Its
+            // reason must remain consistent with that visible error as well.
+            self.reason = Some("missing_files".into());
+        }
+    }
+
     fn record(record: &Record, facts: StateFacts, source: Source) -> Self {
         let (state, reason) = derive_state(facts);
         Self {
@@ -165,7 +184,7 @@ impl TorrentView {
             } else {
                 Intent::Run
             },
-            staged: false,
+            staged: record.staged,
             checked: false,
             progress: None,
             size: None,
@@ -338,6 +357,7 @@ impl TorrentView {
                 .to_string(),
             );
         }
+        view.retain_restore_reason();
         view
     }
 
@@ -478,6 +498,9 @@ impl Inner {
 impl EngineDispatcher {
     pub(super) async fn info(&self, cx: &Cx) -> Result<Vec<TorrentView>> {
         let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+        Ok(self.info_locked(&ledger))
+    }
+    pub(super) fn info_locked(&self, ledger: &Ledger) -> Vec<TorrentView> {
         let mut torrents = Vec::new();
         for record in &ledger.records {
             let mut view = match self.inner.handle(&record.hash) {
@@ -497,10 +520,21 @@ impl EngineDispatcher {
                     .get(&record.hash)
                     .and_then(|restore| restore.last_error.clone());
             }
+            if self.inner.rechecks.active(&record.hash) {
+                view.rechecking();
+            } else if self.inner.recheck_failed(&record.hash) {
+                view.state = TorrentState::Error;
+                view.checked = false;
+                view.reason = Some("restore_failed".into());
+                view.completed_at = None;
+                view.completed_bytes = None;
+                view.progress = None;
+            }
+            view.retain_restore_reason();
             torrents.push(view);
         }
         torrents.sort_by(|a, b| b.added_at.cmp(&a.added_at));
-        Ok(torrents)
+        torrents
     }
 }
 

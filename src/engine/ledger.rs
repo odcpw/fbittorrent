@@ -20,9 +20,53 @@ pub(super) struct Record {
     pub(super) paused: bool,
     #[serde(default)]
     pub(super) resume_after_migration: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) deferred: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) staged: bool,
 }
+fn is_false(value: &bool) -> bool { !value }
 
 impl Record {
+    pub(super) fn deferred_magnet(options: &ops::AddRequest, folder: &Path) -> Result<Self> {
+        let source = options.sources.first().context("no magnet supplied")?;
+        let magnet = librqbit::Magnet::parse(source)?;
+        let hash = magnet.as_id20().context("a v1 magnet hash is required")?.as_string();
+        let files = magnet.get_select_only();
+        let name = magnet.name.unwrap_or_else(|| hash.clone());
+        Self::deferred_intent(options, folder, hash, name, source.clone(), files)
+    }
+
+    pub(super) fn deferred_torrent(options: &ops::AddRequest, folder: &Path, files: Vec<usize>) -> Result<Self> {
+        let (_, bytes) = options.torrent.as_ref().context("local torrent metadata required")?;
+        let metadata = librqbit::torrent_from_bytes(bytes)?;
+        let info = metadata.info.data.validate()?;
+        let hash = metadata.info_hash.as_string();
+        let name = info.name().map(|s| s.into_owned()).unwrap_or_else(|| hash.clone());
+        let count = info.iter_file_details().count();
+        anyhow::ensure!(files.iter().all(|i| *i < count), "file index is out of range");
+        let mut record = Self::deferred_intent(options, folder, hash, name, String::new(), Some(files))?;
+        if options.save_path.is_none() && info.info().files.is_some() {
+            let path = Path::new(&record.name);
+            anyhow::ensure!(path.components().count() == 1 && matches!(path.components().next(), Some(std::path::Component::Normal(_))), "invalid torrent directory name");
+            record.output_folder = folder.join(path).to_string_lossy().into_owned();
+        }
+        Ok(record)
+    }
+
+    fn deferred_intent(options: &ops::AddRequest, folder: &Path, hash: String, name: String, source: String, files: Option<Vec<usize>>) -> Result<Self> {
+        let record = Self {
+            hash, name, source, only_files: files,
+            output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
+            upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
+            category: options.category.clone(), tags: options.tags.clone(),
+            added_on: now(), completion_on: 0, paused: options.stopped,
+            resume_after_migration: false, deferred: true, staged: false,
+        };
+        record.options(true)?; // Physical transfer is paused; saved intent stays explicit.
+        Ok(record)
+    }
+
     pub(super) fn options(&self, paused: bool) -> Result<AddTorrentOptions> {
         if self.upload_limit < 0 {
             bail!("upload limit cannot be negative");

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::config::Config;
+mod native_api;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -252,6 +253,7 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
 ];
 
 pub struct AddOptions {
+    pub origin: Option<String>,
     pub sequential: bool,
     pub first_last: bool,
     /// Allow upload. When false the torrent is capped and stops once complete.
@@ -406,6 +408,9 @@ impl Client {
         Ok(serde_json::from_str(&body)?)
     }
     pub fn add_url(&self, url: &str, o: &AddOptions) -> Result<()> {
+        if self.cfg.native() && crate::ipc::socket_path(&self.cfg).with_file_name("api.sock").exists() {
+            return native_api::add(&self.cfg, serde_json::json!({"magnet":url}), o, None);
+        }
         let mut form: Vec<(&str, &str)> = vec![
             ("urls", url),
             ("sequentialDownload", bool_s(o.sequential)),
@@ -419,9 +424,9 @@ impl Client {
             form.push(("upLimit", &no_up));
             form.push(("ratioLimit", "0"));
             form.push(("shareLimitAction", "Stop"));
-        } else {
-            form.push(("tags", SEED_TAG));
         }
+        let tags = [o.seed.then_some(SEED_TAG.to_owned()), o.origin.as_ref().map(|origin| format!("fbt-origin:{origin}"))].into_iter().flatten().collect::<Vec<_>>().join(",");
+        if !tags.is_empty() { form.push(("tags", &tags)); }
         let body = self.post("torrents/add", &form)?;
         add_response_ok(&body)
     }
@@ -445,6 +450,9 @@ impl Client {
 
     /// Add a .torrent file (bytes). Same defaults as `add_url`.
     pub fn add_file(&self, filename: &str, bytes: &[u8], o: &AddOptions) -> Result<()> {
+        if self.cfg.native() && crate::ipc::socket_path(&self.cfg).with_file_name("api.sock").exists() {
+            return native_api::add(&self.cfg, serde_json::Value::Null, o, Some(bytes));
+        }
         let no_up = NO_UPLOAD_LIMIT.to_string();
         let mut fields: Vec<(&str, &str)> = vec![
             ("sequentialDownload", bool_s(o.sequential)),
@@ -457,9 +465,9 @@ impl Client {
             fields.push(("upLimit", &no_up));
             fields.push(("ratioLimit", "0"));
             fields.push(("shareLimitAction", "Stop"));
-        } else {
-            fields.push(("tags", SEED_TAG));
         }
+        let tags = [o.seed.then_some(SEED_TAG.to_owned()), o.origin.as_ref().map(|origin| format!("fbt-origin:{origin}"))].into_iter().flatten().collect::<Vec<_>>().join(",");
+        if !tags.is_empty() { fields.push(("tags", &tags)); }
         let body = self.post_multipart("torrents/add", &fields, "torrents", filename, bytes)?;
         add_response_ok(&body)
     }

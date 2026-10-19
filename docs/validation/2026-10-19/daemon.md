@@ -1,0 +1,136 @@
+# Daemon track
+
+Commands below use the private-XDG runner `target/test-logs/<bead-id>/run.py`;
+all application launches prove HOME/TMPDIR/five XDG paths and download isolation.
+No all.sh between beads, per the owner track policy.
+
+## P1-08 — event bus (`fbt-p1-08-xyp`)
+
+Commits `d44d4cd` (implementation), `ae508cd` (live replay test), `e47c2a5`
+(budget/evidence). Added consistent snapshots/deltas, revision tracking, event
+replay, bounded slow-reader shutdown, engine observers and restart/detail cleanup.
+Split the inherited server below 900 lines; engine/fork hooks, app subscription
+counts, harness/resource gate and README changes are additive. Evidence paths in
+this section are relative to `target/test-logs/fbt-p1-08-xyp/`.
+
+| Criterion | Command / evidence | Result |
+|---|---|---|
+| Subscribe fixtures / recovery | `run.py api`; `run.py cases bus_subscriptions subscribe_gap_recovery`; `api-final/`, `event-driven-{live,systemd-final}/daemon/` | **PARTIAL**: frozen decoder/reducer and whole live typed transcript pass; losing a real frame causes unsubscribe/resubscribe and a fresh snapshot in both modes. Exact canonical live replay remains unmet. |
+| Slow reader / healthy peers | `cases slow_client_closed_others_live`; `escaped-client-live/`, `event-driven-systemd-final/` | PASS: real queue reaches 512, bye/EOF, healthy pause delta continues; newline name remains on one log line. |
+| Ten-minute revisions | `FBT_TEST_SOAK=1 FBT_BUS_BINARY=target/release-perf/fbittorrent run.py cases rev_soak_10min`; `soak-final/daemon/` | PASS: 600 s soak, final rev 652, no gaps/interleaved snapshots; case 608.266 s. |
+| Matrix / bar budget | `run.py budget`, `run.py budget_reference`; `daemon-budget-qualified.json`, `budget-final/`, `budget-proc-reference/` | PASS: three runs each at 10/100 × 0/1/8; bar increments 0.00/0.02 s/min ≤ references 0.02/0.02. Full method/table: `daemon-budget.md`. |
+
+Supporting tests: full Rust 281 passed/two intentional ignores (`final-unit-suite/`)
+preceded the late observer fixes; final API 62/one bridge ignored (`api-final/`),
+observer 3 (`observer-module-final/`), real fork 1 (`fork-tests/`), eight live cases
+per mode (`event-driven-*`, `event-replay-{live,systemd}`), final startup fix
+(`transitional-live/`), Python logger/CI/budget math (`verified-gates/`,
+`daemon-gate-tests/`, `budget-exact-arithmetic/`) all pass. P1-12's full run below
+also rechecks the final engine/API code. Earlier failed runs remain archived.
+
+Unmet: canonical live `subscribe.ndjson`/`subscribe-gap.ndjson` replay under the
+unchanged P1-06 normalization table: no identity rules cover hash-bearing topic
+strings, changed-map keys or removed values; examples also require future
+policy/watch/limits fields and exact counters. The retained
+`event-driven-systemd-final/daemon/bus_subscriptions.live.ndjson` validates frozen
+types but is not claimed as exact replay. No fixture, validator, mask or IPC doc
+was weakened. Follow-ups: settle those replay preconditions/rules; rerun the
+integrated resource gate after policy/CLI migration. Inherited P1-06 active-check
+and dynamic-history disagreements remain outside this change.
+
+## P1-12 — stop rule and idle net (`fbt-p1-12-pmn`)
+
+Added default 300/minimum 30/zero-off config and CLI override, transfer/restore/
+mutation/search/presence busy inputs, bar exclusion, glance pause/resume/drop,
+summary countdown and bye-idle drain. Owner shutdown preserves durable run intent.
+CLI declarations and RSS/Shows handlers moved out of main (886 lines); original
+bodies/tests unchanged. Minimal API/engine hooks and agent/README updates included.
+Paths below are relative to `target/test-logs/fbt-p1-12-pmn/`. The `run.py cases`
+commands name all ten `idle_exit_*` cases in `daemon_policy.py`, once with
+`FBT_BUS_RUNNAME=policy-live`, once with `FBT_BUS_SYSTEMD=1 FBT_BUS_RUNNAME=policy-systemd`.
+
+| Criterion | Case / JSONL under both `policy-{live,systemd}/daemon/` | Result |
+|---|---|---|
+| Empty exits | `idle_exit_no_torrents.jsonl` | PASS: bye idle, exit 0, both sockets removed. |
+| Local download stays | `idle_exit_download_keeps_alive.jsonl` | PASS: real 8 MiB seed/leecher, 32768 B/s cap, verified bytes and positive rate; survives 4 s with 2 s idle delay. |
+| Interactive stays | `idle_exit_interactive_keeps_alive.jsonl` | PASS: named reason, no countdown, owner shutdown drains. |
+| Bar alone exits | `idle_exit_bar_does_not.jsonl` | PASS: bar interactive=true is ignored; bye idle, exit 0. |
+| Parked download stays | `idle_exit_parked_keeps_alive.jsonl` | PASS: missing private payload + run intent, missing interface; named parked_waiting reason, alive after 4 s. |
+| Zero off / shutdown drains | `idle_exit_disabled_{never_exits,shutdown_drains}.jsonl` | PASS: no fake busy/countdown; shutdown drains, durable paused=false survives. |
+| Busy reasons name work | Above + `idle_exit_mutation_keeps_alive.jsonl` | PASS: downloading, seeding, interactive, parked_waiting, real held loopback URL mutation; search count unit-tested for P3-01. |
+
+Glance cases also pass: fresh reads freeze at 20 s across a 5 s pause, resume at
+20 s, exit after 20.728/20.742 s including drain; socket drop resumes the short
+countdown. All 20 cases have conforming JSONL and clean owned process/unit cleanup.
+`run.py check`: exit 0 (`initial-check/`); `run.py policy`: 6 passed (`policy-units/`);
+`run.py full`: **292 passed, 0 failed, 2 intentional bridge/probe ignores**, 7.94 s
+(`final-full/development_full/full.{jsonl,stdout.log}`). Unmet for P1-12: none;
+UI attachment/quit verbs remain P1-15. Handoffs: P1-09 asynchronous mutation workers
+must retain the lifetime guard; P3-01 must update the live/grace-period search count.
+
+## P1-08 / P1-12 — reconciliation with main's server and CLI modules
+
+Kept main's canonical connection/dispatch/framing/mutation-flow modules, ported
+subscription routing, bounded EventSink extensions, bus lifecycle, presence and
+idle override, and removed the superseded duplicate source modules. Consolidated
+hello capabilities and the daemon case registry. P1-09 queued workers and pending
+confirmations now retain the idle guard, and confirmed mutations use the bus's
+single event sequence. A new real case verifies direct delivery, subscribed
+history, idempotent replay and since-sequence replay agree exactly. The live
+transcript adapter retains each subscription's real revision history when calling
+the unchanged frozen checker; a regression accepts the canonical consecutive
+sequence and rejects a gap. No contract fixture or validator changed.
+
+Commands use `target/test-logs/track-daemon-reconcile/run.py`; evidence is relative
+to that directory. `check` (`check-fixed/`) passes `cargo check --locked --tests`;
+`api` (`adapter-units/`) passes 77 module tests with one intentional bridge ignore;
+`build` (`debug-build/`) passes. All nine bus cases and ten P1-12 cases pass in
+foreground (`foreground/`, with the corrected transcript case in
+`foreground-adapter/`) and systemd (`systemd/`), including verified private XDG
+state and owned-process/unit cleanup. `full` (`full-final/`) passes the single
+full `cargo test --locked -- --nocapture`: 326 passed, zero failed, two intentional
+ignores. Every changed Rust source is below 900 lines. The earlier parser-phase
+and transcript-context failures remain archived. No all.sh between track beads,
+per owner policy. Unmet for this port: none. The existing P1-08 literal canonical
+live replay limitation above remains recorded; no additional claim is made here.
+
+## P1-13 — daemon notifications and the icon (`fbt-p1-13-7tx`)
+
+Added a bounded 512-waiting/four-worker notifier, pending-key collapse, markup
+escaping, action argv, cancellation/group cleanup, config/flag suppression and
+VPN transition limiting at the owner. The engine emits completion exactly when
+it first persists completion_on (including immediately completed records), with
+the resolved metadata name and content target. Handler-origin adds receive the
+daemon's Undo/Open-window toast; Undo is a normal API mutation with a unique ref
+and keeps files. Manual CLI adds notify only on a TTY or --notify; JSON, quiet and
+agent callers suppress that toast. Setup installs the monochrome download SVG
+inside the active XDG data home and uses it in both desktop entries and toasts.
+Mechanical neighbouring edits thread origin through legacy AddOptions until
+P1-11, initialize the engine/test event queue, and report failed handler adds from
+the mutation receipt path. No frozen contract changes or live desktop/state edits.
+
+Evidence is under `target/test-logs/fbt-p1-13-7tx/`; commands use its private-XDG
+`run.py`. `cases` names the notify_* functions plus `setup_desktop_handlers`, in
+`foreground-verified/` and `FBT_BUS_SYSTEMD=1` in `systemd/`.
+
+| Acceptance criterion | Command / JSONL in both modes | Observed result |
+|---|---|---|
+| Correct notification argv/actions | `cases notify_completed notify_failed notify_handler_cli_once`; `daemon/<case>.jsonl` plus `.notify-send.argv.json` | PASS: one real loopback magnet completion with exact bytes; default/open/folder actions; failed add log action; one actioned handler toast. |
+| Open action receives the right path | `cases notify_action_open notify_action_default notify_action_folder`; `.xdg-open.argv.json` | PASS: exact completed file / containing directory. |
+| Undo removes, retaining data | `cases notify_added_undo` | PASS: API removes only the record and preserves every payload byte. |
+| notify=false suppresses all | `cases notify_off notify_cli_policy`; `notify_off_{config,flag}.jsonl` | PASS: config false and --no-notify suppress completion/failure; non-TTY/JSON/quiet/agent adds have no plain toast; explicit --notify has one. |
+| Three VPN transitions in 2s → ≤2 notices | `cases notify_vpn_once_per_transition` | PASS: systemd 0.192 s; two notices, configured interface named. |
+
+Additional cases: forty actual completions deliver forty notices, measured peak
+four concurrent children and zero remaining; killed action handler never opens;
+restoring a completed ledger never repeats its completion; icon and desktop
+handler installation are verified inside private XDG. `policy` unit filter
+(`notifier-units-final/`): two passed (escaping, collapse/cap). `api`
+(`module-tests/`): 77 passed/one bridge ignored. `engine_watch` queue filter
+(`engine-queue-final/`): two passed. Single full `cargo test --locked -- --nocapture`
+(`full-final/`): **328 passed, zero failed, two intentional ignores**, 7.95 s.
+Earlier failures are retained. No all.sh between track beads per owner policy.
+Unmet acceptance criteria: none. Follow-ups: Open-log is wired to the CLI log
+verb supplied by P1-14; actual desktop notification rendering/action selection
+remains outside these recording-shim checks. P1-14 keeps the existing app.info counts cumulative (connections since start),
+as its canonical rule requires.

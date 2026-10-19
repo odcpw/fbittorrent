@@ -108,7 +108,7 @@ def umbrella_flags():
         shutil.copyfile(REPO / "scripts/testlog-summary.py", root / "scripts/testlog-summary.py")
         umbrella = regression / "umbrella.sh"
         help_result = subprocess.run(["bash", str(umbrella), "--help"], capture_output=True, text=True, timeout=10)
-        flags = ("QS", "VISUAL", "WIDGET", "VPN", "RESOURCES", "VERBOSE", "FORCE_FAIL")
+        flags = ("QS", "VISUAL", "WIDGET", "VPN", "RESOURCES", "DAEMON_RESOURCES", "VERBOSE", "FORCE_FAIL")
         case.check(help_result.returncode == 0 and all("FBT_TEST_" + flag in help_result.stdout for flag in flags),
                    "--help documents every prescribed flag without starting a build", help_result.stdout)
         # These commands are dispatch-only fixtures; no compiler, shell plugin,
@@ -121,6 +121,8 @@ def umbrella_flags():
         for name, suite in (("fbtlog_test.py", "fbtlog_test"), ("native.py", "native"),
                             ("ci_test.py", "ci_gates"), ("resources.py", "resources")):
             (regression / name).write_text(write_suite(suite))
+        (regression / "resources.py").write_text(write_suite("resources").replace(
+            "with Case('resources',", "with Case('daemon_budget' if '--daemon' in sys.argv else 'resources',"))
         (root / "plugin/tests/qs-log.py").write_text(write_suite("qs_log_test"))
         for name in ("check-gitignore.sh", "check-nova3-licences.sh"):
             p = root / "scripts" / name
@@ -135,7 +137,7 @@ def umbrella_flags():
         home = root / "fixture-home"
         shims = home / ".rch/shims"
         shims.mkdir(parents=True)
-        for name, program in (("cargo", "exit 0"), ("rustc", "echo 'host: x86_64-unknown-linux-gnu'")):
+        for name, program in (("cargo", 'echo "$*" >> cargo-argv.log\nexit 0'), ("rustc", "echo 'host: x86_64-unknown-linux-gnu'")):
             p = shims / name
             p.write_text("#!/bin/bash\n" + program + "\n")
             p.chmod(0o700)
@@ -145,13 +147,20 @@ def umbrella_flags():
         (regression / "widget_keys.sh").write_text("#!/bin/bash\necho widget >> dispatch.log\n")
         (regression / "vpn.py").write_text("from pathlib import Path\nwith Path('dispatch.log').open('a') as f: f.write('vpn\\n')\n")
         env = dict(os.environ, HOME=str(home), FBT_TEST_LEGACY="0", FBT_TEST_FORCE_FAIL="",
-                   **{"FBT_TEST_" + name: "1" for name in ("QS", "VISUAL", "WIDGET", "VPN", "RESOURCES")})
+                   **{"FBT_TEST_" + name: "1" for name in ("QS", "VISUAL", "WIDGET", "VPN", "RESOURCES", "DAEMON_RESOURCES")})
         result = subprocess.run(["bash", str(umbrella)], capture_output=True, text=True, timeout=30, env=env)
         (root / "stdout.log").write_text(result.stdout)
         (root / "stderr.log").write_text(result.stderr)
         case.check(result.returncode == 0 and set((root / "dispatch.log").read_text().splitlines()) ==
                    {"qs-store.sh", "qs-smoke.sh", "qs-visual.sh", "widget", "vpn"},
                    "every opted-in local suite dispatches to its named fixture", result.stdout + result.stderr)
+        case.check((root / "cargo-argv.log").read_text().count("--profile release-perf") == 1,
+                   "the two resource gates share exactly one performance build")
+        (root / "cargo-argv.log").write_text("")
+        env["FBT_TEST_RESOURCES"] = "0"
+        result = subprocess.run(["bash", str(umbrella)], capture_output=True, text=True, timeout=30, env=env)
+        case.check(result.returncode == 0 and (root / "cargo-argv.log").read_text().count("--profile release-perf") == 1,
+                   "the daemon-only resource gate builds its binary and runs independently", result.stdout + result.stderr)
         (root / "plugin/tests/qs-store.sh").unlink()
         result = subprocess.run(["bash", str(umbrella)], capture_output=True, text=True, timeout=30, env=env)
         rows = [json.loads(line) for line in (root / "target/test-logs/gate_qs_store/command.jsonl").read_text().splitlines()]

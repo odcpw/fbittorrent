@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
+pub mod service;
+
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) fbittorrent/0.1";
 const RATINGS_URL: &str = "https://datasets.imdbws.com/title.ratings.tsv.gz";
 const RATINGS_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
@@ -103,6 +105,7 @@ struct SuggItem {
     l: Option<String>,
     y: Option<u16>,
     q: Option<String>,
+    qid: Option<String>,
     s: Option<String>,
     i: Option<SuggImage>,
 }
@@ -115,17 +118,15 @@ pub fn search(query: &str, year: Option<u16>) -> Result<Vec<Title>> {
     if q.is_empty() { return Ok(vec![]); }
     let first = q.chars().next().unwrap();
     let url = format!("https://v3.sg.media-imdb.com/suggestion/{first}/{}.json", crate::qbt::urlencode(&q));
-    let mut resp = agent(8).get(&url).call().context("IMDb suggestion request")?;
-    if resp.status().as_u16() != 200 { return Err(anyhow!("IMDb suggestion HTTP {}", resp.status())); }
-    let body = resp.body_mut().read_to_string()?;
-    let s: Sugg = serde_json::from_str(&body).context("IMDb suggestion JSON")?;
+    let body = service::read_http(&url, 8, service::JSON_CAP)?;
+    let s: Sugg = serde_json::from_slice(&body).context("IMDb suggestion JSON")?;
     let mut out: Vec<Title> = s.d.unwrap_or_default().into_iter()
-        .filter(|i| i.id.starts_with("tt"))
+        .filter(|i| service::valid_id(&i.id))
         .map(|i| Title {
             id: i.id,
             name: i.l.unwrap_or_default(),
             year: i.y,
-            kind: i.q.unwrap_or_default(),
+            kind: i.q.or(i.qid).unwrap_or_default(),
             stars: i.s.unwrap_or_default(),
             poster_url: i.i.and_then(|p| p.image_url).unwrap_or_default(),
             ..Default::default()
@@ -193,11 +194,10 @@ pub fn refresh_ratings() -> Result<()> {
 }
 
 fn download_ratings_to(root: &Path, url: &str) -> Result<()> {
-    let mut resp = agent(120).get(url).call().context("ratings dataset download")?;
-    if resp.status().as_u16() != 200 { return Err(anyhow!("ratings dataset HTTP {}", resp.status())); }
-    let gz = resp.body_mut().with_config().limit(64 * 1024 * 1024).read_to_vec()?;
+    let gz = service::read_http(url, 120, 64 * 1024 * 1024)?;
     let mut tsv = Vec::with_capacity(gz.len() * 3);
-    flate2::read::GzDecoder::new(&gz[..]).read_to_end(&mut tsv)?;
+    flate2::read::GzDecoder::new(&gz[..]).take(256 * 1024 * 1024 + 1).read_to_end(&mut tsv)?;
+    anyhow::ensure!(tsv.len() <= 256 * 1024 * 1024, "ratings dataset exceeds unpacked byte cap");
     let path = root.join("title.ratings.tsv");
     write_cache_file(root, &path, &tsv, Some(&path.with_extension("tmp")))
 }
@@ -213,22 +213,26 @@ impl RatingsIndex {
     pub fn load() -> Result<Self> {
         private_cached_file(&cache_dir(), &ratings_path()).context("ratings dataset not downloaded yet")?;
         let data = std::fs::read(ratings_path()).context("ratings dataset not downloaded yet")?;
-        let mut rows: Vec<(u32, u16, u32)> = Vec::with_capacity(1_700_000);
+        Ok(Self::from_tsv(&data))
+    }
+
+    fn from_tsv(data: &[u8]) -> Self {
+        let mut rows: Vec<(u32, u16, u32)> = Vec::new();
         for line in data.split(|&b| b == b'\n').skip(1) {
             let mut it = line.split(|&b| b == b'\t');
             let (Some(id), Some(r), Some(v)) = (it.next(), it.next(), it.next()) else { continue };
             let Some(digits) = id.strip_prefix(b"tt") else { continue };
             let Ok(id) = std::str::from_utf8(digits).unwrap_or("x").parse::<u32>() else { continue };
-            let rating = std::str::from_utf8(r).ok().and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
-            let votes = std::str::from_utf8(v).ok().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0);
+            let Some(rating) = std::str::from_utf8(r).ok().and_then(|s| s.parse::<f32>().ok()).filter(|r| r.is_finite() && (0.0..=10.0).contains(r)) else { continue };
+            let Some(votes) = std::str::from_utf8(v).ok().and_then(|s| s.trim().parse::<u32>().ok()) else { continue };
             rows.push((id, (rating * 10.0).round() as u16, votes));
         }
         rows.sort_unstable_by_key(|r| r.0);
-        Ok(Self {
+        Self {
             ids: rows.iter().map(|r| r.0).collect(),
             ratings: rows.iter().map(|r| r.1).collect(),
             votes: rows.iter().map(|r| r.2).collect(),
-        })
+        }
     }
 
 
@@ -299,14 +303,12 @@ pub fn wiki_blurb(t: &Title) -> Result<(String, String)> {
     let kind = if t.kind.to_ascii_lowercase().starts_with("tv") { "TV series" } else { "film" };
     let q = match t.year { Some(y) => format!("{} {y} {kind}", t.name), None => format!("{} {kind}", t.name) };
     let url = format!("https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=1&srsearch={}", crate::qbt::urlencode(&q));
-    let mut resp = agent(8).get(&url).call().context("Wikipedia search")?;
-    let body = resp.body_mut().read_to_string()?;
-    let s: WikiSearch = serde_json::from_str(&body).context("Wikipedia search JSON")?;
+    let body = service::read_http(&url, 8, service::JSON_CAP)?;
+    let s: WikiSearch = serde_json::from_slice(&body).context("Wikipedia search JSON")?;
     let Some(hit) = s.query.and_then(|q| q.search.into_iter().next()) else { return Ok((String::new(), String::new())) };
     let url = format!("https://en.wikipedia.org/api/rest_v1/page/summary/{}", crate::qbt::urlencode(&hit.title.replace(' ', "_")));
-    let mut resp = agent(8).get(&url).call().context("Wikipedia summary")?;
-    let body = resp.body_mut().read_to_string()?;
-    let sum: WikiSummary = serde_json::from_str(&body).context("Wikipedia summary JSON")?;
+    let body = service::read_http(&url, 8, service::JSON_CAP)?;
+    let sum: WikiSummary = serde_json::from_slice(&body).context("Wikipedia summary JSON")?;
     let page = sum.content_urls.and_then(|c| c.desktop).and_then(|d| d.page).unwrap_or_default();
     Ok((sum.extract.unwrap_or_default(), page))
 }
@@ -458,6 +460,14 @@ pub fn enrich(t: &mut Title) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ratings_lookup() {
+        let index = RatingsIndex::from_tsv(include_bytes!("../agent_ergonomics_audit/audit/regression_tests/fixtures/imdb/ratings.tsv"));
+        assert_eq!(index.get("tt1234001"), Some((8.2, 1234)));
+        assert_eq!(index.get("tt1234002"), None);
+        assert_eq!(index.get("tt9999999"), None);
+    }
 
     struct Scratch(PathBuf);
     impl Scratch {

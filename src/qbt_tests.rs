@@ -71,7 +71,7 @@ fn client(url: &str) -> Client {
 }
 
 fn opts(seed: bool) -> AddOptions {
-    AddOptions { sequential: true, first_last: true, seed, stopped: true, save_path: None, category: None }
+    AddOptions { origin: None, sequential: true, first_last: true, seed, stopped: true, save_path: None, category: None }
 }
 
 fn body_str(c: &Captured) -> String { String::from_utf8_lossy(&c.body).to_string() }

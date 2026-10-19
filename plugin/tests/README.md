@@ -1,0 +1,74 @@
+# Isolated shell checks
+
+The tests copy the plugin into a disposable configuration with private HOME,
+TMPDIR and all five XDG directories. They never reload the installed shell.
+`FBT_PLUGIN_SOURCE` selects a development copy; the default is this worktree's
+plugin. Quickshell, Python, Node and the installed read-only Omarchy components
+are required.
+
+- `qs-client.sh`, `qs-store.sh`: API session and frozen transcript reducer checks.
+- `qs-glyphs.sh`, `qs-format.sh`: actual Qt text/format/contrast checks.
+- `contrast.py --self-test`: checked-in theme oracle and known-bad control.
+  `--installed` additionally checks current installed themes; `--refresh` explicitly
+  copies them and the owner's current colors into `contracts/ui/themes/`.
+- `service-tests.py <debug-binary>`: an owned real daemon and two widget instances.
+- `FBT_TEST_VISUAL=1 qs-visual.sh popup downloading --binary <debug-binary>`:
+  actual native popup over a real local seed/client transfer, inside a private
+  headless Sway compositor using pixman. No owner display socket is inherited.
+  `--light catppuccin-latte` selects the private theme copy; `--compare
+  omarchy.network` adds the installed reference panel and geometry annotations.
+  The reference has an unavailable private network backend, so it never scans or
+  changes the owner's network. The comparison image is for human review, without
+  an automated claim that the popup looks first-party.
+- `qs-visual.sh --dry-run`: read-only tool diagnostics. `qs-icons.sh` / `qs-visual.sh
+  bar downloading`: all bar presentation profiles in dark/light. Bar profiles
+  derive from the frozen wire objects; they do not prove live engine transitions.
+
+Native popup captures require `sway` on PATH or `FBT_TEST_SWAY=/absolute/path/sway`.
+On this Arch machine, `python3 plugin/tests/prepare-headless.py --download` can
+extract packages into ignored `plugin/tests/target/headless-tools/` without sudo
+or a system install. It checks the SHA-256 values from the local pacman sync
+metadata before extraction. Normal tests never download tools automatically.
+A missing headless compositor fails; there is no fallback to the owner's display.
+
+Images and previous-image pixel differences go to `target/test-logs/visual/<date>/`.
+JSONL, daemon, compositor and QML logs go to `target/test-logs/<suite>/`.
+`daemon.py <debug-binary> --serve-fixture empty|paused|downloading` exposes the same
+real fixture as `FBTFIXTURE {runtime, root, state, row}` on stdout; close stdin to
+stop and reap all owned children. It never fabricates states for a screenshot.
+
+## Smoke probe (2026-10-19)
+
+| File | What it tests | Run | Last result |
+|---|---|---|---|
+| `smoke/probe-ui.qml` | Installed `qs.Ui.PanelHero` and `qs.Commons` imports via private symlinks | `FBT_BIN=<binary> plugin/tests/qs-smoke.sh` | PASS, Quickshell 0.3.2, revision 2b4501a282689792b62e94f3fb30d8f512324fe6 |
+| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | PASS on socket-polling fallback; live subscription restoration still needs the P1-08 server cap |
+
+The smoke runs offscreen and never uses an owner Wayland socket. It reads only
+`app.info` from an already running owner API socket before/after the test to check
+`clients.bar`; absent socket or changed instance is logged as a skip, and no owner
+daemon is started. The current pre-P1-11 binary lacks `status --quiet`, so readiness
+uses its equivalent read-only `status --json` until that flag appears. The owner
+probe likewise uses API 1 directly until the `api` CLI verb lands.
+
+## Dashboard and network boundary
+
+`plugin/tests/qs-dashboard.sh --binary <debug-binary>` runs the actual dashboard
+inside the private compositor, summons it with the installed `omarchy-shell`
+command pointed at the private config, types with `wtype`, and checks 50 native
+window create/destroy cycles. The installed registry verifies that only a bar
+layout reference enables the panel. The test host implements the panel-loader
+facade; this does not claim a run inside the owner's live host shell.
+
+Real-daemon service, smoke, dashboard and visual tests now enter private user,
+network and mount namespaces before creating cases. Only loopback exists; probes
+verify that IPv4/IPv6 have no external route. A private UDP DNS fixture answers
+A/AAAA with loopback and never forwards; its resolv.conf/hosts mounts affect only
+the private mount namespace. `private-net-test.py` covers the boundary, forged
+marker rejection, both DNS families and oversized-datagram rejection. Namespace
+creation failure is a test failure, with no owner-network fallback.
+
+This boundary is required: the P3-08 FD investigation found background DNS
+sockets in the older debug binary despite the engine's loopback configuration.
+Earlier captures/mutation tests exercised real local payloads, but their DNS was
+not fully contained. Requalified runs are retained with the Track C receipt.

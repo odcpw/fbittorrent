@@ -1,0 +1,5 @@
+# Legacy files over the 900-line ceiling; each may only shrink (scripts/lint-sizes.sh --baseline). Split them when a bead touches them.
+1360 src/main.rs
+1369 src/search.rs
+1079 src/shows.rs
+3702 src/tui/mod.rs
