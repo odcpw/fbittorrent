@@ -386,7 +386,7 @@ agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; 
 cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
-…/regression_tests/tui_smoke.sh                        # drives the TUI in tmux: list, files modal, prompt toggles, screens, help, quit
+python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
 …/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
 ```
 
