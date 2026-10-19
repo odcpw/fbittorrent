@@ -154,7 +154,7 @@ fn finish(i: Item, indexer: &Indexer) -> Option<SearchResult> {
         descr_link: i.comments,
         engine: indexer.name.clone(),
         imdb: String::new(),
-        pub_date: crate::qbt::parse_rfc2822(&i.date).max(0),
+        pub_date: crate::feed_date::parse_rfc2822(&i.date).max(0),
     };
     super::super::normalize::item(&row).validate().ok()?;
     Some(row)

@@ -44,18 +44,19 @@ pub fn catalogue() -> Vec<Entry> {
     ]
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
+/// VPN-bound when network_interface is set (see `crate::outbound`).
+fn agent() -> Result<crate::outbound::Http> {
+    crate::outbound::Http::new(ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
         .user_agent(UA)
         .http_status_as_error(false)
-        .build()
-        .into()
+        .build(), "Browse list")
 }
 
 pub(crate) fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T> {
     let target = request_url(url)?;
-    let mut resp = agent().get(&target).call().with_context(|| format!("GET {url}"))?;
+    let http = agent()?;
+    let mut resp = http.agent().get(&target).call().with_context(|| format!("GET {url}"))?;
     let code = resp.status().as_u16();
     if code != 200 { return Err(anyhow!("{url}: HTTP {code}")); }
     let body = resp.body_mut().with_config().limit(16 * 1024 * 1024).read_to_string()?;

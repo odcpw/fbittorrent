@@ -559,10 +559,11 @@ pub(crate) fn eztv_endpoint(query:&str)->String {
 }
 fn fetch_eztv_inner(imdb:&str,quality:&str,boundary:Option<i64>,complete_before:bool,cancelled:Option<&std::sync::atomic::AtomicBool>)->Result<EpisodeCheck> {
     let digits = imdb.trim_start_matches("tt");
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    // VPN-bound when network_interface is set (see `crate::outbound`).
+    let http = crate::outbound::Http::new(ureq::Agent::config_builder()
         .user_agent("fbittorrent/0.1 (show feed)")
-        .build()
-        .into();
+        .build(), "EZTV show check")?;
+    let agent = http.agent();
     fetch_pages(quality, boundary, complete_before, |page, remaining| {
         anyhow::ensure!(!cancelled.is_some_and(|c|c.load(Ordering::Acquire)),"show check cancelled");
         let url = eztv_endpoint(&format!("imdb_id={digits}&limit=100&page={page}"));

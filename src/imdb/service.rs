@@ -23,7 +23,9 @@ fn endpoint(url: &str) -> Result<String> {
 }
 
 pub(super) fn read_http(url: &str, timeout: u64, cap: u64) -> Result<Vec<u8>> {
-    let mut response = agent(timeout)
+    let http = agent(timeout)?;
+    let mut response = http
+        .agent()
         .get(endpoint(url)?)
         .call()
         .context("IMDb upstream request")?;
