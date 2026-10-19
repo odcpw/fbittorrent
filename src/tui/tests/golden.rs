@@ -71,11 +71,11 @@ fn assert_render(surface: &str, width: u16, height: u16) {
         "rss"=>&["RSS","Blender releases","Unread","Read","Sintel","Big.Buck.Bunny","Elephants.Dream"],
         "files"=>&["Files","FILE","SIZE","DONE","PRIO","Subtitles/English.srt","42%","include","skip"],
         "providers"=>&["Search providers","EZTV","YTS","The Pirate Bay","nova"],
-        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Download destination","Seed by default","Idle exit","Clipboard offers","Enter save","Esc cancel"],
-        "prompt"=>&["Add magnet link or URL","streaming automatic","seed:off","magnet:?xt=urn:btih:"],
+        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Download destination","Idle exit","Clipboard offers","Enter save","Esc cancel"],
+        "prompt"=>&["Add magnet link or URL","streaming automatic","magnet:?xt=urn:btih:"],
         "help"=>&["GLOBAL","Torrents","Search","Shows","RSS","Settings","Log"],
         "confirm"=>&["DELETE","AND ITS FILES? y/N"],
-        "details"=>&["[Overview]","Files","state","progress","speed","peers","upload","path","downloading","42.0%"],
+        "details"=>&["[Overview]","Files","state","progress","speed","peers","Upload: off","path","downloading","42.0%"],
         "poster"=>&["The Diplomat (2023)","TV series","7.9","Keri Russell"],
         "disk"=>&["! Disk","Not enough space","needed","free"],
         "clipboard"=>&["Add 'Sintel.2010.1080p'? (y/Esc)","(y) Add","(Esc) Dismiss"],
@@ -101,15 +101,16 @@ macro_rules! goldens {
 goldens!(peers,clipboard,torrents, search, shows, rss, files, providers, settings, prompt, help, confirm, done, details, poster, disk, pieces);
 
 #[test]
-fn done_row_offers_seed_instead_of_resume() {
+fn done_row_opens_upload_details_instead_of_resuming() {
     let mut app = fixture::app("torrents");
     app.on_torrents_key(KeyEvent::new(KeyCode::Down));
     let text = render(&app, 80, 24);
     let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
     println!("asserted footer: {footer}");
-    assert!(footer.contains("(u) Seed"));
+    assert!(footer.contains("(u) Upload details"));
     assert!(!footer.contains("(p) Resume"));
-    assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('u'))), Cmd::Task(..)));
+    let _=app.on_torrents_key(KeyEvent::new(KeyCode::Char('u')));
+    assert!(app.details.is_some() && !app.service_busy);
 }
 
 #[test]
@@ -226,4 +227,24 @@ fn shows_quality_key_and_independent_inbox_filters() {
     let _=app.apply_show_filters("read 720p");
     let rendered=render(&app,120,30);assert!(rendered.contains("read 720p"));
     let _=app.apply_show_filters("all 4k");assert!(app.show_controls.read==ReadFilter::Read);
+}
+#[test]
+fn add_and_seeding_controls_keep_new_downloads_off() {
+    let mut app=fixture::app("torrents");app.cfg.seed_by_default=true;
+    app.open_prompt(PromptKind::AddMagnet,"Add",false);
+    assert!(!app.prompt.as_ref().unwrap().add_flags.2);
+    assert!(!app.prompt.as_ref().unwrap().title().to_lowercase().contains("seed"));
+    let _=app.on_key(KeyEvent::new(KeyCode::F(4)));
+    assert!(!app.prompt.as_ref().unwrap().add_flags.2 && !render(&app,120,30).contains("F4"));
+    app.close_prompt();let _=app.on_key(KeyEvent::new(KeyCode::Char('u')));
+    assert!(app.details.is_some() && !app.service_busy,"the list opens Details without changing seed policy");
+    let hash=app.details.as_ref().unwrap().hash.clone();
+    let value=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines()
+        .map(|line|serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|line|line["frame"]["result"]["torrents"].is_array()).unwrap();
+    let mut row:crate::api::Torrent=serde_json::from_value(value["frame"]["result"]["torrents"][0].clone()).unwrap();
+    row.hash=crate::api::Hash::new(hash.clone()).unwrap();row.seed=false;
+    app.store.torrents.insert(hash,row);
+    assert!(matches!(app.on_key(KeyEvent::new(KeyCode::Char('u'))),Cmd::Task(..)) && app.service_busy,
+        "Details retains an explicit upload opt-in");
 }

@@ -2,7 +2,6 @@
 var fields=[
  {key:"max_active_downloads",label:"Active downloads",kind:"number"},
  {key:"save_path",label:"Download folder",kind:"text"},
- {key:"seed_by_default",label:"Seed new downloads by default",kind:"bool"},
  {key:"idle_exit_secs",label:"Idle exit (seconds;0 disables)",kind:"number"},
  {key:"peer_encryption",label:"Peer encryption",kind:"choice",options:["off","prefer","require"]},
  {key:"network_interface",label:"Network binding",kind:"interface"},

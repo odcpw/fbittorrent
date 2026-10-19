@@ -148,7 +148,7 @@ pub(crate) fn run(cfg:&Config,sub:&ShowsCmd,json_mode:bool,no_start:bool)->Resul
             let shows=source.shows()?;let show=select(&shows,show)?;let rows=source.releases(&show.imdb,false)?;let key=episode.to_uppercase();
             let row=rows.iter().find(|row|row.key==key).ok_or_else(||AppError::new(Code::NotFound,format!("{} has no episode {key}",show.title)))?;
             let owner=catalogue::write_owner(cfg,no_start,json_mode)?;
-            let call=api::Call::ShowsGrab{args:api::ShowGrabArgs{imdb:show.imdb.clone(),key:row.key.clone(),stage:None,seed:Some(cfg.seed_by_default),stopped:Some(false),save_path:cfg.save_path.clone(),files:None,category:cfg.category.clone()}};
+            let call=api::Call::ShowsGrab{args:api::ShowGrabArgs{imdb:show.imdb.clone(),key:row.key.clone(),stage:None,seed:Some(false),stopped:Some(false),save_path:cfg.save_path.clone(),files:None,category:cfg.category.clone()}};
             let added:api::AddResult=catalogue::typed(catalogue::success(&owner,&call,cfg.timeout_secs)?)?;
             let hash=added.hash.context("grab confirmation omitted hash")?;
             let mut value=json!({"ok":true,"action":"shows-grab","imdb":show.imdb,"show":show.title,"episode":row.key,"hash":hash,"name":row.title});

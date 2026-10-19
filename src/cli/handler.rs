@@ -1,11 +1,10 @@
 //! The desktop handler's confirmation is a deliberate UI action, never a hidden add.
 use crate::{
     agent::{AppError, Code},
-    api::client::Client,
     config::Config,
 };
-use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use anyhow::Result;
+use serde_json::{Value, json};
 
 pub(super) fn source(source: &str) -> Result<Value> {
     let local = crate::cli_sources::local_torrent_source(source)?;
@@ -27,59 +26,22 @@ fn dashboard_required() -> AppError {
 }
 
 pub(super) fn confirm(
-    client: &Client,
     cfg: &Config,
     input: &str,
     stopped: bool,
-    seed: bool,
     save: Option<String>,
     category: Option<String>,
 ) -> Result<Value> {
-    // Resolve installation and shell availability before the first mutation.
-    // Opening the window is part of this explicit confirmation request.
-    if !crate::backend::summon_dashboard(&json!({"view":"torrents"}))? {
+    // The shell owns staging and confirmation. Do not wait for a daemon or
+    // metadata before showing the source name and the Download action.
+    let source = source(input)?;
+    let route = json!({"view":"torrents","add":{"source":source,"origin":"handler",
+        "seed":false,"stopped":stopped,"save_path":save.or_else(||cfg.save_path.clone()),
+        "category":category.or_else(||cfg.category.clone())}});
+    if !crate::backend::summon_dashboard(&route)? {
         return Err(dashboard_required().into());
     }
-    let mut result = super::native::add(
-        client,
-        cfg,
-        input,
-        stopped,
-        seed,
-        save.clone(),
-        category.clone(),
-        "handler",
-        true,
-    )?;
-    let hash = result["hash"].as_str().context("staged add omitted hash")?;
-    let route = json!({"view":"torrents","hash":hash});
-    let summoned = crate::backend::summon_dashboard(&route);
-    if !matches!(summoned, Ok(true)) {
-        // If the shell disappeared between the two summons, remove only the
-        // stage created by this invocation. A duplicate belongs to its owner.
-        if result["duplicate"] != true {
-            let discarded = client
-                .call("torrents.discard", json!({"hash":hash}))
-                .context("dashboard unavailable; could not discard the new staged torrent")?;
-            if discarded["state"] == "pending" {
-                super::native::await_mutation(client, discarded)?;
-            }
-        }
-        return Err(summoned
-            .err()
-            .unwrap_or_else(|| dashboard_required().into()));
-    }
-    result["ok"] = json!(true);
-    result["action"] = json!("add");
-    result["confirmation_required"] = json!(true);
-    result["staged"] = json!(true);
-    result["count"] = json!(1);
-    result["hashes"] = if let Some(hash) = result["hash"].as_str() {
-        json!([hash])
-    } else {
-        json!([])
-    };
-    Ok(result)
+    Ok(json!({"ok":true,"action":"review","confirmation_required":true,"count":0}))
 }
 
 #[cfg(test)]

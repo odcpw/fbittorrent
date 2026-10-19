@@ -631,8 +631,8 @@ impl Bus {
                         ready_seen = true;
                         for row in &sample.rows {
                             let old = previous_rows.get(&row.hash.to_string());
-                            let event = if old.is_none()
-                                && (!restored_baseline
+                            let event = if !row.staged && old.is_none_or(|previous| previous.staged)
+                                && (old.is_some() || !restored_baseline
                                     || !self.initial_hashes.contains(&row.hash.to_string()))
                             {
                                 Some(

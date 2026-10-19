@@ -81,9 +81,11 @@ def main():
                     # is not the behavior under test.
                     for _ in range(7):
                         ui.keys(target,'s')
-                        if 'Sorted by size ↓' in ui.capture(target):break
-                    assert ui.assert_pane(target,'Sorted by size ↓')
-                    ui.keys(target,'S');assert ui.assert_pane(target,'Sorted by size ↑')
+                        if 'SIZE↓' in ui.capture(target):break
+                    assert ui.assert_pane(target,'SIZE↓')
+                    pane=ui.capture(target);case.check(pane.find('Owned.Result.2')<pane.find('Owned.Result.1'),'Search size sort uses actual numeric sizes',pane)
+                    ui.keys(target,'S');assert ui.assert_pane(target,'SIZE↑')
+                    pane=ui.capture(target);case.check(pane.find('Owned.Result.1')<pane.find('Owned.Result.2'),'Search reverse changes actual row order',pane)
                     ui.keys(target,'3');assert ui.assert_pane(target,'S01E01')
                     ui.keys(target,'s');ui.keys(target,'s');assert ui.assert_pane(target,'Sorted releases by size ↓')
                     pane=ui.capture(target);case.check(pane.find('S01E02')<pane.find('S01E01'),'release sort compares actual sizes in the narrow list',pane)
@@ -107,19 +109,18 @@ def main():
                     ui.keys(target,'F6',literal=False);assert ui.assert_pane(target,'Download settings')
                     for _ in range(9):ui.keys(target,'Down',literal=False)
                     ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False);ui.keys(target,str(destination));ui.keys(target,'Enter',literal=False)
-                    ui.keys(target,'Down',literal=False);ui.keys(target,'Right',literal=False)
                     ui.keys(target,'Down',literal=False);ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False);ui.keys(target,'300');ui.keys(target,'Enter',literal=False)
                     ui.keys(target,'Enter',literal=False)
                     def saved():
-                        s=c.call('app.settings.get')['result'];return s['save_path']==str(destination) and s['seed_by_default'] and s['idle_exit_secs']==300,json.dumps(s)
-                    assert h.wait_for(saved,'Enter commits destination seed default and idle exit through API')
+                        s=c.call('app.settings.get')['result'];return s['save_path']==str(destination) and not s['seed_by_default'] and s['idle_exit_secs']==300,json.dumps(s)
+                    assert h.wait_for(saved,'Enter commits destination and idle exit without changing upload opt-in')
                     ui.keys(target,'1')
                     h.stop_serve(p);assert ui.assert_pane(target,'fbittorrent stopped')
                     h.notify.close();p=h.start_serve(idle_exit_secs=300);h.receive_ready();h.wait_engine()
                     assert h.wait_for(lambda:(ui.clients()==1,ui.capture(target)),'the same terminal attaches to the replacement daemon')
                     with d.ApiConn(h) as fresh:
                         fresh.hello();settings=fresh.call('app.settings.get')['result'];shows=fresh.call('shows.list')['result']['shows']
-                        case.check(settings['save_path']==str(destination) and settings['seed_by_default'] and shows[0]['quality']=='2160p','settings and per-show quality survive a real daemon restart',json.dumps(dict(settings=settings,shows=shows)))
+                        case.check(settings['save_path']==str(destination) and not settings['seed_by_default'] and shows[0]['quality']=='2160p','settings and per-show quality survive a real daemon restart without opting into upload',json.dumps(dict(settings=settings,shows=shows)))
                         fresh.call('torrents.rename',dict(hash=item.info_hash,name='After restart'))
                         assert ui.assert_pane(target,'After restart')
                         fresh.call('torrents.rename',dict(hash=item.info_hash,name=''))

@@ -73,7 +73,7 @@ def exercise(ui,f):
     wait(lambda:((settings:=c.call('app.settings.get')['result'])['max_active_downloads']==original+1,json.dumps(settings)),'Settings saves through API v1')
     press('F6','Download settings',False);observe('reopened Settings shows the saved queue limit',lambda p:re.search(r'Simultaneous downloads\s+'+str(original+1),p))
     ui.press('Escape','close Settings',literal=False)
-    press('a','seed:off');ui.press(str(f.other.torrent),'type a second real file source');ui.press('Enter','start a second real download',literal=False)
+    press('a','streaming automatic');ui.press(str(f.other.torrent),'type a second real file source');ui.press('Enter','start a second real download',literal=False)
     wait(lambda:((rows:=f.rows()) and len(rows)==2 and all(r['state']=='downloading' and r.get('completed_bytes',0)>0 for r in rows),json.dumps(rows)),'two real downloads are active for the shutdown control',15)
     before=f.row()['completed_bytes'];ui.press('q','q detaches without stopping the owner',lambda p:ui.done.exists() and ui.done.read_text()=='0' and f.process.child.poll() is None)
     wait(lambda:((row:=f.row())['completed_bytes']>before,json.dumps(row)),'payload continues after detaching the terminal')

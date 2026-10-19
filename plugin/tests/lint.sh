@@ -23,12 +23,12 @@ for (const name of ['Glyphs', 'Formats', 'Palette']) {
 }
 vm.runInNewContext(source(process.argv[2]), model);
 const torrent = {state:'downloading', progress:0.42, dl_bps:2048, eta_s:65, seed:false};
-assert.equal(model.meta(torrent), '42% · 2.0 KB/s · 1 min · seed off');
+assert.equal(model.meta(torrent), '42% · 2.0 KB/s · 1 min');
 assert.equal(model.peerCount(torrent,true), '—/—');
 assert.equal(model.peerCount({...torrent,peers:7},false), '7 peers connected · seeds unknown');
 assert.equal(model.peerCount({...torrent,peers:7,seeds:1},true), '1/7');
 assert.equal(model.peerCount({...torrent,peers:0,seeds:0},true), '0/0');
-assert.equal(model.meta({state:'waiting_vpn',seed:false}), 'seed off');
+assert.equal(model.meta({state:'waiting_vpn',seed:false}), '');
 assert.equal(model.isDone({state:'downloading',progress:1}),false);
 console.log('Native widget formatting retains unknown observations and uses only real connected seed/peer counts.');
 JS

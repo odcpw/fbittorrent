@@ -111,7 +111,7 @@ FocusScope {
     if(text==="N"){if(current){activate(cursorHash);service.detailFlow.begin(cursorHash);Qt.callLater(function(){if(pane)pane.renameTitle()})}return true}
     if(text==="o"){if(current)service.openTarget(cursorHash);return true}
     if(text==="p" || event.key===Qt.Key_Space){if(current)service.toggleTorrent(current);return true}
-    if(text==="u"){if(current)service.toggleSeed(cursorHash);return true}
+    if(text==="u"){if(current)activate(cursorHash);return true}
     if(control && event.key===Qt.Key_A){selectVisible();return true}
     if(text==="U"){service.cleanupFlow.undo();return true}
     if(text==="d" || text==="x" || event.key===Qt.Key_Delete || text==="D"){confirmRemove(text==="D");return true}

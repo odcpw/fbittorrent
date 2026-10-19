@@ -177,7 +177,7 @@ impl TuiApp {
                     let token = format!("{imdb}:{}", e.key);
                     if self.service_busy{return Cmd::none();}
                     if !self.show_grabbing.insert(token) { return Cmd::none(); }
-                    return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":self.cfg.seed_by_default}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));
+                    return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":false}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));
                 }
             }
             actions::Intent::Imdb => if let Some(s) = self.release_show() {

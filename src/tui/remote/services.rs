@@ -116,7 +116,7 @@ impl TuiApp {
             args["read"] = json!(read);
         }
         if op == "rss.grab" {
-            args["seed"] = json!(self.cfg.seed_by_default);
+            args["seed"] = json!(false);
         }
         self.service_action(op, args, label)
     }

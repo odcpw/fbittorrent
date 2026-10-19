@@ -6,12 +6,11 @@ const LIMIT_NAMES: [&str; 4] = [
     "Turtle download limit",
     "Turtle upload limit",
 ];
-pub(super) const SETTINGS_ROWS: usize = 13;
-pub(super) const PORT_ROW: usize = 8;
+pub(super) const SETTINGS_ROWS: usize = 12;
 pub(super) const DESTINATION_ROW: usize = 9;
-pub(super) const SEED_ROW: usize = 10;
-pub(super) const IDLE_ROW: usize = 11;
-pub(super) const CLIPBOARD_ROW: usize = 12;
+pub(super) const IDLE_ROW: usize = 10;
+pub(super) const CLIPBOARD_ROW: usize = 11;
+pub(super) const PORT_ROW: usize = 8;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
     match index {
         0 => cfg.download_limit_bps,
@@ -31,7 +30,6 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     let mut patch = serde_json::Map::new();
     for key in [
         "save_path",
-        "seed_by_default",
         "idle_exit_secs",
         "clipboard_watch",
         "peer_port",

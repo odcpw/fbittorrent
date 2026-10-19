@@ -47,5 +47,5 @@ fn rss_enter_opens_a_selected_feed_while_its_first_snapshot_is_pending() {
 #[test]
 fn add_prompt_explains_local_torrent_paths() {
     let mut app=fixture::app("torrents");app.on_key(KeyEvent::new(KeyCode::Char('a')));
-    let text=golden::render(&app,80,24);assert!(text.contains(".torrent path"),"{text}");assert!(text.contains("seed:off"),"{text}");
+    let text=golden::render(&app,80,24);assert!(text.contains(".torrent path"),"{text}");assert!(text.contains("streaming automatic"),"{text}");assert!(!text.contains("F4"),"upload opt-in belongs in Details: {text}");
 }

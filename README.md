@@ -568,7 +568,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:details` | Download cap… | `c` | `c` | — |  |
 | `modal:details` | Open | `o` | — | — |  |
 | `modal:details` | Pause/resume | `p` | — | — |  |
-| `modal:details` | Seed | `u` | — | — |  |
+| `modal:details` | Upload on/off | `u` | `u` | — |  |
 | `modal:details` | Remove | `d` | — | — |  |
 | `modal:details` | Delete files | `D` | — | — |  |
 | `modal:details` | IMDb | `i` | — | — |  |
@@ -601,7 +601,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Details | `Enter` | `Enter` | — |  |
 | `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
 | `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
-| `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
+| `screen:torrents` | Upload details | `u` | `u` | `u` |  |
 | `screen:torrents` | Remove, keep files | `d`, `x`, `Delete` | `d`, `x`, `Delete` | `d`, `x`, `Delete` |  |
 | `screen:torrents` | Delete with files | `D` | `D` | — |  |
 | `screen:torrents` | IMDb | `i` | `i` | — |  |
@@ -705,7 +705,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | Remove | `y` | `y` | `y` |  |
 | `prompt` | Cancel | `Esc` | `Esc` | `Esc` |  |
 | `prompt` | Submit | `Enter` | `Enter` | — |  |
-| `prompt` | Seed on/off | `F4` | — | — |  |
 | `global` | Card | `v` | — | — |  |
 | `modal:poster` | Back | `Esc`, `v` | — | — |  |
 | `modal:poster` | IMDb | `i` | — | — |  |

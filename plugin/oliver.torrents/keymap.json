@@ -540,13 +540,15 @@
     {
       "id": "details.seed",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "u"
+        ],
         "popup": null,
         "tui": [
           "u"
         ]
       },
-      "label": "Seed",
+      "label": "Upload on/off",
       "scope": "modal:details"
     },
     {
@@ -999,7 +1001,7 @@
           "u"
         ]
       },
-      "label": "Seed on/off",
+      "label": "Upload details",
       "scope": "screen:torrents"
     },
     {
@@ -2468,18 +2470,6 @@
         ]
       },
       "label": "Submit",
-      "scope": "prompt"
-    },
-    {
-      "id": "prompt.seed",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F4"
-        ]
-      },
-      "label": "Seed on/off",
       "scope": "prompt"
     },
     {

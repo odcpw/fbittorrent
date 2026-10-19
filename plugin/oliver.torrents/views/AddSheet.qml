@@ -12,9 +12,9 @@ FocusScope {
   readonly property var model:{var revision=service.addRevision;return flow.snapshot()}
   property string lastPhase:""
   property bool choosingFolder:false
-  function field(){if(choosingFolder)return "picker";if(seedToggle.activeFocus)return "seed";if(destination.activeFocus)return "destination";if(choose.activeFocus)return "choose";if(cancel.activeFocus)return "cancel";return "sheet"}
+  function field(){if(choosingFolder)return "picker";if(destination.activeFocus)return "destination";if(choose.activeFocus)return "choose";if(cancel.activeFocus)return "cancel";return "sheet"}
   function nextFocus(direction){
-    var items=[sourceInput,fileList,seedToggle,destination,choose,cancel,keep,download].filter(function(item){return item.visible && item.enabled})
+    var items=[sourceInput,fileList,destination,choose,cancel,keep,download].filter(function(item){return item.visible && item.enabled})
     var index=items.findIndex(function(item){return item.activeFocus})
     if(items.length)items[(index+direction+items.length)%items.length].forceActiveFocus()
     changed()
@@ -60,16 +60,10 @@ FocusScope {
       Text {visible:root.model.name!=="";Layout.fillWidth:true;textFormat:Text.PlainText;text:(root.model.duplicate ? "Already in your list: " : "")+root.model.name;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;wrapMode:Text.Wrap;maximumLineCount:3;elide:Text.ElideRight;HoverHandler {id:nameHover} Components.FullTextTip {visible:nameHover.hovered;text:parent.text}}
       Text {
         Layout.fillWidth:true;textFormat:Text.PlainText;wrapMode:Text.Wrap
-        text:root.model.phase==="metadata_timeout" ? "No peers answered yet." : root.model.phase==="preview" ? "Metadata will be fetched after Download." : root.model.phase==="staging" || root.model.phase==="resolving" ? "Resolving metadata… "+Math.floor(root.model.elapsed_s/60)+":"+String(root.model.elapsed_s%60).padStart(2,"0") : root.model.phase==="committing" ? "Adding download…" : root.model.phase==="discarding" || root.model.phase==="cancel_wait" ? "Discarding…" : root.model.size!==undefined ? Model.size(root.model.size,false)+" · "+root.model.files.length+" files" : ""
+        text:root.model.phase==="metadata_timeout" ? "No peers answered yet." : root.model.phase==="preview" ? "Metadata will be fetched after Download." : ["connecting","staging","resolving","files_loading"].indexOf(root.model.phase)>=0 ? "Fetching file list…" : root.model.phase==="committing" ? "Adding download…" : root.model.phase==="discarding" || root.model.phase==="cancel_wait" ? "Discarding…" : root.model.size!==undefined ? Model.size(root.model.size,false)+" · "+root.model.files.length+" files" : ""
         color:Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall
       }
       Components.AddFiles {id:fileList;visible:root.model.files.length>0;Layout.fillWidth:true;Layout.preferredHeight:Math.min(implicitHeight,root.model.files.length*Commons.Style.spacing.controlHeight);flow:root.flow;sheet:root.model}
-      RowLayout {
-        visible:!root.model.duplicate && root.model.phase!=="input";Layout.fillWidth:true;spacing:Commons.Style.spacing.lg
-        Text {textFormat:Text.PlainText;text:"Seeding";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-        Ui.ToggleSwitch {id:seedToggle;activeFocusOnTab:true;hasCursor:activeFocus;Keys.onSpacePressed:root.flow.seed(!root.model.seed);checked:root.model.seed;busy:root.model.busy;onToggled:root.flow.seed(!root.model.seed)}
-        Text {Layout.fillWidth:true;textFormat:Text.PlainText;text:root.model.seed ? "Continues seeding when complete" : "Upload capped at 32 KiB/s, stops when complete";wrapMode:Text.Wrap;color:Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall}
-      }
       RowLayout {
         visible:!root.model.duplicate && root.model.phase!=="input";Layout.fillWidth:true
         Text {textFormat:Text.PlainText;text:"Save to";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
@@ -89,7 +83,7 @@ FocusScope {
         Ui.Button {id:cancel;text:root.model.duplicate ? "Close" : "Discard (Esc)";focusable:true;bordered:true;enabled:root.model.phase!=="committing" && root.model.phase!=="discarding";onClicked:root.flow.cancel()}
         Item {Layout.fillWidth:true}
         Ui.Button {id:keep;visible:root.model.phase==="metadata_timeout";text:"Keep paused";focusable:true;bordered:true;onClicked:root.flow.keep()}
-        Ui.Button {id:download;text:root.model.phase==="error" ? "Review again" : root.model.phase==="input" ? "Review" : root.model.duplicate ? "Open list" : root.model.stopped ? "Add paused (Enter)" : "Download (Enter)";visible:root.model.phase!=="metadata_timeout";enabled:["input","ready","preview","duplicate","error"].indexOf(root.model.phase)>=0 && (["ready","preview"].indexOf(root.model.phase)<0 || root.model.destinationReady);focusable:true;bordered:true;onClicked:if(root.model.phase==="error")root.flow.retry();else if(root.model.phase==="input")root.flow.review(sourceInput.text);else root.flow.commit()}
+        Ui.Button {id:download;text:root.model.commitRequested ? "Starting download…" : root.model.phase==="error" ? "Review again" : root.model.phase==="input" ? "Review" : root.model.duplicate ? "Open list" : root.model.stopped ? "Add paused (Enter)" : "Download (Enter)";enabled:root.model.canDownload || ["input","duplicate","error"].indexOf(root.model.phase)>=0;focusable:true;bordered:true;onClicked:if(root.model.phase==="error")root.flow.retry();else if(root.model.phase==="input")root.flow.review(sourceInput.text);else root.flow.commit()}
       }
     }
     Loader {

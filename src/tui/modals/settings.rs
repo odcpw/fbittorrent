@@ -82,7 +82,6 @@ impl TuiApp {
                         modal.cfg.network_interface = modal.connections[(index + if forward { 1 } else { count - 1 }) % count].clone();
                     }
                     3 => modal.cfg.reduce_motion = !modal.cfg.reduce_motion,
-                    settings_fields::SEED_ROW=>modal.cfg.seed_by_default=!modal.cfg.seed_by_default,
                     settings_fields::CLIPBOARD_ROW=>modal.cfg.clipboard_watch=!modal.cfg.clipboard_watch,
                     _=>{},
                 }
@@ -113,7 +112,6 @@ impl TuiApp {
                 3=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
                 settings_fields::PORT_ROW=>format!("Peer port                {}",if modal.cfg.peer_port==0{"Automatic (0)".into()}else{modal.cfg.peer_port.to_string()}),
                 settings_fields::DESTINATION_ROW=>format!("Download destination     {}",modal.cfg.save_path.as_deref().unwrap_or("Downloads (default)")),
-                settings_fields::SEED_ROW=>format!("Seed by default          {}",if modal.cfg.seed_by_default {"On"}else{"Off"}),
                 settings_fields::IDLE_ROW=>format!("Idle exit                {}",if modal.cfg.idle_exit_secs==0 {"Disabled (0)".into()}else{format!("{} seconds",modal.cfg.idle_exit_secs)}),
                 settings_fields::CLIPBOARD_ROW=>format!("Clipboard offers         {}",if modal.cfg.clipboard_watch {"On"}else{"Off"}),
                 _=>settings_fields::limit_label(&modal.cfg,i-4),

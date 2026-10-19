@@ -23,7 +23,7 @@ def add(ui,fixture,source):
     def contains(key,text,literal=True):
         if not ui.contains(key,text,literal=literal):raise RuntimeError('TUI source step failed: '+text)
     if source in ('magnet','file'):
-        contains('a','seed:off')
+        contains('a','streaming automatic')
         ui.press(fixture.torrent.magnet if source=='magnet' else str(fixture.torrent.torrent),'type a real '+source+' source')
         ui.press('Enter','submit the source to the daemon',literal=False)
     elif source=='search':
