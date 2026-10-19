@@ -90,7 +90,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
                     index: i as i64, name: name.into(), size: 268_435_456,
                     progress: 0.42, progress_known: true, priority: if i == 2 { 0 } else { 1 },
                 }).collect(),
-            list: selected_list(), loading: false, error: String::new(),
+            list: selected_list(), loading: false, saving:false, error: String::new(),
         }),
         "providers" => {
             let _ = app.set_screen(Screen::Search);

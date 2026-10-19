@@ -646,7 +646,7 @@
     #[test]
     fn native_controls_do_not_offer_unsupported_priorities_or_toggles() {
         let mut app = app();
-        app.files = Some(FilesModal { hash: "hash".into(), name: "Torrent".into(), files: vec![TorrentFile { index: 0, name: "File".into(), priority: 1, ..Default::default() }], list: RefCell::new(ListState::default()), loading: false, error: String::new() });
+        app.files = Some(FilesModal { hash: "hash".into(), name: "Torrent".into(), files: vec![TorrentFile { index: 0, name: "File".into(), priority: 1, ..Default::default() }], list: RefCell::new(ListState::default()), loading: false, saving:false,error: String::new() });
         app.files.as_ref().unwrap().list.borrow_mut().select(Some(0));
         assert!(matches!(app.on_files_key(KeyEvent::new(KeyCode::Char('2'))), Cmd::None));
         assert!(matches!(app.on_files_key(KeyEvent::new(KeyCode::Char('3'))), Cmd::None));

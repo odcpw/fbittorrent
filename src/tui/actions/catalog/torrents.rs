@@ -18,7 +18,7 @@ pub(super) const ACTIONS: &[Action] = &[
         40,
         |_| true,
         Some(|a| {
-            a.open_prompt(PromptKind::AddMagnet, "Add magnet / URL", false);
+            a.open_prompt(PromptKind::AddMagnet, "Add magnet / URL / .torrent path", false);
             Cmd::none()
         }),
         TDP,
