@@ -106,8 +106,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |a| a.cfg.native(),
         Some(|a| {
-            a.open_settings();
-            Cmd::none()
+            a.open_settings()
         }),
         TD,
         Some(&[KeyChord::plain(KeyCode::Char(','))]),

@@ -17,9 +17,9 @@
             let yes = matches!(code, KeyCode::Char('y'));
             assert!(app.presence.is_none(), "confirmation key {code:?} must not open an owner connection");
             if unfollow {
-                assert!(matches!(command, Cmd::None));
-                assert_eq!(app.shows.shows.len(), if yes { 1 } else { 2 });
-                assert_eq!(app.status.starts_with("unfollowed"), yes);
+                assert_eq!(matches!(command, Cmd::Task(..)),yes,"only y dispatches the daemon intent");
+                assert_eq!(app.shows.shows.len(),2,"unfollow acknowledgement cannot remove a confirmed row");
+                assert!(!app.status.starts_with("unfollowed"),"success waits for the daemon");
             } else {
                 assert_eq!(matches!(command, Cmd::Task(..)), yes, "key {code:?}");
                 assert_eq!(app.torrents.len(), 1);
@@ -45,7 +45,7 @@
 
     #[test]
     fn destructive_unfollow_requires_y() {
-        // Unfollow persists synchronously. Run this unit case in a child with
+        // Keep this destructive-key control in a child with
         // private XDG roots rather than mutating process-wide env in parallel.
         if std::env::var_os("FBT_P013_UNFOLLOW_CHILD").is_none() {
             let root = std::env::temp_dir().join(format!("fbt-p013-unfollow-{}", std::process::id()));
@@ -105,7 +105,7 @@
     }
 
     fn feed(articles: Vec<crate::qbt::RssArticle>) -> RssFeed {
-        RssFeed { name: "Example feed".into(), title: "Example feed".into(), articles, ..Default::default() }
+        RssFeed { uid:"fixture-feed".into(),name: "Example feed".into(), title: "Example feed".into(), articles, ..Default::default() }
     }
 
     fn render(app: &TuiApp, width: u16, height: u16) -> String {
@@ -619,21 +619,23 @@
     }
 
     #[test]
-    fn rss_initial_check_and_download_dispatch_only_once() {
+    fn rss_refresh_and_download_dispatch_only_once() {
         let mut app = app();
-        app.rss_initial_refresh_pending = true;
-        assert!(matches!(app.update(Msg::Rss { revision: 0, result: Ok(vec![feed(vec![article("item", "FeedItemAlpha")])]) }), Cmd::Task(..)));
+        let feed:crate::api::Feed=serde_json::from_value(serde_json::json!({"id":"fixture-feed","name":"Example feed","url":"http://127.0.0.1/feed","unread":1,"loading":false})).unwrap();
+        let item:crate::api::FeedItem=serde_json::from_value(serde_json::json!({"id":"item","title":"FeedItemAlpha","read":false,"grabbed":false})).unwrap();
+        app.store.rss_feeds.insert(feed.id.clone(),feed);
+        app.store.rss_items.insert("fixture-feed".into(),[(item.id.clone(),item)].into());
+        app.sync_native_feeds();
+        assert!(matches!(app.refresh_rss(),Cmd::Task(..)));
         assert!(app.rss_busy);
-        assert!(!app.rss_initial_refresh_pending);
         assert!(matches!(app.refresh_rss(), Cmd::None));
-        let revision = app.rss_revision;
-        app.update(Msg::RssAction { revision, label: "checked".into(), result: Ok(app.feeds.clone()), error: None });
+        app.service_done(None,"rss.refresh",serde_json::json!({}),"checked".into(),Ok(serde_json::json!({"state":"done"})));
         assert!(!app.rss_busy);
         app.on_rss_key(KeyEvent::new(KeyCode::Right));
         assert!(!app.feeds[0].articles[0].is_read);
         assert!(matches!(app.on_rss_key(KeyEvent::new(KeyCode::Enter)), Cmd::Task(..)));
         assert!(matches!(app.on_rss_key(KeyEvent::new(KeyCode::Enter)), Cmd::None));
-        assert!(!app.feeds[0].articles[0].is_read);
+        assert!(!app.feeds[0].articles[0].is_read,"grab intent cannot manufacture the daemon read flag");
     }
 
     #[test]

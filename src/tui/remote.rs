@@ -1,6 +1,8 @@
 //! Available API read operations; one existing presence connection owns transport.
 use super::*;
 mod client;
+mod services;
+pub(super) mod topics;
 pub(super) mod search;
 pub(super) mod imdb;
 mod metadata;

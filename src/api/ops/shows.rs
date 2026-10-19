@@ -55,7 +55,8 @@ pub fn dispatch(daemon:&Daemon,call:&Call)->ApiResult<Reply>{
         },
         Call::ShowsGrab {args}=>{
             let _edit=daemon.shows.edit.lock().unwrap();let mut all=Shows::load().map_err(failure)?;let e=episode(&all,&args.imdb,&args.key)?;
-            let add=serde_json::from_value(json!({"source":{"magnet":e.magnet},"seed":args.seed,"stopped":args.stopped,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"shows"})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
+            let source=if e.magnet.starts_with("http://")||e.magnet.starts_with("https://"){AddSource::Url(e.magnet.clone())}else{AddSource::Magnet(e.magnet.clone())};
+            let add=serde_json::from_value(json!({"source":source,"seed":args.seed,"stopped":args.stopped,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"shows"})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
             let Reply::TorrentsAdd(added)=super::torrents::dispatch(daemon,&Call::TorrentsAdd {args:add})? else{unreachable!()};
             all.get_mut(&args.imdb).unwrap().mark_grabbed(&e.key,&e.magnet);all.save().map_err(failure)?;Reply::ShowsGrab(added)
         },

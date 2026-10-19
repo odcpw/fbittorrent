@@ -4945,6 +4945,8 @@ from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
 CASES.update((function.__name__, function) for function in RESPONSIVE_CASES)
+from daemon_tui_services import CASES as TUI_SERVICE_CASES
+CASES.update((function.__name__,function) for function in TUI_SERVICE_CASES)
 from daemon_legacy import CASES as LEGACY_CASES
 CASES.update((function.__name__, function) for function in LEGACY_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",

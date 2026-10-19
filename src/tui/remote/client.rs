@@ -17,7 +17,7 @@ impl ScreenClient {
         }
     }
     pub fn login(&self) -> Result<()> {
-        self.local.login()
+        if self.cfg.native(){Ok(())}else{self.local.login()}
     }
     fn mutate(&self, op: &'static str, args: Value) -> Result<Value> {
         let reply = self
