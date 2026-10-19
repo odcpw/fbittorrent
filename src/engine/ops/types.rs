@@ -36,6 +36,7 @@ pub struct AddRequest {
     pub stopped: bool,
     pub category: String,
     pub tags: String,
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +96,8 @@ pub enum EngineOp {
         hashes: HashSelection,
         files: bool,
     },
+    RemoveKeep { hashes: HashSelection },
+    RestoreUndo { hash: String },
     FilePriority {
         hash: String,
         ids: Vec<usize>,
@@ -262,6 +265,7 @@ impl TorrentDetails {
 
 #[derive(Debug)]
 pub enum EngineResult {
+    RemovedUndo { undo_until: u64 },
     QueuePosition(u64),
     Recheck(Arc<super::super::recheck::Batch>),
     Acknowledged,
@@ -280,6 +284,7 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
+            Self::RemovedUndo { .. } => bail!("undo removal has no legacy route"),
             Self::QueuePosition(_) => bail!("queue movement has no legacy route"),
             Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),

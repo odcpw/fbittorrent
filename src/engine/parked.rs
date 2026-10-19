@@ -44,6 +44,7 @@ pub struct ParkedLedger {
     directory: PathBuf,
     lifecycle: Lifecycle,
     generation: Arc<LedgerGeneration>,
+    undo: Arc<undo::History>,
 }
 impl ParkedLedger {
     pub fn new(directory: PathBuf, lifecycle: Lifecycle) -> Self {
@@ -51,13 +52,17 @@ impl ParkedLedger {
             directory,
             lifecycle,
             generation: Arc::default(),
+            undo: Arc::default(),
         }
     }
+    pub fn with_undo(mut self, history: Arc<undo::History>) -> Self { self.undo=history; self }
     pub fn ledger_generation(&self) -> Arc<LedgerGeneration> {
         self.generation.clone()
     }
     pub fn execute(&self, op: EngineOp) -> Result<EngineResult> {
         op.validate()?;
+        let _undo_guard = matches!(&op, EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. })
+            .then(|| self.undo.transaction.lock().unwrap());
         let _guard = PARKED_LEDGER_LOCK
             .lock()
             .map_err(|_| anyhow!("saved torrent lock is unavailable"))?;
@@ -97,13 +102,14 @@ impl ParkedLedger {
             | EngineOp::Stop { .. }
             | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
             // Typed API additions save intent without constructing a session.
-            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } => {}
+            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } | EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. } => {}
             _ => bail!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ),
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if let Some(result) = undo::parked(&self.undo, &self.directory, &mut ledger, &op) { return result; }
         if let EngineOp::AddMagnet(options) | EngineOp::AddSelected { options, .. } = &op {
             let cfg = Config::load()?;
             let folder = cfg.save_path.map(PathBuf::from).unwrap_or_else(|| {
@@ -163,6 +169,7 @@ impl ParkedLedger {
                 let mut queue_position=0;
                 let mut rows=ledger.records.iter().map(|record| {
                     let mut view=parked_view(record,&self.directory)?;
+                    view.origin=Some(record.origin.clone());
                     view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
                     Ok(view)
                 }).collect::<Result<Vec<_>>>()?;

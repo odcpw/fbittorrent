@@ -49,6 +49,10 @@ impl EngineDispatcher {
         if self.inner.stopping.load(Ordering::Acquire) {
             bail!("native engine is closing");
         }
+        let undo = self.inner.undo.lock().unwrap().clone();
+        // The guard stays on the caller's stack, never across a Send future.
+        let _undo_guard = matches!(&op, EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. })
+            .then(|| undo.transaction.lock().unwrap());
         let cx = self.runtime.cx();
         self.runtime.block_on(async {
             rqbit_runtime::select! {
@@ -58,6 +62,11 @@ impl EngineDispatcher {
         })
     }
     async fn execute_async(&self, cx: &Cx, op: EngineOp) -> Result<EngineResult> {
+        match &op {
+            EngineOp::RemoveKeep { hashes } => return self.remove_keep(cx, hashes).await,
+            EngineOp::RestoreUndo { hash } => return self.restore_undo(cx, hash).await,
+            _ => {}
+        }
         if let EngineOp::RecheckBatch { hashes } = &op {
             return Ok(EngineResult::Recheck(self.inner.begin_recheck(cx, hashes.clone()).await?));
         }
@@ -218,7 +227,7 @@ impl EngineDispatcher {
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, upload_limit: options.upload_limit,
-                    ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(),
+                    ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
                 ledger.records.push(record.clone());
@@ -504,6 +513,7 @@ impl EngineDispatcher {
             ratio_limit: options.ratio_limit,
             category: options.category.clone(),
             tags: options.tags.clone(),
+            origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
             added_on: now(),
             completion_on: 0,
             paused,

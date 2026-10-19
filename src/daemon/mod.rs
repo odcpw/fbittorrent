@@ -29,6 +29,7 @@ pub struct Daemon {
     pub idle_exit_secs: AtomicU64,
     pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
+    pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
@@ -226,7 +227,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         daemon.replace(Slot::Parked(engine::ParkedLedger::new(
             crate::config::data_dir().join("engine"),
             daemon.lifecycle.clone(),
-        )))?;
+        ).with_undo(daemon.undo.clone())))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface;
@@ -239,6 +240,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
                 }
                 Err(error) => return Err(error),
             };
+        engine.dispatcher().attach_undo(daemon.undo.clone());
         eprintln!(
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
@@ -258,6 +260,7 @@ fn supervise(
     notify.send("STATUS=Engine ready")?;
     loop {
         let request = daemon.lifecycle.wait(Duration::from_secs(1));
+        daemon.undo.expire(&crate::config::data_dir().join("engine"));
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -319,6 +322,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         settings: Default::default(),
         no_notify,
         imdb: Default::default(),
+        undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });

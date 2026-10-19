@@ -1381,7 +1381,11 @@ def api_torrent_operations(binary, systemd):
         client.call("torrents.get", dict(hash="f" * 40), error="not_found")
         # P6-05 implements the reserved force flag; false is ordinary start.
         client.call("torrents.start", dict(hashes=[fixture.info_hash], force=False))
-        client.call("torrents.add", dict(source=dict(restore=fixture.info_hash)), error="invalid_args")
+        before_restore=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        duplicate_restore=client.call("torrents.add",dict(source=dict(restore=fixture.info_hash)))["result"]
+        after_restore=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(duplicate_restore["duplicate"] and all(before_restore.get(key)==after_restore.get(key) for key in ("seed","origin","save_path","upload_policy")),
+                   "P6-08 restore of an existing row is an idempotent duplicate preserving policy",json.dumps(dict(reply=duplicate_restore,before=before_restore,after=after_restore)))
         client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
         link = sandbox.root / "symlink.torrent"
         link.symlink_to(fixture.torrent)
@@ -4100,8 +4104,163 @@ def queue_parked_persists(binary,systemd):
         case.check(client.call("app.info")["result"]["instance"]==hello["instance"],
                    "parked queue changes retain daemon identity",hello["instance"])
 
+def undo_rows(client):
+    return client.call("torrents.list",{})["result"]["torrents"]
+
+
+def origin_persists(binary,systemd):
+    with Case("daemon","origin_persists") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve();h.receive_ready();h.wait_engine()
+        origins=["manual","search","rss","shows","clipboard","handler","agent","future-origin,exact"]
+        try:
+            with ApiConn(h) as client:
+                client.hello()
+                for i,origin in enumerate(origins,1):
+                    client.call("torrents.add",dict(source=dict(magnet=f"magnet:?xt=urn:btih:{i:040x}"),stopped=True,origin=origin))
+                for bucket,expected in [("manual",set(origins)-{"search","rss","shows"}),("search",{"search"}),("rss",{"rss"}),("shows",{"shows"}),("future-origin,exact",{"future-origin,exact"})]:
+                    rows=client.call("torrents.list",dict(origin=[bucket]))["result"]["torrents"]
+                    case.check({r["origin"] for r in rows}==expected,"origin bucket retains the declared grouping and exact open string",json.dumps(dict(bucket=bucket,rows=rows)))
+                before={r["hash"]:r["origin"] for r in undo_rows(client)}
+            h.stop_serve(process);h.notify.close()
+            process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();after={r["hash"]:r["origin"] for r in undo_rows(client)}
+                case.check(after==before and len(after)==8,"all origin values survive a full daemon restart",json.dumps(after))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+
+def undo_restore(binary,systemd):
+    with api_owned("undo_restore",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();fixture=recheck_local_fixture(sandbox,size=64*fixtures.MIB)
+        checksum=hashlib.sha256(fixture.files[0].read_bytes()).hexdigest()
+        client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),origin="shows"))
+        h.wait_for(lambda: ((r:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and r.get("completed_at",0)>0,json.dumps(r)),"local fixture finishes and saves completion")
+        reply=client.call("torrents.remove",dict(hashes=[fixture.info_hash],delete_files=False))["result"]
+        directory=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine"
+        names=sorted(p.name for p in (directory/"undo").iterdir())
+        case.check(reply["state"]=="done" and 9<=reply["undo_until"]-time.time()<=10.1
+                   and names==[fixture.info_hash+".json",fixture.info_hash+".torrent"] and not undo_rows(client),
+                   "keep-files remove returns one ten-second deadline and caches record plus metainfo",json.dumps(dict(reply=reply,cache=names)))
+        client.call("torrents.get",dict(hash=fixture.info_hash),error="not_found")
+        restored=client.call("torrents.add",dict(source=dict(restore=fixture.info_hash)))["result"]
+        states=[]
+        def done():
+            row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"];states.append(row)
+            return row["state"]=="done" and row["checked"],json.dumps(row)
+        h.wait_for(done,"undo performs a fresh check and reaches done",timeout=10)
+        transfer=client.call("transfer.info")["result"]
+        case.check(not restored["duplicate"] and states[-1]["origin"]=="shows"
+                   and hashlib.sha256(fixture.files[0].read_bytes()).hexdigest()==checksum
+                   and transfer["session_downloaded"]==0,
+                   "undo preserves origin and exact payload without receiving any download bytes",json.dumps(dict(restored=restored,states=states,transfer=transfer,sha256=checksum)))
+        duplicate=client.call("torrents.add",dict(source=dict(restore=fixture.info_hash)))["result"]
+        case.check(duplicate["duplicate"] and len(undo_rows(client))==1,"repeated restore is an idempotent duplicate",json.dumps(duplicate))
+
+
+def bulk_remove_mixed_sizes(binary,systemd):
+    with api_owned("bulk_remove_mixed_sizes",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();hashes=[]
+        for i,size in enumerate([16384,32768]):
+            fixture=recheck_local_fixture(sandbox,name=f"bulk-{i}.bin",size=size)
+            hashes.append(fixture.info_hash)
+            client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),stopped=True,origin="rss"))
+        for digit,origin in [("e","rss"),("f","rss"),("d","search")]:
+            client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+digit*40),stopped=True,origin=origin))
+        rows=client.call("torrents.list",dict(origin=["rss"]))["result"]["torrents"]
+        known=sum(row.get("size",0) for row in rows);unknown=sum("size" not in row for row in rows)
+        case.check(len(rows)==4 and known==49152 and unknown==2,
+                   "filtered API set supplies truthful count, known size and unknown count for UI confirmation",json.dumps(dict(rows=rows,count=len(rows),size=known,unknown=unknown)))
+        reply=client.call("torrents.remove",dict(hashes=[r["hash"] for r in rows],delete_files=False))["result"]
+        remaining=undo_rows(client)
+        case.check(reply["undo_until"]>time.time() and len(remaining)==1 and remaining[0]["origin"]=="search",
+                   "one keep-files batch removes exactly the filtered set",json.dumps(dict(reply=reply,remaining=remaining)))
+        for row in rows:client.call("torrents.add",dict(source=dict(restore=row["hash"])))
+        saved=json.loads((Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json").read_text())
+        case.check([r["hash"] for r in saved["records"]]==["d"*40]+[r["hash"] for r in rows],
+                   "restored batch appends behind survivors in requested order",json.dumps(saved))
+        case.step("record UI ownership","tracks C/D prove the count/size y/N dialog and toast").ok("Daemon filtered set and one batch request proven; confirmation presentation is deferred to tracks C/D.")
+
+
+def undo_expired(binary,systemd):
+    with api_owned("undo_expired",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client:
+        client.hello();hash_="e"*40
+        client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+hash_),stopped=True))
+        reply=client.call("torrents.remove",dict(hashes=[hash_],delete_files=False))["result"]
+        step=case.step("wait past undo deadline","restore fails after the ten-second monotonic window")
+        time.sleep(11)
+        result=client.call("torrents.add",dict(source=dict(restore=hash_)),error="invalid_state")
+        step.close(result["error"]["retryable"] is False and result["error"]["details"]["reason"]=="undo_expired",json.dumps(dict(reply=reply,result=result)))
+        cache=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/undo"
+        h.wait_for(lambda: (not list(cache.iterdir()),str(list(cache.iterdir()))),"expired cache is collected by daemon maintenance")
+
+
+def undo_owner_lifetime(binary,systemd):
+    with Case("daemon","undo_owner_lifetime") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve();h.receive_ready();h.wait_engine();hash_="b"*40
+        try:
+            with ApiConn(h) as client:
+                client.hello();before=client.call("app.info")["result"]
+                client.call("torrents.add",dict(source=dict(magnet="magnet:?xt=urn:btih:"+hash_),stopped=True))
+                client.call("torrents.remove",dict(hashes=[hash_],delete_files=False))
+                client.call("app.restart",dict(scope="engine"),ref="undo-restart-slot")
+                h.wait_for(lambda: ((r:=client.call("app.info")["result"])["state"]=="running" and r["engine_epoch"]>before["engine_epoch"],json.dumps(r)),"engine slot restarts within undo window")
+                restored=client.call("torrents.add",dict(source=dict(restore=hash_)))["result"]
+                case.check(not restored["duplicate"],"daemon-owned undo survives engine slot restart",json.dumps(restored))
+                client.call("torrents.remove",dict(hashes=[hash_],delete_files=False))
+            h.stop_serve(process);h.notify.close();process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();reply=client.call("torrents.add",dict(source=dict(restore=hash_)),error="invalid_state")
+                case.check(reply["error"]["details"]["reason"]=="undo_expired" and not undo_rows(client),"full daemon restart ends undo authorization without resurrecting records",json.dumps(reply))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+
+def undo_incomplete_download(binary,systemd):
+    with api_owned("undo_incomplete_download",binary,systemd) as (case,sandbox,h,process),ApiConn(h) as client, \
+            Sandbox() as seedbox,Harness(case,binary,seedbox,systemd) as seedh:
+        seedprocess=seedh.start_serve();seedh.receive_ready();seedh.wait_engine()
+        try:
+            with ApiConn(seedh) as seed:
+                client.hello();seed.hello()
+                seed.call("app.settings.set",dict(upload_limit_bps=65536))
+                port=tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml").read_text())["peer_port"]
+                tracker=fixtures.bencode(dict(interval=1,complete=1,incomplete=0,peers=socket.inet_aton("127.0.0.1")+struct.pack("!H",port)))
+                empty=fixtures.bencode(dict(interval=1,complete=0,incomplete=1,peers=b""))
+                with fixtures.HttpFixture(seedbox.root,{"/announce":dict(base64=base64.b64encode(empty).decode())}) as http:
+                    payload=seedbox.downloads/"undo-incomplete.bin";payload.write_bytes(os.urandom(64*fixtures.MIB))
+                    fixture=fixtures.torrent_fixture(seedbox.root,[payload],name="undo-incomplete",tracker=http.base+"/announce")
+                    seed.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(seedbox.downloads),seed=True,stopped=True))
+                    target=sandbox.downloads/payload.name
+                    with payload.open("rb") as source,target.open("wb") as dest:dest.write(source.read(32*fixtures.MIB))
+                    client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(sandbox.downloads),stopped=True))
+                    h.wait_for(lambda: ((r:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["checked"],json.dumps(r)),"incomplete paused fixture completes its first check")
+                    seedh.wait_for(lambda: ((r:=seed.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["checked"],json.dumps(r)),"paused local seed is ready")
+                    client.call("torrents.start",dict(hashes=[fixture.info_hash]))
+                    client.call("torrents.remove",dict(hashes=[fixture.info_hash],delete_files=False))
+                    client.call("torrents.add",dict(source=dict(restore=fixture.info_hash)))
+                    states=[]
+                    def checked():
+                        row=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"];states.append(row)
+                        return row["checked"] and row["state"] in ("stalled","downloading"),json.dumps(row)
+                    h.wait_for(checked,"undo incomplete payload is verified and admitted under saved run intent")
+                    case.check(states[-1]["completed_bytes"]==32*fixtures.MIB and states[-1]["intent"]=="run"
+                               and states[-1]["state"] in ("stalled","downloading")
+                               and all(not r["checked"] for r in states if r["state"]=="checking"),
+                               "restored incomplete intent checks and retains measured half-completion",json.dumps(states))
+                    seed.call("torrents.start",dict(hashes=[fixture.info_hash]))
+                    seedh.wait_for(lambda: ((r:=seed.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="seeding",json.dumps(r)),"local seed is live before tracker advertises it")
+                    http.routes["/announce"]=dict(base64=base64.b64encode(tracker).decode())
+                    case.step("advertise verified local peer","hash checking precedes any advertised source").ok(f"Tracker changes from no peers to loopback seed port {port}; interval remains 1 second.")
+                    h.wait_for(lambda: ((r:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="downloading" and r.get("dl_bps",0)>0,json.dumps(r)),"restored run intent receives real loopback data",timeout=15)
+        finally:
+            seedh.stop_serve(seedprocess);seedh.lock_free()
+
+
 CASES = {function.__name__: function for function in
-         (force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

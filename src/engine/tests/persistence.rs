@@ -209,7 +209,7 @@
             upload_limit: NO_UPLOAD_LIMIT,
             ratio_limit: 0.0,
             category: String::new(),
-            tags: String::new(),
+            tags: String::new(), origin: "manual".into(),
             added_on: 1,
             completion_on: 0,
             paused: false,

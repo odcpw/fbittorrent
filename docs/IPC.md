@@ -619,3 +619,33 @@ releases them, while ordinary FIFO resume behavior is preserved. The independent
 `queue.ndjson` transcript and contract patch 1.2.4 add these operations and row
 fields without changing previous transcripts. Dashboard/TUI controls and CLI
 verbs are separate surface integration work.
+
+### P6-08: origin and keep-files undo
+
+The `origin` capability enables the durable open string `Torrent.origin` and
+`torrents.list {origin: [str]}`. New adds default to `manual`; historical origin
+tags migrate without changing legacy tags. `search`, `rss` and `shows` have
+separate buckets. The `manual` bucket includes manual, clipboard, handler,
+agent and unknown future values; an explicit other string matches exactly.
+
+`torrents.remove {hashes, delete_files:false}` accepts up to 256 hashes and
+returns `{state:"done", undo_until:<Unix seconds>}`. Every record and cached
+metainfo is retained under private `engine/undo/` for a single ten-second batch
+window. Payload files are never removed by this path. The daemon owns the
+monotonic authorization deadline: engine-slot restarts retain it, full daemon
+restarts end it. Expired cache entries are collected by daemon maintenance.
+
+`torrents.add {source:{restore:<hash>}}` appends the saved intent at the end of
+the ledger, preserving origin, selection, path, paused intent and seed policy.
+It invalidates saved completion and performs a fresh hash check before normal
+queue admission. Restoring a completed intact payload needs no network bytes;
+an incomplete payload resumes under its saved intent. An expired/missing undo
+entry returns nonretryable `invalid_state` with `details.reason:"undo_expired"`
+(exit 1). Restoring an already-present hash is a duplicate add and changes no
+policy. File-deleting removes retain their existing pending-mutation protocol
+and never carry `undo_until`. `origin.ndjson` characterizes these additive
+fields and the existing restore source; contract patch 1.2.5 records them.
+
+The filtered count/known-byte sum/unknown-size count, confirmation and undo
+toast are presented by the UI tracks. CLI undo and origin/filter argument
+wiring are tracked separately from this daemon/API increment.

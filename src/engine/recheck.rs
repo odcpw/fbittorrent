@@ -26,7 +26,8 @@ impl Batch {
     }
 }
 #[derive(Default)]
-struct Check {
+pub(super) struct Check {
+    cancel: CancellationToken,
     active: AtomicBool,
     handle: StdMutex<Option<Weak<ManagedTorrent>>>,
     result: StdMutex<Option<std::result::Result<u64, String>>>,
@@ -38,6 +39,24 @@ pub(super) struct Rechecks {
     pub(super) cancel: CancellationToken,
 }
 impl Rechecks {
+    #[cfg(test)]
+    pub(super) fn removal_cancelled(&self, hash:&str)->bool {
+        self.checks.lock().unwrap().get(hash).is_some_and(|check|check.cancel.is_cancelled())
+    }
+
+    pub(super) fn cancel_removed(&self, hashes:&[String])->Vec<Arc<Check>> {
+        let checks=self.checks.lock().unwrap();
+        hashes.iter().filter_map(|hash|checks.get(hash).cloned()).inspect(|check|check.cancel.cancel()).collect()
+    }
+    pub(super) async fn settle_removed(&self,cx:&Cx,checks:Vec<Arc<Check>>)->Result<()> {
+        while checks.iter().any(|check|check.result.lock().unwrap().is_none()) {
+            if self.cancel.is_cancelled() {bail!("engine is closing");}
+            time::sleep(cx,Duration::from_millis(20)).await;
+            cx.checkpoint()?;
+        }
+        Ok(())
+    }
+
     pub(super) fn active(&self, hash: &str) -> bool {
         self.checks
             .lock()
@@ -130,6 +149,7 @@ impl Inner {
                 let result = if fresh {
                     let verified = rqbit_runtime::select! {
                         _ = inner.rechecks.cancel.cancelled() => Err(anyhow!("recheck cancelled: engine is closing")),
+                        _ = check.cancel.cancelled() => Err(anyhow!("recheck cancelled by removal")),
                         result = inner.verify_one(&cx, &hash, &check) => result,
                     }.map_err(|error| format!("{error:#}"));
                     if let Err(message) = &verified {

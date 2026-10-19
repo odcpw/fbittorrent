@@ -9,7 +9,7 @@ fn deferred_record_from_magnet() {
     let options = AddRequest {
         sources: vec![source.into()], torrent: None, save_path: Some(directory.join("downloads").to_string_lossy().into()),
         upload_limit: 32768, ratio_limit: 0.0, stopped: false,
-        category: "fixture".into(), tags: "fbt-origin:agent".into(),
+        category: "fixture".into(), tags: "fbt-origin:agent".into(), origin: None,
     };
     let record = Record::deferred_magnet(&options, &directory).unwrap();
     assert_eq!(record.hash, "0123456789abcdef0123456789abcdef01234567");
@@ -148,5 +148,26 @@ fn save_preserves_order() {
     assert_eq!(rows.iter().map(|r|r.queue_pos.unwrap()).collect::<Vec<_>>(),[1,3,2],"display sort cannot change ledger positions");
     assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records.iter().map(|r|r.hash.clone()).collect::<Vec<_>>(),expected);
     println!("saved ledger order stays 3,1,2 independently of added_on and display sort");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn origin_default_manual() {
+    let directory=review_directory("origin-migration");
+    let mut record=crate::engine::tests::review_record(&"a".repeat(40),&directory);
+    let mut value=serde_json::to_value(&record).unwrap();
+    value.as_object_mut().unwrap().remove("origin");
+    assert_eq!(serde_json::from_value::<Record>(value.clone()).unwrap().origin,"manual");
+    value["tags"]=serde_json::json!("watching,fbt-origin:rss");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("torrents.json"),serde_json::to_vec(&serde_json::json!({"migrated_legacy":false,"records":[value]})).unwrap()).unwrap();
+    assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].origin,"rss");
+    record.origin="future-origin,exact".into();record.tags="fbt-origin:handler".into();
+    save_parked_ledger(&directory,&Ledger {records:vec![record.clone()],..Default::default()}).unwrap();
+    assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].origin,record.origin);
+    record.origin="manual".into();
+    save_parked_ledger(&directory,&Ledger {records:vec![record],..Default::default()}).unwrap();
+    assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].origin,"manual");
+    println!("old field defaults manual; legacy rss tag migrates; explicit manual and unknown comma-bearing open strings remain authoritative");
     std::fs::remove_dir_all(directory).unwrap();
 }

@@ -26,7 +26,7 @@ fn upload_cap_edit_retains_handle_and_checked_data() {
             ratio_limit: 0.0,
             stopped: true,
             category: String::new(),
-            tags: String::new(),
+            tags: String::new(), origin: None,
         }))
         .unwrap();
     let original = dispatcher.inner.handle(&hash).unwrap();

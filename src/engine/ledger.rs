@@ -14,6 +14,8 @@ pub(super) struct Record {
     pub(super) ratio_limit: f64,
     pub(super) category: String,
     pub(super) tags: String,
+    #[serde(default = "manual_origin")]
+    pub(super) origin: String,
     pub(super) added_on: i64,
     pub(super) completion_on: i64,
     // Durable user intent. Queue and completion suspension never rewrite this.
@@ -27,6 +29,7 @@ pub(super) struct Record {
     #[serde(default, skip_serializing_if = "is_false")]
     pub(super) force: bool,
 }
+fn manual_origin() -> String { "manual".into() }
 fn is_false(value: &bool) -> bool { !value }
 
 impl Record {
@@ -61,7 +64,7 @@ impl Record {
             hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
             upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
-            category: options.category.clone(), tags: options.tags.clone(),
+            category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||origin_from_tags(&options.tags)),
             added_on: now(), completion_on: 0, paused: options.stopped,
             resume_after_migration: false, deferred: true, staged: false, force: false,
         };
@@ -120,7 +123,7 @@ pub(super) struct Ledger {
     pub(super) records: Vec<Record>,
 }
 
-fn validate_info_hash(hash: &str) -> Result<()> {
+pub(super) fn validate_info_hash(hash: &str) -> Result<()> {
     if hash.len() != 40
         || !hash
             .bytes()
@@ -137,12 +140,22 @@ pub(super) fn read_ledger(path: &Path) -> Result<Ledger> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Ledger::default()),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    let ledger: Ledger = serde_json::from_slice(&bytes).with_context(|| {
+    let mut ledger: Ledger = serde_json::from_slice(&bytes).with_context(|| {
         format!(
             "reading saved torrent records {}; the file has been preserved",
             path.display()
         )
     })?;
+    // Pre-P6-08 records encoded attribution only as a legacy tag. Keep it when
+    // the new field was absent; an explicit manual value is authoritative.
+    #[derive(Deserialize)] struct OriginField { origin: Option<String> }
+    #[derive(Deserialize)] struct OriginFields { records: Vec<OriginField> }
+    if ledger.records.iter().any(|r|r.origin=="manual" && origin_from_tags(&r.tags)!="manual") {
+        let fields:OriginFields=serde_json::from_slice(&bytes)?;
+        for (record, field) in ledger.records.iter_mut().zip(fields.records) {
+            if field.origin.is_none() {record.origin=origin_from_tags(&record.tags);}
+        }
+    }
     let mut hashes = HashSet::new();
     for record in &ledger.records {
         validate_info_hash(&record.hash).with_context(|| {
@@ -287,3 +300,8 @@ impl EngineDispatcher {
 #[cfg(test)]
 #[path = "tests/ledger.rs"]
 mod tests;
+
+
+pub(super) fn origin_from_tags(tags:&str)->String {
+    tags.split(',').find_map(|tag|tag.strip_prefix("fbt-origin:")).unwrap_or("manual").into()
+}
