@@ -327,3 +327,7 @@ compilation, size gate and diff checks pass. settings_queue_vpn_restart was
 verified byte-identical and passed locally; its main-gate repair remains the
 integrator's. No release/all.sh run, frozen fixture change, or state-table
 change. All log paths above are under target/test-logs/fbt-p4-03-r5p/.
+
+### P3-01 search extraction checkpoint
+
+Moved search download resolution, process capture/lifetime, job registry and all existing tests into `src/search/*`; existing function bodies and test bytes are identical, with only sibling visibility and facade wiring added (`split_isomorphism.jsonl`). `cargo test --locked -p fbittorrent search:: -- --nocapture`: 15 passed, including three search goldens; `bash scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`: passed. Evidence: `target/test-logs/fbt-p3-01-mrt/split_{units_fixed,sizes,isomorphism}.*`. The daemon integration is still in progress; no search acceptance criterion is claimed at this checkpoint.
