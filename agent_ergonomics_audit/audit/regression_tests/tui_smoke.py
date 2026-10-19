@@ -9,6 +9,7 @@ import base64
 from contextlib import ExitStack, contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import struct
@@ -67,6 +68,27 @@ class PaneUi(native.AttachedTui):
 
     def contains(self,key,text,*,literal=True):
         return self.press(key,'pane contains '+text,lambda pane:text in pane,literal=literal)
+
+    def details_tab(self,name):
+        def selected(pane):
+            match=re.search(r'\[(Overview|Files|Peers|Trackers|Pieces|Log)\]',pane)
+            return match.group(1) if match else None
+        for _ in range(8):
+            pane=self.capture(self.target);current=selected(pane)
+            if current==name:return True
+            header=next((line for line in pane.splitlines() if current and '['+current+']' in line),'')
+            if not current or name not in header:break
+            key=']' if header.index(name)>header.index(current) else '['
+            if not self.press(key,'details changes tab toward '+name,lambda p:selected(p) not in (None,current)):return False
+        return self.observe('open '+name+' details','the named detail tab is visible',lambda p:selected(p)==name,timeout=0)
+
+    def settings_row(self,label):
+        def selected(pane):return next((line for line in pane.splitlines() if '▌' in line and any(name in line for name in ('Simultaneous downloads','Peer encryption','VPN connection','Reduce motion','limit','Peer port','Download destination','Seed by default','Idle exit','Clipboard offers'))),'')
+        for _ in range(24):
+            before=selected(self.capture(self.target))
+            if label in before:return True
+            if not self.press('Down','choose Settings field '+label,lambda p:selected(p)!=before,literal=False):return False
+        return self.observe('select '+label,'the named Settings row is selected',lambda p:label in selected(p),timeout=0)
 
     def select_active(self,client):
         rows=client.call('torrents.list',{})['result']['torrents']
@@ -147,10 +169,10 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
                 ui.contains(']','Overview  [Files]')
                 ui.observe('read files','real file names and include controls are visible',
                            lambda pane:all(text in pane for text in('The.Diplomat.S04E01.mkv','English.srt','sample.mkv','include/skip')))
-                ui.contains(']','Overview  Files  [Log]')
-                ui.contains(']','Overview  Files  [Log]')
-                ui.contains('[','Overview  [Files]')
-                ui.contains('[','[Overview]  Files')
+                ui.details_tab('Log')
+                ui.contains(']','[Log]')
+                ui.details_tab('Files')
+                ui.details_tab('Overview')
                 ui.contains('Escape','[Torrents]',literal=False)
                 before=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']['intent']
                 ui.contains('d','keep files')
@@ -299,7 +321,7 @@ def peer_port(binary,setup,sandbox,h,ui,process,torrent):
         with Case('tui_smoke','peer_port')as case:
             ui.case=case
             ui.contains('F6','Download settings',literal=False)
-            ui.press('Up','select the peer port field',lambda pane:'Peer port'in pane,literal=False)
+            ui.settings_row('Peer port')
             ui.contains('Right','Peer port · 0 automatic',literal=False)
             ui.press('C-a','select the current port text',lambda pane:'Peer port · 0 automatic'in pane,literal=False)
             ui.press(str(port),'type a free private peer port',lambda pane:str(port)in pane)
