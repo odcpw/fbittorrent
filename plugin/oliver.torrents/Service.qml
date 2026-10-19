@@ -228,6 +228,7 @@ Item {
     }
     if(request && !frame.ok && request.ref)notify(frame.error.message+" · Refresh to check the current state")
     if(frame.ev==="mutation.result" && frame.outcome!=="done")notify((frame.error ? frame.error.message : "No answer")+" · Refresh to check the current state")
+    if(frame.ev==="mutation.result" && frame.outcome==="done" && client.actions[frame.ref] && client.actions[frame.ref].op==="torrents.recheck")notify("Recheck complete")
     if (frame.ev === "bye") { byeReason=frame.reason; stoppedRecently = true; stoppedTimer.restart() }
   }
   function mutate(op, args, cap, callback) {
@@ -266,7 +267,13 @@ Item {
   readonly property bool turtleOn: {var confirmed=status;return store.summary.alt===true}
   function toggleTurtle(){return setTurtle(!turtleOn)}
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
-  function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
+  function recheck(hash) {
+    var active=pendingAction(hash)
+    if(active && active.op==="torrents.recheck"){notify("Checking files…");return false}
+    return mutate("torrents.recheck",{hashes:[hash]},"recheck",function(result){
+      if(result)notify(result.state==="pending" ? "Recheck accepted · Checking files…" : "Recheck complete")
+    })
+  }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard(hash) { return mutate("app.clipboard.dismiss", {hash:hash}, "clipboard") }
   function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}
