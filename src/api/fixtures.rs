@@ -12,6 +12,9 @@ const GROUPS: &[(&str, &str)] = &[
     ("queue",include_str!("../../contracts/ipc/v1/queue.ndjson")),
     ("search", include_str!("../../contracts/ipc/v1/search.ndjson")),
     ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
+    ("clipboard", include_str!("../../contracts/ipc/v1/clipboard.ndjson")),
+    ("peer-port", include_str!("../../contracts/ipc/v1/peer-port.ndjson")),
+    ("disk", include_str!("../../contracts/ipc/v1/disk.ndjson")),
     ("limits", include_str!("../../contracts/ipc/v1/limits.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("free-space", include_str!("../../contracts/ipc/v1/free-space.ndjson")),
@@ -451,6 +454,7 @@ fn operation_event_error_and_document_coverage() {
         "search.start", "search.stop", "search.providers", "search.set_provider",
         "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
+        "app.clipboard.dismiss",
         "app.log",
         "app.stats",
         "app.free_space", // P6-11: planned additive operation.

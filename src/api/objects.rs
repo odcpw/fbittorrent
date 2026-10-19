@@ -232,6 +232,9 @@ pub struct TopTorrent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiskSpace { pub free_bytes: u64, pub needed_bytes: u64 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Disk {
     pub needed_bytes: u64,
     pub low: bool,

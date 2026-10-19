@@ -120,6 +120,16 @@ impl Notifier {
             actions,
         });
     }
+    pub fn disk_low(&self) {
+        self.enqueue(Notice { kind:"disk".into(), hash:"disk".into(), serial:0,
+            title:"Disk almost full".into(), body:String::new(), target:None,
+            actions:vec![("window","Open window")] });
+    }
+    pub fn clipboard(&self, event: &Value) {
+        self.enqueue(Notice { kind:"clipboard".into(), hash:event["hash"].as_str().unwrap_or("").into(), serial:0,
+            title:format!("Magnet on clipboard: {}",event["name"].as_str().unwrap_or("Torrent")),
+            body:String::new(), target:None, actions:vec![("add","Add"),("dismiss","Dismiss")] });
+    }
     pub fn failed(&self) {
         self.enqueue(Notice {
             kind: "failed".into(),
@@ -209,6 +219,7 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
     for (action, label) in &n.actions {
         command.arg("-A").arg(format!("{action}={label}"));
     }
+    if n.kind == "clipboard" { command.stderr(Stdio::null()); }
     let mut child = command
         .arg(escape_markup(&n.title))
         .arg(escape_markup(&n.body))
@@ -243,6 +254,13 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
         return Ok(());
     }
     match action {
+        "add" => {
+            // Only the infohash survives selection parsing. Reconstruct the
+            // magnet instead of keeping clipboard text or tracker URLs.
+            request("torrents.add", json!({"source":{"magnet":format!("magnet:?xt=urn:btih:{}",n.hash)},"origin":"clipboard"}),
+                Some(&format!("notify-clipboard-{}-{}", std::process::id(), n.serial)))?;
+        }
+        "dismiss" => { request("app.clipboard.dismiss", json!({"hash":n.hash}), None)?; }
         "undo" => {
             request(
                 "torrents.remove",

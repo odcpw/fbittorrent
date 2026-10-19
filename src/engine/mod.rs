@@ -44,6 +44,7 @@ pub mod undo;
 pub(crate) mod resume;
 mod undo_ops;
 mod settings;
+pub(crate) mod disk;
 pub mod ops;
 mod restore;
 mod dormant;

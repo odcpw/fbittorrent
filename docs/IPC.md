@@ -37,7 +37,7 @@ regular file at most 16 MiB whose first byte is d (bencoded).
 - Idempotent operations (safe to resend with the same `ref` after a mid-request loss, or
   against a new instance after a crash): `torrents.start`, `torrents.stop`,
   `torrents.set_seed`, `torrents.set_files`, `torrents.set_upload_limit`, `torrents.add`,
-  `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
+  `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
   `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
@@ -161,6 +161,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
@@ -169,7 +170,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
 | `torrents.get` | `hash: hash` | `{torrent: TorrentDetail}` | no | P1-06 |
-| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?}` | yes | P1-06, P1-09, P3-06, P7-09 |
+| `torrents.add` | `source: {magnet: str} \| {url: str} \| {path: str} \| {restore: hash}` (exactly one), `stage: bool?`, `stopped: bool?`, `seed: bool?`, `save_path: str?`, `files: [u64]?`, `category: str?`, `origin: open(manual\|search\|rss\|shows\|clipboard\|handler\|agent)?` | `{state: enum(pending\|done), hash: hash?, name: str?, duplicate: bool?, deferred: bool?, disk: {free_bytes: bytes, needed_bytes: bytes}?}` | yes | P1-06, P1-09, P3-06, P7-09 |
 | `torrents.recheck` | `hashes: [hash]` (1..256) | `{state: "pending", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}` | yes | P5-03 |
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
@@ -443,7 +444,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -832,7 +833,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.16**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.18**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -858,3 +859,64 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.14` | `limits` |
 | `1.2.15` | `caps.imdb` |
 | `1.2.16` | `app.free_space` |
+| `1.2.17` | `add.disk` |
+| `1.2.18` | `clipboard` |
+
+### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
+
+Summary.disk is sampled every five seconds, once per distinct save path; free
+space is absent when statvfs fails. Needed bytes cover run-intent incomplete
+records, including disk-full errors; completed/paused/seeding/parked records are
+excluded. Filesystems shared by paths are counted once. Low means any destination
+has free < its needed + 512 MiB. A new ENOSPC records the affected destination's
+free space and piece length, and reports error/disk_full with “Disk full”. One
+normal “Disk almost full” notification offers the window action per daemon life.
+
+Per the 2026-10-19 orchestrator ruling, automatic retry requires a five-second
+sample with free >= the ENOSPC baseline + max(16 MiB, one piece). Retry consumes
+that rise; repeated ENOSPC records a new baseline. It logs disk_full_recovered.
+Explicit start retries immediately; paused intent is checked atomically before
+an automatic retry. `torrents.add` optionally adds `disk: {free_bytes: u64,
+needed_bytes: u64}` when known selected metadata exceeds free space; the CLI keeps
+exit 0 and adds warnings[].code=disk_low with a binary-unit message. The new
+disk.ndjson transcript covers add capacity, summary low and disk_full state.
+
+### P6-09: peer port and sleep inhibition
+
+The existing restart-class `peer_port` setting is applied by
+`app.settings.set {peer_port}` or `settings --port N`. The daemon instance,
+API socket and connected clients survive; event subscribers receive both
+starting/running `engine.changed` frames (peer-port.ndjson). This adds no
+operation, capability or field to contract 1.2.17. While any run-intent torrent
+is downloading, stalled, metadata or checking, one owned
+`systemd-inhibit --what=sleep --who=fbittorrent --why=Downloading --mode=block sleep infinity`
+child holds the inhibitor. Queued, paused, seeding-only, done, parked and error
+states do not inhibit. The last eligible torrent stopping or daemon drain kills
+the child's process group within five seconds. A failed launcher is cleaned
+and retried at most every five seconds while work remains; no child or polling
+worker runs while there is no eligible work. The session bus address is
+preserved independently of the child's XDG runtime directory.
+
+### P6-13: opt-in clipboard offers (contract 1.2.18)
+
+The `clipboard` capability adds `app.clipboard.dismiss {hash}` (idempotent),
+`clipboard.magnet {hash, name?, already_added}` and origin `clipboard` for adds.
+`settings --clipboard-watch on|off` accepts true/false too; default false starts
+no reader. Watcher activity never extends the idle deadline. The owner-approved
+2026-10-19 command is `wl-paste --watch sh -c 'cat; printf "\0"'`: one NUL-framed
+record per selection. Records over 64 KiB are discarded through the next NUL;
+incomplete records are never parsed. Turning off or draining kills the whole
+owned group, including shell/cat descendants. A failed reader retries at most
+once per five seconds while enabled.
+
+Only the last offered hash is retained by the watcher; existing ledger hashes
+and consecutive identical offers are suppressed. Clipboard text, selection names,
+and child stderr never enter daemon logs. The bounded event history and pending
+notification hold the offered name for display, as normal API/notification data.
+A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
+`torrents.add {source:{magnet:"magnet:?xt=urn:btih:<hash>"},origin:"clipboard"}` or
+`app.clipboard.dismiss {hash}` over api.sock. Add reconstructs the hash-only magnet
+(no clipboard history or tracker URLs retained); metadata uses ordinary DHT/peer
+discovery. No transfer starts before an explicit Add action. Hello/error fixtures
+now advertise the exact live caps including clipboard; changes[].cap records it.
+The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.

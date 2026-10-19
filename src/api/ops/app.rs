@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -31,6 +31,10 @@ pub fn dispatch(
     subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
     Ok(match call {
+        Call::AppClipboardDismiss { args } => {
+            daemon.clipboard.dismiss(args.hash.as_str());
+            Reply::AppClipboardDismiss(EmptyResult {})
+        }
         Call::AppLog { args } => Reply::AppLog(daemon.logs.query(&args.clone().unwrap_or_default())),
         Call::AppStats { .. } => Reply::AppStats(StatsResult {
             connections: serde_json::from_value(counts).unwrap(),

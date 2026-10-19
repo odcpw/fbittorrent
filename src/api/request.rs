@@ -337,6 +337,8 @@ pub enum Call {
 
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
+    #[serde(rename = "app.clipboard.dismiss")]
+    AppClipboardDismiss { args: HashArgs },
     #[serde(rename = "app.log")]
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
@@ -426,6 +428,7 @@ impl Call {
             Self::SearchGrab { .. } => "search.grab",
 
             Self::TorrentsRecheck { .. } => "torrents.recheck",
+            Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",
             Self::AppFreeSpace { .. } => "app.free_space",

@@ -120,6 +120,7 @@ struct Sample {
     files: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
+    disk: Disk,
     daemon: Value,
 }
 impl Sample {
@@ -162,7 +163,7 @@ impl Sample {
                 v
             })
             .collect();
-        let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
+        let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }
@@ -384,6 +385,8 @@ impl Bus {
             Slot::Running(app) => app.dispatcher().take_completions(),
             _ => Vec::new(),
         };
+        self.daemon.disk.lock().unwrap().observe(&rows);
+        if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
         let rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)
@@ -445,6 +448,7 @@ impl Bus {
             files,
             network,
             settings,
+            disk: self.daemon.disk.lock().unwrap().summary.clone(),
             daemon,
         })
     }

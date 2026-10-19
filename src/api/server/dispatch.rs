@@ -49,7 +49,7 @@ impl Shared {
                 let reply = if matches!(&job.request.call, Call::SearchInstall { .. }) {
                     Reply::SearchInstall(InstallReply::Pending(pending))
                 } else { Reply::SearchGrab(AddResult { status: MutationResult::Pending { reference: pending.reference },
-                    hash: None, name: None, duplicate: None, deferred: None }) };
+                    hash: None, name: None, duplicate: None, deferred: None, disk: None }) };
                 if self.begin_confirmation(&job, reply, Confirmation::Worker, false) {
                     let result = ops::search::dispatch(&self.daemon, job.connection.number, &job.request.call);
                     if result.as_ref().ok().is_some_and(|reply| ops::search::awaits_metadata(&self.daemon, reply)) {
@@ -93,6 +93,7 @@ impl Shared {
                         name: None,
                         duplicate: None,
                         deferred: None,
+                        disk: None,
                     });
                     if self.begin_confirmation(&job, pending, Confirmation::Worker, false) {
                         let result = ops::torrents::dispatch(&self.daemon, &job.request.call);
@@ -120,7 +121,8 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppLog { .. }
+                Call::AppClipboardDismiss { .. }
+                | Call::AppLog { .. }
                 | Call::AppStats { .. }
                 | Call::AppFreeSpace { .. }
                 | Call::AppSettingsGet { .. }

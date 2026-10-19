@@ -1,0 +1,4 @@
+{"dir":"c2s","frame":{"id":1,"op":"app.settings.set","args":{"peer_port":49152}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"applied":["peer_port"],"restart":true}}}
+{"dir":"s2c","frame":{"ev":"engine.changed","seq":1,"ts":1792396800000,"epoch":2,"state":"starting","reason":"engine_restart"}}
+{"dir":"s2c","frame":{"ev":"engine.changed","seq":2,"ts":1792396800100,"epoch":2,"state":"running","reason":"engine_restart"}}

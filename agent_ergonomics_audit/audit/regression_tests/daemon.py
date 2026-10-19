@@ -3900,6 +3900,9 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
+from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 def handler_confirm_stages(binary, systemd=False):
@@ -4673,7 +4676,7 @@ def tracker_saved_views(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,

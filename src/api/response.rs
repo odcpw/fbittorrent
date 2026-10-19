@@ -151,6 +151,8 @@ pub struct AddResult {
     pub duplicate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk: Option<DiskSpace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -221,6 +223,7 @@ pub enum Reply {
     SearchGrab(AddResult),
 
     TorrentsRecheck(RecheckReply),
+    AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
     AppFreeSpace(super::FreeSpaceResult),
@@ -267,6 +270,7 @@ impl Reply {
             "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
 
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
+            "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "app.free_space" => serde_json::from_value(result).map(Self::AppFreeSpace),

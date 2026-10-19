@@ -248,6 +248,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     json_mode,
                 );
             }
+            if let Some(disk) = added.get("disk") {
+                let disk:api::DiskSpace = serde_json::from_value(disk.clone())?;
+                crate::agent::warning("disk_low",crate::daemon::supervisor::warning_message(&disk),true);
+            }
             let mut value = added;
             value["ok"] = json!(true);
             value["action"] = json!("add");
