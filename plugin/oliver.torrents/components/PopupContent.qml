@@ -32,7 +32,7 @@ PanelKeyCatcher {
   property var rows:[]
   readonly property int delegateCount:owner.opened && !svc.modelReordering ? rows.length : 0
   property var entries:[]
-  ListModel {id:entryModel;dynamicRoles:true}
+  ListModel {id:entryModel;dynamicRoles:false}
   function syncEntries(items){
     var same=items.length===entries.length
     if(same)for(var i=0;i<items.length;i++)if((items[i].header ? items[i].group.key : items[i].torrent.hash)!==(entries[i].header ? entries[i].group.key : entries[i].torrent.hash)){same=false;break}

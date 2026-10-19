@@ -46,18 +46,20 @@ Item {
   function acceptDrop(urls,text){var parsed=Source.drop(urls,text);if(!parsed)return false;return openAdd(parsed.source)}
   function publish() {
     if(disposing)return
+    if(svc && !svc.testHooks && svc.dashboardOwner===(window.visible ? root : null) && svc.dashboardVisible===window.visible)return
     if(!window || !window.visible){publishNow();return}
     // Loader items and their derived view state settle after onLoaded. Publish
     // once per event turn, rather than allocating intermediate partial states.
     Qt.callLater(root.publishNow)
   }
   function publishNow() {
-    if (disposing || !svc || !window || !searchInput)return
+    if (disposing || !svc || !window)return
     if(!window.visible && svc.dashboardOwner!==root)return
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
+    if(!svc.testHooks)return
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:"view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
     if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.viewState)
@@ -283,23 +285,7 @@ Item {
             onLoaded:{root.publish();Qt.callLater(root.focusView)}
             sourceComponent:Views.ShowsView {service:root.svc;onChanged:root.publish();onFocusRequested:Qt.callLater(root.focusView)}
           }
-          ColumnLayout {
-            anchors.fill:parent
-            visible:!!root.svc && root.svc.online && root.currentView!=="torrents" && root.currentView!=="search" && root.currentView!=="settings" && root.currentView!=="log" && root.currentView!=="shows" && root.currentView!=="rss"
-            spacing:Commons.Style.spacing.panelGap
-            Text {text:root.labels[root.views.indexOf(root.currentView)];textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title;font.bold:true}
-            Ui.TextField {
-              id:searchInput
-              visible:root.currentView==="search"
-              Layout.fillWidth:true
-              placeholderText:"Search titles"
-              maximumLength:200
-              text:root.query
-              onTextEdited:root.query=text
-              onActiveFocusChanged:root.publish()
-            }
-            Item {Layout.fillWidth:true;Layout.fillHeight:true}
-          }
+
         }
         Components.RateStatus {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Text {

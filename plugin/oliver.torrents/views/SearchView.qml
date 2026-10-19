@@ -17,7 +17,7 @@ FocusScope {
   readonly property bool editing:queryInput.activeFocus || (sheet.item && sheet.item.editing===true)
   readonly property bool gridShowing:viewModel.mode==="browse" && viewModel.grid===true
   readonly property bool dialogOpen:!!viewModel.panel
-  readonly property var viewState:({grid:gridShowing ? grid.state() : null,query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : 0,added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"})
+  readonly property var viewState:service.testHooks ? ({grid:gridShowing ? grid.state() : null,query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : 0,added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"}) : null
   signal changed()
   signal queryEdited(string query)
   signal dismissRequested()

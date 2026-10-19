@@ -12,7 +12,7 @@ FocusScope {
   readonly property bool editing:followInput.activeFocus || controls.popupOpen
   readonly property bool dialogOpen:model.panel!=="" || controls.popupOpen
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:({shows:model,controls:controls.state,focus:followInput.activeFocus ? "follow" : controls.popupOpen ? "controls" : model.focus,unfollowCancel:confirmation.cancelFocused})
+  readonly property var viewState:service.testHooks ? ({shows:model,controls:controls.state,focus:followInput.activeFocus ? "follow" : controls.popupOpen ? "controls" : model.focus,unfollowCancel:confirmation.cancelFocused}) : null
   signal changed()
   signal focusRequested()
   Item {id:resultsFocus;focus:true}

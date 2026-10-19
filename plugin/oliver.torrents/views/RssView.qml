@@ -18,7 +18,7 @@ FocusScope {
   readonly property bool editing:viewModel.modal==="add"
   readonly property bool dialogOpen:!!viewModel.modal
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:({rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused})
+  readonly property var viewState:service.testHooks ? ({rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused}) : null
   property string focusedModal:""
   signal changed()
   signal dismissRequested()

@@ -32,7 +32,10 @@ Item {
   signal apiFrame(var frame,var request)
   function parseAddSource(text){return AddSource.parse(text)}
   property bool dashboardVisible: false
+  readonly property bool testHooks:Quickshell.env("FBT_TEST_HOOKS")==="1"
   property var dashboardState:null
+  property var topicVersions:({})
+  property int observedLogVersion:0
   property var dashboardOwner:null
   property var windowFocus:null
   property int windowFocusSteps:0
@@ -137,13 +140,10 @@ Item {
   function rowPending(hash) {var revision=actionRevision;return !!store.pendingByHash[hash]}
   function rowFailed(hash) {var revision=actionRevision;return !!store.failedByHash[hash]}
   function pendingAction(hash) {
-    if(!client)return null
-    var actions=client.actions,refs=Object.keys(actions)
-    for(var i=0;i<refs.length;i++){var action=actions[refs[i]],args=action.args || {};if(action.status==="pending" && ((args.hashes || []).indexOf(hash)>=0 || args.hash===hash))return action}
-    return null
+    var revision=actionRevision;return store.pendingActions[hash] || null
   }
   function pendingGlyph(hash) {var revision=actionRevision;return store.pendingByHash[hash] ? (Commons.Style.reduceMotion ? "…" : "⠋⠙⠹⠸⠼⠴⠦⠧"[pendingFrame]) : ""}
-  function clearFailures(){if(client){store.clearFailures(client.actions);actionRevision++}}
+  function clearFailures(){if(client){if(store.clearFailures(client.actions))actionRevision++}}
   function notify(text){lastMessageText=text;lastMessageAt=Date.now();toast={text:text,until:Date.now()+5000};toastTimer.restart()}
   function copyMagnet(hash){copyText("magnet:?xt=urn:btih:"+hash)}
   function titleLink(hash,wikipedia) {
@@ -160,7 +160,7 @@ Item {
     return mutate("shows.follow",row.imdb_id ? {imdb:row.imdb_id} : {query:row.name},"shows")
   }
   readonly property alias torrentModel: rowsModel
-  ListModel { id: rowsModel; dynamicRoles: true }
+  ListModel { id: rowsModel; dynamicRoles: false }
   property bool modelReordering:false
   function orderBoundary(starting){if(starting)rowOrderChanging();modelReordering=starting;if(!starting)rowOrderChanged()}
   signal rowOrderChanging()
@@ -202,9 +202,9 @@ Item {
     }
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
-    pending = c.state().pending
+    var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
-    store.syncActions(c.actions);actionRevision++
+    if(store.syncActions(c.actions))actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
@@ -226,9 +226,9 @@ Item {
     if(showsFlow)showsFlow.frame(frame,request)
     if(rssFlow)rssFlow.frame(frame,request)
     apiFrame(frame,request)
-    if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
+    topicVersions=store.topicVersions
     if(frame.topic==="stats" || (request && request.op==="hello"))statsRevision++
-    if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
+    if(observedLogVersion!==store.logVersion){observedLogVersion=store.logVersion;logRevision++}
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
@@ -457,7 +457,7 @@ Item {
     showsFlow=ShowsFlow.create(root,function(){root.showsRevision++})
     rssFlow=RssFlow.create(root,function(){root.rssRevision++})
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
-    detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
+    detailFlow=DetailFlow.create(root,function(){root.topicVersions=root.store.topicVersions;root.detailRevision++})
     overviewFlow=OverviewFlow.create(root,function(){root.overviewRevision++})
     cleanupFlow=CleanupFlow.create(root,function(){root.cleanupRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")

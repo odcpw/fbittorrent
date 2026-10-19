@@ -204,6 +204,11 @@ complete matrix.
 
 ## Responsiveness
 
+`python3 plugin/tests/run-qs.py reactivity plugin/tests/reactivity` checks unchanged
+action/detail updates, native keyed-model edits and the bounded append-only log
+ring. It prints call counts and the time for 1,000 appends; wall time is diagnostic.
+
+
 ```sh
 python3 plugin/tests/responsiveness.py --binary /path/to/current/fbittorrent \
   --label after --runs 20 --seconds 30 --verify --output target/responsiveness/after.json

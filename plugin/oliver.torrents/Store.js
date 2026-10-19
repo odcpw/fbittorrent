@@ -1,5 +1,6 @@
 .pragma library
 .import "PiecesModel.js" as PiecesModel
+.import "LogBuffer.js" as LogBuffer
 
 // Declare optional display roles when a row is first inserted. The native
 // proxy cannot expose a role added later (for example, after staging ends).
@@ -26,9 +27,18 @@ function create(options) {
   var s = { torrents: dictionary(), summary: {}, network: {}, settings: {}, info: {}, transfer: {},
     badges: {}, topics: dictionary(), subscriptions: dictionary(), snapshots: dictionary(), calls: dictionary(),
     mutations: dictionary(), events: [], eventSeen: dictionary(), cards: dictionary(), counts: {total:0, ready:0, staged:0, reviewing:0},
-    changes: [], hasTorrents: false, membershipChanged: false, proto: undefined, compatible: false, instance: "",
+    topicVersions:dictionary(), rowVersions:dictionary(), pieces:dictionary(), logVersion:0, logDelta:{added:[],removed:[]}, changes: [], hasTorrents: false, membershipChanged: false, proto: undefined, compatible: false, instance: "",
     generation: 0, membershipVersion: 0, sortVersions: {added:0,name:0,progress:0,rate:0,size:0,state:0,eta:0,up:0,peers:0,ratio:0}, sortNames: dictionary(), sortValues: dictionary(), keys: [], keysDirty: true, sortCache: dictionary(), lastError: null }
   STATES.forEach(function(state) { s.counts[state] = 0 })
+  var log=LogBuffer.create()
+  s.setTopic=function(topic,value){
+    if(equal(s.topics[topic],value))return false
+    if(value && typeof value==="object" && !Array.isArray(value) && s.topics[topic] && typeof s.topics[topic]==="object")Object.keys(value).forEach(function(k){if(equal(value[k],s.topics[topic][k]))value[k]=s.topics[topic][k]})
+    s.topics[topic]=value;s.topicVersions=Object.assign({},s.topicVersions);s.topicVersions[topic]=(s.topicVersions[topic] || 0)+1;return true
+  }
+  function appendLog(entries){if(log.append(entries)){s.logVersion++;s.logDelta=log.delta;s.topics.log=log.values}}
+  s.setPieces=function(topic,value,decoded){if(equal(s.topics[topic],value))return false;var map=decoded && decoded.data===value ? decoded : PiecesModel.decode(value);s.setTopic(topic,value);s.pieces[topic]=map;return true}
+  s.logSources=function(){return log.sources()}
   var errors=dictionary(), unacknowledged=dictionary()
   s.firstError=function() {for (var hash in errors) return s.torrents[hash]; return null}
   s.firstReady=function() {for (var hash in unacknowledged) return s.torrents[hash]; return null}
@@ -45,7 +55,7 @@ function create(options) {
     if (membership) s.membershipVersion++
     var sortFields = {added_at:"added", name:"name", progress:"progress", dl_bps:"rate", size:"size", state:"state", staged:"state", eta_s:"eta",ul_bps:"up",peers:"peers",ratio:"ratio"}
     ;(fields || []).forEach(function(field) { if (sortFields[field]) s.sortVersions[sortFields[field]]++ })
-    s.generation++
+    s.generation++;s.rowVersions[hash]=(s.rowVersions[hash] || 0)+1
   }
   function upsert(incoming, patch) {
     var hash = incoming.hash
@@ -84,7 +94,7 @@ function create(options) {
   function remove(hash) {
     var row = s.torrents[hash]
     if (!row) return
-    recount(row, -1); delete errors[hash]; delete unacknowledged[hash]; delete s.torrents[hash]; delete s.sortNames[hash]; delete s.sortValues[hash]; s.keysDirty = true; touched(hash, null, true)
+    recount(row, -1); delete errors[hash]; delete unacknowledged[hash]; delete s.torrents[hash]; delete s.sortNames[hash]; delete s.sortValues[hash]; s.keysDirty = true; touched(hash, null, true);delete s.rowVersions[hash]
   }
   function replaceTorrents(rows) {
     s.hasTorrents = true
@@ -102,12 +112,8 @@ function create(options) {
     if (topic === "events" || topic === "log") return String(row.seq)
     return String(row.hash !== undefined ? row.hash : row.id !== undefined ? row.id : row.imdb)
   }
-  function trimLog(){
-    var target=s.topics.log || dictionary(),keys=Object.keys(target)
-    if(keys.length>1000){keys.sort(function(a,b){return Number(a)-Number(b)});keys.slice(0,keys.length-1000).forEach(function(k){delete target[k]})}
-  }
-  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^(torrent:|search:)/.test(topic))delete s.topics[topic]})}
-  s.logEntries=function(hash){var rows=s.topics.log || {};return Object.keys(rows).map(function(k){return rows[k]}).filter(function(r){return !hash || r.hash===hash}).sort(function(a,b){return a.seq-b.seq})}
+  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^(torrent:|search:)/.test(topic) && Object.prototype.hasOwnProperty.call(s.topics,topic)){delete s.topics[topic];delete s.pieces[topic];s.topicVersions=Object.assign({},s.topicVersions);delete s.topicVersions[topic]}})}
+  s.logEntries=function(hash){return hash ? log.rows().filter(function(row){return row.hash===hash}) : log.rows()}
   function keepMutation(reference, value) {
     var refs = Object.keys(s.mutations)
     if (!s.mutations[reference] && refs.length >= 256) delete s.mutations[refs[0]]
@@ -122,7 +128,7 @@ function create(options) {
   function domainList(topic,rows) {
     var keyed=dictionary()
     rows.forEach(function(row){keyed[topicKey(topic,row)]=row})
-    s.topics[topic]=keyed;badge(topic)
+    s.setTopic(topic,keyed);badge(topic)
   }
   function event(frame) {
     if (frame.ev === "mutation.result") keepMutation(frame.ref, {op:frame.op, status:frame.outcome, error:frame.error, result:frame.result})
@@ -167,21 +173,22 @@ function create(options) {
         var complete = s.snapshots[snapshotKey]
         if (!complete || complete.rows.length !== complete.count) throw Error("incomplete snapshot")
         if (topic === "torrents") replaceTorrents(complete.rows)
+        else if(topic==="log")appendLog(complete.rows)
         else {
           var keyed = dictionary()
           complete.rows.forEach(function(row) { keyed[topicKey(topic,row)] = row })
-          s.topics[topic] = keyed
+          s.setTopic(topic,keyed)
           if (topic === "events") complete.rows.forEach(event)
         }
         delete s.snapshots[snapshotKey]
       } else if (frame.ev === "state") {
-        if(/^torrent:.*\.pieces$/.test(topic))PiecesModel.decode(frame.data)
-        s.topics[topic] = frame.data
+        if(/^torrent:.*\.pieces$/.test(topic))s.setPieces(topic,frame.data);else s.setTopic(topic,frame.data)
         if (topic === "summary" || topic === "network" || topic === "settings") s[topic] = frame.data
       } else if (frame.ev === "delta") {
         if (s.snapshots[snapshotKey]) throw Error("delta interleaves snapshot")
         if(topic==="log" && ((frame.removed || []).length || Object.keys(frame.changed || {}).length))throw Error("log topic is append-only")
-        if (topic === "torrents") {
+        if(topic==="log")appendLog(frame.added || [])
+        else if (topic === "torrents") {
           ;(frame.added || []).forEach(function(row) { upsert(row, false) })
           ;(frame.removed || []).forEach(remove)
           Object.keys(frame.changed || {}).forEach(function(hash) {
@@ -195,21 +202,21 @@ function create(options) {
             }
           })
         } else {
-          var target = s.topics[topic] || dictionary()
+          var target = Object.assign(dictionary(),s.topics[topic] || {})
           ;(frame.added || []).forEach(function(row) { target[topicKey(topic,row)] = row; if (topic === "events") event(row) })
           ;(frame.removed || []).forEach(function(key) { delete target[key] })
           Object.keys(frame.changed || {}).forEach(function(key) {
             if (!target[key]) return
+            target[key]=Object.assign({},target[key])
             Object.keys(frame.changed[key]).forEach(function(field) {
               if (!safeField(field)) throw Error("invalid field")
               if (frame.changed[key][field] === null) delete target[key][field]
               else target[key][field] = frame.changed[key][field]
             })
           })
-          s.topics[topic] = target
+          s.setTopic(topic,target)
         }
       }
-      if(topic==="log")trimLog()
       badge(topic)
       return s.changes.length > 0
     }
@@ -226,7 +233,7 @@ function create(options) {
       s.proto = result.proto; s.compatible = result.proto === 1
       if (s.instance && s.instance !== result.instance) {
         replaceTorrents([]); s.subscriptions = dictionary(); s.snapshots = dictionary(); s.topics = dictionary()
-        s.hasTorrents = false; s.badges={}
+        s.hasTorrents = false; s.badges={};s.pieces=dictionary();s.topicVersions=dictionary();log=LogBuffer.create();s.logVersion++;s.logDelta={added:[],removed:[]}
         s.events = []; s.eventSeen = dictionary(); s.summary = {}; s.network = {}; s.settings = {}
       }
       s.subscriptions = dictionary(); s.snapshots = dictionary()
@@ -236,7 +243,7 @@ function create(options) {
     else if(call.op==="app.settings.get")s.settings=result
     else if (call.op === "transfer.info") s.transfer = result
     else if(call.op==="app.log"){
-      var log=s.topics.log || dictionary();result.entries.forEach(function(r){log[String(r.seq)]=r});s.topics.log=log;trimLog()
+      appendLog(result.entries)
     }
     else if(call.op==="shows.list")domainList("shows",result.shows)
     else if(call.op==="rss.feeds")domainList("rss.feeds",result.feeds)
@@ -246,13 +253,13 @@ function create(options) {
     else if (call.op === "torrents.peers") {
       var peers = dictionary()
       result.peers.forEach(function(peer) { peers[peer.addr] = peer })
-      s.topics["torrent:" + call.args.hash + ".peers"] = peers
+      s.setTopic("torrent:" + call.args.hash + ".peers",peers)
     }
-    else if(call.op === "torrents.pieces") {PiecesModel.decode(result);s.topics["torrent:"+call.args.hash+".pieces"]=result}
+    else if(call.op === "torrents.pieces") {var topic="torrent:"+call.args.hash+".pieces";s.setPieces(topic,result)}
     else if (call.op === "torrents.files") {
       var files = dictionary()
       result.files.forEach(function(file) { files[String(file.index)] = file })
-      s.topics["torrent:" + call.args.hash + ".files"] = files
+      s.setTopic("torrent:" + call.args.hash + ".files",files)
     }
     else if (call.op === "subscribe") s.subscriptions[result.sub] = {topics:result.topics, rev:0, resync:false}
     else if (call.op === "unsubscribe") {
@@ -371,21 +378,23 @@ function create(options) {
     if(!mirror.model)return
     mirror.order.forEach(function(hash,index){var row=s.torrents[hash];mirror.model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[hash],state,text))})
   }
-  s.pendingByHash=dictionary();s.failedByHash=dictionary()
+  s.pendingByHash=dictionary();s.failedByHash=dictionary();s.pendingActions=dictionary()
+  s.pendingActions=dictionary()
   s.syncActions=function(actions) {
-    var pending=dictionary(),failed=dictionary()
+    var pending=dictionary(),failed=dictionary(),pendingActions=dictionary()
     Object.keys(actions).forEach(function(ref) {
       var action=actions[ref],args=action.args || {},hashes=args.hashes || (args.hash ? [args.hash] : [])
       hashes.forEach(function(hash) {
-        if(action.status==="pending")pending[hash]=true
+        if(action.status==="pending"){pending[hash]=true;if(!pendingActions[hash])pendingActions[hash]=action}
         else if(action.status==="failed" || action.status==="error" || action.status==="no answer")failed[hash]=action.error || {message:"no answer"}
       })
     })
-    s.pendingByHash=pending;s.failedByHash=failed
+    if(equal(pending,s.pendingByHash) && equal(failed,s.failedByHash) && equal(pendingActions,s.pendingActions))return false
+    s.pendingByHash=pending;s.failedByHash=failed;s.pendingActions=pendingActions;return true
   }
   s.clearFailures=function(actions) {
     Object.keys(actions).forEach(function(ref) {if(actions[ref].status!=="pending")delete actions[ref]})
-    s.failedByHash=dictionary()
+    return s.syncActions(actions)
   }
   s.visibleKeys=function(filter,text,key,reverse) {
     text=String(text || "").toLocaleLowerCase()
