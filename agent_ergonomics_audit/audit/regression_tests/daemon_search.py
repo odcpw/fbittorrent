@@ -189,6 +189,11 @@ def search_grab_and_ledger(binary, systemd):
         case.check(failure['error']['details']['state']=='parked' and 'VPN' in failure['error']['hint'],
                    'parked grab is refused before pending with the VPN hint',json.dumps(failure))
         client.call('search.stop',dict(search_id=identifier))
+        # This fixture's generic teardown verifies a live engine drain. Return
+        # from the deliberately parked refusal control before that teardown.
+        client.call('app.settings.set',dict(network_interface=None))
+        h.wait_for(lambda:((value:=client.call('app.info')['result'])['state']=='running',json.dumps(value)),
+                   'restore the fixture engine after the parked refusal control')
 
 
 CASES=CASES+(search_grab_and_ledger,)
@@ -272,3 +277,34 @@ def tui_search_owner_restart(binary, systemd):
 
 
 CASES=CASES+(tui_search_owner_restart,)
+
+
+def search_stage_peerless(binary, systemd):
+    """Review owns a stage immediately, even when no peer can give metadata."""
+    with owned('search_stage_peerless', binary, systemd) as (case, box, h, process, runtime), d.ApiConn(h, timeout=2) as client:
+        client.hello()
+        hash_='d'*40
+        magnet='magnet:?xt=urn:btih:'+hash_+'&dn=Peerless%20review'
+        item=dict(key=hash_,name='Peerless review',providers=['local'],magnet=magnet)
+        began=time.monotonic()
+        response=client.call('search.grab',dict(result=item,stage=True,seed=False),ref='peerless-review')
+        case.check(response['result']['state']=='pending','search stage acknowledges its correlation before worker completion',json.dumps(response))
+        outcome=d.mutation_outcome(client,'peerless-review')
+        row=client.call('torrents.get',dict(hash=hash_))['result']['torrent']
+        case.check(time.monotonic()-began<2 and outcome['result']['hash']==hash_
+                   and row['staged'] and row['state']=='paused' and not row['checked']
+                   and not row['upload_enabled'] and 'file_count' not in row and not list(box.downloads.iterdir()),
+                   'peerless search stage completes within two seconds without waiting for metadata or touching payloads',json.dumps(dict(row=row,outcome=outcome)))
+        client.call('torrents.discard',dict(hash=hash_))
+        case.check(client.call('torrents.list',{})['result']['torrents']==[] and not list(box.downloads.iterdir()),
+                   'Discard can remove the unresolved search stage and preserves the download folder','empty ledger and folder')
+        client.call('search.grab',dict(result=item,stage=True,seed=False),ref='peerless-commit')
+        d.mutation_outcome(client,'peerless-commit')
+        client.call('torrents.commit',dict(hash=hash_,seed=False))
+        row=client.call('torrents.get',dict(hash=hash_))['result']['torrent']
+        case.check(not row['staged'] and row['intent']=='run' and not row['upload_enabled']
+                   and 'file_count' not in row and not list(box.downloads.iterdir()),
+                   'Download can commit the search magnet before metadata arrives, without enabling upload',json.dumps(row))
+
+
+CASES=CASES+(search_stage_peerless,)
