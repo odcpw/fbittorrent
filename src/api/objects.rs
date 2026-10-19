@@ -347,6 +347,7 @@ pub struct ImdbCard {
     pub poster_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_path: Option<String>,
+}
 
 impl Settings {
     /// Older daemons omit this preference. Their clients keep hover motion on.

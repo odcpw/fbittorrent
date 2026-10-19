@@ -1518,9 +1518,8 @@ def api_collection_cap(binary, systemd):
 def api_subscriptions_deferred(binary, systemd):
     with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add"], "P1-06, P1-09 and P7-09 advertise exactly their implemented capabilities", str(hello["caps"]))
+        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add", "imdb"], "P1-06, P1-09, P7-09 and P3-04 advertise exactly their implemented capabilities", str(hello["caps"]))
 
-        case.check(hello["caps"] == ["torrents", "files", "imdb"], "daemon advertises exactly its implemented capabilities (P3-04 adds imdb)", str(hello["caps"]))
         for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
             frame = client.call(op, args, error="unknown_op")
             nearest = ["torrents.list"] if op == "torrents.lis" else []
@@ -1562,6 +1561,50 @@ def api_start_results(binary, systemd):
         case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
                    "bulk start preserves completed and already-running skip reasons", str(bulk))
 
+
+def offline_ledger_case(binary, systemd, name, remove=False, draining=False):
+    with Case("daemon", name) as case, Sandbox() as sandbox, Harness(case,binary,sandbox,systemd) as h:
+        select_replay_interface(Path(sandbox.env["XDG_CONFIG_HOME"])/"fbittorrent/config.toml","fbmissing0")
+        if not systemd: allow_manager_reads(h)
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine()
+            fixture=fixtures.two_file_fixture(sandbox.root)
+            h.cli("add",str(fixture.torrent))
+            ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+            before=json.loads(ledger.read_text())["records"]
+            if draining:
+                commands=[[str(binary),"down","--json"],[str(binary),"--no-start","stop",fixture.info_hash,"--json"]]
+                children=[case.popen(argv,env=sandbox.env,stdout=subprocess.PIPE,text=True) for argv in commands]
+                for argv,child in zip(commands,children):
+                    stdout,stderr=child.communicate(timeout=15)
+                    case.check(child.returncode==0 and json.loads(stdout)["ok"],"concurrent down/offline stop succeeds without a lost final save",json.dumps(dict(argv=argv,code=child.returncode,stdout=stdout,stderr_log=str(case.daemon_path))))
+                process.wait()
+            else:
+                h.stop_serve(process)
+                result=h.cli("delete" if remove else "stop",fixture.info_hash)
+                case.check(result.get("running") is False and result.get("count")==1,"offline intent reports its durable result without starting an owner",json.dumps(result))
+            saved=json.loads(ledger.read_text())["records"]
+            if remove:
+                case.check(saved==[] and not (ledger.parent/(fixture.info_hash+".torrent")).exists() and all(p.exists() for p in fixture.files),"offline keep-files deletion removes record/metainfo and retains payload",json.dumps(saved))
+            else:
+                expected=[dict(row,paused=True) for row in before]
+                case.check(saved==expected,"offline stop preserves every record field/order and durably changes only pause intent",json.dumps(saved))
+            h.lock_free()
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+
+
+def offline_stop_ledger(binary,systemd):
+    offline_ledger_case(binary,systemd,"offline_stop_ledger")
+
+
+def offline_delete_keep_files_ledger(binary,systemd):
+    offline_ledger_case(binary,systemd,"offline_delete_keep_files_ledger",remove=True)
+
+
+def offline_write_waits_for_draining_daemon(binary,systemd):
+    offline_ledger_case(binary,systemd,"offline_write_waits_for_draining_daemon",draining=True)
 
 def deferred_add_saved_record(binary, systemd):
     with Case("daemon", "deferred_add_saved_record") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h:
@@ -3601,7 +3644,7 @@ CASES = {function.__name__: function for function in
           connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
           api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
-          api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
+          offline_stop_ledger, offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon, api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",

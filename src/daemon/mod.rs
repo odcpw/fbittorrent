@@ -92,7 +92,7 @@ impl Daemon {
     pub fn info(&self) -> serde_json::Value {
         let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
         serde_json::json!({
-            "server": {"version": env!("CARGO_PKG_VERSION"), "build": option_env!("FBT_BUILD_ID").unwrap_or("unknown"),
+            "server": {"version": env!("CARGO_PKG_VERSION"), "build": crate::api::build_id(),
                 "pid": std::process::id(), "launcher": self.launcher,
                 "log": if self.launcher == "systemd" { "journalctl --user -u fbittorrent" }
                     else { "the terminal running fbittorrent serve" }},

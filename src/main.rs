@@ -44,7 +44,15 @@ fn main() {
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli)=>cli,
+        Err(error)=>{
+            if std::env::args().any(|arg|arg=="--json") && !matches!(error.kind(),clap::error::ErrorKind::DisplayHelp|clap::error::ErrorKind::DisplayVersion) {
+                std::process::exit(agent::report(&AppError::new(Code::Usage,error.to_string()).into(),true));
+            }
+            error.exit();
+        }
+    };
     let json = cli.json;
     if let Some(Cmd::Serve { idle_exit_secs, no_notify }) = &cli.cmd {
         if no_start_requested(cli.no_start, std::env::var_os("FBITTORRENT_NO_START").as_deref()) {
@@ -83,7 +91,7 @@ fn main() {
 
 /// Print a JSON value or, when not in JSON mode, run the human printer.
 fn emit(json: bool, value: serde_json::Value, human: impl FnOnce()) {
-    if json { println!("{value}"); } else { human(); }
+    if json { println!("{}",agent::with_warnings(value)); } else { human(); }
 }
 
 fn run(cli: Cli) -> Result<Code> {
@@ -107,6 +115,8 @@ fn run(cli: Cli) -> Result<Code> {
     if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
+    if !cfg.native() { agent::warning("deprecated_engine", "engine = \"qbittorrent\" is deprecated and is removed in v0.4.0; see the README".into(), true); }
+    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
         return Err(AppError::new(Code::Usage, "native sequential and first/last scheduling are intrinsic; toggle commands require legacy mode")
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());
@@ -114,7 +124,7 @@ fn run(cli: Cli) -> Result<Code> {
 
     // Commands that never touch the backend.
     match cmd {
-        Cmd::Capabilities => { println!("{}", agent::capabilities_json()); return Ok(Code::Ok); }
+        Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
         Cmd::Setup { port, save, magnet, uninstall } => {
             if uninstall {
                 setup::uninstall()?;
@@ -152,7 +162,7 @@ fn run(cli: Cli) -> Result<Code> {
                 v["found"] = serde_json::json!(true);
                 v["url"] = serde_json::json!(t.url());
                 v["poster_path"] = serde_json::json!(poster);
-                println!("{v}");
+                println!("{}", agent::with_warnings(v));
                 return Ok(Code::Ok);
             }
             println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
@@ -201,8 +211,8 @@ fn run(cli: Cli) -> Result<Code> {
     let c = Client::from_config(&cfg);
 
     match cmd {
-        Cmd::Triage => { println!("{}", agent::triage(&cfg, &c)); Ok(Code::Ok) }
-        Cmd::Status => {
+        Cmd::Triage => { println!("{}", agent::with_warnings(agent::triage(&cfg, &c))); Ok(Code::Ok) }
+        Cmd::Status { quiet: _ } => {
             if c.version().is_err() {
                 let backend = if !cfg.native() && backend::is_active(&cfg.backend_unit) { "starting" } else { "stopped" };
                 emit(json, serde_json::json!({"ok": false, "backend": backend, "engine": cfg.engine, "app_open": false}), || {
@@ -318,7 +328,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, wait, timeout } => {
+        Cmd::Add { source, no_seq, no_first_last, stopped, seed, save, category, quiet, wait, timeout, origin: _ } => {
             if cfg.native() && (no_seq || no_first_last) {
                 return Err(AppError::new(Code::Usage, "the native engine downloads sequentially with first/last pieces prioritised; those settings cannot be disabled")
                     .hint("drop --no-seq and --no-first-last, or explicitly configure engine = \"qbittorrent\" for legacy scheduling").into());
@@ -614,7 +624,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 
 fn native_may_start(cmd: &Cmd) -> bool {
     matches!(cmd, Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
-        | Cmd::Noseed { .. } | Cmd::Wait { .. } | Cmd::Delete { files: true, .. }
+        | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
 }

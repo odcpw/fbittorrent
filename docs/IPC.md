@@ -526,3 +526,21 @@ null and non-boolean values; explicit false remains present on a typed roundtrip
 This extends the v1 object contract without adding an operation or advertising
 a not-yet-implemented service. The standalone TUI persists and applies the same
 preference from `config.toml`; API-client attachment consumes it in P4-03.
+
+
+### P1-11 — CLI client and contract 1.2.0
+
+The CLI uses the bounded blocking API session, matches up to eight requests by
+ID, keeps events separate, and decodes subscription revisions using the frozen
+per-subscription counter across topics. Reads never open a daemon; offline stop
+and keep-files removal share engine.lock and the durable parked ledger. A lost
+idempotent request can reconnect once with the original ref and observed
+instance; destructive unknown outcomes return timeout without replay. Native
+add uses the returned hash and accepts `--origin manual|handler|agent`.
+Contract 1.2.0 declares the stopped-status `ok:true` change and additive normalized
+torrent fields while preserving the legacy numeric sentinels. Capabilities are
+generated from clap, with starts/since metadata. JSON warnings identify legacy
+mode and version skew. `SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
+ledger timestamps are preserved. Live summary/idle/upgrade qualification follows
+the P1-08/P1-12/P1-17 integration; cumulative app.info client counters never stand
+in for live interactive presence.
