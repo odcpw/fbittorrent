@@ -45,6 +45,7 @@ pub(super) struct Store {
     pub peers: BTreeMap<api::Hash, BTreeMap<String, api::Peer>>,
     pub rss_feeds:BTreeMap<String,api::Feed>,
     pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
+    pub releases_topic:Option<String>,
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
@@ -78,7 +79,7 @@ impl Store {
         self.caps.reply(&reply)?;
         match (call, reply) {
             (_,api::Reply::ShowsList(result))=>{ensure!(result.shows.len()<=MAX_ITEMS,"show list exceeds UI row budget");self.shows=result.shows.into_iter().map(|row|(row.imdb.clone(),row)).collect();},
-            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
+            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.releases_topic=Some(args.imdb.clone().unwrap_or_else(||"inbox".into()));self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
             (_,api::Reply::RssFeeds(result))=>{
                 ensure!(result.feeds.len()<=MAX_ITEMS,"feed list exceeds UI row budget");
                 self.rss_feeds=result.feeds.into_iter().map(|row|(row.id.clone(),row)).collect();
@@ -323,7 +324,7 @@ impl Store {
         ensure!(snapshot.len() == snapshot.count, "incomplete snapshot");
         match topic {
             api::Topic::Shows=>self.shows=snapshot.shows,
-            api::Topic::ShowReleases(_)=>self.show_releases=snapshot.releases,
+            api::Topic::ShowReleases(id)=>{self.releases_topic=Some(id.clone());self.show_releases=snapshot.releases;},
             api::Topic::RssFeeds=>self.rss_feeds=snapshot.feeds,
             api::Topic::RssItems(id)=>{self.rss_items.clear();self.rss_items.insert(id.clone(),snapshot.feed_items);},
             api::Topic::Torrents => {

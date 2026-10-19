@@ -20,7 +20,7 @@ impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let cols = Flex::horizontal().constraints([Constraint::Fill, Constraint::FitContent]).split(area);
-        let new = self.inbox_rows.len();
+        let new = self.shows_unread();
         let shows_tab = format!(" 3 Shows ({new}) ");
         let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab.clone(), " 4 RSS ".to_string()];
         let mut x = area.x;

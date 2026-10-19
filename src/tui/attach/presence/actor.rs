@@ -11,7 +11,7 @@ struct Pending {
 }
 pub(super) fn budget(op: &str) -> Duration {
     Duration::from_secs(match op {
-        "torrents.add" | "search.grab" | "search.install" => 100,
+        "torrents.add" | "search.grab" | "search.install" | "rss.grab" | "shows.grab" | "rss.refresh" | "shows.check" => 100,
         "torrents.get" | "torrents.files" | "torrents.set_files" => 65,
         _ => 20,
     })

@@ -10,7 +10,7 @@ pub fn run(cfg: Config, screen: Screen) -> Result<()> {
     // This guard owns only UI cleanup, never an engine or the instance lock.
     let _terminal=signals::AppGuard::new(());
     let native=cfg.native();
-    let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+    let mut model = TuiApp::new(cfg, screen, if native {Shows::default()}else{Shows::load()?});
     if let Some(connection)=existing {
         model.recovery.connected(&connection.hello.server.version,env!("CARGO_PKG_VERSION"));
         model.store.hello(connection.hello.clone());
