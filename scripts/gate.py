@@ -139,7 +139,7 @@ def unit_environment(command, rust_test=False):
 
 def modules():
     sys.path.insert(0, str(HARNESS))
-    return {name: importlib.import_module(name) for name in ('daemon', 'native', 'agent_contract', 'tui_smoke')}
+    return {name: importlib.import_module(name) for name in ('daemon', 'native', 'agent_contract', 'tui_smoke', 'tui_journey')}
 
 
 def opted_in(env, name):
@@ -166,6 +166,7 @@ def cases(mode, binary, env, registry):
                    and (name != 'deferred_add' or opted_in(env, 'VPN'))],
         'agent_contract': list(registry['agent_contract'].CASES),
         'tui_smoke': list(registry['tui_smoke'].CASES),
+        'tui_journey': list(registry['tui_journey'].SOURCES),
     }
     result = []
     for suite, names in selected.items():

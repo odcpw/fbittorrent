@@ -148,10 +148,7 @@ pub fn stdout_is_tty() -> bool {
 struct CommandDoc { name: &'static str, aliases: &'static [&'static str], summary: &'static str, json: bool, mutating: bool, needs_backend: bool }
 
 fn upload_cap_text() -> String {
-    format!(
-        "{} KiB/s while downloading (non-zero caps must be at least 16 KiB/s); stops when complete unless seeding is enabled",
-        crate::qbt::NO_UPLOAD_LIMIT / 1024,
-    )
+    "off by default: zero piece payload while downloading or complete; enable upload in settings or explicitly for one torrent (non-zero caps must be at least 16 KiB/s)".into()
 }
 
 pub fn capabilities_json() -> serde_json::Value {
@@ -328,7 +325,7 @@ WHAT IT IS
   delete-keeping-files never start it (stop and delete-keeping-files edit the ledger under engine.lock while the daemon is down).
   Status and triage never open it. Search, RSS browsing, and Shows tracking work
   locally without starting downloads.
-  Upload is capped at {upload_policy}.
+  Upload is {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
   The native daemon is the only backend.
 
@@ -527,15 +524,13 @@ mod tests {
 
     #[test]
     fn upload_cap_text_from_constant() {
-        let cap = crate::qbt::NO_UPLOAD_LIMIT;
         let capabilities = capabilities_json();
-        let amount = format!("{} KiB/s", cap / 1024);
-        for text in [capabilities["defaults"]["upload"].as_str().unwrap(),
-                     capabilities["conventions"]["native_upload"].as_str().unwrap()] {
-            assert!(text.contains(&amount), "upload policy must expose the configured cap");
+        for text in [capabilities["defaults"]["upload"].as_str().unwrap(), capabilities["conventions"]["native_upload"].as_str().unwrap()] {
+            assert!(text.contains("zero piece payload"));
+            assert!(text.contains("off by default"));
         }
         let guide = ROBOT_GUIDE.to_string();
-        assert!(guide.contains(&amount));
+        assert!(guide.contains("zero piece payload"));
         assert!(!guide.contains("{upload_policy}"));
 
     }

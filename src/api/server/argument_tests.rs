@@ -334,8 +334,8 @@ fn optional_extras_require_the_frozen_types_in_both_forms() {
 fn checking_capture() -> Vec<Value> {
     let hash = "ab".repeat(20);
     let paused = json!({"hash":hash,"name":"checking fixture","state":"paused",
-        "intent":"pause","staged":false,"checked":true,"seed":false,
-        "upload_policy":"default_cap","save_path":"/tmp/fbt-fixture",
+        "intent":"pause","staged":false,"checked":true,"seed":false,"upload_enabled":false,
+        "upload_policy":"off","save_path":"/tmp/fbt-fixture",
         "added_at":1,"force":false,"size":100,"completed_bytes":50,"progress":0.5});
     let mut checking = paused.clone();
     checking["state"] = json!("checking");

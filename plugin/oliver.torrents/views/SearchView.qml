@@ -21,7 +21,7 @@ FocusScope {
   signal changed()
   signal queryEdited(string query)
   signal dismissRequested()
-  function focusQuery(){queryInput.forceActiveFocus()}
+  function focusQuery(){queryInput.forceActiveFocus();queryInput.selectAll()}
   function focusResults(){service.cancelFocusTarget(queryInput);queryInput.focus=false;root.forceActiveFocus()}
   function open(query,run){queryInput.text=String(query || "");if(run && queryInput.text)flow.start(queryInput.text);Qt.callLater(queryInput.text ? focusQuery : focusResults)}
   function key(event){
@@ -60,7 +60,7 @@ FocusScope {
   Keys.priority:Keys.BeforeItem
   Keys.onPressed:function(event){if(root.key(event))event.accepted=true}
   onViewModelChanged:{
-    if(viewModel.mode==="browse" && viewModel.label!==lastBrowseLabel){lastBrowseLabel=viewModel.label;queryInput.text=viewModel.label;focusResults()}
+    if(viewModel.mode==="browse" && viewModel.label!==lastBrowseLabel){lastBrowseLabel=viewModel.label;if(!queryInput.activeFocus){queryInput.text=viewModel.label;focusResults()}}
     else if(viewModel.mode==="query")lastBrowseLabel=""
   }
   onViewStateChanged:changed()
@@ -75,7 +75,8 @@ FocusScope {
         borderSpec:Commons.Border.controlSpec(root.editing ? "focus" : "normal",Commons.Color.foreground,Commons.Color.accent)
         TextInput {
           id:queryInput
-          clip:true;selectByMouse:true
+          clip:true;selectByMouse:true;selectionColor:Commons.Style.selectionFill;selectedTextColor:Commons.Color.foreground
+          Keys.priority:Keys.BeforeItem
           anchors.fill:parent;anchors.margins:Commons.Style.spacing.sm;maximumLength:256
           font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;color:Commons.Color.foreground
           onTextEdited:root.queryEdited(text)

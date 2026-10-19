@@ -172,7 +172,8 @@ fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: In
     start_shared(cfg, lifecycle, directory, Arc::new(instance), options, None)
 }
 
-fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, options: SessionOptions, resume: Option<Arc<resume::Store>>) -> Result<AppEngine> {
+fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, mut options: SessionOptions, resume: Option<Arc<resume::Store>>) -> Result<AppEngine> {
+    options.upload_enabled = cfg.upload == "on";
     std::fs::create_dir_all(&directory)?;
     let ledger_path = directory.join("torrents.json");
     let ledger = read_ledger(&ledger_path)?;

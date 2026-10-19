@@ -8,7 +8,7 @@ ShellRoot {
   FileView {id:fixture;blockLoading:true;blockAllReads:true;preload:false}
   function check(name,expected,actual,ok){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise production add controller",expect:expected,observed:JSON.stringify(actual),ok:!!ok,ms:0}))}
   function service(caps){
-    var s={now:0,online:true,addTopics:[],calls:[],notes:[],selected:"",store:{settings:{seed_by_default:true,save_path:"/downloads"},torrents:{},topics:{},mutations:{}}}
+    var s={now:0,online:true,addTopics:[],calls:[],notes:[],selected:"",store:{settings:{upload:"on",save_path:"/downloads"},torrents:{},topics:{},mutations:{}}}
     s.client={caps:caps,request:function(op,args,options){s.calls.push({op:op,args:args,callback:options.callback});return s.calls.length}}
     s.mutate=function(op,args,cap,done){s.calls.push({op:op,args:args,callback:done});return "unit-"+s.calls.length}
     s.notify=function(text){s.notes.push(text)};s.finishAdd=function(hash){s.selected=hash}
@@ -24,7 +24,7 @@ ShellRoot {
     check("source","URL-encoded xt is accepted once without losing the original link",Source.parse(source.magnet.replace("urn:btih:","urn%3Abtih%3A")),Source.parse(source.magnet.replace("urn:btih:","urn%3Abtih%3A")).hash===hash && !Source.parse(source.magnet.replace("urn:btih:","urn%253Abtih%253A")))
     var s=service(["torrents","files"]),f=Flow.create(s,function(){},true)
     f.open(source)
-    check("preview","no staging cap means no write before Download; destination retained and seeding stays off even with seed_by_default",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && !f.snapshot().seed && f.snapshot().savePath==="/downloads")
+    check("preview","no staging cap means no write before Download; destination retained and seeding stays off even with global upload on",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && !f.snapshot().seed && f.snapshot().savePath==="/downloads")
     f.commit();check("preview","Download sends existing add shape without stage",s.calls[0],s.calls[0].op==="torrents.add" && s.calls[0].args.stage===undefined && s.calls[0].args.origin==="manual")
     s.reply("torrents.add",{hash:hash});check("preview","confirmed reply closes and selects hash",f.snapshot(),!f.snapshot().visible && s.selected===hash)
     f.open(source);var count=s.calls.length;f.cancel();check("preview","Escape from preview never sends add/discard",s.calls.length,s.calls.length===count && !f.snapshot().visible)
@@ -42,7 +42,7 @@ ShellRoot {
     s.reply("torrents.commit",{});check("staging","commit acknowledgement closes",f.snapshot(),!f.snapshot().visible)
     s=service(["torrents","staging","free_space","settings"]);f=Flow.create(s,function(){},true);f.existing(hash)
     s.reply("torrents.get",{torrent:{hash:hash,size:4096,name:"Handler stage",origin:"handler",seed:true,save_path:"/handler destination"}})
-    s.reply("app.free_space",{writable:true,free_bytes:4096});s.reply("app.settings.get",{seed_by_default:false,save_path:"/default"});s.reply("torrents.files",{files:files})
+    s.reply("app.free_space",{writable:true,free_bytes:4096});s.reply("app.settings.get",{upload:"off",save_path:"/default"});s.reply("torrents.files",{files:files})
     check("staging","existing stage adopts handler origin, destination but seeding remains off and frozen File.size",f.snapshot(),f.snapshot().phase==="ready" && f.snapshot().origin==="handler" && !f.snapshot().seed && f.snapshot().savePath==="/handler destination" && f.snapshot().neededBytes===4096 && f.snapshot().destinationReady)
     s=service(["torrents","staging"]);f=Flow.create(s,function(){},true);f.open(source);f.cancel();check("cancel_race","cancel waits for in-flight stage hash",f.snapshot(),f.snapshot().phase==="cancel_wait")
     s.reply("torrents.add",{hash:hash});check("cancel_race","stage reply triggers discard, never delete-files",s.calls[s.calls.length-1],s.calls[s.calls.length-1].op==="torrents.discard" && s.calls[s.calls.length-1].args.hash===hash)
@@ -80,7 +80,9 @@ ShellRoot {
     s.reply("search.grab",{hash:hash});check("search_review","confirmed grab selects the downloaded torrent",f.snapshot(),!f.snapshot().visible && s.selected===hash)
     s=service(["torrents","search","staging"]);f=Flow.create(s,function(){},true);f.search(result,7)
     check("search_review","negotiated staging uses the session/key and stage true",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.stage===true && s.calls[0].args.search_id===7 && s.calls[0].args.key===hash)
-    s.reply("search.grab",{hash:hash});check("search_review","staged grab enters the shared metadata/file selection flow",f.snapshot(),f.snapshot().owned && s.calls[1].op==="torrents.get")
+    s.reply("search.grab",{state:"pending",ref:"unit-1"});s.store.mutations["unit-1"]={status:"pending",result:{state:"pending",ref:"unit-1"}};f.frame({topic:"events",ev:"delta"})
+    check("search_review","a pending snapshot is an acknowledgement, not a failed add",f.snapshot(),f.snapshot().phase==="staging" && !f.snapshot().error)
+    f.frame({ev:"mutation.result",ref:"unit-1",outcome:"done",result:{hash:hash}});check("search_review","staged grab enters the shared metadata/file selection flow",f.snapshot(),f.snapshot().owned && s.calls[1].op==="torrents.get")
     s=service(["torrents","search","free_space"]);f=Flow.create(s,function(){},true)
     result={key:hash,name:"100 MiB fixture",size:100*1024*1024,providers:["local"],magnet:source.magnet}
     f.search(result,1);s.reply("app.free_space",{writable:true,free_bytes:64*1024*1024});count=s.calls.length;f.commit()

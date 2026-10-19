@@ -209,7 +209,7 @@ function create(service,changed,debug) {
     if(frame.ev==="mutation.result" && s.pendingRef && frame.ref===s.pendingRef){
       if(frame.outcome==="pending")return
       record("event",s.pendingOp,frame)
-      if(frame.outcome==="done"){var done=s.pendingDone;s.pendingRef="";done(frame.result || {})}else if(frame.outcome!=="done")error(frame.error ? frame.error.message : "Result unknown; refresh before trying again")
+      if(frame.outcome==="done"){var done=s.pendingDone;s.pendingRef="";done(frame.result || {})}else if(frame.outcome!=="pending")error(frame.error ? frame.error.message : "Result unknown; refresh before trying again")
     }
     if(s.owned && frame.topic==="torrent:"+s.hash+".files" && (frame.ev==="snapshot.end" || frame.ev==="delta")){
       var files=service.store.topics[frame.topic] || {};fileRows(Object.keys(files).map(function(key){return files[key]}))

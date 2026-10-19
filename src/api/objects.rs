@@ -104,6 +104,8 @@ pub struct Torrent {
     pub staged: bool,
     pub checked: bool,
     pub seed: bool,
+    #[serde(default)]
+    pub upload_enabled: bool,
     pub upload_policy: UploadPolicy,
     pub save_path: String,
     pub added_at: u64,
@@ -272,7 +274,8 @@ pub struct Settings {
     pub max_active_downloads: u64,
     pub peer_encryption: PeerEncryption,
     pub save_path: String,
-    pub seed_by_default: bool,
+    #[serde(default="crate::config::upload_off")]
+    pub upload: String,
     pub autostart: bool,
     pub idle_exit_secs: u64,
     pub notify: bool,

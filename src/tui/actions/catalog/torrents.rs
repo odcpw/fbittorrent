@@ -1,9 +1,11 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("torrents.copy_magnet",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
+        |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),T,None,None,None),
     action!("torrents.rename",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
         |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
     action!("torrents.undo_remove",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",20,
-        TuiApp::can_undo_removal,Some(TuiApp::undo_removal),T,None,None,None),
+        |a|a.online&&!a.service_busy&&a.removal_undo.is_some(),Some(TuiApp::undo_removal),T,None,None,None),
     action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort",90,
         |_|true,Some(|a|a.cycle_torrent_sort(false)),TD,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
     action!("torrents.reverse_sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse sort",90,
@@ -20,7 +22,7 @@ pub(super) const ACTIONS: &[Action] = &[
         40,
         |_| true,
         Some(|a| {
-            a.open_prompt(PromptKind::AddMagnet, "Add magnet / URL", false);
+            a.open_prompt(PromptKind::AddMagnet, "Add magnet / URL / .torrent path", false);
             Cmd::none()
         }),
         TDP,

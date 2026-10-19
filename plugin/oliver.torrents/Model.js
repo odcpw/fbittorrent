@@ -39,6 +39,7 @@ function stateLabel(t) {
     var p=t.playable
     return p.stall_free===true || (p.stall_free===undefined && Number(p.buffered_s)>=120) ? "Ready to watch" : "Playable · may stall"
   }
+  if (t.state==="error" && t.reason==="missing_files") return "Files missing"
   if (t.state==="error" && t.reason==="disk_full") return "Disk full"
   if (words[t.state]) return words[t.state]
   return t.state || "?"

@@ -13,6 +13,8 @@ pub(super) struct Prompt {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum PromptKind {
     AddMagnet,
+    MoveTorrent { hash: String },
+    TorrentDownloadCap { hash: String },
     RenameTorrent {hash:String},
     SettingLimit(usize),
     SettingPeerPort,
@@ -35,10 +37,14 @@ impl TuiApp {
         let mut input = TextInput::new()
             .with_style(self.theme.text())
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
-        if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
+        if matches!(kind,PromptKind::SettingLimit(_) | PromptKind::TorrentDownloadCap {..}){input=input.with_max_length(16);}
+        if matches!(kind,PromptKind::MoveTorrent{..}) {input=input.with_max_length(4096);}
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         if matches!(kind,PromptKind::RenameTorrent {..}) {input=input.with_max_length(512);}
         if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
+        if kind==PromptKind::SettingIdleExit {input=input.with_max_length(20);}
+        if kind==PromptKind::SettingDestination {input=input.with_max_length(4096);}
+        if matches!(kind,PromptKind::ShowQuality {..}) {input=input.with_max_length(16);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (true, true, false);
@@ -96,14 +102,15 @@ impl TuiApp {
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
-                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
-                if kind==PromptKind::ShowFilters {return self.apply_show_filters(&value);}
+                if matches!(kind,PromptKind::MoveTorrent{..} | PromptKind::TorrentDownloadCap{..}) {return self.apply_overview(kind,&value);}
                 if let PromptKind::RenameTorrent {hash}=kind {
                     if !crate::engine::rename::valid_name(&raw){self.set_status("Name must contain no controls and at most 512 characters",true);return Cmd::none();}
                     return self.service_action("torrents.rename",serde_json::json!({"hash":hash,"name":raw}),"renamed torrent");
                 }
                 if kind==PromptKind::SettingDestination {return self.apply_destination(&value);}
                 if kind==PromptKind::SettingIdleExit {return self.apply_idle_exit(&value);}
+                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
+                if kind==PromptKind::ShowFilters {return self.apply_show_filters(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

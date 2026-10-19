@@ -15,12 +15,11 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   duration supplies the buffer estimate; unknown duration stays unknown. The
   notification's Open action plays the file. Agents can use
   `fbittorrent wait <hash> --until playable --json` or `--until stall-free`.
-- **Seeding off by default.** New torrents get a 32 KiB/s upload cap while
-  downloading and stop when complete. This limits uploaded payload; it does not
-  guarantee zero upload. Allow seeding per torrent with `u` in the TUI or widget,
-  or `fbittorrent seed <hash>`; that removes the cap and allows completed torrents
-  to keep running.
-  Flip the default with `seed_by_default = true` in the config.
+- **Upload off by default.** Peers receive no piece payload while downloading or
+  after completion. `fbittorrent settings --upload on` allows upload while downloading,
+  subject to the configured speed limits. Completed torrents stop unless you explicitly
+  enable their Upload toggle in Details or run `fbittorrent seed <hash>`. That per-torrent
+  permission also works with global upload off; turning it off denies upload for that torrent.
 - **App lifetime.** CLI writes start the daemon on demand without opening a
   terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
   dashboard or TUI. Reads and status queries never start it. Nothing runs at
@@ -86,13 +85,14 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   sources that carry IMDb ids (browse lists), filled in for others once their
   title lookup completes.
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
-  desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
-  seeding for that add), or the CLI.
+  desktop handler owns both), the clipboard, the TUI (`a`), or the CLI.
+  Per-torrent Upload opt-in lives in Details.
 - **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
   torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
   keeps files. Without the daemon staging capability, the sheet says that metadata
   arrives after Download and creates no record before confirmation. With staging,
-  it resolves metadata first and offers file selection, seeding and destination.
+  it offers file selection as metadata arrives and a destination. Enter can
+  confirm the download while metadata is still resolving.
   The desktop handler respects `handler = "confirm"` by opening this sheet;
   `handler = "add"` adds immediately. A local file drop uses the same sheet;
   file-manager drag and drop on Hyprland still needs manual qualification.
@@ -368,7 +368,7 @@ peer_port = 6882
 max_active_downloads = 3
 peer_encryption = "prefer"           # off, prefer, require
 # network_interface = "proton"       # required ProtonVPN, or an exact interface
-seed_by_default = false
+upload = "off"
 show_quality = "1080p"
 notify = true
 timeout_secs = 10
@@ -514,7 +514,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 - The native engine uses the rqbit protocol code ported to Asupersync, with
   app-owned tasks, network activity, and storage work. The app's normal
   dependency graph has no Tokio runtime. Existing files are hash checked on opening. Changing
-  an upload cap rebuilds that torrent under the new limit and can cause another
+  an upload cap updates the existing live limiter without another
   check. Native MSE/peer encryption is supported; high/max file priorities,
   uTP and pure BitTorrent v2 remain unavailable.
   See [the engine evaluation](docs/engine-evaluation.md) for the implementation
@@ -567,6 +567,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:details` | Previous tab | `[` | — | — |  |
 | `modal:files` | Next tab | `]` | — | — |  |
 | `modal:files` | Overview | `[` | — | — |  |
+| `modal:details` | Move… | `m` | `m` | — |  |
+| `modal:details` | Download cap… | `c` | `c` | — |  |
 | `modal:details` | Open | `o` | — | — |  |
 | `modal:details` | Pause/resume | `p` | — | — |  |
 | `modal:details` | Upload on/off | `u` | `u` | — |  |
@@ -585,6 +587,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Copy magnet | `y` | — | — |  |
 | `screen:torrents` | Rename | `N` | `N` | — |  |
 | `screen:torrents` | Undo removal | `U` | — | — |  |
 | `screen:torrents` | Sort | `s` | `s` | — |  |
@@ -628,6 +631,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `pane:search.results` | Follow show | `f`, `F` | `f`, `F` | — |  |
 | `pane:search.query` | Search | `Enter` | `Enter` | — |  |
 | `pane:search.query` | Leave query | `Esc`, `↓` | `Esc`, `↓` | — |  |
+| `pane:rss.items` | Sort items | `s` | — | — |  |
+| `pane:rss.items` | Reverse item sort | `S` | — | — |  |
 | `screen:rss` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:rss` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:rss` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -645,11 +650,11 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:rss` | All read | `M` | `M` | — |  |
 | `screen:rss` | IMDb | `i` | `i` | — |  |
 | `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
-| `screen:shows` | Show quality | `=` | `=` | — |  |
-| `screen:shows` | Inbox filters | `F` | — | — |  |
 | `screen:shows` | Sort releases | `s` | — | — |  |
 | `screen:shows` | Reverse releases sort | `S` | — | — |  |
 | `pane:shows.releases` | Copy magnet | `y` | — | — |  |
+| `screen:shows` | Show quality | `=` | `=` | — |  |
+| `screen:shows` | Inbox filters | `F` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -738,7 +743,9 @@ wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
 Completed stop-on-complete records restore as `done, checked:false` without
 opening their payloads for hashing. `seed` and nonempty file-selection actions
 verify them before use; `open` only stats the saved target and stays dormant.
-Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
+Listing stats selected file paths and sizes: missing or truncated data is shown
+as `Files missing` (`error`, `reason:missing_files`) without claiming completion
+or admitting a handle. Same-size content changes still require verification. Explicit
 `delete --files --yes` can remove a dormant record without creating a live handle.
 
 

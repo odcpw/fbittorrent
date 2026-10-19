@@ -24,7 +24,7 @@ pub enum Intent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UploadPolicy {
-    DefaultCap,
+    Off,
     Unlimited,
     Custom,
 }
@@ -138,6 +138,7 @@ pub struct TorrentView {
     pub seeds: Option<u64>,
     pub seed: bool,
     pub upload_policy: UploadPolicy,
+    pub upload_enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_limit_bps: Option<u64>,
     #[serde(skip_serializing_if="Option::is_none")]
@@ -171,6 +172,17 @@ impl TorrentView {
         self.checked = false;
         self.reason = None;
         self.completed_at = None;
+    }
+
+    pub(super) fn files_missing(&mut self) {
+        self.state = TorrentState::Error;
+        self.reason = Some("missing_files".into());
+        self.error = Some(format!("Files missing: {} restore failed: missing files", self.name));
+        self.checked = false;
+        self.progress = None;
+        self.completed_bytes = None;
+        self.completed_at = None;
+        self.legacy.progress_known = false;
     }
 
     fn retain_restore_reason(&mut self) {
@@ -216,13 +228,9 @@ impl TorrentView {
             peers: None,
             seeds: None,
             seed: !record.stop_on_complete(),
-            upload_policy: if record.upload_limit == 0 && record.ratio_limit == -2.0 {
-                UploadPolicy::Unlimited
-            } else if record.upload_limit == NO_UPLOAD_LIMIT && record.ratio_limit == 0.0 {
-                UploadPolicy::DefaultCap
-            } else {
-                UploadPolicy::Custom
-            },
+            upload_enabled: record.upload.unwrap_or(!record.stop_on_complete()),
+            upload_policy: if !record.upload.unwrap_or(!record.stop_on_complete()) { UploadPolicy::Off }
+                else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited },
             upload_limit_bps: u64::try_from(record.upload_limit).ok(),
             download_limit_bps: record.download_limit,
             effective_download_limit_bps: None,
@@ -439,6 +447,7 @@ impl TorrentView {
     pub fn to_cli_json(&self) -> Result<String> {
         let f = self.legacy.facts;
         let state = match self.legacy.source {
+            Source::Dormant if self.state == TorrentState::Error => "error",
             Source::Dormant => "stoppedUP",
             Source::Parked if !f.record_paused => "waitingVPN",
             Source::Parked => {
@@ -539,6 +548,7 @@ impl Inner {
                 }
                 view.content_path = Some(path.to_string_lossy().into());
                 view.legacy.content_path = view.content_path.clone().unwrap();
+                if !saved.selected_files_present { view.files_missing(); }
             }
         }
         view
@@ -589,6 +599,9 @@ impl EngineDispatcher {
                 view.completed_bytes = None;
                 view.progress = None;
             }
+            view.upload_enabled = record.upload.unwrap_or(!record.stop_on_complete() || (self.inner.session.upload_enabled() && view.state != TorrentState::Done));
+            view.upload_policy = if !view.upload_enabled { UploadPolicy::Off }
+                else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited };
             view.origin=Some(record.origin.clone());
             view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
             view.retain_restore_reason();

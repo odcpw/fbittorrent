@@ -11,7 +11,7 @@ impl TuiApp {
     }
     pub(in crate::tui) fn cycle_torrent_sort(&mut self, reverse: bool) -> Cmd<Msg> {
         use TorrentSort::*;
-        let fields=[Added,Name,Progress,DownloadRate,Size,State,Eta];
+        let fields=[Added,Name,Progress,DownloadRate,Size,State,Eta,Peers];
         let field=if reverse {self.torrent_sort} else {
             fields[(fields.iter().position(|field|*field==self.torrent_sort).unwrap_or(0)+1)%fields.len()]
         };

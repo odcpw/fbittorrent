@@ -54,7 +54,7 @@ def tui_everyday(binary, systemd):
             case.check(copied.read_text()=='magnet:?xt=urn:btih:'+f'{1:040x}','sorting preserves selection identity through clipboard copy',copied.read_text())
             ui.keys(target,'F6',literal=False);ui.assert_pane(target,'Download settings')
             for _ in range(9):ui.keys(target,'Down',literal=False)
-            ui.keys(target,'Right',literal=False);ui.assert_pane(target,'Download destination · empty')
+            ui.keys(target,'Right',literal=False);ui.assert_pane(target,'Download destination · absolute folder path')
             destination=box.root/'chosen-downloads';destination.mkdir()
             ui.keys(target,'C-a',literal=False);ui.keys(target,str(destination));ui.keys(target,'Enter',literal=False)
             ui.keys(target,'Down',literal=False);ui.keys(target,'Right',literal=False)
@@ -64,19 +64,23 @@ def tui_everyday(binary, systemd):
             ui.keys(target,'Enter',literal=False)
             def settings_saved():
                 settings=client.call('app.settings.get')['result']
-                return settings['save_path']==str(destination) and settings['seed_by_default'] and settings['idle_exit_secs']==0,json.dumps(settings)
-            h.wait_for(settings_saved,'destination, seed default and disabled idle exit persist through API Settings')
+                return settings['save_path']==str(destination) and settings['upload']=='on' and settings['idle_exit_secs']==0,json.dumps(settings)
+            h.wait_for(settings_saved,'destination, upload permission and disabled idle exit persist through API Settings')
             ui.keys(target,'F6',literal=False);ui.assert_pane(target,'Disabled (0)');ui.assert_pane(target,str(destination))
             ui.keys(target,'Escape',literal=False)
-            ui.keys(target,'1');ui.keys(target,'a');ui.keys(target,'magnet:?xt=urn:btih:'+'d'*40+'&dn=New.Defaults');ui.assert_pane(target,'seed:on');ui.keys(target,'Enter',literal=False)
+            ui.keys(target,'1');ui.keys(target,'a');ui.keys(target,'magnet:?xt=urn:btih:'+'d'*40+'&dn=New.Defaults');ui.assert_pane(target,'streaming automatic');ui.keys(target,'Enter',literal=False)
             h.wait_for(lambda:('d'*40 in [r['hash']for r in d.undo_rows(client)],ui.capture(target)),'new add uses the saved defaults')
             added=client.call('torrents.get',dict(hash='d'*40))['result']['torrent']
-            case.check(added['save_path']==str(destination) and added['seed'],'new torrent inherits native destination and seed policy',json.dumps(added))
+            case.check(added['save_path']==str(destination) and not added['seed'] and added['upload_enabled'],'new torrent inherits destination and upload permission without completion seeding',json.dumps(added))
             client.call('app.settings.set',dict(network_interface='fbt_no_vpn'))
             ui.assert_pane(target,'Waiting for VPN')
             ui.tmux('resize-window','-t',target,'-x','80','-y','24')
             ui.assert_pane(target,'Waiting for VPN')
             case.check('Waiting for VPN' in ui.capture(target).splitlines()[0],'VPN state remains useful at 80 columns',ui.capture(target))
+            # Restore the owned binding before the common running-engine drain check.
+            client.call('app.settings.set',dict(network_interface='lo'))
+            assert h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='running',json.dumps(info)),
+                              'restored private binding unparks the same daemon before shutdown')
             ui.keys(target,'q');h.wait_for(lambda:(done.exists(),ui.capture(target)),'q detaches after everyday commands')
             case.check(process.child.poll() is None and payload.exists(),'detach preserves daemon and original payload')
         finally:ui.close()

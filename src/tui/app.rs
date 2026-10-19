@@ -23,7 +23,6 @@ pub struct TuiApp {
     pub(super) screen: Screen,
     pub(super) removal_undo: Option<(String,u64)>,
     pub(super) release_sort: release_sort::ReleaseSort,
-    pub(super) release_descending: bool,
     pub(super) tabs: RefCell<TabsState>,
     pub(super) show_help: bool,
     pub(super) help_scroll: u16,
@@ -84,6 +83,8 @@ pub struct TuiApp {
     pub(super) feed_list: RefCell<ListState>,
     pub(super) item_list: RefCell<ListState>,
     pub(super) rss_focus_items: bool,
+    pub(super) rss_sort:super::rss_sort::RssSort,
+    pub(super) rss_descending:bool,
     pub(super) rss_loaded: bool,
     pub(super) rss_revision: u64,
     pub(super) rss_busy: bool,
@@ -96,6 +97,7 @@ pub struct TuiApp {
     pub(super) show_list: RefCell<ListState>,
     pub(super) ep_list: RefCell<ListState>,
     pub(super) shows_focus_eps: bool,
+    pub(super) release_descending: bool,
     pub(super) shows_refreshing: HashSet<String>,
     pub(super) inbox_rows: Vec<ShowReleaseTarget>,
     /// Explicit undo restores the exact release last marked read in the inbox.
@@ -156,6 +158,7 @@ pub enum Msg {
     ApiDetail {connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>},
     Trackers {connection:Option<u64>,hash:String,request:u64,forced:bool,result:Result<Vec<crate::api::Tracker>,String>},
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
+    FilesSaved {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
 
 }
@@ -245,6 +248,8 @@ impl TuiApp {
             feed_list: RefCell::new(ListState::default()),
             item_list: RefCell::new(ListState::default()),
             rss_focus_items: false,
+            rss_sort:super::rss_sort::RssSort::Date,
+            rss_descending:true,
             rss_loaded: false,
             rss_revision: 0,
             rss_busy: false,

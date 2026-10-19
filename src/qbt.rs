@@ -40,11 +40,8 @@ fn is_false(value: &bool) -> bool { !value }
 
 fn known_progress() -> bool { true }
 
-/// Upload cap that means "no upload". Not literally zero: libtorrent charges protocol
-/// messages (piece and metadata requests) against the limit, and at 1 B/s a download
-/// never gets past fetching metadata. 32 KiB/s leaves room for the chatter while
-/// keeping payload upload negligible; torrents stop the moment they complete anyway.
-pub const NO_UPLOAD_LIMIT: i64 = 32 * 1024;
+/// Unlimited rate representation. Actual payload permission is gated separately.
+pub const NO_UPLOAD_LIMIT: i64 = 0;
 pub const SEED_TAG: &str = "seed";
 
 impl Torrent {
@@ -60,9 +57,9 @@ impl Torrent {
     }
     pub fn is_queued(&self) -> bool { self.state == "queuedDL" }
     pub fn complete_no_seed(&self) -> bool { self.completion_on > 0 && self.ratio_limit == 0.0 }
-    /// True when uploading is allowed (no default cap or explicitly tagged "seed").
+    /// Explicit permission to continue uploading after completion.
     pub fn seed_allowed(&self) -> bool {
-        self.has_tag(SEED_TAG) || self.up_limit != NO_UPLOAD_LIMIT
+        self.has_tag(SEED_TAG) || self.ratio_limit != 0.0
     }
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.split(',').any(|t| t.trim() == tag)
@@ -260,7 +257,7 @@ pub struct AddOptions {
     pub origin: Option<String>,
     pub sequential: bool,
     pub first_last: bool,
-    /// Allow upload. When false the torrent is capped and stops once complete.
+    /// Explicitly permit upload, including after completion; false inherits the global download-time policy and stops when complete.
     pub seed: bool,
     pub stopped: bool,
     pub save_path: Option<String>,

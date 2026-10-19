@@ -149,7 +149,7 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
     assert_eq!(view.name.chars().count(), 1024);
     assert_eq!(normalized["state"], "metadata");
     assert_eq!(normalized["intent"], "run");
-    assert_eq!(normalized["upload_policy"], "default_cap");
+    assert_eq!(normalized["upload_policy"], "off");
     assert_eq!(normalized["seed"], false);
     let legacy: Torrent = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
     assert_eq!(legacy.completion_on, -1);
@@ -179,10 +179,10 @@ fn policy_and_restore_reason_are_normalized_without_fabricated_completion() {
         Path::new("/fixture"),
     );
     for (limit, ratio, policy, seed) in [
-        (NO_UPLOAD_LIMIT, 0.0, UploadPolicy::DefaultCap, false),
+        (NO_UPLOAD_LIMIT, 0.0, UploadPolicy::Off, false),
         (0, -2.0, UploadPolicy::Unlimited, true),
         (65536, -2.0, UploadPolicy::Custom, true),
-        (0, 0.0, UploadPolicy::Custom, false),
+        (0, 0.0, UploadPolicy::Off, false),
     ] {
         record.upload_limit = limit;
         record.ratio_limit = ratio;

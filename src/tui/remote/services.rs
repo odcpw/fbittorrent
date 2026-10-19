@@ -70,6 +70,9 @@ impl TuiApp {
                         args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(hash,until)|(hash.into(),until))
                     }else{None};
                 }
+                if op=="torrents.add" && args["source"]["restore"].is_string() {
+                    self.removal_undo=None;
+                }
                 if op == "shows.set_read" && args["read"] == true {
                     if let (Some(imdb), Some(key)) = (args["imdb"].as_str(), args["key"].as_str()) {
                         self.inbox_last_read = Some(ShowReleaseTarget {
@@ -164,8 +167,7 @@ impl TuiApp {
             .collect();
         self.feeds.sort_by(|a, b| a.name.cmp(&b.name));
         for feed in &mut self.feeds {
-            feed.articles
-                .sort_by(|a, b| b.ts.cmp(&a.ts).then(a.id.cmp(&b.id)));
+            feed.articles.sort_by(|a,b|self.rss_sort.compare(a,b,self.rss_descending));
         }
         self.feed_list.borrow_mut().select(
             selected
@@ -257,6 +259,7 @@ impl TuiApp {
     pub(in crate::tui) fn sync_native_shows(&mut self) {
         let parent = self.selected_show().map(|s| s.imdb.clone());
         let selected = self.selected_release_target();
+        let old_index = self.ep_list.borrow().selected().unwrap_or(0);
         self.shows_refreshing = self
             .store
             .shows
@@ -329,16 +332,7 @@ impl TuiApp {
             self.follow_target = None;
             self.shows_focus_eps = false;
         }
-        self.order_release_rows();
-        self.rebuild_inbox();
-        if let Some(target) = selected {
-            if !self.shows_inbox() {
-                let pos = self
-                    .selected_show()
-                    .filter(|s| s.imdb == target.imdb)
-                    .and_then(|s| s.episodes.iter().position(|e| e.key == target.key));
-                self.ep_list.borrow_mut().select(pos);
-            }
-        }
+        self.reorder_releases();
+        self.restore_release_selection(selected, old_index);
     }
 }

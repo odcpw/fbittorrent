@@ -59,6 +59,8 @@ use modals_settings::*;
 mod settings_fields;
 #[path = "modals/prompt.rs"]
 mod modals_prompt;
+#[path="modals/overview.rs"]
+mod modals_overview;
 use modals_prompt::*;
 mod imdb_card;
 mod imdb_cache;
@@ -69,10 +71,8 @@ mod layout;
 use layout::*;
 mod footer;
 mod clipboard;
-mod everyday;
 #[cfg(test)]
-#[path="tests/everyday.rs"] mod everyday_tests;
-mod release_sort;
+#[path="tests/journeys.rs"] mod journey_tests;
 #[cfg(test)]
 #[path="tests/clipboard.rs"] mod clipboard_tests;
 mod help;
@@ -87,6 +87,14 @@ mod palette;
 mod feedback;
 mod limits;
 mod statistics;
+mod everyday;
+#[path="screens/release_sort.rs"]
+mod release_sort;
+#[path="screens/rss_sort.rs"]
+mod rss_sort;
+#[cfg(test)]
+#[path="tests/everyday.rs"]
+mod everyday_tests;
 #[cfg(test)]
 #[path="tests/statistics.rs"]
 mod statistics_tests;
@@ -97,8 +105,14 @@ mod history_tests;
 #[path="tests/limits.rs"]
 mod limit_tests;
 #[cfg(test)]
+#[path="tests/overview.rs"]
+mod overview_tests;
+#[cfg(test)]
 #[path="tests/services.rs"]
 mod service_tests;
+#[cfg(test)]
+#[path="tests/shows_selection.rs"]
+mod shows_selection_tests;
 #[cfg(test)]
 #[path="tests/disk.rs"]
 mod disk_tests;
@@ -339,19 +353,23 @@ impl Model for TuiApp {
                 if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
                 self.update(Msg::Files(hash,result))
             }
+            Msg::FilesSaved {connection,hash,result}=>{
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                if let Some(panel)=self.files.as_mut().filter(|m|m.hash==hash){panel.saving=false;}
+                self.update(Msg::Files(hash,result))
+            }
             Msg::Files(hash, r) => {
                 if let Some(m) = self.files.as_mut() {
-                    if m.hash == hash {
+                    if m.hash == hash && !m.saving {
                         m.loading = false;
                         match r {
                             Ok(fs) => {
                                 let n = fs.len();
+                                m.error.clear();
+                                let selected=m.list.borrow().selected().and_then(|i|m.files.get(i)).map(|f|f.index);
                                 m.files = fs;
                                 let mut st = m.list.borrow_mut();
-                                match st.selected() {
-                                    Some(i) if i < n => {}
-                                    _ => st.select(if n > 0 { Some(0) } else { None }),
-                                }
+                                st.select(selected.and_then(|index|m.files.iter().position(|f|f.index==index)).or_else(||(n>0).then_some(0)));
                             }
                             Err(e) => m.error = e,
                         }

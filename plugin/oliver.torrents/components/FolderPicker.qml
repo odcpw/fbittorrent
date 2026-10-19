@@ -29,7 +29,7 @@ FocusScope {
   function move(amount){cursor=Math.max(-1,Math.min(folders.count-1,cursor+amount));if(cursor>=0)list.positionViewAtIndex(cursor,ListView.Contain);changed()}
   function handleKey(event){
     if(event.key===Qt.Key_Escape){cancelled();return true}
-    if(event.key===Qt.Key_Return || event.key===Qt.Key_Enter){if(address.activeFocus)navigate(address.text);else choose();return true}
+    if(event.key===Qt.Key_Return || event.key===Qt.Key_Enter){if(cancelFolder.activeFocus)cancelled();else if(address.activeFocus)navigate(address.text);else choose();return true}
     if(address.activeFocus)return false
     if(event.key===Qt.Key_Down || event.text==="j"){move(1);return true}
     if(event.key===Qt.Key_Up || event.text==="k"){move(-1);return true}

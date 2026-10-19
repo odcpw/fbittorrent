@@ -234,10 +234,10 @@ fn typed_seed_live_retains_handle_and_never_checks() {
                 if on {
                     UploadPolicy::Unlimited
                 } else {
-                    UploadPolicy::DefaultCap
+                    UploadPolicy::Off
                 }
             );
-            assert_eq!(r.upload_limit_bps, Some(if on { 0 } else { 32768 }));
+            assert_eq!(r.upload_limit_bps, Some(0));
             assert!(!matches!(
                 current.stats().state,
                 TorrentStatsState::Initializing { .. }
@@ -246,7 +246,7 @@ fn typed_seed_live_retains_handle_and_never_checks() {
             let legacy: Torrent = serde_json::from_str(&r.to_cli_json().unwrap()).unwrap();
             assert_eq!(legacy.state, if on { "uploading" } else { "stoppedUP" });
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
-            assert_eq!(saved.records[0].upload_limit, if on { 0 } else { 32768 });
+            assert_eq!(saved.records[0].upload_limit, 0);
             assert_eq!(saved.records[0].ratio_limit, if on { -2.0 } else { 0.0 });
             assert_eq!(saved.records[0].tags, if on { "keep,seed" } else { "keep" });
             states.push(legacy.state);
@@ -312,7 +312,7 @@ fn typed_seed_dormant_checks_once_then_retains_handle() {
                 TorrentState::Done
             }
         );
-        assert_eq!(r.upload_limit_bps, Some(if on { 0 } else { 32768 }));
+        assert_eq!(r.upload_limit_bps, Some(0));
         observe("typed_seed_dormant", "toggle seed policy after the dormant check", "Retain the admitted handle and the single check; apply unlimited/default caps without checking again.",
             serde_json::json!({"seed":on,"handle_id":admitted.id(),"creates_reads_bytes":counts.snapshot(),"row":r}));
     }

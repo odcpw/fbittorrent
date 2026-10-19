@@ -24,7 +24,7 @@ impl TuiApp {
         let ni = self.selected_feed().map(|f| f.articles.len()).unwrap_or(0);
         match intent {
             actions::Intent::Left => self.rss_focus_items = false,
-            actions::Intent::Right => { if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } } }
+            actions::Intent::Right => { if nf > 0 { self.rss_focus_items = true; if ni>0 && self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } } }
             actions::Intent::Down => {
                 if self.rss_focus_items { if ni > 0 { self.item_list.borrow_mut().select_next(ni); } }
                 else if nf > 0 { self.feed_list.borrow_mut().select_next(nf); self.item_list.borrow_mut().select(None); }
@@ -57,7 +57,7 @@ impl TuiApp {
                 return self.native_feed_action("rss.mark_feed_read",&name,None,None,format!("marked {name} as read"));
             },
             actions::Intent::Primary if !self.rss_focus_items => {
-                if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } }
+                if nf > 0 { self.rss_focus_items = true; if ni>0 && self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } }
             },
             actions::Intent::Primary => if self.rss_focus_items {
                 let selected = self.item_list.borrow().selected();
@@ -187,7 +187,8 @@ impl TuiApp {
             return;
         };
         if feed.articles.is_empty() {
-            Paragraph::new(if feed.is_loading {
+            let pending=self.store.hello.is_some() && !self.store.rss_items.contains_key(&feed.uid);
+            Paragraph::new(if feed.is_loading || pending {
                 "Loading…"
             } else {
                 "No items.\n(r) Refresh feeds"

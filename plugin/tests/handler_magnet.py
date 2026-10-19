@@ -37,9 +37,7 @@ def run(binary,early=False):
         for index in range(2):
             box=stack.enter_context(fixtures.Sandbox())
             if index==1:
-                notify.config(box,notify=True);notify.shims(box)
-                config=Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
-                config.write_text(config.read_text()+'\nseed_by_default = true\n')
+                notify.config(box,notify=True,upload="on");notify.shims(box)
             h=stack.enter_context(daemon.Harness(case,binary,box,False))
             p=h.start_serve(idle_exit_secs=0);assert h.receive_ready() and h.wait_engine()
             c=stack.enter_context(daemon.ApiConn(h));hello=c.hello()['result'];nodes.append((box,h,c))
@@ -101,13 +99,16 @@ def run(binary,early=False):
             assert len(c.call('torrents.list',{})['result']['torrents'])==1 and row['seed'] is False
             extra='e'*40
             c.call('torrents.add',dict(source=dict(magnet='magnet:?xt=urn:btih:'+extra),stage=True))
-            case.check(not c.call('torrents.get',dict(hash=extra))['result']['torrent']['seed'],'omitting seed on the daemon API stays off despite the saved old default',extra)
+            case.check(not c.call('torrents.get',dict(hash=extra))['result']['torrent']['seed'],'omitting seed on the daemon API never enables completion seeding despite global upload on',extra)
             c.call('torrents.discard',dict(hash=extra))
             q.keys(['u'],lambda:((q.state().get('view') or {}).get('details') or {}).get('visible'))
-            assert not c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['seed']
-            q.keys(['u'],lambda:c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['seed'])
-            q.keys(['u'],lambda:not c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['seed'])
-            case.check(True,'only the Details override changes Upload off/on/off',json.dumps(c.call('torrents.get',dict(hash=source.info_hash))))
+            current=c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']
+            assert not current['seed'] and current['upload_enabled'],current
+            for enabled in (False,True,False):
+                q.keys(['u'],lambda:c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['upload_enabled'] is enabled)
+                current=c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']
+                case.check(current['seed'] is enabled,'Details explicitly changes effective Upload to '+('on' if enabled else 'off'),json.dumps(current))
+            case.check(True,'Details overrides global Upload on with off/on/off',json.dumps(current))
             case.check(True,'one handler review and one Enter commit; sheet stays closed while real bytes download',json.dumps(dict(click_to_sheet_ms=click_ms,enter_to_downloading_ms=download_ms,enter_to_bytes_ms=first_bytes_ms,samples=samples,handler=json.loads(out))))
             print(json.dumps(dict(click_to_sheet_ms=click_ms,enter_to_downloading_ms=download_ms,enter_to_bytes_ms=first_bytes_ms,host_cpu_busy_pct=cpu_busy)),flush=True)
         except Exception:

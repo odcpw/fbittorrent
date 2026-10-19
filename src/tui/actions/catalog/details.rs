@@ -110,6 +110,10 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
+    action!("details.move",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('m'))],"Move…",40,
+        |a|a.overview_available("move"),Some(|a|a.overview_prompt(false)),TD,None,None,None),
+    action!("details.download_cap",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('c'))],"Download cap…",40,
+        |a|a.overview_available("download_limit"),Some(|a|a.overview_prompt(true)),TD,None,None,None),
     detail!("details.open", 'o', "Open", Open),
     detail!("details.pause", 'p', "Pause/resume", Pause),
     action!("details.seed",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('u'))],"Upload on/off",30,

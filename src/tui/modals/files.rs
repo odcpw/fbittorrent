@@ -7,12 +7,13 @@ pub(super) struct FilesModal {
     pub(super) files: Vec<TorrentFile>,
     pub(super) list: RefCell<ListState>,
     pub(super) loading: bool,
+    pub(super) saving:bool,
     pub(super) error: String,
 }
 
 impl TuiApp {
     pub(super) fn open_files(&mut self, t: &Torrent) -> Cmd<Msg> {
-        self.files = Some(FilesModal { hash: t.hash.clone(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, error: String::new() });
+        self.files = Some(FilesModal { hash: t.hash.clone(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, saving:false,error: String::new() });
         self.reload_files(t.hash.clone())
     }
 
@@ -25,13 +26,16 @@ impl TuiApp {
         })
     }
 
-    pub(super) fn set_file_prio(&self, hash: String, ids: Vec<i64>, prio: i64) -> Cmd<Msg> {
+    pub(super) fn files_editable(&self)->bool {self.files.as_ref().is_some_and(|m|!m.loading&&!m.saving)}
+    pub(super) fn set_file_prio(&mut self, hash: String, ids: Vec<i64>, prio: i64) -> Cmd<Msg> {
+        if !self.files_editable(){return Cmd::none();}
+        self.files.as_mut().unwrap().saving=true;
         let presence = self.presence.clone();
         let h = hash.clone();
         Cmd::task(move || {
             let id=presence.as_ref().map(|connection|connection.id);
             let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::set_files(&connection,&h,&ids,prio));
-            Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())}
+            Msg::FilesSaved {connection:id,hash,result:result.map_err(|error|error.to_string())}
         })
     }
 
@@ -41,6 +45,7 @@ impl TuiApp {
     }
 
     pub(super) fn on_files_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
+        if matches!(intent,actions::Intent::Toggle|actions::Intent::Include|actions::Intent::All|actions::Intent::None) && !self.files_editable(){return Cmd::none();}
         let Some(m) = self.files.as_ref() else { return Cmd::none() };
         let n = m.files.len();
         let hash = m.hash.clone();
@@ -121,7 +126,7 @@ impl TuiApp {
             ])
             },frame);
         let selected:i64=m.files.iter().filter(|f|f.priority>0).map(|f|f.size).sum();
-        let controls = "Space include/skip · a/n all/none · Esc close";
+        let controls = if m.saving {"Saving file selection… · Esc close"}else{"Space include/skip · a/n all/none · Esc close"};
         let foot = format!("{}/{} · {} · {controls}",
             m.files.iter().filter(|f| f.priority > 0).count(), m.files.len(), human_bytes(selected));
         Paragraph::new(foot).style(bg.fg(th.dim)).wrap(WrapMode::None).render(rows[2], frame);

@@ -14,6 +14,9 @@ fn dormant_tracker_edits_are_durable_without_admitting_payloads() {
     let saved=read_ledger(&directory.join("torrents.json")).unwrap();
     let record=saved.records.iter().find(|r|r.hash==hash).unwrap();
     assert_eq!(record.trackers,[b]);assert_eq!(record.removed_trackers,[a]);
-    assert_eq!(dormant_rows(&dispatcher)[0].state,TorrentState::Done);
+    let row=&dormant_rows(&dispatcher)[0];
+    assert_eq!(row.state,TorrentState::Error);
+    assert_eq!(row.reason.as_deref(),Some("missing_files"));
+    assert!(row.progress.is_none());
     assert!(std::fs::read_dir(directory.join("downloads")).unwrap().next().is_none());
 }

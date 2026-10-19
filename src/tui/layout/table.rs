@@ -22,7 +22,8 @@ pub(in crate::tui) enum Column {
 impl Column {
     pub fn sort_field(self) -> Option<store::TorrentSort> {
         Some(match self {
-            Self::Marker|Self::Seeds|Self::Rating|Self::Uploaded|Self::Provider => return None,
+            Self::Marker|Self::Seeds|Self::Rating|Self::Provider => return None,
+            Self::Uploaded => store::TorrentSort::Added,
             Self::State => store::TorrentSort::State,
             Self::Name => store::TorrentSort::Name,
             Self::Size => store::TorrentSort::Size,

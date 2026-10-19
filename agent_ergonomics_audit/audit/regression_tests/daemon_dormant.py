@@ -59,8 +59,8 @@ def restored(name,binary,systemd,missing=False):
             stream=RevisionStream(client);frames=stream.snapshot(sub,['torrents'])
             elapsed=time.monotonic()-ready_at
             rows=[row for frame in frames for row in frame.get('items',[])]
-            case.step('measure five dormant rows from READY=1','all five list done/unchecked within one second').close(
-                elapsed<=1 and len(rows)==5 and all(row['state']=='done' and row['checked'] is False for row in rows),
+            case.step('measure five dormant rows from READY=1','all five list without hashing within one second; unavailable selected data is an error').close(
+                elapsed<=1 and len(rows)==5 and all(row['checked'] is False and (row['state']=='error' and row.get('reason')=='missing_files' and 'progress' not in row if missing and row['hash']==items[0][0].info_hash else row['state']=='done') for row in rows),
                 json.dumps(dict(elapsed_s=elapsed,rows=rows)))
             try:yield case,box,h,p,client,items,offset,stream,frames
             finally:
@@ -116,9 +116,9 @@ def dormant_missing_files(binary,systemd):
         error=client.call('torrents.set_seed',dict(hashes=[item.info_hash],on=True),error='invalid_state')
         row=client.call('torrents.get',dict(hash=item.info_hash))['result']['torrent']
         logs=checks(h,offset,[item.info_hash])
-        case.check(before['state']=='done' and not before['checked'] and row['state']=='error' and row.get('reason')=='missing_files'
+        case.check(before['state']=='error' and before.get('reason')=='missing_files' and 'progress' not in before and not before['checked'] and row['state']=='error' and row.get('reason')=='missing_files'
                    and not row['checked'] and error['error']['details']['reason']=='missing_files' and not logs and not path.exists(),
-                   'missing data changes saved done to error only on explicit seed, before admission',json.dumps(dict(before=before,error=error,after=row,matching_logs=logs)))
+                   'listing already reports missing data before explicit seed; no admission or file creation',json.dumps(dict(before=before,error=error,after=row,matching_logs=logs)))
 
 
 def dormant_open_no_check(binary,systemd):

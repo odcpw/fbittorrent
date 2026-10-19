@@ -41,8 +41,8 @@ def global_unlimited_keeps_cap(binary,systemd):
         before=pair.client.call('torrents.get',dict(hash=pair.hash))['result']['torrent']
         changed=pair.client.call('transfer.set_limits',dict(upload_bps=0))['result']
         after=pair.client.call('torrents.get',dict(hash=pair.hash))['result']['torrent']
-        case.check(before['upload_limit_bps']==after['upload_limit_bps']==32768 and 'upload_bps' not in changed['limits'],
-                   'global upload 0 is unlimited and leaves the real per-torrent default at 32768',json.dumps(dict(before=before,after=after,reply=changed)))
+        case.check(before.get('upload_limit_bps',0)==after.get('upload_limit_bps',0)==0 and before['upload_enabled'] is after['upload_enabled'] is False and 'upload_bps' not in changed['limits'],
+                   'global upload 0 is unlimited and leaves default upload permission off',json.dumps(dict(before=before,after=after,reply=changed)))
         pair.client.call('transfer.set_limits',dict(upload_bps=1),error='invalid_args')
         pair.client.call('transfer.set_limits',dict(upload_bps=-1),error='invalid_args')
         pair.client.call('transfer.set_limits',dict(upload_bps=4294967296),error='invalid_args')

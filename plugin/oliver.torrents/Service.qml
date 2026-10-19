@@ -14,8 +14,11 @@ import "ClipboardFlow.js" as ClipboardFlow
 import "SettingsFlow.js" as SettingsFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
+import "OverviewFlow.js" as OverviewFlow
+import "CleanupFlow.js" as CleanupFlow
 import "SearchFlow.js" as SearchFlow
 import "ShowsFlow.js" as ShowsFlow
+import "RssFlow.js" as RssFlow
 import "BrowsePosters.js" as BrowsePosters
 
 Item {
@@ -62,6 +65,13 @@ Item {
   Timer {id:detailChoice;property string hash:"";interval:150;onTriggered:if(root.detailFlow)root.detailFlow.begin(hash)}
   Timer {id:imdbChoice;interval:300;onTriggered:if(root.detailFlow)root.detailFlow.lookup()}
 
+  property var overviewFlow:null
+  property int cleanupRevision:0
+  property var cleanupFlow:null
+  property int overviewRevision:0
+  property var rssTopics:[]
+  property var rssFlow:null
+  property int rssRevision:0
   property var showsTopics:[]
   property var showsFlow:null
   property int showsRevision:0
@@ -72,6 +82,7 @@ Item {
   property int searchRevision:0
   function scheduleSearchPoster(){searchPoster.restart()}
   Timer {id:searchPoster;interval:300;onTriggered:if(root.searchFlow)root.searchFlow.lookup()}
+  function beginRssAdd(feed,item){return addFlow ? addFlow.release("rss.grab",{feed:feed,item:item.id},item) : false}
   function beginSearchAdd(row,session){return addFlow ? addFlow.search(row,session) : false}
   property var addTopics:[]
   property var addFlow:null
@@ -203,8 +214,11 @@ Item {
     if(clipboardFlow)clipboardFlow.frame(frame)
     if(addFlow)addFlow.frame(frame)
     if(detailFlow)detailFlow.frame(frame,request)
+    if(overviewFlow)overviewFlow.frame(frame)
+    if(cleanupFlow)cleanupFlow.frame(frame)
     if(searchFlow)searchFlow.frame(frame)
     if(showsFlow)showsFlow.frame(frame,request)
+    if(rssFlow)rssFlow.frame(frame,request)
     apiFrame(frame,request)
     if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
     if(frame.topic==="stats" || (request && request.op==="hello"))statsRevision++
@@ -230,7 +244,7 @@ Item {
   function resume(hash) { return mutate("torrents.start", {hashes:[hash]}) }
   function toggleSeed(hash) {
     var row = store.torrents[hash]
-    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.seed}) : false
+    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
   function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
@@ -339,15 +353,16 @@ Item {
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onQuickVisibleChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onQuickTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
-  onShowsTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onQuickVisibleChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onQuickTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onRssTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onShowsTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
 
   FileView {
     id:preferences
@@ -420,16 +435,19 @@ Item {
     clipboardFlow=ClipboardFlow.create(root)
     browsePosters=BrowsePosters.create(root,function(){root.browsePosterRevision++})
     showsFlow=ShowsFlow.create(root,function(){root.showsRevision++})
+    rssFlow=RssFlow.create(root,function(){root.rssRevision++})
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})
+    overviewFlow=OverviewFlow.create(root,function(){root.overviewRevision++})
+    cleanupFlow=CleanupFlow.create(root,function(){root.cleanupRevision++})
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
-      instance:function() { if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
-    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+      instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
+    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

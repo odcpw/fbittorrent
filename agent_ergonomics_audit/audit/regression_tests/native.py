@@ -34,6 +34,25 @@ from fbtlog import Case, REPO, suite_status
 from process_cleanup import ProcessRun, finish_cleanup
 
 _process_run = ContextVar("native_process_run", default=None)
+_cleanup_deadline = ContextVar("native_cleanup_deadline", default=None)
+
+
+def cleanup_timeout(seconds):
+    deadline = _cleanup_deadline.get()
+    return seconds if deadline is None else max(.1, min(seconds, deadline - time.monotonic()))
+
+
+def startup_cleanup(*actions):
+    # Constructor/startup callers outside main (including tui_smoke) also need
+    # to finish an interrupt unwind before the gate escalates after 10 seconds.
+    token = None
+    if isinstance(sys.exception(), KeyboardInterrupt) and _cleanup_deadline.get() is None:
+        token = _cleanup_deadline.set(time.monotonic() + 8)
+    try:
+        finish_cleanup(*actions)
+    finally:
+        if token is not None:
+            _cleanup_deadline.reset(token)
 
 
 @contextlib.contextmanager
@@ -57,7 +76,12 @@ def cleanup_private_processes(root):
     if run is None:  # Also protect callers exercising an individual fixture directly.
         run = ProcessRun()
         run.register(root)
-    run.cleanup([root])
+    run.cleanup([root], deadline=_cleanup_deadline.get())
+
+
+def cleanup_run_processes():
+    if run := _process_run.get():
+        run.cleanup(deadline=_cleanup_deadline.get())
 
 CASES = (
     "dec_mouse_mode", "closed_status_stays_closed", "one_enter_adds_once",
@@ -404,14 +428,23 @@ class NativeHarness:
         ledger = Path(self.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
         names = [record["name"] for record in json.loads(ledger.read_text())["records"]] if ledger.exists() else []
         prepare_imdb_fixture(self.env, names + ["terminal-close.fixture"])
-        self.serve = self.get_case().popen([self.binary, "serve", "--idle-exit-secs", "600"],
-                                          env=self.env, stdout=subprocess.DEVNULL)
-        self.wait_for(lambda: path.exists() and self.serve.poll() is None, "disposable daemon listener opens")
         def ready():
             try:
-                return self.api("app.info").get("state") in ("running","parked")
-            except (OSError,EOFError): return False
-        self.wait_for(ready,"disposable daemon answers API v1")
+                return self.api("app.info").get("state") in ("running", "parked")
+            except (OSError, EOFError):
+                return False
+        try:
+            self.serve = self.get_case().popen([self.binary, "serve", "--idle-exit-secs", "600"],
+                                              env=self.env, stdout=subprocess.DEVNULL)
+            if not self.wait_for(lambda: path.exists() and self.serve.poll() is None, "disposable daemon listener opens"):
+                raise RuntimeError("disposable daemon did not open its listener")
+            if not self.wait_for(ready, "disposable daemon answers API v1"):
+                raise RuntimeError("disposable daemon did not answer API v1")
+        except BaseException:
+            # Startup may fail before the caller has registered its teardown.
+            # KeyboardInterrupt is a BaseException, including the gate's SIGINT.
+            startup_cleanup(self.close_serve, cleanup_run_processes)
+            raise
 
     def api(self, op, args=None):
         """Read real daemon state independently of the CLI's legacy/API shaper."""
@@ -429,12 +462,12 @@ class NativeHarness:
         if process is not None and process.poll() is None:
             process.terminate()
             try:
-                process.wait(timeout=10)
+                process.wait(timeout=cleanup_timeout(10))
             except subprocess.TimeoutExpired:
-                process.kill(); process.wait(timeout=2)
+                process.kill(); process.wait(timeout=cleanup_timeout(2))
                 # Teardown can run after its Case has closed. Raise so a late
                 # failed drain cannot be hidden behind an already-green result.
-                raise TimeoutError("owned daemon failed to drain within ten seconds; required SIGKILL")
+                raise TimeoutError("owned daemon failed to drain within the cleanup deadline; required SIGKILL")
 
     def record(self, action, expect, observed, ok=True, started=None):
         if self.polling and action == "capture terminal pane" and ok:
@@ -493,11 +526,16 @@ class NativeHarness:
                     observed, gone, started)
         if not gone:
             raise TimeoutError(observed)
-        self.ensure_serve()
-        tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
-        # Socket removal precedes terminal teardown. Keep this private server
-        # alive between sessions so session absence cannot race server exit.
-        tmux("set-option", "-s", "exit-empty", "off")
+        try:
+            self.ensure_serve()
+            tmux("new-session", "-d", "-s", session, "-x", "120", "-y", "30", launch)
+            # Socket removal precedes terminal teardown. Keep this private server
+            # alive between sessions so session absence cannot race server exit.
+            tmux("set-option", "-s", "exit-empty", "off")
+        except BaseException:
+            startup_cleanup(lambda: tmux("kill-server", check=False, timeout=cleanup_timeout(5)),
+                            self.close_serve, cleanup_run_processes)
+            raise
 
     def wait_for_reopen(self, socket_path, hash_, seconds=10):
         started = time.monotonic()
@@ -1132,13 +1170,19 @@ class AttachedTui:
         self.case, self.binary, self.sandbox, self.h = case, binary, sandbox, harness
         self.socket = session + "-" + str(os.getpid()) + "-" + sandbox.root.name
         self.session, self.counter = session, 0
-        created = self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
-        case.check(created.returncode == 0, "case owns a fresh private tmux server",
-                   f"socket={self.socket}; exit={created.returncode}; stderr={created.stderr}")
+        try:
+            created = self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+            case.check(created.returncode == 0, "case owns a fresh private tmux server",
+                       f"socket={self.socket}; exit={created.returncode}; stderr={created.stderr}")
+        except BaseException:
+            # Both native and tui_smoke register ui.close only after construction.
+            startup_cleanup(self.close, lambda: cleanup_private_processes(sandbox.root))
+            raise
 
     def tmux(self, *args):
         return subprocess.run(["tmux", "-L", self.socket, "-f", "/dev/null", *args],
-                              env=self.sandbox.env, capture_output=True, text=True, timeout=5)
+                              env=self.sandbox.env, capture_output=True, text=True,
+                              timeout=cleanup_timeout(5) if args[0] == "kill-server" else 5)
 
     def start(self):
         before = self.clients() if daemon.DaemonContract.socket_path(self.sandbox).exists() else 0
@@ -1577,7 +1621,7 @@ def run_cases():
                 cli("stop", expected_hash)
                 details = cli("show", expected_hash)
                 case.check(details["files"][0]["name"] == name, 'The native file list preserves the full fixture filename.')
-                case.check(details["up_limit"] == 32768, 'The native upload cap is 32768 bytes per second.')
+                case.check(details.get("upload_enabled") is False, 'Default upload permission is off independently of the rate limit.')
                 case.check(details["state"] == "stoppedDL", 'The explicitly stopped torrent remains stopped.')
                 cli("delete", expected_hash, "--files", code=3)
             if options.case == "native_cli_fields_and_deletion_safety":
@@ -1740,7 +1784,7 @@ def run_cases():
                 wait_for(lambda: "3 Shows (1)" in capture(), "reopened TUI restores unread Shows badge")
                 case.check("3 Shows (1)" in capture(), 'The current screen displays a Shows badge with one unread release.')
                 restored = cli("show", expected_hash)
-                case.check(restored["state"] == "stoppedDL" and restored["up_limit"] == 32768, 'Restart preserves both the manual pause and upload cap.')
+                case.check(restored["state"] == "stoppedDL" and restored.get("upload_enabled") is False, 'Restart preserves the manual pause and upload off.')
                 case.check(next(item for item in cli("rss", "items", "Local feed")["items"]
                             if item["id"] == "episode-2")["isRead"], 'Restart preserves the RSS episode-two read marker.')
                 cli("down")
@@ -1859,7 +1903,7 @@ def run_cases():
             # still runs if tmux, daemon teardown, or artifact I/O fails; the
             # private sweep also reaps orphaned script/pipe-pane descendants.
             parked = locals().get("parked_harness")
-            finish_cleanup(lambda: tmux("kill-server", check=False),
+            finish_cleanup(lambda: tmux("kill-server", check=False, timeout=cleanup_timeout(5)),
                            harness.close_serve, parked.close_serve if parked else lambda: None,
                            server.shutdown, server.server_close,
                            lambda: cleanup_private_processes(root), retain_terminal)
@@ -1875,17 +1919,38 @@ def run_cases():
 def main():
     run = ProcessRun()
     token = _process_run.set(run)
-    # A runner timeout normally sends TERM. Convert it to an unwind so the
-    # fixture finally blocks and the audit still run (SIGKILL cannot unwind).
-    previous_term = signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+    deadline_token = _cleanup_deadline.set(None)
+    auditing, received_signal = False, None
+    # The gate first sends SIGINT to the workflow process group. Explicitly
+    # enable KeyboardInterrupt even if a parent shell ignored SIGINT. TERM also
+    # unwinds through cleanup if the gate reaches its next escalation stage.
+    def interrupt(signum, frame):
+        nonlocal received_signal
+        # Reserve two seconds of the gate's ten-second grace for the final
+        # process audit/report. A second signal must not extend this deadline.
+        if _cleanup_deadline.get() is None:
+            _cleanup_deadline.set(time.monotonic() + 8)
+        if received_signal is None:
+            received_signal = signum
+        # Once in the final audit, defer the exception until all descendants
+        # have been collected. SIGINT arriving during a /proc scan must not
+        # bypass the last cleanup opportunity; the exit still reports failure.
+        if auditing:
+            return
+        if signum == signal.SIGINT:
+            signal.default_int_handler(signum, frame)
+        sys.exit(128 + signum)
+    previous_int = signal.signal(signal.SIGINT, interrupt)
+    previous_term = signal.signal(signal.SIGTERM, interrupt)
     try:
         try:
             status = run_cases()
         finally:
+            auditing = True
             if run.roots:
-                survivors = run.wait(seconds=1)
+                survivors = run.wait(seconds=cleanup_timeout(1))
                 try:
-                    run.cleanup()  # Emergency cleanup never erases the failing observation.
+                    run.cleanup(deadline=_cleanup_deadline.get())  # Never erase the failing observation.
                 finally:
                     with Case("native", "process_cleanup") as case:
                         case.check(not survivors, "no process from this run's private directories survives fixture teardown",
@@ -1894,9 +1959,11 @@ def main():
                         case.check(not remaining, "emergency cleanup leaves no owned process alive", repr(remaining))
         # Early returns in run_cases evaluate suite_status before its finally;
         # recompute it here so the audit can turn any such return into failure.
-        return status or suite_status("native")
+        return (128 + received_signal if received_signal is not None else status) or suite_status("native")
     finally:
         signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
+        _cleanup_deadline.reset(deadline_token)
         _process_run.reset(token)
 
 

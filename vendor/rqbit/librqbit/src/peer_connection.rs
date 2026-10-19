@@ -90,6 +90,7 @@ pub trait PeerConnectionHandler {
     fn on_connected(&self, _connection_time: Duration) {}
     fn on_connection_flags(&self, _encrypted: bool, _incoming: bool) {}
     fn should_send_bitfield(&self) -> bool;
+    fn upload_enabled(&self) -> bool { true }
     fn serialize_bitfield_message_to_buf(&self, buf: &mut [u8]) -> anyhow::Result<usize>;
     fn on_handshake(&self, handshake: Handshake, ckind: ConnectionKind) -> anyhow::Result<()>;
     fn on_extended_handshake(
@@ -136,6 +137,7 @@ pub enum WriterRequest {
     UtMetadata(UtMetadata<ByteBufOwned>),
     UtPex(UtPex<ByteBufOwned>),
     ReadChunkRequest(ChunkInfo),
+    UploadPolicyChanged,
     Disconnect(anyhow::Result<()>),
 }
 
@@ -471,7 +473,8 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                 trace!("sent bitfield");
             }
 
-            let len = Message::Unchoke.serialize(&mut *write_buf, &Default::default)?;
+            let message = if self.handler.upload_enabled() {Message::Unchoke} else {Message::Choke};
+            let len = message.serialize(&mut *write_buf, &Default::default)?;
             with_timeout(
                 cx,
                 "writing",
@@ -548,6 +551,15 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                 };
 
                 let len = match req {
+                    WriterRequest::UploadPolicyChanged => {
+                        let enabled = self.handler.upload_enabled();
+                        let bitfield = if enabled && self.handler.should_send_bitfield() {
+                            self.handler.serialize_bitfield_message_to_buf(&mut *write_buf).map_err(Error::Anyhow)?
+                        } else {0};
+                        let message = if enabled {Message::Unchoke} else {Message::Choke};
+                        bitfield + message.serialize(&mut write_buf[bitfield..], &Default::default)?
+                    }
+                    WriterRequest::Message(Message::Unchoke) if !self.handler.upload_enabled() => Message::Choke.serialize(&mut *write_buf, ext_msg_ids)?,
                     WriterRequest::Message(msg) => msg.serialize(&mut *write_buf, ext_msg_ids)?,
                     WriterRequest::UtMetadata(utm) => {
                         Message::Extended(ExtendedMessage::UtMetadata(utm.as_borrowed()))
@@ -558,6 +570,7 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                             .serialize(&mut *write_buf, ext_msg_ids)?
                     }
                     WriterRequest::ReadChunkRequest(chunk) => {
+                        if !self.handler.upload_enabled() { continue; }
                         // this whole section is an optimization
                         let preamble_len = serialize_piece_preamble(&chunk, &mut *write_buf);
                         let full_len = preamble_len + chunk.size as usize;
@@ -565,6 +578,10 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                             .handler
                             .read_chunk(cx, chunk, write_buf, preamble_len)
                             .await?;
+
+                        // Permission may change while the disk read is pending.
+                        // Drop queued payload rather than send a formerly allowed piece.
+                        if !self.handler.upload_enabled() { continue; }
 
                         uploaded_add = Some(chunk.size);
                         full_len

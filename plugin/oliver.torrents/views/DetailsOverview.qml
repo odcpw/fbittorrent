@@ -12,6 +12,7 @@ ScrollView {
   required property var service
   required property var torrent
   property var card:null
+  readonly property var actionState:actions.state
   readonly property bool editing:titleEditor.editing
   function renameTitle(){titleEditor.begin()}
   function key(event){return titleEditor.key(event)}
@@ -38,6 +39,7 @@ ScrollView {
       Ui.Button {text:"Copy path";onClicked:root.service.copyText(root.torrent.save_path)}
       Ui.Button {text:"Open content";onClicked:root.service.openTarget(root.torrent.hash)}
     }
+    Components.OverviewActions {id:actions;service:root.service;torrent:root.torrent}
     Components.DetailField {Layout.fillWidth:true;label:"Hash";value:root.torrent.hash}
     Ui.Button {text:"Copy hash";onClicked:root.service.copyText(root.torrent.hash)}
     Components.DetailField {Layout.fillWidth:true;label:"Added";value:Model.when(root.torrent.added_at)}
@@ -45,7 +47,7 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;label:"Undo until";visible:root.torrent.undo_until!==undefined;value:Model.when(root.torrent.undo_until)}
     RowLayout {
       Text {Layout.fillWidth:true;text:DetailText.policy(root.torrent)+" (u)";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-      Ui.ToggleSwitch {checked:root.torrent.seed===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
+      Ui.ToggleSwitch {checked:root.torrent.upload_enabled===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
     }
     Components.DetailField {Layout.fillWidth:true;label:"Queue position";visible:root.torrent.queue_pos!==undefined;value:String(root.torrent.queue_pos)}
     Components.DetailField {Layout.fillWidth:true;label:"Files · Pieces";value:Model.count(root.torrent.file_count)+" · "+Model.count(root.torrent.piece_count)+" × "+Model.size(root.torrent.piece_size,false)}
@@ -58,7 +60,6 @@ ScrollView {
     }
     RowLayout {
       Ui.Button {visible:root.service.hasCap("recheck");text:"Recheck…";onClicked:root.recheckRequested(root.torrent.hash)}
-      // The move workflow is owned by P7-02; its action appears with that implementation.
     }
     Item {Layout.preferredHeight:Commons.Style.spacing.sm}
   }
