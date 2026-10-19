@@ -3793,20 +3793,22 @@ def tui_single_connection(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
-
-         (tui_single_connection, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
-          systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
-          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
-          unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
-          killmode_mixed, start_limit_not_hit, start_while_deactivating, down_cancels_restart,
-          down_failed_manager_query, down_malformed_manager_query, down_failed_query_without_unit_file,
-          cleanup_failed_stop, cleanup_stop_timeout, foreground_down, unit_install_unwritable, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic, startup_failure_hint, unit_exec_path,
-          cap_change_no_check, seed_toggle_no_check,
-          connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
-          ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
-          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
-          offline_stop_ledger, offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon, api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
+         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
+          settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic,
+          fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+          tui_single_connection, systemd_without_bus_address, interim_engine_socket, ready_notify,
+          parked_start, sigterm_drains, panic_exits_70, second_serve_refused, engine_restart_retains_owner,
+          shutdown_inflight_add, unit_is_static, add_starts_unit_no_launcher, status_never_starts,
+          down_stops, kill9_restarts, killmode_mixed, start_limit_not_hit, start_while_deactivating,
+          down_cancels_restart, down_failed_manager_query, down_malformed_manager_query,
+          down_failed_query_without_unit_file, cleanup_failed_stop, cleanup_stop_timeout, foreground_down,
+          unit_install_unwritable, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic,
+          startup_failure_hint, unit_exec_path, cap_change_no_check, seed_toggle_no_check, connection_limit,
+          line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes, ninth_inflight_busy,
+          api_quiesce_bye, api_torrent_operations, dispatch_queue_busy, api_concurrent_adds,
+          api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
+          offline_stop_ledger, offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
+          api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
