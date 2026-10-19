@@ -2,10 +2,10 @@
 .import "AddSource.js" as Source
 .import "Model.js" as Model
 function create(service,changed,debug) {
-  var f={},epoch=0,trace=[],s={},readPending=false,filesRequested=false,seedDirty=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
+  var f={},epoch=0,trace=[],s={},readPending=false,filesRequested=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
   function publish(){changed()}
   function record(kind,op,data){if(debug){trace.push({kind:kind,op:op,data:data});if(trace.length>32)trace.shift()}}
-  function reset(){s={visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,stageSupported:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};readPending=false;filesRequested=false;seedDirty=false;pathDirty=false;spaceDue=0;adopting=false}
+  function reset(){s={visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,stageSupported:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};readPending=false;filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
   reset()
   function requiredBytes(){
     if(s.files.length)return s.files.reduce(function(total,row){return total+(s.included[row.index] ? row.size : 0)},0)
@@ -89,7 +89,7 @@ function create(service,changed,debug) {
     var generation=epoch
     function apply(value){
       if(generation!==epoch || !s.visible)return
-      if(!seedDirty)s.seed=options.seed===undefined ? value.seed_by_default===true : options.seed===true
+      s.seed=false
       if(!pathDirty){var path=options.save_path || value.save_path || "";if(path!==s.savePath || !s.space.supported){s.savePath=path;scheduleSpace(true)}}
       publish()
     }
@@ -109,7 +109,7 @@ function create(service,changed,debug) {
     var existing=s.hash && service.store.torrents[s.hash]
     if(existing){s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
     s.stageSupported=service.client.caps.indexOf("staging")>=0
-    if(s.stageSupported){s.phase="staging";send("torrents.add",{source:s.source,stage:true,origin:s.origin},"staging",staged)}
+    if(s.stageSupported){s.phase="staging";send("torrents.add",{source:s.source,stage:true,seed:false,origin:s.origin},"staging",staged)}
     else s.phase="preview"
     publish();return true
   }
@@ -121,7 +121,7 @@ function create(service,changed,debug) {
     s.stageSupported=service.client.caps.indexOf("staging")>=0
     s.searchArgs=s.stageSupported && session ? {search_id:session,key:row.key} : {result:row}
     settings({})
-    if(s.stageSupported){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}
+    if(s.stageSupported){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)}
     publish();return true
   }
   // Shared Shows/RSS entry: stage first, mark the source only on commit.
@@ -130,7 +130,7 @@ function create(service,changed,debug) {
     if(["shows.grab","rss.grab"].indexOf(op)<0 || service.client.caps.indexOf("staging")<0){service.notify("Staged review is unavailable");return false}
     epoch++;reset();s.visible=true;s.phase="staging";s.origin=op==="shows.grab" ? "shows" : "rss";s.name=row.title || "Release";s.size=row.size
     s.stageSupported=true;s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
-    send(op,Object.assign({},args,{stage:true}),s.origin,staged);publish();return true
+    send(op,Object.assign({},args,{stage:true,seed:false}),s.origin,staged);publish();return true
   }
   f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
@@ -139,16 +139,15 @@ function create(service,changed,debug) {
     adopting=true;inspect();publish();return true
   }
   f.toggle=function(index){if(busy())return;var next=Object.assign({},s.included);next[index]=!next[index];s.included=next;publish()}
-  f.seed=function(value){if(busy())return;seedDirty=true;s.seed=!!value;publish()}
   f.path=function(value){if(busy())return;pathDirty=true;s.savePath=value;scheduleSpace(false);publish()}
   f.checkPath=function(){checkSpace()}
-  f.retry=function(){s.error="";if(s.grabArgs && !s.owned){s.phase="staging";send(s.grabOp,Object.assign({},s.grabArgs,{stage:true}),s.origin,staged)}else if(s.searchArgs && s.stageSupported && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true}),"search",staged)}else{s.phase=s.owned ? "resolving" : s.searchArgs ? "preview" : "input";if(s.owned)inspect()}publish()}
+  f.retry=function(){s.error="";if(s.grabArgs && !s.owned){s.phase="staging";send(s.grabOp,Object.assign({},s.grabArgs,{stage:true,seed:false}),s.origin,staged)}else if(s.searchArgs && s.stageSupported && !s.owned){s.phase="staging";send("search.grab",Object.assign({},s.searchArgs,{stage:true,seed:false}),"search",staged)}else{s.phase=s.owned ? "resolving" : s.searchArgs ? "preview" : "input";if(s.owned)inspect()}publish()}
   f.commit=function(){
     if(s.duplicate){service.finishAdd(s.hash);close();return}
     if(s.phase!=="preview" && s.phase!=="ready")return
     if(s.savePath && s.savePath[0]!=="/"){error("Enter an absolute save folder");return}
     if(!spaceReady())return
-    var args={seed:s.seed},op="torrents.add"
+    var args={seed:false},op="torrents.add"
     if(s.savePath)args.save_path=s.savePath
     if(s.owned){
       args.hash=s.hash;args.files=s.files.filter(function(row){return s.included[row.index]}).map(function(row){return row.index});op="torrents.commit"

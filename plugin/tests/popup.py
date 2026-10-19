@@ -47,7 +47,8 @@ def run(binary):
                 # Keep this row paused for the remaining confirmation tests.
                 client.call('torrents.stop',dict(hashes=[row['hash']]));q.wait(lambda:json.loads(q.ipc('state'))['rows']==1)
             with Case(SUITE,'w_006') as c:
-                keys(q,['u'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['seed']);c.check(True,'u updates the confirmed seed policy',str(client.call('torrents.get',dict(hash=row['hash']))));snapshot(c,q)
+                keys(q,['u'],lambda:not cursor(q)['opened']);text=q.log.read_text()
+                c.check('FBTVISUAL-SUMMON oliver.torrents '+json.dumps(dict(view='torrents',hash=row['hash']),separators=(',',':')) in text and not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['seed'],'u opens this torrent in Details and leaves seeding off',text);snapshot(c,q);q.ipc('open');q.wait(lambda:cursor(q)['opened'])
             with Case(SUITE,'w_007') as c:
                 keys(q,['d'],lambda:cursor(q)['confirming'] and cursor(q)['confirmFocused']=='cancel');keys(q,['-k','Return'],lambda:not cursor(q)['confirming']);c.check(client.call('torrents.get',dict(hash=row['hash']))['ok'],'remove strip starts Cancel-focused; Enter cancels',q.ipc('cursor'));snapshot(c,q)
             with Case(SUITE,'w_008') as c:

@@ -76,7 +76,7 @@ impl TuiApp {
                 origin: None,
             sequential: self.cfg.native() || self.cfg.sequential,
             first_last: self.cfg.native() || self.cfg.first_last,
-            seed: self.cfg.seed_by_default,
+            seed: false,
             stopped: false,
             save_path: self.cfg.save_path.clone(),
             category: self.cfg.category.clone(),

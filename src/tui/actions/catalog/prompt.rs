@@ -39,17 +39,4 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
-    action!(
-        "prompt.seed",
-        Scope::Prompt,
-        &[KeyChord::plain(KeyCode::F(4))],
-        "Seed on/off",
-        40,
-        |a| a.prompt.as_ref().is_some_and(|p| p.kind == PromptKind::AddMagnet),
-        Some(|a| a.on_prompt_action(Intent::Seed)),
-        T,
-        None,
-        None,
-        None
-    ),
 ];

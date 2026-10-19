@@ -2,7 +2,7 @@
 use super::*;
 
 pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
-    let id=match id { "details.pause"=>"torrents.pause", "details.seed"=>"torrents.seed", _=>id };
+    let id=match id { "details.pause"=>"torrents.pause", _=>id };
     Some(
         match id {
             "torrents.pause" => {
@@ -16,16 +16,7 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
                     "Pause"
                 }
             }
-            "torrents.seed" => {
-                let torrent = app.selected_torrent()?;
-                if app.complete_no_seed(torrent) {
-                    "Seed"
-                } else if app.seed_allowed(torrent) {
-                    "Seed off"
-                } else {
-                    "Seed on"
-                }
-            }
+            "torrents.seed" => "Upload details",
             "poster.toggle" if app.poster_open => "Hide card",
             "search.submit" if app.search_input.value().trim().is_empty() => "Browse lists",
             "browse.open" => {

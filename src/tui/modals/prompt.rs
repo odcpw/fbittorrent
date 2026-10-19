@@ -41,7 +41,7 @@ impl TuiApp {
         if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        let add_flags = (true, true, self.cfg.seed_by_default);
+        let add_flags = (true, true, false);
         self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 
@@ -88,7 +88,6 @@ impl TuiApp {
         }
         match intent {
             actions::Intent::Cancel => { self.close_prompt(); Cmd::none() }
-            actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             actions::Intent::Primary => {
                 let raw=p.input.value().to_string();
                 let value = raw.trim().to_string();
@@ -133,6 +132,6 @@ impl Prompt {
     /// Title with the live flag state, so the toggles are discoverable while typing.
     pub(super) fn title(&self) -> String {
         if self.kind != PromptKind::AddMagnet { return self.label.clone(); }
-        format!("{} · streaming automatic · F4 seed:{} ", self.label, if self.add_flags.2 { "on" } else { "off" })
+        format!("{} · streaming automatic", self.label)
     }
 }

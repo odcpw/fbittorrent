@@ -325,6 +325,7 @@ Item {
   function removeTorrent(t) { return t ? remove(t.hash, false) : false }
   function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
+  function openTorrentDetails(t) {return !!(t && shell && shell.summon("oliver.torrents",JSON.stringify({view:"torrents",hash:t.hash})))}
   function stopBackend() { return quit() }
   function startBackend() { startDaemon() }
   property bool clipboardTooLarge: false

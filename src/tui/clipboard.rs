@@ -51,7 +51,7 @@ impl TuiApp {
         if !self.clipboard_visible() {return Cmd::none();}
         let offer=self.clipboard.offer.take().unwrap();
         self.service_action("torrents.add",json!({"source":{"magnet":format!("magnet:?xt=urn:btih:{}",offer.hash)},
-            "origin":"clipboard","seed":self.cfg.seed_by_default}),"added from clipboard")
+            "origin":"clipboard","seed":false}),"added from clipboard")
     }
     pub(in crate::tui) fn clipboard_dismiss(&mut self) -> Cmd<Msg> {
         if !self.clipboard_visible() {return Cmd::none();}

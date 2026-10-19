@@ -170,24 +170,14 @@ impl Metrics<'_> {
         )
     }
     pub fn upload(&self) -> String {
-        if let Some(row) = self.api {
-            if row.seed {
-                return "seeding allowed  (u to turn off)".into();
-            }
-            return format!(
-                "{} · stops when complete  (u to seed)",
-                row.upload_limit_bps.map_or_else(
-                    || "default upload cap".into(),
-                    |limit| format!("{} cap", rate(Some(limit)))
-                )
-            );
+        let seed=self.api.map_or_else(||self.legacy.seed_allowed(),|row|row.seed);
+        let mut text=format!("Upload: {}",if seed {"on"}else{"off"});
+        if let Some(limit)=self.api.and_then(|row|row.upload_limit_bps) {
+            text.push_str(&format!(" · {} upload cap",rate(Some(limit))));
         }
-        if self.legacy.seed_allowed() {
-            "seeding allowed  (u to turn off)".into()
-        } else {
-            "32 KiB/s cap · stops when complete  (u to seed)".into()
-        }
+        text
     }
+
 }
 pub(super) fn rate(value: Option<u64>) -> String {
     value.map_or_else(|| "—".into(), |value| human_rate(signed(value)))
