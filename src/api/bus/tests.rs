@@ -28,6 +28,7 @@ fn rev_monotonic() {
         searches: BTreeMap::new(),
         files: BTreeMap::new(),
         peers: BTreeMap::new(),
+        pieces:BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
@@ -127,4 +128,35 @@ fn peer_counters_coalesce_but_seed_and_direction_are_structural(){
     assert_eq!(projected[0]["downloaded"],1);assert_eq!(projected[0]["uploaded"],2);
     assert_eq!(projected[0]["dl_bps"],3);assert_eq!(projected[0]["ul_bps"],4);assert_eq!(projected[0]["seed"],true);
     let (changed,_,_)=diff::diff(&topic,&old,&new);assert!(changed.contains_key("127.0.0.1:1"));
+}
+
+#[test]
+fn pieces_are_singleton_state_and_never_structural_updates() {
+    let hash=Hash::new("a".repeat(40)).unwrap();let topic=Topic::Pieces(hash);
+    let old=json!({"count":8,"piece_size":16384,"have":"AA==","priority":[0,7]});
+    let new=json!({"count":8,"piece_size":16384,"have":"gA==","priority":[0,7]});
+    assert_eq!(structural_projection(&topic,&old,&new),old);
+    let event=state_event(1,&topic,1,new).unwrap();
+    use validation::Validate;
+    event.validate().unwrap();
+    assert!(matches!(event,Event::State {data:StateData::Pieces(_),..}));
+}
+
+#[test]
+fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_resends() {
+    let hash=Hash::new("a".repeat(40)).unwrap();let topic=Topic::Pieces(hash.clone());
+    let data=json!({"count":8,"piece_size":16384,"have":"gA==","priority":[0,7]});
+    let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
+        .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
+    let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
+    let mut sample=Sample {epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
+    let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
+    sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
+    let mut sub=Subscription {sub:1,sink:sink.clone(),rev:1,topics:vec![TopicState {topic,interval:Duration::from_secs(2),due,sent:Some(data.clone())}],since:None,epoch:Some((1,"running".into())),active:true};
+    for _ in 0..10 {sub.update(&sample,&[],1).unwrap();}
+    assert_eq!(sub.topics[0].due,due);assert!(sink.take_frames().is_empty());
+    sample.epoch=2;sub.update(&sample,&[],1).unwrap();assert!(sub.topics[0].sent.is_none());
+    sample.pieces.insert(hash.to_string(),data);sub.topics[0].due=Instant::now();
+    sub.update(&sample,&[],1).unwrap();assert_eq!(sink.take_frames().len(),1,"new engine must republish even an identical bitfield");
 }

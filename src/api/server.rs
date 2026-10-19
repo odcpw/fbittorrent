@@ -423,6 +423,10 @@ impl EventSink {
         Self(Arc::new(tests::connection().0))
     }
     #[cfg(test)]
+    pub(crate) fn testing_negotiate(&self,hello:&HelloResult) {
+        self.0.client.lock().unwrap().caps=validation::NegotiatedCaps::from_hello(hello);
+    }
+    #[cfg(test)]
     pub(crate) fn take_frames(&self) -> Vec<Value> {
         self.0.out.lock().unwrap().frames.drain(..).collect()
     }

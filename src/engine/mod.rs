@@ -34,6 +34,7 @@ use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
 pub(crate) mod staging;
+pub(crate) mod pieces;
 mod bus;
 mod watch;
 pub(crate) mod peers;

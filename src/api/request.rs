@@ -307,6 +307,8 @@ pub enum Call {
     TorrentsDiscard { args: HashArgs },
     #[serde(rename="torrents.move")]
     TorrentsMove {args: MoveArgs},
+    #[serde(rename="torrents.pieces")]
+    TorrentsPieces { args: HashArgs },
     #[serde(rename="torrents.trackers")]
     TorrentsTrackers { args: HashArgs },
     #[serde(rename="torrents.reannounce")]
@@ -458,6 +460,7 @@ impl Call {
             Self::TorrentsCommit {..}=>"torrents.commit",
             Self::TorrentsDiscard {..}=>"torrents.discard",
             Self::TorrentsMove {..}=>"torrents.move",
+            Self::TorrentsPieces {..} => "torrents.pieces",
             Self::TorrentsTrackers {..} => "torrents.trackers",
             Self::TorrentsReannounce {..} => "torrents.reannounce",
             Self::TorrentsForceStart {..} => "torrents.force_start",

@@ -9,6 +9,7 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {name:"torrents.pieces",mutating:false,idempotent:false,since:"P6-02",args:"`hash: hash`",result:"`Pieces` (MSB-first base64 verified bitfield)"},
     Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
 
@@ -62,7 +63,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name:"shows.set_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`, `key: str`, `read: bool`",result:"`{}`" },
     Operation { name:"shows.mark_show_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`",result:"`{count: u64}`" },
     Operation { name:"shows.undo_read",mutating:true,idempotent:false,since:"P3-03",args:"none",result:"`{restored?: {imdb: str, key: str}}`" },
-    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
+    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, `stage?: bool`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
     Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
     Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
     Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
@@ -137,6 +138,7 @@ pub mod trackers;
 pub mod rss;
 pub mod shows;
 pub mod moving;
+pub mod pieces;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

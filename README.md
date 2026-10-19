@@ -209,6 +209,9 @@ Space toggles the selected file, `a` / `n` include or skip the filtered files, `
 filters names, and `o` opens the selected file. Files sort naturally by episode
 number. Overview loads the daemon's local IMDb poster and shows the confirmed
 seed policy. Log shares one bounded subscription and filters by torrent hash.
+The Pieces tab shows the verified have bitfield, first/last priority markers and
+the known playable prefix. Both UIs release its two-second subscription when
+hiding the pane. Large torrents are aggregated to the available display width.
 
 Press `,` for Settings, `L` for Log, and `?` for the generated keyboard help.
 Settings covers every current writable daemon setting, including the VPN binding,

@@ -166,7 +166,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     use ErrorCode::*;
     Ok(match call {
-        Call::TorrentsCommit {args} => {
+        Call::TorrentsCommit {args} => return crate::daemon::staged_sources::commit(daemon,&args.hash,|| {
             if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
                 return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
             }
@@ -177,12 +177,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             execute(daemon,EngineOp::Commit {hash:args.hash.to_string(),
                 files:args.files.as_ref().map(|values|values.iter().map(|v|*v as usize).collect()),
                 seed:args.seed,save_path:args.save_path.as_ref().map(Into::into)})?;
-            Reply::TorrentsCommit(DoneResult {state:DoneState::Done})
-        }
-        Call::TorrentsDiscard {args} => {
+            Ok(Reply::TorrentsCommit(DoneResult {state:DoneState::Done}))
+        }),
+        Call::TorrentsDiscard {args} => return crate::daemon::staged_sources::discard(daemon,&args.hash,|| {
             execute(daemon,EngineOp::Discard {hash:args.hash.to_string()})?;
-            Reply::TorrentsDiscard(DoneResult {state:DoneState::Done})
-        }
+            Ok(Reply::TorrentsDiscard(DoneResult {state:DoneState::Done}))
+        }),
         Call::ImdbLookup { args } => return super::imdb::lookup(&daemon.imdb, args),
         Call::TorrentsList { args } => {
             let mut rows = list(daemon)?;

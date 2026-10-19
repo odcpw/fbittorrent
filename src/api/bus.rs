@@ -122,6 +122,7 @@ struct Sample {
     searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     peers: BTreeMap<String, Value>,
+    pieces: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
     disk: Disk,
@@ -139,6 +140,7 @@ impl Sample {
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
             Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
+            Topic::Pieces(h) => self.pieces.get(h.as_str()).cloned().unwrap_or(Value::Null),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
             Topic::Network => self.network.clone(),
             Topic::Settings => self.settings.clone(),
@@ -260,7 +262,7 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
             if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
-            if let Topic::Files(hash) | Topic::Peers(hash) = topic {
+            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Pieces(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
@@ -302,6 +304,7 @@ impl Bus {
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
+                            Topic::Pieces(_) => Duration::from_millis(args.effective_interval_ms(2000).max(2000)),
                             Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
                             Topic::Summary => {
                                 Duration::from_millis(args.effective_interval_ms(summary_interval))
@@ -407,6 +410,15 @@ impl Bus {
             .map(ops::torrents::torrent)
             .collect::<ApiResult<Vec<_>>>()?;
         self.daemon.watch.lock().unwrap().decorate(&mut rows);
+        let mut pieces=BTreeMap::new();
+        if let Slot::Running(app)=&slot.slot {
+            for hash in topics.iter().filter_map(|t|if let Topic::Pieces(h)=t {Some(h)}else{None}).collect::<BTreeSet<_>>() {
+                let playable=rows.iter().find(|row|&row.hash==hash).and_then(|row|row.playable.as_ref());
+                if let Ok(value)=app.dispatcher().pieces_snapshot(hash.as_str()).map_err(ops::engine_error).and_then(|value|ops::pieces::encode(value,playable)) {
+                    pieces.insert(hash.to_string(),json!(value));
+                }
+            }
+        }
         let files = details
             .into_iter()
             .map(|(hash, files)| {
@@ -479,6 +491,7 @@ impl Bus {
             logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
             searches,
             files,
+            pieces,
             network,
             settings,
             disk: self.daemon.disk.lock().unwrap().summary.clone(),
@@ -601,7 +614,7 @@ impl Bus {
                 .unwrap()
                 .subscriptions
                 .values()
-                .flat_map(|s| s.topics.iter().map(|t| t.topic.clone()))
+                .flat_map(|s| s.topics.iter().filter(|t| !matches!(t.topic,Topic::Pieces(_)) || t.due<=Instant::now()).map(|t| t.topic.clone()))
                 .collect();
             match self.sample(&topics) {
                 Ok(sample) => {
@@ -744,6 +757,7 @@ impl Subscription {
         });
         for index in order {
             let t = &mut self.topics[index];
+            if restart && matches!(t.topic,Topic::Pieces(_)) {t.sent=None;}
             let mut value = if t.topic == Topic::Events {
                 json!(events
                     .iter()
@@ -752,6 +766,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
+            if matches!(t.topic,Topic::Pieces(_)) && value.is_null() {if t.due<=Instant::now() {t.due=Instant::now()+t.interval;}continue;}
             let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_));
@@ -847,6 +862,7 @@ impl Subscription {
                 |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
             );
         }
+        self.topics.retain(|t|!matches!(&t.topic,Topic::Pieces(h) if !sample.rows.iter().any(|r|&r.hash==h)));
         self.epoch = Some(engine);
         Ok(())
     }

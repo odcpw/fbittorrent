@@ -156,6 +156,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.commit` | `hash`, `files?`, `seed?`, `save_path?` | `{state: "done"}` | yes | P3-06 |
 | `torrents.discard` | `hash` | `{state: "done"}`; payload files never deleted | yes | P3-06 |
 | `torrents.move` | `hashes: [hash]` (1..256), `save_path` | `{state: "pending", ref}`, then mutation.result | yes | P7-02 |
+| `torrents.pieces` | `hash: hash` | `Pieces` (MSB-first base64 verified bitfield) | no | P6-02 |
 | `torrents.trackers` | `hash: hash` | `{trackers: [Tracker]}` | no | P6-01 |
 | `torrents.reannounce` | `hashes: [hash]` (1..256) | `{state: "done"}` | yes | P6-01 |
 | `hello` | See handshake | HelloResult | no | P1-06 |
@@ -175,7 +176,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
 | `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
 | `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
-| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, `stage?: bool`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
 | `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
 | `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
 | `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
@@ -457,7 +458,7 @@ The hello/error replay normalization table remains:
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit","pieces"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -899,11 +900,9 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.31**. Each additive change after the 1.2.0
-baseline has its own patch, assigned in first-parent integration merge order.
-Changes arriving together retain their feature order; the P1-18 event and raw
-API entries receive successive patches. Future merges allocate after the latest
-integrated patch and update this table, capabilities, and contract assertions.
+The current CLI contract is **1.2.31**. Additive changes from parallel tracks
+may share a patch version. Integration preserves their version numbers and
+change descriptions; patches are not renumbered at merge time.
 API hello still negotiates wire version 1; these CLI patches do not change
 NDJSON framing or the capability arrays in the wire fixtures.
 
@@ -940,6 +939,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.29` | `search.torznab` |
 | `1.2.30` | `trackers.edit` |
 | `1.2.31` | `cli.catalogue` |
+| `1.2.31` | `pieces` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1210,3 +1210,19 @@ interactive edge refreshes only stale catalogues. The existing UI connection
 subscribes to rss.feeds/shows and reloads today's atomic files on pushed updates;
 shows.checked also refreshes the cached Shows view. A fresh reconnect does not
 fetch again. Explicit user refresh/check remains available.
+### P6-02: verified Pieces (contract 1.2.31)
+
+The `pieces` capability adds read-only `torrents.pieces {hash}` → `Pieces` and
+`torrent:<hash>.pieces`, a singleton `state {data: Pieces}` detail topic.
+`Pieces {count: u64, piece_size: u64, have: str, priority: [u64], playable_end?: u64}`
+uses the BEP 3 MSB-first verified have bitfield in standard padded base64, exactly
+`ceil(count/8)` bytes before encoding, unused low bits zero. `priority` contains
+sorted unique first/last indices of included nonempty non-padding files.
+`playable_end`, when known from the playable prefix, is an exclusive piece end
+index. Unknown prefix is omitted. The 1,048,576-byte frame cap still applies; an
+unrepresentable read returns `unsupported`. An unknown hash is `not_found`; a
+known torrent without a live verified snapshot returns `invalid_state`.
+Sampling exists only for subscribed details, at most once every2,000ms (requested
+intervals can lengthen this). No snapshot is fabricated during checking, parking
+or dormant restore. Clients clear unavailable observations at engine changes and
+release the topic when hiding/switching the pane.
