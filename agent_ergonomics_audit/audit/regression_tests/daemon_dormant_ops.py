@@ -46,7 +46,7 @@ def dormant_operations(binary, systemd):
             hash_=dormant('trackers');url='http://127.0.0.1:1/dormant-fixture'
             c.call('torrents.trackers',dict(hash=hash_));c.call('torrents.add_tracker',dict(hash=hash_,url=url))
             trackers=c.call('torrents.trackers',dict(hash=hash_))['result']['trackers']
-            case.check(any(t['url']==url for t in trackers),'tracker add is visible on the dormant record',json.dumps(trackers))
+            case.check(any(t['url'].split('#')[0]==url for t in trackers),'tracker add is visible on the dormant record',json.dumps(trackers))
             c.call('torrents.remove_tracker',dict(hash=hash_,url=url))
             trackers=c.call('torrents.trackers',dict(hash=hash_))['result']['trackers']
             case.check(not trackers and row('trackers')['checked'] is False,'tracker remove retains dormancy',json.dumps(trackers))

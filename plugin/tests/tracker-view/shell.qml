@@ -9,6 +9,13 @@ ShellRoot {
   TrackerRow {id:row;width:350;tracker:({url:"https://private-user:private-pass@tracker.invalid/announce?passkey=private-token#private-fragment",status:"error",message:"private-user private-pass private-token https://other-user:other-pass@other.invalid/error?key=other-secret"})}
   function check(name,ok,expect,observed){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise actual tracker presentation and controller",expect:expect,observed:JSON.stringify(observed),ok:!!ok,ms:0}))}
   Component.onCompleted:{
+    ;["SYNTHETIC_PATH_PASSKEY","0123456789abcdef0123456789abcdef","AbCdEf0123456789+/=="].forEach(function(secret){
+      var url="https://tracker.invalid/"+encodeURIComponent(secret)+"/announce?token=short"
+      row.tracker={url:url,status:"error",message:secret+" at "+url}
+      var rendered=row.rendered()
+      check("privacy",rendered.indexOf(secret)<0 && rendered.indexOf(encodeURIComponent(secret))<0 && rendered.indexOf("short")<0 && rendered.indexOf("REDACTED/announce")>=0,"actual tracker row hides path and query credentials and echoed values",rendered)
+    })
+    row.tracker={url:"https://private-user:private-pass@tracker.invalid/announce?passkey=private-token#private-fragment",status:"error",message:"private-user private-pass private-token https://other-user:other-pass@other.invalid/error?key=other-secret"}
     var text=row.rendered()
     check("privacy",["private-user","private-pass","private-token","passkey=","private-fragment","other-user","other-pass","key="].every(function(s){return text.indexOf(s)<0}),"rendered URL and failure prose contain no userinfo, query, fragment or echoed credentials",text)
     var scheme=TrackerText.message("https://other-user:other-pass@other.invalid/error?secret=value","https://tracker.invalid/?key=https")

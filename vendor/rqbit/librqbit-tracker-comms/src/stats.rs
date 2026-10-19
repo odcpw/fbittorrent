@@ -10,6 +10,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 use url::Url;
+use crate::{redact_url,sanitize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrackerStatus {
@@ -180,40 +181,6 @@ impl Drop for AnnounceGuard {
             }
         }
     }
-}
-pub fn redact_url(url: &Url) -> String {
-    let mut public=url.clone();
-    let _=public.set_username("");let _=public.set_password(None);
-    public.set_query(None);public.set_fragment(None);
-    if url.query().is_some() {format!("{public}?…")}else{public.to_string()}
-}
-/// Strip URL userinfo, fragments and queries in all diagnostics. Remove known
-/// credential values too, because an untrusted tracker can echo them as prose.
-pub fn sanitize(url: &Url, text: &str) -> String {
-    let text=text.chars().map(|ch|if ch.is_control(){' '}else{ch}).collect::<String>();
-    let mut secrets=url.query_pairs().map(|(_,v)|v.into_owned()).collect::<Vec<_>>();
-    for value in [Some(url.username()),url.password(),url.fragment()].into_iter().flatten().filter(|v|!v.is_empty()) {
-        secrets.push(value.to_owned());
-        let encoded=format!("value={value}");
-        secrets.extend(url::form_urlencoded::parse(encoded.as_bytes()).map(|(_,v)|v.into_owned()));
-    }
-    let mut output=String::with_capacity(text.len());
-    for word in text.split_inclusive(char::is_whitespace) {
-        if let Some(separator)=word.find("://") {
-            let start=word[..separator].char_indices().rev().take_while(|(_,c)|c.is_ascii_alphanumeric()||matches!(*c,'+'|'-'|'.')).last().map_or(separator,|(i,_)|i);
-            let token=word[start..].trim_end();
-            if let Ok(parsed)=Url::parse(token) {
-                output.push_str(&word[..start]);output.push_str(&redact_url(&parsed));
-                output.push_str(&word[start+token.len()..]);continue;
-            }
-        }
-        output.push_str(word);
-    }
-    // Redact URL structure before prose substitutions: a credential such as
-    // "https" must not invalidate another URL's scheme before it is inspected.
-    secrets.sort_by_key(|value|std::cmp::Reverse(value.len()));
-    for secret in secrets.into_iter().filter(|v|!v.is_empty()) {output=output.replace(&secret,"…");}
-    output.chars().take(200).collect()
 }
 
 #[cfg(test)]

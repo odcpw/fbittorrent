@@ -17,9 +17,9 @@ impl TuiApp {
         Cmd::none()
     }
     pub(super) fn edit_tracker(&mut self,hash:&str,value:&str,add:bool)->Cmd<Msg> {
-        let valid=value.len()<=4096 && !value.chars().any(char::is_control)
+        let valid=value.len()<=(if add {4096}else{8192}) && !value.chars().any(char::is_control)
             && url::Url::parse(value).is_ok_and(|url|url.host_str().is_some()
-                && matches!(url.scheme(),"http"|"https"|"udp") && (url.scheme()!="udp"||url.port().is_some()));
+                && ((!add&&crate::api::trackers::is_alias(&url))||matches!(url.scheme(),"http"|"https"|"udp")) && (url.scheme()!="udp"||url.port().is_some()));
         if !valid {self.set_status("Invalid tracker URL · use http(s) or udp with a port",true);return Cmd::none();}
         self.service_action(if add {"torrents.add_tracker"}else{"torrents.remove_tracker"},
             serde_json::json!({"hash":hash,"url":value}),if add {"Tracker added"}else{"Tracker removed"})

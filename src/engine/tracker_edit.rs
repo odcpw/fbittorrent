@@ -8,11 +8,13 @@ impl EngineDispatcher {
         value: &str,
         add: bool,
     ) -> Result<()> {
-        let url = url::Url::parse(value).map_err(|_| anyhow!("invalid tracker URL"))?;
+        let mut url = url::Url::parse(value).map_err(|_| anyhow!("invalid tracker URL"))?;
+        let alias=crate::api::trackers::is_alias(&url);
         anyhow::ensure!(
-            value.len() <= 4096
+            value.len() <= (if !add&&alias {8192}else{4096})
+                && !(add&&alias)
                 && url.host_str().is_some()
-                && matches!(url.scheme(), "http" | "https" | "udp")
+                && ((!add&&alias)||matches!(url.scheme(), "http" | "https" | "udp"))
                 && (url.scheme() != "udp" || url.port().is_some()),
             "invalid tracker URL"
         );
@@ -33,6 +35,16 @@ impl EngineDispatcher {
             Some(handle)=>handle.tracker_urls(),
             None=>trackers::saved(&ledger.records[index],&self.inner.directory)?.into_iter().map(|row|row.url).collect(),
         };
+        if alias {
+            // Resolve only canonical aliases; never fall back to a literal
+            // imported URL with the same fragment or announce a display URL.
+            let mut selected=None;
+            for raw in &urls {
+                if crate::api::trackers::alias(raw)?==value {selected=Some(raw.clone());break;}
+            }
+            let Some(raw)=selected else {return Ok(());};
+            url=raw;
+        }
         if urls.contains(&url) == add {
             return Ok(());
         }

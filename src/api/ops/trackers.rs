@@ -1,4 +1,4 @@
-//! Tracker diagnostics contain sanitized messages but retain the private URL.
+//! Tracker diagnostics expose only redacted, uniquely removable aliases.
 use super::{ApiResult, engine_error};
 use crate::{
     api::*,
@@ -25,7 +25,8 @@ fn execute(daemon: &Daemon, op: EngineOp, hash: Option<String>) -> ApiResult<Eng
 }
 pub(crate) fn read(daemon: &Daemon, hash: &Hash)->ApiResult<Vec<Tracker>> {
     let EngineResult::Trackers(rows)=execute(daemon,EngineOp::Trackers{hash:hash.to_string()},Some(hash.to_string()))? else {unreachable!("typed tracker result")};
-    Ok(rows.into_iter().map(crate::api::trackers::wire).collect())
+    let mut rows=rows.into_iter().map(|row|crate::api::trackers::wire(row).map_err(engine_error)).collect::<ApiResult<Vec<_>>>()?;
+    rows.sort_by(|a,b|a.url.cmp(&b.url));Ok(rows)
 }
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     match call {

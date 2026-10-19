@@ -28,7 +28,7 @@ def tracker_add_remove(binary,systemd):
                 epoch=c.call('app.info')['result']['engine_epoch']
                 for _ in range(2):c.call('torrents.add_tracker',dict(hash=hash,url=b))
                 observations=c.call('torrents.trackers',dict(hash=hash))['result']['trackers']
-                case.check([v['url'] for v in observations]==[a,b] and observations[1]['status']=='not_contacted',
+                case.check(sorted(v['url'].split('#')[0] for v in observations)==[a,b] and next(v for v in observations if v['url'].split('#')[0]==b)['status']=='not_contacted',
                            'new private backup is immediately observed as not_contacted in the current set',json.dumps(observations))
                 row=c.call('torrents.get',dict(hash=hash))['result']['torrent']
                 case.check(row.get('tracker_count')==2 and count('/b')==0,'private torrent retains only its first tracker until that tracker is removed',json.dumps(dict(torrent=row,b=count('/b'))))
@@ -46,7 +46,7 @@ def tracker_add_remove(binary,systemd):
                     case.check(value.get('ok') is True and value.get('result')==dict(state='done'),'raw CLI removal returns the exact done result',json.dumps(value))
                 if not h.wait_for(lambda:(count('/b')>=2,json.dumps(dict(a=count('/a'),b=count('/b')))),'added tracker receives real announces after private first-tracker removal'):return
                 observations=c.call('torrents.trackers',dict(hash=hash))['result']['trackers']
-                case.check(len(observations)==1 and observations[0]['url']==b and observations[0].get('last_announce_at') is not None,
+                case.check(len(observations)==1 and observations[0]['url'].split('#')[0]==b and observations[0].get('last_announce_at') is not None,
                            'observations contain only the added current tracker after removing the old one',json.dumps(observations))
                 old=count('/a');new=count('/b')
                 h.wait_for(lambda:(count('/b')>=new+2,json.dumps(dict(a=count('/a'),b=count('/b')))),'two subsequent real announce cycles complete',timeout=8)
@@ -62,7 +62,7 @@ def tracker_add_remove(binary,systemd):
                 c.hello()
                 h.wait_for(lambda:(count('/b')>=new+2,json.dumps(dict(a=count('/a'),b=count('/b')))),'actual daemon restore announces to the added tracker')
                 observations=c.call('torrents.trackers',dict(hash=hash))['result']['trackers']
-                case.check(len(observations)==1 and observations[0]['url']==b and observations[0].get('last_announce_at') is not None,
+                case.check(len(observations)==1 and observations[0]['url'].split('#')[0]==b and observations[0].get('last_announce_at') is not None,
                            'restored observations follow durable tracker edits rather than stale metainfo',json.dumps(observations))
                 case.check(count('/a')==old,'removed metainfo tracker stays removed on restore' ,json.dumps(dict(before=old,after=count('/a'))))
                 # Exercise an empty live set and subsequent wake; no timer polling.

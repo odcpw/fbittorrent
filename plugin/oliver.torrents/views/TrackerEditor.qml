@@ -9,6 +9,7 @@ FocusScope {
   property string mode:""
   property string target:""
   property string error:""
+  readonly property string confirmationText:"Remove tracker "+TrackerText.publicUrl(root.target)+"?"
   readonly property bool opened:mode!==""
   readonly property bool cancelFocused:mode==="remove" ? confirm.selectedIndex===0 : cancel.activeFocus
   visible:opened
@@ -57,7 +58,7 @@ FocusScope {
   }
   Ui.ConfirmDialog {
     id:confirm;anchors.fill:parent;opened:root.mode==="remove";selectedIndex:0
-    confirmText:"Remove tracker";message:"Remove tracker "+TrackerText.publicUrl(root.target)+"?"
+    confirmText:"Remove tracker";message:root.confirmationText
     onCanceled:root.close();onConfirmed:root.submit()
   }
 }

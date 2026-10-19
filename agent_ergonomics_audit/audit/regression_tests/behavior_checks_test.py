@@ -53,6 +53,17 @@ class BehaviorChecks(unittest.TestCase):
         self.assertTrue(expected_daemon_stderr("INFO daemon draining", complete=False))
         self.assertFalse(expected_daemon_stderr("INFO daemon sockets unlinked", complete=False))
 
+    def test_verified_empty_slot_still_requires_every_owner_release_phase(self):
+        phases=[self.phases[i] for i in (0,2,3,4)]
+        self.assertTrue(expected_daemon_stderr("\n".join(phases),empty_slot=True))
+        self.assertFalse(expected_daemon_stderr("\n".join(phases)))
+        for i in range(len(phases)):
+            self.assertFalse(expected_daemon_stderr("\n".join(phases[:i]+phases[i+1:]),empty_slot=True))
+        for i in range(len(phases)-1):
+            swapped=phases.copy();swapped[i],swapped[i+1]=swapped[i+1],swapped[i]
+            self.assertFalse(expected_daemon_stderr("\n".join(swapped),empty_slot=True))
+        self.assertFalse(expected_daemon_stderr("\n".join(phases).replace("code=0","code=70"),empty_slot=True))
+
     def test_catalogue_includes_table_and_explicit_operation_addenda(self):
         document = "## Capability catalogue\n| `files`, `torrents` | operations |\n## Additions\nCapability `free_space` adds read-only space checks.\nIncidental `invented` text."
         self.assertEqual(capability_catalogue(document), {"files", "torrents", "free_space"})
