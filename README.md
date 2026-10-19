@@ -76,6 +76,14 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
   desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
   seeding for that add), or the CLI.
+- **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
+  torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
+  keeps files. Without the daemon staging capability, the sheet says that metadata
+  arrives after Download and creates no record before confirmation. With staging,
+  it resolves metadata first and offers file selection, seeding and destination.
+  The desktop handler respects `handler = "confirm"` by opening this sheet;
+  `handler = "add"` adds immediately. A local file drop uses the same sheet;
+  file-manager drag and drop on Hyprland still needs manual qualification.
 - **File selection.** Enter on a torrent opens its file list: Space toggles a
   file between included and skipped, `1` includes it, and `a`/`n` select all or
   none. Native mode does not support high/max file priorities.

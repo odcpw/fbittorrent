@@ -6,6 +6,7 @@ pub(super) mod stream;
 pub(super) mod raw;
 pub(super) mod restart;
 mod native;
+mod handler;
 mod offline;
 pub(super) mod settings;
 pub(super) use native::{handles as native_handles, run as run_native};
@@ -90,7 +91,7 @@ pub(super) enum Cmd {
     /// Start the daemon; --ui also opens the dashboard or TUI
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
-    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
+    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String>, #[arg(long)] hash: Option<String> },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)

@@ -5,6 +5,7 @@ import Quickshell
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "Model.js" as Model
+import "AddSource.js" as Source
 import "views" as Views
 import "components" as Components
 
@@ -24,6 +25,9 @@ Item {
   readonly property var torrents:torrentsLoader.item
   readonly property var views:["torrents","search","shows","rss","settings","log"]
   readonly property var labels:["Torrents","Search","Shows","RSS","Settings","Log"]
+  function selectTorrent(hash){currentView="torrents";selectedHash=hash;if(torrents)torrents.cursorHash=hash}
+  function openAdd(source,options){var accepted=svc ? svc.beginAdd(source,options) : false;Qt.callLater(function(){if(addSheet.item)addSheet.item.focusSheet()});return accepted}
+  function acceptDrop(urls,text){var parsed=Source.drop(urls,text);if(!parsed)return false;return openAdd(parsed.source)}
   function publish() {
     if (!svc || !window || !searchInput)return
     if(!window.visible && svc.dashboardOwner!==root)return
@@ -32,10 +36,12 @@ Item {
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
       cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
+    if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
 
   }
   function focusView() {
     if (!svc || !window.visible)return
+    if(addSheet.item){svc.focusWindow(window,addSheet.item);return}
     var target=!svc.online && !svc.startupRequested ? startButton : currentView==="search" ? searchInput : currentView==="torrents" && torrents ? torrents : scope
     svc.focusWindow(window,target)
   }
@@ -57,6 +63,13 @@ Item {
     closingFromHost=false
     window.visible=true
     if(svc && !svc.online)svc.startDaemon()
+    if(payload.add){
+      if(!Source.normalize(payload.add.source)){routeError="Invalid add source";return false}
+      openAdd(payload.add.source,payload.add)
+    }else if(payload.hash && svc && svc.client && svc.client.caps.indexOf("staging")>=0){
+      var hash=payload.hash
+      svc.client.request("torrents.get",{hash:hash},{callback:function(result){if(result && result.torrent.staged)svc.addFlow.existing(hash)}})
+    }
     publish()
     Qt.callLater(focusView)
     return true
@@ -81,7 +94,7 @@ Item {
   onFilterChanged:publish()
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
-  Connections {target:root.svc;function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
+  Connections {target:root.svc;function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
   Component.onDestruction:if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window)}
 
   FloatingWindow {
@@ -104,6 +117,8 @@ Item {
       focus:true
       Keys.priority:Keys.AfterItem
       Keys.onPressed:function(event) {
+        if(addSheet.active){if(addSheet.item && addSheet.item.handleKey(event))event.accepted=true;return}
+        if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(root.currentView==="torrents" && root.svc && root.svc.online && torrents && torrents.handleKey(event)){event.accepted=true;return}
         if(event.key===Qt.Key_Escape) {
           if(root.query!==""){root.query="";event.accepted=true}
@@ -115,9 +130,10 @@ Item {
           root.selectView(event.key-Qt.Key_1);event.accepted=true
         }
       }
+      Shortcut {sequence:"Ctrl+V";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active;onActivated:root.svc.addClipboardSheet()}
       Shortcut {sequence:"Ctrl+Q";context:Qt.WindowShortcut;enabled:window.visible && !!root.svc && root.svc.online;onActivated:root.svc.quit()}
-      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(1)}
-      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(-1)}
+      Shortcut {sequence:"Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(1)}
+      Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && !addSheet.active && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(-1)}
       ColumnLayout {
         anchors.fill:parent
         anchors.margins:Commons.Style.space(0)
@@ -127,6 +143,7 @@ Item {
           Layout.margins:Commons.Style.spacing.panelPadding
           Text {text:"fbittorrent";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading;font.bold:true}
           Item {Layout.fillWidth:true}
+          Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }
         Ui.PanelSeparator {Layout.fillWidth:true}
@@ -188,6 +205,8 @@ Item {
           color:Commons.Color.urgent;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall
         }
       }
+      DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
+      Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusView)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }
   }
 }

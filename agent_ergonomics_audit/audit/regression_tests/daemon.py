@@ -3888,6 +3888,15 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+def handler_confirm_stages(binary, systemd=False):
+    # Reuse the private native shell fixture; the daemon case retains its own JSONL.
+    sys.path.insert(0, str(REPO / "plugin/tests"))
+    import private_net
+    private_net.enter()
+    from add_sheet import handler
+    handler(binary, "daemon", "handler_confirm_stages")
+
+
 
 def tui_reconnect_existing_owner(binary, systemd):
     import native
@@ -4650,7 +4659,7 @@ def tracker_saved_views(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,

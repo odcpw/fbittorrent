@@ -69,6 +69,7 @@ ShellRoot {
       root.scrollCount=0;root.scrollStarted=Date.now();root.scrollElapsed=0;root.scrolling=true;return true
     }
     function scrollStats():string{return JSON.stringify({count:root.scrollCount,elapsed_ms:root.scrollElapsed,active:root.scrolling})}
+    function routeDrop(url:string):bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false;return dashboard.item.acceptDrop([url],"")}
     function rowPoint(index:int):string{return JSON.stringify(dashboard.item ? dashboard.item.rowPoint(index) : null)}
     function resize(width:int,height:int):bool{if(!dashboard.item)return false;dashboard.item.resize(width,height);return true}
     function scroll(dy:real):bool{if(!dashboard.item)return false;dashboard.item.scroll(dy);return true}
