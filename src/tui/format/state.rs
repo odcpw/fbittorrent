@@ -49,10 +49,12 @@ fn key(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
     }
 }
 pub(in crate::tui) fn state_cell(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
+    if row.is_some_and(|r|r.state==api::TorrentState::Error && r.reason.as_deref()==Some("missing_files")) {return "! Missing";}
     let key=key(legacy,row);
     definitions().iter().find(|s|s.definition.state==key).map_or("? Unknown",|s|s.padded.as_str())
 }
 pub(in crate::tui) fn state_word(legacy: &Torrent, row: Option<&api::Torrent>) -> &'static str {
+    if row.is_some_and(|r|r.state==api::TorrentState::Error && r.reason.as_deref()==Some("missing_files")) {return "Files missing";}
     if let Some(p)=row.filter(|r|r.state==api::TorrentState::Downloading).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
         if p.stall_free!=Some(true) && !(p.stall_free.is_none() && p.buffered_s.is_some_and(|s|s>=120)) {return "Playable · may stall";}
     }
@@ -75,6 +77,20 @@ pub(in crate::tui) fn tracker_label(status: &api::TrackerStatus) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_files_replaces_done_and_percentage_in_every_tui_view() {
+        let row:api::Torrent=serde_json::from_value(serde_json::json!({
+            "hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"Deleted film",
+            "state":"error","reason":"missing_files","intent":"run","staged":false,
+            "checked":false,"seed":false,"upload_enabled":false,"upload_policy":"off",
+            "save_path":"/fixture/downloads","added_at":1,"force":false
+        })).unwrap();
+        let legacy=super::super::torrent(&row);
+        assert_eq!(state_word(&legacy,Some(&row)),"Files missing");
+        assert_eq!(state_cell(&legacy,Some(&row)),"! Missing");
+        assert_eq!(super::super::Metrics{legacy:&legacy,api:Some(&row)}.progress(),"Files missing");
+    }
+
     #[test]
     fn state_glyph_width_one() {
         for row in definitions() {

@@ -91,6 +91,7 @@ pub(super) struct Metrics<'a> {
 impl Metrics<'_> {
     pub fn progress(&self) -> String {
         if let Some(row) = self.api {
+            if row.reason.as_deref()==Some("missing_files") { return "Files missing".into(); }
             return row.progress.map_or_else(
                 || {
                     if row.state == api::TorrentState::WaitingVpn {
