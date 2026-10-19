@@ -94,7 +94,7 @@ class Session:
                 try:self.child.wait(timeout=3)
                 except subprocess.TimeoutExpired:self.child.kill();self.child.wait()
             self.output.close();text=self.log.read_text()
-            errors=[line for line in text.splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected'))]
+            errors=[line for line in text.splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected','Unexpected token','Error calling method'))]
             self.case.check(self.child.returncode==0 and not errors,'owned dashboard shell closes without QML errors',f'exit={self.child.returncode}; errors={errors}; {self.log}')
         finally:self.compositor.close()
 

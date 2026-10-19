@@ -225,7 +225,7 @@ function create(options) {
       s.instance = result.instance; s.info = result
     } else if (call.op === "app.info") s.info = result
     else if (call.op === "app.network") s.network = result.state
-    else if(call.op==="app.settings.get" || call.op==="app.settings.set")s.settings=result.settings || result
+    else if(call.op==="app.settings.get")s.settings=result
     else if (call.op === "transfer.info") s.transfer = result
     else if(call.op==="app.log"){
       var log=s.topics.log || dictionary();result.entries.forEach(function(r){log[String(r.seq)]=r});s.topics.log=log;trimLog()

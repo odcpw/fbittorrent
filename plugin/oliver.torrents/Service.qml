@@ -11,6 +11,7 @@ import "PopupState.js" as PopupState
 import "Focus.js" as Focus
 import "AddFlow.js" as AddFlow
 import "ClipboardFlow.js" as ClipboardFlow
+import "SettingsFlow.js" as SettingsFlow
 import "AddSource.js" as AddSource
 import "DetailFlow.js" as DetailFlow
 import "SearchFlow.js" as SearchFlow
@@ -77,6 +78,9 @@ Item {
   property bool startupRequested: false
   property var clipboardOffer: null
   property var clipboardFlow:null
+  property var settingsFlow:null
+  property int settingsRevision:0
+  property var helpActions:[]
   property string instance: ""
   property string backendState: "stopped"
   property string lastError: ""
@@ -180,6 +184,8 @@ Item {
     try { rowsChanged = store.apply(frame, request) }
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
     syncRows();badgeCounts=store.badges
+    if(settingsFlow)settingsFlow.frame(frame)
+    if(frame.topic==="settings" || (request && request.op.indexOf("app.settings.")===0))settingsRevision++
     if(clipboardFlow)clipboardFlow.frame(frame)
     if(addFlow)addFlow.frame(frame)
     if(detailFlow)detailFlow.frame(frame,request)
@@ -360,7 +366,7 @@ Item {
       if (!socket.connected) restart()
     }
   }
-  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick() } }
+  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
@@ -385,7 +391,11 @@ Item {
     }
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }
   }
+  FileView {id:helpDocument;blockLoading:true;blockAllReads:true;preload:false}
   Component.onCompleted: {
+    helpDocument.path=Qt.resolvedUrl("keymap.json")
+    helpActions=JSON.parse(helpDocument.text()).actions.filter(function(row){return Array.isArray(row.keys.dashboard)})
+    settingsFlow=SettingsFlow.create(root,function(){root.settingsRevision++})
     clipboardFlow=ClipboardFlow.create(root)
     searchFlow=SearchFlow.create(root,function(){root.searchRevision++})
     detailFlow=DetailFlow.create(root,function(){root.detailRevision++})

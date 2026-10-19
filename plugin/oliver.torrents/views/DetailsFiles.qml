@@ -14,7 +14,7 @@ ColumnLayout {
   property int revision:service.detailRevision
   readonly property bool editing:filterInput.activeFocus
   function focusFilter(){filterInput.forceActiveFocus()}
-  function endFilter(){filterInput.focus=false}
+  function endFilter(){service.cancelFocusTarget(filterInput);filterInput.focus=false;root.forceActiveFocus()}
   function key(event){
     if(editing){if(event.key===Qt.Key_Escape || event.key===Qt.Key_Return){endFilter();return true}return false}
     if(event.text==="/"){focusFilter();return true}

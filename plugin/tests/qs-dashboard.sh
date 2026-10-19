@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [[ "${1:-}" == --preferences ]]; then
+  shift
+  exec python3 plugin/tests/preferences.py "$@"
+fi
 if [[ "${1:-}" == --search ]]; then
   shift
   exec python3 plugin/tests/search.py "$@"

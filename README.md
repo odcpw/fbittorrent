@@ -163,8 +163,7 @@ The plugin exposes a separate window entry point while the bar keeps its popup:
 omarchy-shell shell summon oliver.torrents '{"view":"search","query":"sintel"}'
 ```
 
-The window shell routes Torrents, Search, Shows, RSS, Settings and Log. Their views
-land separately; this command currently proves window routing and query focus.
+The window routes Torrents, Search, Shows, RSS, Settings and Log.
 The bar service owns its API connection across window closes. `q` closes the
 window; Esc clears one layer and leaves the window open at the top level.
 
@@ -197,6 +196,16 @@ Space toggles the selected file, `a` / `n` include or skip the filtered files, `
 filters names, and `o` opens the selected file. Files sort naturally by episode
 number. Overview loads the daemon's local IMDb poster and shows the confirmed
 seed policy. Log shares one bounded subscription and filters by torrent hash.
+
+Press `,` for Settings, `L` for Log, and `?` for the generated keyboard help.
+Settings covers every current writable daemon setting, including the VPN binding,
+peer port, clipboard watch and four speed limits. Limit fields accept bytes per
+second with `K`/`M` suffixes (1024/1048576); empty means unlimited. Changes wait for
+confirmed settings. Encryption, binding and port changes restart the engine slot
+while preserving the window's connection. Log filters by level, source and torrent
+hash, keeps the newest entry last, and follows new messages until you scroll back.
+`plugin/tests/qs-dashboard.sh --preferences --binary /path/to/fbittorrent` tests
+these views in a private compositor and retains JSONL and native PNG captures.
 
 Run `plugin/tests/qs-dashboard.sh --details --binary /path/to/fbittorrent` for the
 private-compositor acceptance cases. They use isolated state and a local IMDb
@@ -480,6 +489,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
 | --- | --- | --- | --- | --- | --- |
+| `global` | Log | — | `L` | — |  |
 | `modal:clipboard` | Add offered magnet | — | `y` | `y` |  |
 | `modal:clipboard` | Dismiss offered magnet | — | `Esc` | `Esc` |  |
 | `global` | Turtle limits | — | `z` | `z` |  |

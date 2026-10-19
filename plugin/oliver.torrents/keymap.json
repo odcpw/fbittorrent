@@ -1,6 +1,18 @@
 {
   "actions": [
     {
+      "id": "log.open",
+      "keys": {
+        "dashboard": [
+          "L"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Log",
+      "scope": "global"
+    },
+    {
       "id": "clipboard.accept_offer",
       "keys": {
         "dashboard": [
