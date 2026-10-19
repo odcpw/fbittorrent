@@ -1,26 +1,75 @@
 {
-  "version": 1,
-  "reference": {
-    "host": "t14",
-    "machine": "x86_64",
-    "cpu": "Intel(R) Core(TM) Ultra 7 258V",
-    "idle_seconds": 10,
-    "active_mib": 32,
-    "active_mib_s": 4,
-    "ratings_fixture": "fresh empty TSV; active title lookup negatively cached",
-    "binary_sha256": "c78605da44957ced3a4f16e21cfc9fb55065cf7e8670c29e34746c4237722f88"
-  },
   "configs": {
-    "idle": {
+    "100x0": {
       "cpu_s": [
-        0.03,
-        0.03,
-        0.03
+        0.21,
+        0.23,
+        0.24
       ],
       "rss_kb": [
-        15508,
-        15468,
-        15480
+        19828,
+        20024,
+        20076
+      ]
+    },
+    "100x1": {
+      "cpu_s": [
+        0.25,
+        0.24,
+        0.26
+      ],
+      "rss_kb": [
+        20384,
+        20236,
+        20300
+      ]
+    },
+    "100x8": {
+      "cpu_s": [
+        0.26,
+        0.25,
+        0.27
+      ],
+      "rss_kb": [
+        20876,
+        20612,
+        20492
+      ]
+    },
+    "10x0": {
+      "cpu_s": [
+        0.18,
+        0.19,
+        0.2
+      ],
+      "rss_kb": [
+        17628,
+        17216,
+        17268
+      ]
+    },
+    "10x1": {
+      "cpu_s": [
+        0.18,
+        0.19,
+        0.18
+      ],
+      "rss_kb": [
+        17168,
+        17336,
+        17624
+      ]
+    },
+    "10x8": {
+      "cpu_s": [
+        0.21,
+        0.21,
+        0.2
+      ],
+      "rss_kb": [
+        17772,
+        17872,
+        17828
       ]
     },
     "active": {
@@ -34,6 +83,339 @@
         19172.0,
         19104.0
       ]
+    },
+    "idle": {
+      "cpu_s": [
+        0.03,
+        0.03,
+        0.03
+      ],
+      "rss_kb": [
+        15508,
+        15468,
+        15480
+      ]
     }
-  }
+  },
+  "daemon": {
+    "bar_budget": [
+      {
+        "incremental_bar_cpu_s": 0.0,
+        "ok": true,
+        "reference_cli_cpu_s": 0.02,
+        "torrents": 10
+      },
+      {
+        "incremental_bar_cpu_s": 0.02,
+        "ok": true,
+        "reference_cli_cpu_s": 0.02,
+        "torrents": 100
+      }
+    ],
+    "binary_sha256": "d5455ca819933c76069b57e2264ba645b17a48686b8f714a91f89addbc1c9eff",
+    "host": "t14",
+    "measurement_sources": {
+      "reason": "Remeasure only the zero-subscriber/reference pairs after making reference RSS exclusively /proc VmHWM. Daemon binary unchanged.",
+      "subscriber_windows": "budget-final/daemon_budget/t{10,100}_s{1,8}.jsonl",
+      "zero_and_cli_windows": "budget-proc-reference/daemon_budget/t{10,100}_s0.jsonl"
+    },
+    "reference_samples": {
+      "10": [
+        {
+          "calls": [
+            {
+              "cpu_s": 0.00346,
+              "proc_ticks": 0,
+              "rss_kb": 620,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.00634,
+              "proc_ticks": 0,
+              "rss_kb": 8652,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.005075,
+              "proc_ticks": 0,
+              "rss_kb": 8196,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.001614,
+              "proc_ticks": 0,
+              "rss_kb": 7868,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.004216999999999999,
+              "proc_ticks": 0,
+              "rss_kb": 8336,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.00679,
+              "proc_ticks": 0,
+              "rss_kb": 8852,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.01,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.027496,
+          "rss_kb": 8852
+        },
+        {
+          "calls": [
+            {
+              "cpu_s": 0.002178,
+              "proc_ticks": 0,
+              "rss_kb": 7308,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002398,
+              "proc_ticks": 0,
+              "rss_kb": 7632,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.003267,
+              "proc_ticks": 0,
+              "rss_kb": 8060,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.004959,
+              "proc_ticks": 0,
+              "rss_kb": 8192,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002489,
+              "proc_ticks": 0,
+              "rss_kb": 6640,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.003722,
+              "proc_ticks": 0,
+              "rss_kb": 8324,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.02,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.019013,
+          "rss_kb": 8324
+        },
+        {
+          "calls": [
+            {
+              "cpu_s": 0.002338,
+              "proc_ticks": 0,
+              "rss_kb": 5480,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.003067,
+              "proc_ticks": 0,
+              "rss_kb": 8180,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.005605,
+              "proc_ticks": 0,
+              "rss_kb": 8048,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.005272,
+              "proc_ticks": 0,
+              "rss_kb": 8216,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.007266,
+              "proc_ticks": 0,
+              "rss_kb": 8348,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.0050089999999999996,
+              "proc_ticks": 0,
+              "rss_kb": 8264,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.03,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.028557,
+          "rss_kb": 8348
+        }
+      ],
+      "100": [
+        {
+          "calls": [
+            {
+              "cpu_s": 0.004229999999999999,
+              "proc_ticks": 0,
+              "rss_kb": 8792,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002461,
+              "proc_ticks": 0,
+              "rss_kb": 8692,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002421,
+              "proc_ticks": 0,
+              "rss_kb": 8628,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.001865,
+              "proc_ticks": 0,
+              "rss_kb": 8220,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.00235,
+              "proc_ticks": 0,
+              "rss_kb": 8276,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.004536,
+              "proc_ticks": 0,
+              "rss_kb": 8336,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.01,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.017862999999999997,
+          "rss_kb": 8792
+        },
+        {
+          "calls": [
+            {
+              "cpu_s": 0.002386,
+              "proc_ticks": 0,
+              "rss_kb": 8344,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.0024779999999999997,
+              "proc_ticks": 0,
+              "rss_kb": 8352,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.0047729999999999995,
+              "proc_ticks": 0,
+              "rss_kb": 8360,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002536,
+              "proc_ticks": 0,
+              "rss_kb": 8328,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002407,
+              "proc_ticks": 0,
+              "rss_kb": 8120,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.0068590000000000005,
+              "proc_ticks": 0,
+              "rss_kb": 8808,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.02,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.021439,
+          "rss_kb": 8808
+        },
+        {
+          "calls": [
+            {
+              "cpu_s": 0.007509,
+              "proc_ticks": 0,
+              "rss_kb": 8416,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.004011,
+              "proc_ticks": 0,
+              "rss_kb": 8388,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.005025,
+              "proc_ticks": 0,
+              "rss_kb": 8248,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.0018269999999999998,
+              "proc_ticks": 0,
+              "rss_kb": 8796,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.001995,
+              "proc_ticks": 0,
+              "rss_kb": 8488,
+              "wait4_rss_kb": 128400
+            },
+            {
+              "cpu_s": 0.002849,
+              "proc_ticks": 0,
+              "rss_kb": 8220,
+              "wait4_rss_kb": 128400
+            }
+          ],
+          "cpu_s": 0.03,
+          "cpu_source": "kernel /proc parent cutime+cstime delta for only the reaped CLI children; tick rounding occurs once across all calls",
+          "direct_proc_cpu_s": 0.0,
+          "precise_cpu_s": 0.023215999999999997,
+          "rss_kb": 8796
+        }
+      ]
+    },
+    "seconds": 60.0
+  },
+  "reference": {
+    "active_mib": 32,
+    "active_mib_s": 4,
+    "binary_sha256": "c78605da44957ced3a4f16e21cfc9fb55065cf7e8670c29e34746c4237722f88",
+    "cpu": "Intel(R) Core(TM) Ultra 7 258V",
+    "cpu_s": [
+      0.01,
+      0.02,
+      0.03
+    ],
+    "host": "t14",
+    "idle_seconds": 10,
+    "machine": "x86_64",
+    "ratings_fixture": "fresh empty TSV; active title lookup negatively cached",
+    "rss_kb": [
+      8792,
+      8808,
+      8796
+    ]
+  },
+  "version": 1
 }
