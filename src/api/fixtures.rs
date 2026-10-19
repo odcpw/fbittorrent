@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("download-limit",include_str!("../../contracts/ipc/v1/download-limit.ndjson")),
+    ("peers",include_str!("../../contracts/ipc/v1/peers.ndjson")),
     ("dashboard-presence",include_str!("../../contracts/ipc/v1/dashboard-presence.ndjson")),
     ("staging",include_str!("../../contracts/ipc/v1/staging.ndjson")),
     ("move",include_str!("../../contracts/ipc/v1/move.ndjson")),
@@ -487,9 +489,11 @@ fn operation_event_error_and_document_coverage() {
         "torrents.stop",
         "torrents.remove",
         "torrents.files",
+        "torrents.peers",
         "torrents.set_files",
         "torrents.set_seed",
         "torrents.set_upload_limit",
+        "torrents.set_download_limit",
         "torrents.open_target",
         "subscribe",
         "unsubscribe",

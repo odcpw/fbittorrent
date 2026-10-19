@@ -49,6 +49,8 @@ pub const TABLE: &[Operation] = &[
         args: "`hash: hash`, `to: enum(top|up|down|bottom)`", result: "`{state: \"done\", queue_pos: u64}`" },
     Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03",
         args: "`hashes: [hash]` (1..256)", result: "`{state: \"pending\", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}`" },
+    Operation{name:"torrents.set_download_limit",mutating:true,idempotent:true,since:"P7-06",args:"`hashes: [hash]`, `bps?: bps|null` (16384..4294967295; omission retains)",result:"`{state: \"done\"}`"},
+    Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
     Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
     Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },

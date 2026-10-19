@@ -82,6 +82,7 @@ impl EngineDispatcher {
                     source: String::new(),
                     output_folder: output_folder.to_string_lossy().into_owned(),
                     only_files: selected,
+            download_limit: None,
                     upload_limit: if seed_allowed {
                         torrent.up_limit.max(0)
                     } else {

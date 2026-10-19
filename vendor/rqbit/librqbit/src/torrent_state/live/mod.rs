@@ -804,6 +804,13 @@ impl TorrentStateLive {
         }
     }
 
+    /// Count connected seeds without allocating the expensive detail snapshot.
+    pub fn connected_seed_count(&self) -> usize {
+        let pieces = self.lengths.total_pieces() as usize;
+        self.peers.states.iter().filter(|peer| peer.value().get_live()
+            .is_some_and(|live| pieces > 0 && live.has_full_torrent(pieces))).count()
+    }
+
     pub fn per_peer_stats_snapshot(&self, filter: PeerStatsFilter) -> PeerStatsSnapshot {
         PeerStatsSnapshot {
             peers: self
@@ -1214,6 +1221,13 @@ impl PeerConnectionHandler for &'_ PeerHandler {
     fn on_handshake(&self, handshake: Handshake, ckind: ConnectionKind) -> anyhow::Result<()> {
         self.state.set_peer_live(self.addr, handshake, ckind);
         Ok(())
+    }
+
+    fn on_connection_flags(&self, encrypted: bool, incoming: bool) {
+        self.state.peers.with_live_mut(self.addr, "connection flags", |peer| {
+            peer.encrypted = encrypted;
+            peer.incoming = incoming;
+        });
     }
 
     fn on_uploaded_bytes(&self, bytes: u32) {
@@ -1628,6 +1642,7 @@ impl PeerHandler {
         self.state
             .peers
             .with_live_mut(self.addr, "on_have", |live| {
+                live.total_pieces = self.state.lengths.total_pieces() as usize;
                 // If bitfield wasn't allocated yet, let's do it. Some clients start empty so they never
                 // send bitfields.
                 if live.bitfield.is_empty() {
@@ -1673,7 +1688,7 @@ impl PeerHandler {
         {
             debug!("peer has full torrent");
         }
-        self.state.peers.update_bitfield(self.addr, bf);
+        self.state.peers.update_bitfield(self.addr, bf, self.state.lengths.total_pieces() as usize);
         self.on_bitfield_notify.notify_waiters();
         Ok(())
     }

@@ -91,6 +91,7 @@ function create(options) {
     if (topic === "torrents") return row.hash
     if (/^search:/.test(topic)) return row.key
     if (/^torrent:.*\.trackers$/.test(topic)) return row.url
+    if (/^torrent:.*\.peers$/.test(topic)) return row.addr
     if (/^torrent:.*\.files$/.test(topic)) return String(row.index)
     if (topic === "events" || topic === "log") return String(row.seq)
     return String(row.hash !== undefined ? row.hash : row.id !== undefined ? row.id : row.imdb)
@@ -235,6 +236,11 @@ function create(options) {
     else if (call.op === "torrents.list") replaceTorrents(result.torrents)
     else if (call.op === "torrents.get") upsert(result.torrent, false)
     else if(call.op==="torrents.trackers")domainList("torrent:"+call.args.hash+".trackers",result.trackers)
+    else if (call.op === "torrents.peers") {
+      var peers = dictionary()
+      result.peers.forEach(function(peer) { peers[peer.addr] = peer })
+      s.topics["torrent:" + call.args.hash + ".peers"] = peers
+    }
     else if (call.op === "torrents.files") {
       var files = dictionary()
       result.files.forEach(function(file) { files[String(file.index)] = file })

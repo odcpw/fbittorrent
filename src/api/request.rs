@@ -427,12 +427,16 @@ pub enum Call {
     TorrentsRemove { args: RemoveArgs },
     #[serde(rename = "torrents.files")]
     TorrentsFiles { args: HashArgs },
+    #[serde(rename="torrents.peers")]
+    TorrentsPeers { args: HashArgs },
     #[serde(rename = "torrents.set_files")]
     TorrentsSetFiles { args: SetFilesArgs },
     #[serde(rename = "torrents.set_seed")]
     TorrentsSetSeed { args: SetSeedArgs },
     #[serde(rename = "torrents.set_upload_limit")]
     TorrentsSetUploadLimit { args: UploadLimitArgs },
+    #[serde(rename="torrents.set_download_limit")]
+    TorrentsSetDownloadLimit { args: UploadLimitArgs },
     #[serde(rename = "torrents.open_target")]
     TorrentsOpenTarget { args: OpenTargetArgs },
     #[serde(rename = "subscribe")]
@@ -487,8 +491,10 @@ impl Call {
             Self::TorrentsStop { .. } => "torrents.stop",
             Self::TorrentsRemove { .. } => "torrents.remove",
             Self::TorrentsFiles { .. } => "torrents.files",
+            Self::TorrentsPeers { .. } => "torrents.peers",
             Self::TorrentsSetFiles { .. } => "torrents.set_files",
             Self::TorrentsSetSeed { .. } => "torrents.set_seed",
+            Self::TorrentsSetDownloadLimit { .. } => "torrents.set_download_limit",
             Self::TorrentsSetUploadLimit { .. } => "torrents.set_upload_limit",
             Self::TorrentsOpenTarget { .. } => "torrents.open_target",
             Self::Subscribe { .. } => "subscribe",

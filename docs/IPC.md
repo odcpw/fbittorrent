@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `download_limit` | `torrents.set_download_limit`, configured/effective torrent fields | P7-06 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
 | `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
@@ -196,9 +197,11 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.start` | `hashes: [hash]` (1..256), `force: bool?` | `{state: "done", started: [hash], skipped: [{hash, reason: open(complete_no_seed\|already_running\|staged)}]}` | yes | P1-06, P6-05 |
 | `torrents.stop` | `hashes: [hash]` | `{state: "done", stopped: [hash]}` | yes | P1-06 |
 | `torrents.remove` | `hashes: [hash]`, `delete_files: bool` (required) | `{state: enum(done\|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept) | yes | P1-06, P1-09, P6-08 |
+| `torrents.peers` | `{hash}` | `{peers: [Peer]}` | no | P5-01 |
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
+| `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
 | `torrents.set_upload_limit` | `hashes: [hash]`, `bps: bps?` (≥ 16384, or `null` for unlimited) | `{state: enum(done\|pending)}` (pending until P6-07) | yes | P1-06 |
 | `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder)}` | no | P1-06 |
 | `subscribe` | `topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the "on change" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7) | `{sub: u64, topics: [str]}` | no | P1-08 |
@@ -465,7 +468,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -907,7 +910,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.25**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.27**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -942,6 +945,8 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.23` | `app.client.dashboard_visible` |
 | `1.2.24` | `search.results[].providers` |
 | `1.2.25` | `playable` |
+| `1.2.26` | `list[].num_seeds` |
+| `1.2.27` | `download_limit_bps` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1050,6 +1055,21 @@ unread, and the next undo is empty. Grab marks read/grabbed only after a success
 ledger add with origin shows. The new transcript covers every operation and
 inbox identity; existing hello/error arrays exactly include the shows cap.
 
+### P5-01: connected seeds and peers (contract 1.2.26)
+
+Capability `peers` adds `torrents.peers {hash}` and `torrent:<hash>.peers`.
+The latter is keyed by `addr`, defaults to 1000 ms and releases sampling when
+its final subscriber disconnects or unsubscribes. `Peer` contains `addr`,
+optional `client`, `conn` (`tcp` or `tcp_mse`), `incoming`, open `state`,
+`downloaded`, `uploaded`, optional `dl_bps`, `ul_bps`, and `seed`. Counters and
+rates coalesce on the detail tick. Rates require two observations at least one
+second apart and are absent initially or after a counter reset. Reads of known
+inactive torrents return an empty peer table. Live torrent `seeds` counts
+connected peers whose entire piece bitfield is set (padding bits excluded);
+inactive/unknown counts remain absent. CLI `show --json` adds `peers[]` and
+`seeds`; contract-1.x `num_seeds` now uses that connected seed count, with its
+historical zero fallback when the optional count is absent. No tracker scrape.
+
 ### M1a: visible dashboard presence (contract 1.2.23)
 
 The negotiated `dashboard_presence` capability adds optional boolean
@@ -1082,3 +1102,16 @@ via a glance acknowledges existing ready rows; completion acknowledges too.
 reconnect fallback; a timeout or an unmet paused condition exits 8.
 The default stays completion. Contract 1.2.25 adds readiness fields/conditions to
 the CLI; API field types and event meaning stay those defined in A.8/A.9.
+
+### P7-06: per-torrent download cap (contract 1.2.27)
+
+`download_limit` enables idempotent `torrents.set_download_limit`. A finite cap
+is 16384..4294967295 bytes/s; null clears, omission retains. It is durable in
+the record and swaps the live limiter without rebuilding/checking, including
+across pause/resume and daemon restore. `Torrent.download_limit_bps` is the
+configured finite cap; `effective_download_limit_bps` reports the minimum of
+it and the session's selected global/turtle bucket. Unlimited caps are omitted.
+CLI `limit <sel> --down N[K|M]` or `--down none` starts on demand, expands all
+client-side in batches of 256 and emits `{ok,action:"limit",hashes,download_limit_bps}`
+(the last field is null when explicitly cleared). Below-floor/overflow syntax
+is exit 2. Dashboard rendering is deferred to track C/D; no new TUI control.
