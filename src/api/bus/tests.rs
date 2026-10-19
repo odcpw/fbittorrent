@@ -29,6 +29,7 @@ fn rev_monotonic() {
         active: true,
     };
     let mut sample = Sample {
+        topics: subscription.topics.iter().map(|t|t.topic.clone()).collect(),
         history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
@@ -176,7 +177,7 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {topics:BTreeSet::from([topic.clone()]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
@@ -195,7 +196,7 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
         topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
         since:None,epoch:None,active:true};
     // The worker collected its topic set before this subscription arrived.
-    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+    let mut sample=Sample {topics:BTreeSet::from([Topic::Stats]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
         rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
         network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
         shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),
@@ -209,4 +210,101 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
     assert_eq!(frames[0]["ev"],"state");assert_eq!(frames[0]["rev"],1);
     assert_eq!(frames[0]["data"]["history"]["download"],json!([0]));
     assert!(!sink.closed());
+}
+
+fn sample_for(topics: &[Topic]) -> Sample {
+    Sample {
+        topics: topics.iter().cloned().collect(), history: vec![], stats: Value::Null,
+        epoch: 1, state: "running".into(), rows: vec![], completions: vec![], logs: json!([]),
+        searches: BTreeMap::new(), files: BTreeMap::new(), peers: BTreeMap::new(),
+        pieces: BTreeMap::new(), trackers: BTreeMap::new(), network: json!({}), settings: json!({}),
+        disk: Disk {needed_bytes: 0, low: false, free_bytes: None}, shows: json!([]),
+        show_releases: BTreeMap::new(), rss_feeds: json!([]), rss_items: BTreeMap::new(), daemon: json!({}),
+    }
+}
+fn subscription_for(topic: Topic) -> Subscription {
+    Subscription {
+        sub: 1, sink: EventSink::testing_with_hello(), rev: 0,
+        topics: vec![TopicState {topic, interval: Duration::ZERO, due: Instant::now(), sent: None}],
+        since: None, epoch: None, active: true,
+    }
+}
+
+#[test]
+fn late_files_subscription_cannot_erase_a_newer_read_with_an_uncollected_snapshot() {
+    let hash = Hash::new("ab".repeat(20)).unwrap();
+    let topic = Topic::Files(hash.clone());
+    let mut subscription = subscription_for(topic.clone());
+    // The sampler released the registry to collect Summary. A Files subscribe
+    // then completed, while an independent files RPC already returned 3 rows.
+    let stale = sample_for(&[Topic::Summary]);
+    subscription.update(&stale, &[], 1).unwrap();
+    assert!(subscription.sink.take_frames().is_empty(), "unknown is not empty");
+    assert_eq!(subscription.rev, 0);
+    assert!(subscription.topics[0].sent.is_none());
+    assert!(subscription.topics[0].due > Instant::now(), "wait without spinning");
+
+    let mut fresh = sample_for(&[topic]);
+    let rows = json!([
+        {"index":0,"path":"Episode.mkv","size":16384,"progress":0.2,"included":true,"sort_key":"episode.mkv"},
+        {"index":1,"path":"English.srt","size":49,"progress":1.0,"included":true,"sort_key":"english.srt"},
+        {"index":2,"path":"sample.mkv","size":16384,"progress":1.0,"included":true,"sort_key":"sample.mkv"}
+    ]);
+    fresh.files.insert(hash.to_string(), rows.clone());
+    subscription.update(&fresh, &[], 1).unwrap();
+    let frames = subscription.sink.take_frames();
+    assert_eq!(frames[0]["count"], 3);
+    assert_eq!(frames[1]["items"], rows);
+    assert_eq!(frames.last().unwrap()["ev"], "snapshot.end");
+    let rev = subscription.rev;
+    subscription.update(&stale, &[], 1).unwrap();
+    assert!(subscription.sink.take_frames().is_empty(), "a skipped sample cannot remove known files either");
+    assert_eq!(subscription.rev, rev);
+    fresh.files.insert(hash.to_string(), json!([]));
+    subscription.update(&fresh, &[], 1).unwrap();
+    let frames = subscription.sink.take_frames();
+    assert_eq!(frames[0]["removed"], json!([0,1,2]), "an actually sampled removal still arrives");
+}
+
+#[test]
+fn collected_empty_topics_still_emit_an_empty_snapshot() {
+    let hash = Hash::new("ab".repeat(20)).unwrap();
+    for topic in [Topic::Files(hash.clone()), Topic::Peers(hash.clone()), Topic::Trackers(hash),
+        Topic::Search(1), Topic::RssFeeds, Topic::RssItems("feed".into()), Topic::Shows,
+        Topic::ShowReleases("inbox".into())] {
+        let mut subscription = subscription_for(topic.clone());
+        subscription.update(&sample_for(&[]), &[], 1).unwrap();
+        assert!(subscription.sink.take_frames().is_empty(), "{topic:?} was not collected");
+        subscription.update(&sample_for(&[topic.clone()]), &[], 1).unwrap();
+        let frames = subscription.sink.take_frames();
+        assert_eq!(frames[0]["ev"], "snapshot.begin");
+        assert_eq!(frames[0]["count"], 0);
+        assert_eq!(frames.last().unwrap()["ev"], "snapshot.end");
+        assert!(frames.iter().filter_map(|f|f.get("items")).all(|items|items.as_array().unwrap().is_empty()));
+    }
+}
+
+#[test]
+fn skipped_pieces_sample_still_invalidates_the_old_engine_bitfield() {
+    let hash=Hash::new("ab".repeat(20)).unwrap();
+    let topic=Topic::Pieces(hash.clone());
+    let mut subscription=subscription_for(topic.clone());
+    let mut sample=sample_for(&[topic.clone()]);
+    let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
+        .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
+    let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();sample.rows.push(row);
+    sample.pieces.insert(hash.to_string(),json!({"count":8,"piece_size":16384,"have":"gA==","priority":[0,7]}));
+    subscription.update(&sample,&[],1).unwrap();
+    assert_eq!(subscription.sink.take_frames()[0]["ev"],"state");
+    let due=Instant::now()+Duration::from_secs(2);
+    subscription.topics[0].due=due;
+    // A different topic caused this sample before the Pieces deadline.
+    sample.topics.clear();sample.epoch=2;
+    subscription.update(&sample,&[],1).unwrap();
+    assert!(subscription.sink.take_frames().is_empty());
+    assert!(subscription.topics[0].sent.is_none());
+    assert_eq!(subscription.topics[0].due,due);
+    sample.topics.insert(topic);
+    subscription.update(&sample,&[],1).unwrap();
+    assert_eq!(subscription.sink.take_frames()[0]["data"]["have"],"gA==","the new engine must republish even identical data");
 }

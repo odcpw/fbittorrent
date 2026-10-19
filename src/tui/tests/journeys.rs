@@ -34,6 +34,25 @@ fn file_save_blocks_stale_toggle_and_clears_errors_after_a_confirmed_read() {
     app.update(Msg::Files(hash,Ok(format::files(&rows()))));assert!(app.files.as_ref().unwrap().error.is_empty());
 }
 #[test]
+fn end_and_home_keep_their_file_identity_across_progress_updates() {
+    let mut app=fixture::app("files");
+    let hash=app.files.as_ref().unwrap().hash.clone();
+    let mut input=rows();
+    app.update(Msg::Files(hash.clone(),Ok(format::files(&input))));
+    for (key,index) in [(KeyCode::End,2),(KeyCode::Home,1)] {
+        app.on_key(KeyEvent::new(key));
+        for step in 0..100 {
+            input[0].progress=step as f64/100.0;
+            input.rotate_left(1); // RPC and keyed-map iteration order can differ.
+            app.update(Msg::Files(hash.clone(),Ok(format::files(&input))));
+            let panel=app.files.as_ref().unwrap();
+            assert_eq!(panel.files[panel.list.borrow().selected().unwrap()].index,index);
+        }
+        let name=if index==2 {"sample.mkv"} else {"English.srt"};
+        assert!(golden::render(&app,80,24).lines().any(|line|line.contains('▌')&&line.contains(name)));
+    }
+}
+#[test]
 fn rss_enter_opens_a_selected_feed_while_its_first_snapshot_is_pending() {
     let mut app=fixture::app("rss");app.feeds[0].articles.clear();app.rss_focus_items=false;
     let frame=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().map(|line|serde_json::from_str::<serde_json::Value>(line).unwrap()).find(|v|v["frame"]["result"]["caps"].is_array()).unwrap();

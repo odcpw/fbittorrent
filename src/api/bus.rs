@@ -123,6 +123,7 @@ impl EventRing {
     }
 }
 struct Sample {
+    topics: BTreeSet<Topic>,
     history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
@@ -485,6 +486,7 @@ impl Bus {
             ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
             (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
+            topics: topics.iter().cloned().collect(),
             history,stats,
             peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
@@ -758,6 +760,15 @@ impl Subscription {
         for index in order {
             let t = &mut self.topics[index];
             if restart && matches!(t.topic,Topic::Pieces(_)) {t.sent=None;}
+            // subscribe/activate can finish while this sample is in flight.
+            // An uncollected topic is unknown, not an empty collection. In
+            // particular, an empty Files snapshot would erase a newer RPC read
+            // and its keyboard selection. Wait for the next actual sample.
+            if !sample.topics.contains(&t.topic) {
+                let now=Instant::now();
+                if t.sent.is_none() && t.due<=now {t.due=now+Duration::from_millis(100);}
+                continue;
+            }
             let mut value = if t.topic == Topic::Events {
                 json!(events
                     .iter()
