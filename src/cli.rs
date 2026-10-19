@@ -103,7 +103,7 @@ pub(super) enum Cmd {
     },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
-    /// Close the app and stop its engine (legacy mode stops the service)
+    /// Stop the daemon and its engine
     Down,
     /// List torrents
     #[command(alias = "ls")]
@@ -188,15 +188,15 @@ pub(super) enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Toggle sequential download (legacy mode; native scheduling is intrinsic)
+    /// Unsupported stub: streaming scheduling is intrinsic
     Seq { selectors: Vec<String> },
-    /// Toggle first/last piece priority (legacy mode; native scheduling is intrinsic)
+    /// Unsupported stub: first/last piece priority is intrinsic
     FirstLast { selectors: Vec<String> },
     /// Allow uploading/seeding
     Seed { selectors: Vec<String> },
     /// Limit uploading and stop when complete (default for new torrents)
     Noseed { selectors: Vec<String> },
-    /// Native scheduling stub; legacy mode applies defaults to outside additions
+    /// Successful scheduling stub: native defaults are intrinsic
     Reconcile {
         /// Only touch torrents added within the last N seconds (0 = all)
         #[arg(long, default_value_t = 0)]
@@ -233,7 +233,7 @@ pub(super) enum Cmd {
         #[arg(long, default_value_t = 30)]
         limit: usize,
     },
-    /// Configure the app download folder (explicit legacy mode also sets up its service)
+    /// Configure the app download folder and desktop integration
     Setup {
         #[arg(long, default_value_t = 8080)]
         port: u16,
@@ -399,3 +399,6 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
     }
     Ok(Code::Ok)
 }
+
+pub(crate) mod local_client;
+pub(crate) mod local_add;

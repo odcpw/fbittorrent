@@ -101,9 +101,7 @@ impl TuiApp {
     pub(super) fn view_torrent_details(&self, t: &Torrent, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let kv = |k: &str, v: String| Line::from_spans([Span::styled(format!("{k:<10}"), th.dimmed()), Span::styled(v, th.text())]);
-        let flags = if self.cfg.native() { "streaming priority automatic".to_string() } else {
-            format!("{}sequential  {}first/last", if t.seq_dl { "✓ " } else { "✗ " }, if t.f_l_piece_prio { "✓ " } else { "✗ " })
-        };
+        let flags = "streaming priority automatic".to_string();
         let metrics = format::Metrics {legacy:t,api:self.store.torrents.get(&t.hash)};
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),

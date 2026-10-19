@@ -40,8 +40,6 @@ pub const MAX_CHUNK_ITEMS: usize = 256;
 #[cfg(test)]
 mod fixtures;
 
-/// Legacy engine.sock adapter (P1-10); removed in P4-09.
-pub mod legacy;
 
-/// Testable build identity shared by hello and the CLI's version-skew warning.
+/// Testable daemon build identity published by hello.
 pub fn build_id()->String{std::env::var("FBT_BUILD_ID_OVERRIDE").unwrap_or_else(|_|option_env!("FBT_BUILD_ID").unwrap_or("unknown").into())}

@@ -8,7 +8,6 @@ pub(super) struct Prompt {
     pub(super) yes_no: bool,
     /// Per-add overrides for the magnet prompt: (sequential, first/last, allow upload).
     pub(super) add_flags: (bool, bool, bool),
-    pub(super) native_streaming: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,8 +32,8 @@ impl TuiApp {
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
-        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags, native_streaming: self.cfg.native() });
+        let add_flags = (true, true, self.cfg.seed_by_default);
+        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 
     pub(super) fn close_prompt(&mut self) {
@@ -70,8 +69,6 @@ impl TuiApp {
         }
         match intent {
             actions::Intent::Cancel => { self.close_prompt(); Cmd::none() }
-            actions::Intent::Sequential if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.0 = !p.add_flags.0; Cmd::none() }
-            actions::Intent::FirstLast if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
             actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             actions::Intent::Primary => {
                 let value = p.input.value().trim().to_string();
@@ -107,11 +104,6 @@ impl Prompt {
     /// Title with the live flag state, so the toggles are discoverable while typing.
     pub(super) fn title(&self) -> String {
         if self.kind != PromptKind::AddMagnet { return self.label.clone(); }
-        let (s, f, u) = self.add_flags;
-        if self.native_streaming {
-            return format!("{} · streaming automatic · F4 seed:{} ", self.label, if u { "on" } else { "off" });
-        }
-        format!("{}  ·  F2 sequential:{}  F3 first/last:{}  F4 upload:{} ", self.label,
-            if s { "on" } else { "off" }, if f { "on" } else { "off" }, if u { "on" } else { "off" })
+        format!("{} · streaming automatic · F4 seed:{} ", self.label, if self.add_flags.2 { "on" } else { "off" })
     }
 }

@@ -198,7 +198,7 @@ def tui_search_api(binary, systemd):
     import native
     with owned('tui_search_api',binary,systemd) as (case,sandbox,h,process,runtime),d.ApiConn(h) as observer:
         daemon_pid=observer.hello()['result']['server']['pid'];native.prepare_imdb_fixture(sandbox.env,['辛特尔'])
-        hidden=h.engine_path.with_name('hidden-compat.sock');h.engine_path.rename(hidden)
+        hidden=h.engine_path.with_name('engine.sock');case.check(not hidden.exists(),'only API v1 socket is created')
         ui=native.AttachedTui(case,str(binary),sandbox,h,session='fbt-fbt-p4-03-r5p-search')
         try:
             target,done=ui.start();ui.keys(target,'2');ui.keys(target,'hold-ui');ui.keys(target,'Enter',literal=False)
@@ -238,7 +238,7 @@ def tui_search_api(binary, systemd):
                        'detaching the TUI preserves daemon search/provider processes for the disconnect grace',json.dumps([members(g['pgid']) for g in original]))
         finally:
             ui.close()
-            if hidden.exists():hidden.rename(h.engine_path)
+            assert not hidden.exists()
 
 
 CASES=CASES+(tui_search_api,)

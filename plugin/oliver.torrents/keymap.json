@@ -534,6 +534,34 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.sort",
+      "keys": {
+        "dashboard": [
+          "s"
+        ],
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.reverse_sort",
+      "keys": {
+        "dashboard": [
+          "S"
+        ],
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse sort",
+      "scope": "screen:torrents"
+    },
+    {
       "id": "torrents.details_previous",
       "keys": {
         "dashboard": [
@@ -815,45 +843,6 @@
         ]
       },
       "label": "Follow show",
-      "note": "Native TUI; legacy uses F while f is first/last priority.",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.follow",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F"
-        ]
-      },
-      "label": "Follow show (legacy)",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.sequential",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "s"
-        ]
-      },
-      "label": "Sequential (legacy)",
-      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
-      "scope": "screen:torrents"
-    },
-    {
-      "id": "legacy.first_last",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "f"
-        ]
-      },
-      "label": "First/last priority (legacy)",
-      "note": "Legacy qBittorrent only; native streaming priority is automatic.",
       "scope": "screen:torrents"
     },
     {
@@ -1818,30 +1807,6 @@
       "scope": "modal:files"
     },
     {
-      "id": "files.high",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "2"
-        ]
-      },
-      "label": "High (legacy)",
-      "scope": "modal:files"
-    },
-    {
-      "id": "files.max",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "3"
-        ]
-      },
-      "label": "Max (legacy)",
-      "scope": "modal:files"
-    },
-    {
       "id": "providers.close",
       "keys": {
         "dashboard": null,
@@ -2162,30 +2127,6 @@
         ]
       },
       "label": "Submit",
-      "scope": "prompt"
-    },
-    {
-      "id": "prompt.sequential",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F2"
-        ]
-      },
-      "label": "Sequential (legacy)",
-      "scope": "prompt"
-    },
-    {
-      "id": "prompt.first_last",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "F3"
-        ]
-      },
-      "label": "First/last (legacy)",
       "scope": "prompt"
     },
     {

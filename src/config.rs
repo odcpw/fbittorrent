@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Torrent engine: native (embedded Rust, app lifetime) or qbittorrent (legacy).
+    /// Torrent engine: native (embedded Rust, daemon lifetime).
     pub engine: String,
     /// Incoming peer port for the embedded engine.
     pub peer_port: u16,
@@ -17,12 +17,7 @@ pub struct Config {
     pub peer_encryption: String,
     /// Require this interface, or "proton" for automatic ProtonVPN discovery.
     pub network_interface: Option<String>,
-    /// Base URL of the qBittorrent WebUI.
-    pub url: String,
-    /// Optional WebUI credentials. Not needed when LocalHostAuth is disabled.
-    pub username: Option<String>,
-    pub password: Option<String>,
-    /// Default add-time flags.
+    /// Intrinsic streaming defaults.
     pub sequential: bool,
     pub first_last: bool,
     /// Allow uploading/seeding for new torrents. Off = upload cap and stop when complete.
@@ -39,8 +34,6 @@ pub struct Config {
     pub autostart: bool,
     /// Stop an otherwise idle daemon after this delay; 0 disables the idle net.
     pub idle_exit_secs: u64,
-    /// systemd user unit that runs qbittorrent-nox.
-    pub backend_unit: String,
     /// Preferred release quality for followed shows ("2160p", "1080p", "720p", "480p").
     pub show_quality: String,
     /// Disable hover-name motion; selected rows are always static.
@@ -63,9 +56,6 @@ impl Default for Config {
             max_active_downloads: 3,
             peer_encryption: "prefer".into(),
             network_interface: None,
-            url: "http://127.0.0.1:8080".into(),
-            username: None,
-            password: None,
             sequential: true,
             first_last: true,
             seed_by_default: false,
@@ -75,7 +65,6 @@ impl Default for Config {
             timeout_secs: 10,
             autostart: true,
             idle_exit_secs: 300,
-            backend_unit: "qbittorrent-nox.service".into(),
             show_quality: "1080p".into(),
             reduce_motion: false,
             handler: "confirm".into(),
@@ -126,7 +115,7 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.idle_exit_secs == 0 || self.idle_exit_secs >= 30,
                         "idle_exit_secs must be 0 or at least 30 seconds");
-        anyhow::ensure!(matches!(self.engine.as_str(), "native" | "qbittorrent"), "engine must be native or qbittorrent");
+        anyhow::ensure!(self.engine == "native", crate::agent::AppError::new(crate::agent::Code::Usage, "engine must be native; the qBittorrent backend was removed in v0.4.0"));
         anyhow::ensure!(self.max_active_downloads > 0, "max_active_downloads: must be at least 1");
         anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer_encryption: must be off, prefer, or require");
         if let Some(name) = &self.network_interface {
@@ -283,5 +272,32 @@ mod tests {
         assert!(cfg.save_to(&path).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod native_backend_tests {
+    use super::*;
+    #[test]
+    fn removed_backend_fails_before_startup() {
+        let cfg=Config {engine:"qbittorrent".into(),..Default::default()};
+        let error=cfg.validate().unwrap_err();
+        assert!(error.to_string().contains("removed in v0.4.0"));
+        println!("removed backend: {error}");
+    }
+    #[test]
+    fn current_settings_keep_their_values() {
+        let input=r#"engine="native"
+peer_port=16882
+save_path="/tmp/private-fixture/downloads"
+backend_unit="unused.service"
+url="http://127.0.0.1:9"
+username="unused"
+sequential=false
+first_last=false
+"#;
+        let cfg:Config=toml::from_str(input).unwrap();cfg.validate().unwrap();
+        assert_eq!(cfg.peer_port,16882);assert_eq!(cfg.save_path.as_deref(),Some("/tmp/private-fixture/downloads"));
+        assert_eq!(cfg.engine,"native");
     }
 }

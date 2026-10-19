@@ -423,7 +423,7 @@ impl TorrentView {
 
     /// This is the only qBittorrent state-string mapping. Preserve legacy unknown
     /// sentinels here; normalized serialization above always omits unknown data.
-    pub fn to_legacy_json(&self) -> Result<String> {
+    pub fn to_cli_json(&self) -> Result<String> {
         let f = self.legacy.facts;
         let state = match self.legacy.source {
             Source::Dormant => "stoppedUP",
@@ -532,7 +532,7 @@ impl Inner {
     }
     #[cfg(test)]
     pub(super) fn unrestored_snapshot(&self, record: &Record) -> Torrent {
-        serde_json::from_str(&self.unrestored_view(record).to_legacy_json().unwrap()).unwrap()
+        serde_json::from_str(&self.unrestored_view(record).to_cli_json().unwrap()).unwrap()
     }
 }
 impl EngineDispatcher {

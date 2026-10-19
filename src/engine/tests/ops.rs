@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::tests::fixture::{Request, Route, LEGACY_ROUTES};
 use crate::engine::tests::{request, review_directory, test_app};
 
 #[test]
@@ -7,14 +8,6 @@ fn every_route_named_once() {
     let names: HashSet<_> = LEGACY_ROUTES.iter().map(|(name, _)| *name).collect();
     assert_eq!(names.len(), LEGACY_ROUTES.len());
     assert_eq!(names.len(), expected.len());
-    let server = [
-        include_str!("../ops/parser.rs"),
-        include_str!("../ops.rs"),
-        include_str!("../parked.rs"),
-        include_str!("../../network_app.rs"),
-        include_str!("../view.rs"),
-    ]
-    .join("\n");
     let body = request(
         "unused",
         &[
@@ -37,11 +30,6 @@ fn every_route_named_once() {
         assert!(
             names.contains(route.as_str()),
             "old socket route {route} missing"
-        );
-        assert_eq!(
-            server.matches(&format!("\"{route}\"")).count(),
-            1,
-            "route {route} must have one server definition"
         );
         let kind = Route::from_name(&route).unwrap();
         assert_eq!(kind.name(), route);

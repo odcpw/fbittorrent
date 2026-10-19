@@ -87,7 +87,6 @@ impl TuiApp {
         if let Some(prompt) = &self.prompt {
             std::mem::discriminant(&prompt.kind).hash(&mut hash);
             prompt.add_flags.hash(&mut hash);
-            prompt.native_streaming.hash(&mut hash);
         }
         hash.finish()
     }

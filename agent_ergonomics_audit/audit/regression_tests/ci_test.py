@@ -179,7 +179,7 @@ def native_tui_wiring():
         umbrella=(HERE/"all.sh").read_text()
         for script in ("tui_smoke.py","tui_smoke_test.py"):
             command=f"python3 agent_ergonomics_audit/audit/regression_tests/{script} target/release/fbittorrent"
-            case.check(command in workflow and command in umbrella.split('if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]',1)[0],
+            case.check(command in workflow and command in umbrella,
                        f"{script} is in the native CI job and default gate",command)
         for suite in ("tui_smoke","tui_smoke_setup","tui_smoke_control"):
             case.check(workflow.count("--suite "+suite)>=2 and "--suite "+suite in umbrella,

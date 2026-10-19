@@ -151,7 +151,6 @@ pub(super) fn shows_cmd(cfg: &Config, c: &Client, sub: ShowsCmd, json: bool) -> 
                 return Err(AppError::new(Code::NotFound, format!("{} has no episode {}", s.title, episode.to_uppercase()))
                     .hint(format!("fbittorrent shows episodes \"{}\" --json", s.imdb)).into());
             };
-            connect(cfg, c)?;
             c.add_url(&e.magnet, &AddOptions {
                 origin: None,
                 sequential: cfg.native() || cfg.sequential, first_last: cfg.native() || cfg.first_last, seed: cfg.seed_by_default, stopped: false,

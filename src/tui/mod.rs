@@ -169,7 +169,6 @@ impl Model for TuiApp {
                 self.poll_inflight = false;
                 match r {
                     Ok((mut ts, ti)) => {
-                        if !self.cfg.native(){ts.sort_by(|left,right|store::legacy_order(left,right,self.torrent_sort,self.torrent_descending));}
                         self.online = true;
                         self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
@@ -241,7 +240,7 @@ impl Model for TuiApp {
                 if !results.is_empty() || done {
                     let sel_url = self.selected_result().map(|r| r.file_url.clone());
                     let mut rs = dedupe_results(results);
-                    rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
+                    rs.sort_by(|a,b|store::display_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));
                     // Best 100 by seeders is all anyone reads; dedupe first so the cap
                     // is not spent on the same torrent from five providers.
                     rs.truncate(MAX_RESULTS);
@@ -271,7 +270,6 @@ impl Model for TuiApp {
                 self.browse_loading = None;
                 match r {
                     Ok(mut rs) => {
-                        if !self.cfg.native(){rs.sort_by(|a,b|store::legacy_search_order(a,b,(self.rating_for(a),self.rating_for(b)),self.search_sort,self.search_descending));}
                         self.search_sub = None; self.search_running = false;
                         let n = rs.len();
                         self.search_results = rs;

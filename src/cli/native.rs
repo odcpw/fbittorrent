@@ -33,39 +33,16 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
 fn connect(cfg: &Config, write: bool, no_start: bool, json: bool) -> Result<ApiClient> {
     match ApiClient::connect(cfg, json) {
         Ok(client) => {
-            warn(&client, json);
             Ok(client)
         }
         Err(error) => {
-            // A v0.1 TUI host is readable through its legacy socket, but never
-            // receives v1 writes or causes a second owner to be started.
-            if !crate::ipc::socket_path(cfg)
-                .with_file_name("api.sock")
-                .exists()
-                && crate::ipc::is_running(cfg)
-            {
-                return Err(AppError::new(
-                    Code::Backend,
-                    "an older fbittorrent app is running; quit it with Q and retry",
-                )
-                .into());
-            }
             if !write {
                 return Err(error);
             }
             api::client::ensure_daemon(cfg, no_start || !cfg.autostart)?;
             let client = ApiClient::connect(cfg, json)?;
-            warn(&client, json);
             Ok(client)
         }
-    }
-}
-pub(super) fn warn(client: &ApiClient, json: bool) {
-    let build = api::build_id();
-    if client.hello.server.version != env!("CARGO_PKG_VERSION")
-        || client.hello.server.build != build
-    {
-        crate::agent::warning("version_skew",format!("daemon {}+{} is running; this binary is {}+{}; run `fbittorrent restart` to switch",client.hello.server.version,client.hello.server.build,env!("CARGO_PKG_VERSION"),build),!json);
     }
 }
 fn list(client: &ApiClient) -> Result<Vec<api::Torrent>> {
@@ -172,9 +149,6 @@ fn snapshot(cfg: &Config, json_mode: bool) -> Result<(Option<ApiClient>, Vec<api
             Ok((Some(c), rows))
         }
         Err(error) => {
-            if crate::ipc::is_running(cfg) {
-                return Err(error);
-            }
             // Permission/protocol errors must never be disguised as an offline read.
             if let Some(io) = error.downcast_ref::<std::io::Error>() {
                 if !matches!(
@@ -217,7 +191,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             ..
         } => {
             if *no_seq || *no_first_last {
-                return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
+                return Err(AppError::new(Code::Usage,"sequential and first/last scheduling are intrinsic; drop --no-seq and --no-first-last").into());
             }
             if let Some(path) = save { crate::free_space::require_writable(path)?; }
             let client = connect(cfg, true, no_start, json_mode)?;

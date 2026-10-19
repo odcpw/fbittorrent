@@ -160,60 +160,6 @@ impl Daemon {
         .into()
     }
 
-    fn dispatch(&self, request: &ipc::Request) -> Result<String> {
-        if self.stopping.load(Ordering::Acquire) {
-            return Err(Self::unavailable(State::Stopping));
-        }
-        let op = crate::api::legacy::parse(request)?;
-        let network = self.network.read().unwrap().clone();
-        if let Some(result) = crate::api::legacy::control(&op, &network, &self.lifecycle) {
-            return result;
-        }
-        let _activity = (request.method != "GET")
-            .then(|| policy::Mutation::start(self.policy.clone()));
-        let began = Instant::now();
-        loop {
-            let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
-            if self.stopping.load(Ordering::Acquire) {
-                return Err(Self::unavailable(State::Stopping));
-            }
-            match &slot.slot {
-                Slot::Starting => {
-                    if began.elapsed() >= Duration::from_secs(60) {
-                        return Err(Self::unavailable(State::Starting));
-                    }
-                }
-                Slot::Running(app) => {
-                    eprintln!(
-                        "DEBUG api legacy dispatch path={:?}",
-                        request.path.chars().take(80).collect::<String>()
-                    );
-                    return crate::api::legacy::running(&app.dispatcher(), op).map_err(|error| {
-                        if app.is_quiescing() {
-                            Self::unavailable(if self.stopping.load(Ordering::Acquire) {
-                                State::Stopping
-                            } else {
-                                State::Starting
-                            })
-                        } else {
-                            error
-                        }
-                    });
-                }
-                Slot::Parked(ledger) => {
-                    let interface = network
-                        .interface
-                        .as_deref()
-                        .unwrap_or("configured interface");
-                    return crate::api::legacy::parked(ledger, op, interface);
-                }
-                Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
-            }
-            drop(slot);
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
     fn replace(&self, next: Slot) -> Result<Slot> {
         // Running handlers hold read guards. Cancellation makes their existing
         // engine dispatch select return before we wait for exclusive ownership.
@@ -279,7 +225,6 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
         );
-        engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
     daemon.notifier.enabled(cfg.notify && !daemon.no_notify);
@@ -418,8 +363,6 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
-    let dispatch = daemon.clone();
-    let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
     *daemon.event_bus.lock().unwrap()=api.event_bus();
     let rss_bus=api.event_bus();
@@ -460,7 +403,6 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
-    server.stop_accepting();
     api.stop_accepting();
     daemon.search.shutdown();
     let began = Instant::now();
@@ -492,7 +434,6 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     else if let Err(error)=daemon.resume.preserve_parked_clean() {eprintln!("WARN resume parked clean marker unavailable error={error:?}");}
     api.drain(drain_reason);
     drop(api);
-    drop(server);
     eprintln!("INFO daemon sockets unlinked");
     drop(lock);
     if let Err(error) = notify.send("STOPPING=1") {

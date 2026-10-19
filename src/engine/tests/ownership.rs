@@ -1,76 +1,38 @@
     #[test]
     fn two_engines_one_process() {
         use crate::daemon::lifecycle::{Request as LifecycleRequest, RestartReason};
-        use std::io::{Read, Write};
-        use std::os::unix::net::UnixStream;
-
-        fn open(label: &str, lifecycle: Lifecycle) -> (AppEngine, PathBuf, PathBuf) {
+        fn open(label: &str, lifecycle: Lifecycle) -> (AppEngine, PathBuf) {
             let directory = review_directory(label);
-            let socket = directory.join("runtime/engine.sock");
-            let cfg = Config {
-                save_path: Some(directory.join("downloads").to_string_lossy().into()),
-                ..Default::default()
-            };
+            let cfg = Config { save_path: Some(directory.join("downloads").to_string_lossy().into()), ..Default::default() };
             let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
-            let mut app = start_in(&cfg, lifecycle.clone(), directory.clone(), instance, SessionOptions {
-                dht: None,
-                disable_trackers: true,
-                disable_local_service_discovery: true,
-                ..Default::default()
+            let app = start_in(&cfg, lifecycle.clone(), directory.clone(), instance, SessionOptions {
+                dht: None, disable_trackers: true, disable_local_service_discovery: true, ..Default::default()
             }).unwrap();
-            let snapshot = crate::network_app::state(&cfg);
-            lifecycle.set_expected_network(Some(snapshot.clone()));
-            let dispatcher = app.dispatcher();
-            app.serve(&cfg, move |request| {
-                crate::network_app::controls(request, &snapshot, &lifecycle)
-                    .or_else(|| dispatcher.dispatch(request)).unwrap()
-            }).unwrap();
-            println!("engine {label}: directory={} socket={}", directory.display(), socket.display());
-            (app, directory, socket)
+            lifecycle.set_expected_network(Some(crate::network_app::state(&cfg)));
+            (app, directory)
         }
-
-        fn call(socket: &Path, path: &str) -> String {
-            let mut stream = UnixStream::connect(socket).unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            stream.set_write_timeout(Some(Duration::from_secs(5))).unwrap();
-            let bytes = serde_json::to_vec(&request(path, &[])).unwrap();
-            stream.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
-            stream.write_all(&bytes).unwrap();
-            let mut header = [0; 4];
-            stream.read_exact(&mut header).unwrap();
-            let mut bytes = vec![0; u32::from_be_bytes(header) as usize];
-            stream.read_exact(&mut bytes).unwrap();
-            let response: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-            assert!(response["error"].is_null(), "{response}");
-            response["value"].as_str().unwrap().to_owned()
-        }
-
         let first = Lifecycle::default();
         let second = Lifecycle::default();
-        let (app_a, directory_a, socket_a) = open("lifecycle-a", first.clone());
-        assert_eq!(call(&socket_a, "app/restart"), "Ok.");
+        let (app_a, directory_a) = open("lifecycle-a", first.clone());
+        app_a.dispatcher().execute(ops::EngineOp::Restart).unwrap();
         // Starting another real session must not clear the first owner's request.
-        let (app_b, directory_b, socket_b) = open("lifecycle-b", second.clone());
+        let (app_b, directory_b) = open("lifecycle-b", second.clone());
         assert_ne!(directory_a, directory_b);
-        assert_ne!(socket_a, socket_b);
         assert_eq!(first.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Explicit)));
         assert_eq!(second.wait(Duration::ZERO), None);
-        assert_eq!(call(&socket_a, "torrents/info"), "[]");
-        assert_eq!(call(&socket_b, "torrents/info"), "[]");
-
-        // Exercise the engine's own shutdown route as well as network_app's
-        // control handler: both must target only the lifecycle passed to them.
-        app_a.dispatcher().dispatch(&request("app/shutdown", &[])).unwrap().unwrap();
+        assert_eq!(app_a.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
+        assert_eq!(app_b.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
+        app_a.dispatcher().execute(ops::EngineOp::Shutdown).unwrap();
         assert_eq!(first.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
         assert_eq!(second.pending_request(), None);
         drop(app_a);
-        assert!(!socket_a.exists());
-        assert_eq!(call(&socket_b, "torrents/info"), "[]");
-        assert_eq!(call(&socket_b, "app/shutdown"), "Ok.");
+        assert!(InstanceLock::acquire_in(directory_a.join("runtime")).is_ok());
+        assert_eq!(app_b.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
+        app_b.dispatcher().execute(ops::EngineOp::Shutdown).unwrap();
         assert_eq!(second.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
         assert_eq!(first.pending_request(), None);
         drop(app_b);
-        assert!(!socket_b.exists());
+        assert!(InstanceLock::acquire_in(directory_b.join("runtime")).is_ok());
         std::fs::remove_dir_all(directory_a).unwrap();
         std::fs::remove_dir_all(directory_b).unwrap();
     }
@@ -80,7 +42,7 @@
         use crate::daemon::lifecycle::Request as LifecycleRequest;
         let directory = review_directory("parked-lifecycle");
         let lifecycle = Lifecycle::default();
-        assert_eq!(super::dispatch_parked_in(&request("app/shutdown", &[]), &directory, &lifecycle)
+        assert_eq!(fixture::dispatch_parked_in(&request("app/shutdown", &[]), &directory, &lifecycle)
             .unwrap().unwrap(), "Ok.");
         assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
     }

@@ -125,9 +125,8 @@
         let native = render(&app, 160, 45);
         assert!(native.contains("7 peers connected"));
         assert!(!native.contains("0 seeds") && !native.contains("leechers"));
-        app.cfg.engine = "qbittorrent".into();
         app.torrents[0].num_seeds = 3;
-        assert!(render(&app, 160, 45).contains("10 peers connected"));
+        assert!(render(&app, 160, 45).contains("7 peers connected"));
     }
 
     #[test]

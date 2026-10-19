@@ -306,7 +306,7 @@ fn assert_checked_running(dispatcher: &EngineDispatcher, hash: &str) {
     assert_eq!(r.completed_bytes, Some(PIECE as u64));
     assert_eq!(r.size, Some(2 * PIECE as u64));
     assert!(r.completed_at.is_none());
-    let legacy: Torrent = serde_json::from_str(&r.to_legacy_json().unwrap()).unwrap();
+    let legacy: Torrent = serde_json::from_str(&r.to_cli_json().unwrap()).unwrap();
     assert_eq!(legacy.state, "stalledDL");
 }
 

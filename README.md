@@ -245,7 +245,7 @@ Exit codes: 0 ok · 1 failure · 2 usage · 3 safety (needs `--yes`) · 4 backen
 5 upstream · 6 not found · 7 ambiguous · 8 timeout.
 
 `fbittorrent serve` keeps the native engine available to the CLI without a TUI
-or a terminal window hosting it. It owns the same private `engine.sock` and
+or a terminal window hosting it. It owns the private API v1 `api.sock` and
 instance lock as the current app; a second owner is refused. `down`, SIGTERM,
 SIGINT or SIGHUP drains the engine and removes its socket. A missing configured
 interface starts it parked, with saved history and start/stop/remove-keeping-files
@@ -326,9 +326,9 @@ autostart = true
 ```
 
 `--no-start` (a global flag) or `FBITTORRENT_NO_START=1` prevents commands from
-starting the daemon or legacy service. Commands that need a closed engine return
+starting the daemon. Commands that need a closed engine return
 exit 4 with an opening hint. This also prevents explicit `up`, `dashboard`, `tui` and `serve` startup;
-legacy `setup` refuses because its workflow requests a service start. The widget uses
+Setup installs the native daemon for explicit, on-demand startup. The widget uses
 `--no-start` for status polling and every torrent action. Explicit Open TUI
 requests may launch the app: middle-click, `t`/`T`, the TUI header button
 (including keyboard activation), and the panel's `tui()` IPC method. Native
@@ -344,22 +344,21 @@ drain and reopen the engine. `settings --vpn off` disables interface binding.
 While waiting for a required VPN, saved file names and pause choices remain
 available; percentages are unknown until the engine can check files again.
 
-For explicit legacy mode, set `engine = "qbittorrent"`, install
-`qbittorrent-nox`, and run `setup`. Its loopback WebUI defaults to
-`url = "http://127.0.0.1:8080"`, with `backend_unit = "qbittorrent-nox.service"`.
-Legacy mode supports `seq`/`first-last`, F2/F3 add flags, and normal/high/max file
-priorities. Native mode always applies streaming priority and supports file
-inclusion/skipping.
+The native daemon is the only backend. `engine = "qbittorrent"` is rejected
+at startup in v0.4.0. Streaming priority is intrinsic and files support
+include/skip. `seq` and `first-last` remain unsupported command stubs with an
+inspection hint; `reconcile` remains a successful no-op. Today's native ledger,
+RSS, Shows and settings files load directly; no source application is launched.
 
 ## Layout
 
 ```
 src/main.rs        CLI (clap)
-src/engine/        embedded librqbit engine, durable torrent records, legacy import
+src/engine/        embedded librqbit engine, durable torrent records
 src/daemon/        headless owner, lifecycle, replaceable engine slot, signals, sd_notify
 src/ipc.rs         local Unix socket connecting CLI/widget to the open app
-src/qbt.rs         common client contract; native IPC or legacy WebUI
-src/backend.rs     open/focus/close the app; explicit legacy service control
+src/qbt.rs         CLI output shapes and display helpers
+src/backend.rs     open/focus the app; stop its daemon
 src/search.rs      local provider preferences and bounded Nova/Python searches
 src/rss.rs         local RSS/Atom subscriptions, cache, and durable read ids
 src/shows.rs       local watchlist, EZTV checks, episode/season release history
@@ -393,14 +392,10 @@ challenge blocks scripted requests; its entries open in your browser.
 
 ## Security
 
-The native app uses a local Unix socket restricted to the current user; it does
-not expose a WebUI. In explicit legacy mode, the WebUI listens on 127.0.0.1 only
-and skips authentication for localhost, which
-is what makes the CLI and widget instant. Two qBittorrent protections stay ON and
-`setup` enforces them on every run: CSRF protection and host-header validation.
-Without them any web page you visit could POST to `localhost:8080` and add or
-delete torrents. fbittorrent sends no `Origin` header and talks to the loopback
-host, so both checks pass for it while a browser-originated request gets 401.
+The native daemon uses a Unix socket restricted to the current user (0600 in
+a private 0700 runtime directory). It exposes no WebUI, TCP listener, credentials
+or second IPC protocol. Clients negotiate API v1 and stay attached while the
+engine slot restarts.
 
 ## Tests
 
@@ -449,14 +444,14 @@ dependency graph and screen mockups. They run by hand, outside CI.
 
 ```
 agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; live suites below require opt-in
-cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
+cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, API client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
 python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
 …/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
 ```
 
-The existing legacy CLI/TUI scripts need a startable qbittorrent-nox. The widget
+The CLI/TUI cases use disposable native daemons. The widget
 test also needs the Omarchy shell running with the plugin enabled.
 
 ## Notes
@@ -477,8 +472,6 @@ test also needs the Omarchy shell running with the plugin enabled.
   catalogue and preserve old releases even if the source removes them. A first
   show check has a 30-second/page budget and reports incomplete history instead
   of presenting it as complete.
-- In legacy mode, search jobs in qBittorrent are bound to the WebUI session
-  cookie; the client keeps one session per process for that reason.
 - Personal use is legal in Switzerland. Mind your local law elsewhere.
 
 ## Keys
@@ -527,6 +520,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Sort | `s` | `s` | — |  |
+| `screen:torrents` | Reverse sort | `S` | `S` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
 | `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
@@ -544,10 +539,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Delete with files | `D` | `D` | — |  |
 | `screen:torrents` | IMDb | `i` | `i` | — |  |
 | `screen:torrents` | Wikipedia | `w` | `w` | — |  |
-| `screen:torrents` | Follow show | `f`, `F` | `f` | — | Native TUI; legacy uses F while f is first/last priority. |
-| `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
-| `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
-| `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:torrents` | Follow show | `f`, `F` | `f` | — |  |
 | `screen:search` | Sort results | — | `s` | — |  |
 | `screen:search` | Reverse results sort | — | `S` | — |  |
 | `pane:search.results` | Copy magnet | — | `y` | — |  |
@@ -614,8 +606,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:files` | First | `g`, `Home` | — | — |  |
 | `modal:files` | Last | `G`, `End` | — | — |  |
 | `modal:files` | Include | `1` | — | — |  |
-| `modal:files` | High (legacy) | `2` | — | — |  |
-| `modal:files` | Max (legacy) | `3` | — | — |  |
 | `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
 | `modal:providers` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `modal:providers` | Previous | `k`, `↑` | `k`, `↑` | — |  |
@@ -640,8 +630,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | Remove | `y` | `y` | `y` |  |
 | `prompt` | Cancel | `Esc` | `Esc` | `Esc` |  |
 | `prompt` | Submit | `Enter` | `Enter` | — |  |
-| `prompt` | Sequential (legacy) | `F2` | — | — |  |
-| `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
 | `global` | Card | `v` | — | — |  |
 | `modal:poster` | Back | `Esc`, `v` | — | — |  |

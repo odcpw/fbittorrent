@@ -105,10 +105,10 @@ pub fn classify(e: &anyhow::Error) -> (Code, String, Option<String>) {
     if let Some(io)=e.downcast_ref::<std::io::Error>() { if matches!(io.kind(),std::io::ErrorKind::NotFound|std::io::ErrorKind::ConnectionRefused) { return (Code::Backend,format!("fbittorrent is closed: {io}"),Some("fbittorrent up".into())); } }
     let msg = format!("{e:#}");
     let low = msg.to_ascii_lowercase();
-    if low.contains("connecting to qbittorrent") || low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
+    if low.contains("fbittorrent is closed") || low.contains("opening the fbittorrent app") || low.contains("not running") || low.contains("not installed") || low.contains("did not come up") {
         return (Code::Backend, msg, Some("fbittorrent up   # opens the app; `fbittorrent setup` configures its download folder".into()));
     }
-    if low.contains("returned http") || low.contains("qbittorrent ") || low.contains("http ") || low.contains("timed out") || low.contains("dns") || low.contains("connection") {
+    if low.contains("returned http") || low.contains("http ") || low.contains("timed out") || low.contains("dns") || low.contains("connection") {
         return (Code::Upstream, msg, Some("fbittorrent status --json   # confirm the backend answers, then retry".into()));
     }
     (Code::Failure, msg, None)
@@ -174,7 +174,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "delete", aliases: &["rm", "remove"], summary: "Remove torrents; --files deletes data and needs --yes; --dry-run previews", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "seed", aliases: &[], summary: "Allow upload for torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "noseed", aliases: &[], summary: "Cap upload and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "seq", aliases: &[], summary: "Toggle sequential download in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "seq", aliases: &[], summary: "Unsupported stub: native streaming scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last priority in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "reconcile", aliases: &[], summary: "Native scheduling stub (no connection); legacy mode applies default flags", json: true, mutating: true, needs_backend: false },
@@ -218,7 +218,7 @@ pub fn capabilities_json() -> serde_json::Value {
         }],
         "global_flags": ["--json", "--no-start"],
         "description": "Torrent app for Omarchy with an embedded Rust engine, CLI, TUI, bar widget and headless serve command.",
-        "engines": { "default": "native", "legacy": "qbittorrent", "native_lifetime": NATIVE_LIFETIME, "serve_limitations": SERVE_LIMITATIONS, "legacy_selection": "set engine = \"qbittorrent\" in config explicitly" },
+        "engines": { "default": "native", "native_lifetime": NATIVE_LIFETIME, "serve_limitations": SERVE_LIMITATIONS },
         "native_features": { "file_priorities": ["skip", "normal"], "sequential": "intrinsic", "first_last_piece": "intrinsic", "scheduling_toggles": false, "protocol_encryption": true, "peer_encryption_policies": ["off", "prefer", "require"], "download_queue": true, "interface_binding": "required exact Linux interface; proton selects proton0" },
         "backend_subcommands": ["rss grab", "shows grab"],
         "conventions": {
@@ -249,7 +249,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "config": crate::config::config_path().display().to_string(),
             "cache": crate::imdb::cache_dir().display().to_string(),
             "data": crate::config::data_dir().display().to_string(),
-            "socket": crate::ipc::socket_path(&crate::config::Config::default()).with_file_name("api.sock").display().to_string(),
+            "socket": crate::config::runtime_dir().join("api.sock").display().to_string(),
         },
         "agent_workflow": [
             "fbittorrent triage --json",
@@ -288,7 +288,7 @@ WHAT IT IS
   locally without starting downloads.
   Upload is capped at {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
-  Explicit engine = "qbittorrent" retains the legacy WebUI/service path.
+  Only the native daemon is supported; engine = "qbittorrent" is rejected in v0.4.0.
 
 RULES
   - {json_convention}
@@ -310,7 +310,7 @@ RULES
     autostart=false is the persistent form for ordinary torrent commands.
     Native `reconcile` is a no-op and never connects to the engine.
   - Native sequential and first/last scheduling are intrinsic. Toggle commands
-    and --no-seq/--no-first-last require legacy mode; native file priority only
+    and --no-seq/--no-first-last are unsupported; file priority only
     supports skip/normal. Peer encryption defaults to prefer; require refuses
     plaintext peers. F6 or `settings` changes encryption, queue limit and VPN.
   - Three downloads run at once by default. Extra downloads wait in FIFO order.
@@ -320,11 +320,8 @@ RULES
     use the usual connection; external torrent download hooks are refused.
   - RSS read state is local. Shows read state is independent of download state;
     `episodes --new` lists unread releases including S01 season bundles.
-  - First launch imports available local legacy torrents paused, plus RSS and
-    provider preferences. An installed stopped legacy service may run once to
-    export saved state. Its login startup is disabled and the service stops only
-    after successful import; legacy config and backup files remain for rollback.
-    Migration errors preserve the source and keep native imported files paused.
+  - Existing native ledger, RSS, Shows and settings files load directly.
+
 
 EXIT CODES
   0 ok            1 failure       2 usage         3 safety (needs --yes)
@@ -504,96 +501,6 @@ mod tests {
 // ---------------------------------------------------------------- triage
 
 /// The mega-command payload. Everything an agent wants before deciding what to do.
-pub fn triage(cfg: &crate::config::Config, c: &crate::qbt::Client) -> serde_json::Value {
-    let running = c.version().is_ok();
-    let unit_active = !cfg.native() && crate::backend::is_active(&cfg.backend_unit);
-    let mut warnings: Vec<String> = Vec::new();
-    let mut next: Vec<String> = Vec::new();
-    let mut torrents = serde_json::Value::Array(vec![]);
-    let mut transfer = serde_json::Value::Null;
-    let mut counts = serde_json::json!({"available": false, "active": 0, "queued": 0, "seeding": 0, "stopped": 0, "done": 0, "error": 0, "total": 0});
-
-    if cfg.native() && !running {
-        warnings.push("fbittorrent is closed; the native engine is stopped".into());
-        next.push("fbittorrent up".into());
-    } else if !cfg.native() && !std::path::Path::new("/usr/bin/qbittorrent-nox").exists() {
-        warnings.push("qbittorrent-nox is not installed".into());
-        next.push("omarchy pkg add qbittorrent-nox && fbittorrent setup --magnet".into());
-    } else if !running {
-        warnings.push(if unit_active { "backend unit is active but the WebUI does not answer yet".into() } else { "backend is stopped (starts on demand)".into() });
-        next.push("fbittorrent up".into());
-    } else {
-        let _ = c.login();
-        if let Ok(ts) = c.torrents() {
-            let active = ts.iter().filter(|t| t.is_active()).count();
-            let queued = ts.iter().filter(|t| t.is_queued()).count();
-            let seeding = ts.iter().filter(|t| t.is_seeding()).count();
-            let stopped = ts.iter().filter(|t| t.is_stopped() && t.progress < 1.0).count();
-            let done = ts.iter().filter(|t| t.progress >= 1.0).count();
-            let errors = ts.iter().filter(|t| t.state == "error" || t.state == "missingFiles").count();
-            counts = serde_json::json!({"available": true, "active": active, "queued": queued, "seeding": seeding, "stopped": stopped, "done": done, "error": errors, "total": ts.len()});
-            if errors > 0 { warnings.push(format!("{errors} torrent(s) in error state")); }
-            if stopped > 0 { next.push("fbittorrent start <hash> --json   # resume a stopped download".into()); }
-            torrents = serde_json::json!(ts.iter().map(|t| serde_json::json!({
-                "hash": t.hash, "name": t.name, "state": t.state, "progress": t.progress, "progress_known": t.progress_known,
-                "size": t.size, "dlspeed": t.dlspeed, "eta": t.eta, "seed_allowed": t.seed_allowed(),
-                "open_target": crate::qbt::open_target(t),
-            })).collect::<Vec<_>>());
-        }
-        if let Ok(ti) = c.transfer_info() {
-            transfer = serde_json::json!({"dl": ti.dl_info_speed, "up": ti.up_info_speed, "connection": ti.connection_status});
-        }
-        if cfg.native() {
-            let network = crate::network_app::state(cfg);
-            if !network.ready { warnings.push(network.message); }
-        }
-    }
-    if cfg.native() || running {
-        match c.search_plugins() {
-            Ok(ps) if ps.is_empty() => { warnings.push("no search providers installed".into()); next.push("fbittorrent search --install".into()); }
-            Ok(ps) if !ps.iter().any(|p| p.enabled) => { warnings.push("all search providers are disabled".into()); }
-            _ => {}
-        }
-    }
-    let rss_json = if cfg.native() || running {
-        match c.rss_feeds() {
-            Ok(feeds) => {
-                for feed in &feeds {
-                    if feed.has_error { warnings.push(format!("RSS feed {} has a refresh error; cached articles are retained", feed.name)); }
-                }
-                serde_json::json!({"feeds": feeds.len(), "unread": feeds.iter().flat_map(|feed| &feed.articles).filter(|article| !article.is_read).count()})
-            }
-            Err(error) => { warnings.push(format!("RSS store unreadable: {error}")); serde_json::Value::Null }
-        }
-    } else { serde_json::Value::Null };
-    let shows_json = match crate::shows::Shows::load() {
-        Ok(all) => {
-            let new = all.new_total();
-            if new > 0 { next.push("fbittorrent shows check --json   # new episodes of followed shows".into()); }
-            serde_json::json!({"followed": all.shows.len(), "new": new, "stale": all.shows.iter().filter(|s| s.is_stale(crate::shows::now())).count()})
-        }
-        Err(e) => { warnings.push(format!("shows list unreadable: {e}")); serde_json::Value::Null }
-    };
-    if crate::imdb::ratings_stale() { warnings.push("IMDb ratings dataset missing or older than a day (refreshed automatically on first lookup)".into()); }
-    next.push("fbittorrent search \"<title>\" --json".into());
-    next.push("fbittorrent add \"<magnet>\" --wait --json".into());
-
-    serde_json::json!({
-        "ok": true,
-        "contract_version": CONTRACT_VERSION,
-        "backend": { "engine": cfg.engine, "running": running, "app_open": cfg.native() && running, "unit": if cfg.native() { None } else { Some(&cfg.backend_unit) }, "unit_active": unit_active, "url": if cfg.native() { None } else { Some(&cfg.url) }, "socket": if cfg.native() { Some(crate::ipc::socket_path(cfg)) } else { None }, "autostart": cfg.autostart },
-        "defaults": { "sequential": cfg.native() || cfg.sequential, "first_last": cfg.native() || cfg.first_last, "seed_by_default": cfg.seed_by_default, "save_path": cfg.save_path, "max_active_downloads": cfg.max_active_downloads, "peer_encryption": cfg.peer_encryption, "network_interface": cfg.network_interface },
-        "transfer": transfer,
-        "counts": counts,
-        "torrents": torrents,
-        "shows": shows_json,
-        "rss": rss_json,
-        "warnings": warnings,
-        "next_commands": next,
-        "docs": "fbittorrent robot-docs",
-    })
-}
-
 fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
     use clap::CommandFactory;
     fn walk(command:&clap::Command,prefix:&str,metadata:&[CommandDoc],out:&mut Vec<serde_json::Value>){

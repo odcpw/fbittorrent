@@ -316,59 +316,11 @@ fn connect_probe(path: &std::path::Path, deadline: Instant) -> Result<UnixStream
 }
 
 pub fn probe(cfg: &Config) -> Result<()> {
-    Client::connect(cfg, false).map(|_| ()).or_else(|_| probe_path(&crate::ipc::socket_path(cfg)))
+    probe_at(cfg, &crate::config::runtime_dir().join("api.sock"))
 }
 
-fn probe_path(path: &std::path::Path) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_millis(200);
-    let mut stream = connect_probe(path, deadline)?;
-    stream.set_write_timeout(Some(
-        deadline
-            .saturating_duration_since(Instant::now())
-            .max(Duration::from_millis(1)),
-    ))?;
-    let bytes = serde_json::to_vec(&crate::ipc::Request {
-        method: "GET".into(),
-        path: "app/version".into(),
-        args: vec![],
-        file: None,
-    })?;
-    stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
-    stream.write_all(&bytes)?;
-    fn read(stream: &mut UnixStream, mut bytes: &mut [u8], deadline: Instant) -> Result<()> {
-        while !bytes.is_empty() {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                bail!("engine probe timed out");
-            }
-            stream.set_read_timeout(Some(remaining))?;
-            let count = stream.read(bytes)?;
-            if count == 0 {
-                bail!("engine probe closed before its reply");
-            }
-            bytes = &mut bytes[count..];
-        }
-        Ok(())
-    }
-    let mut header = [0; 4];
-    read(&mut stream, &mut header, deadline)?;
-    let size = u32::from_be_bytes(header) as usize;
-    if size > 32 * 1024 * 1024 {
-        bail!("engine probe response exceeds size limit");
-    }
-    let mut bytes = vec![0; size];
-    read(&mut stream, &mut bytes, deadline)?;
-    let reply: serde_json::Value = serde_json::from_slice(&bytes)?;
-    if reply["error"].is_string() || reply["app_error"].is_object() {
-        bail!(
-            "engine probe: {}",
-            reply["error"].as_str().unwrap_or("engine unavailable")
-        );
-    }
-    if !reply["value"].is_string() {
-        bail!("invalid engine probe response");
-    }
-    Ok(())
+fn probe_at(cfg: &Config, path: &std::path::Path) -> Result<()> {
+    Client::connect_at(cfg, false, path).map(|_| ())
 }
 
 /// Returns whether startup was needed. Reads pass no_start=true; explicit up
@@ -470,7 +422,7 @@ mod tests {
             std::thread::sleep(Duration::from_secs(2));
         });
         let began = Instant::now();
-        let error = probe_path(&path).unwrap_err();
+        let error = probe_at(&Config::default(), &path).unwrap_err();
         assert!(
             began.elapsed() < Duration::from_secs(1),
             "full production probe must not wait for the silent peer to close: {error}"

@@ -144,16 +144,12 @@ impl Metrics<'_> {
             },
         )
     }
-    pub fn peers(&self, native: bool) -> String {
+    pub fn peers(&self, _native: bool) -> String {
         self.api.map_or_else(
             || {
                 format!(
                     "{} peers connected",
-                    if native {
-                        self.legacy.num_leechs
-                    } else {
-                        self.legacy.num_seeds + self.legacy.num_leechs
-                    }
+                    self.legacy.num_leechs
                 )
             },
             |row| {

@@ -1,5 +1,7 @@
 //! Existing RSS/Shows/UI add callers share v1 when a daemon is present.
-use super::*;
+use crate::{config::Config, qbt::AddOptions};
+use anyhow::{bail, Result};
+use std::time::Duration;
 use serde_json::{json, Value};
 use std::{
     io::Write,

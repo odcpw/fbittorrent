@@ -213,7 +213,7 @@
             .unwrap()
         });
         let mut add = request("torrents/add", &[("tags", SEED_TAG)]);
-        add.file = Some(crate::ipc::Upload {
+        add.file = Some(crate::engine::tests::fixture::Upload {
             name: "fixture.torrent".into(),
             bytes: bytes.to_vec(),
         });
@@ -257,13 +257,6 @@
         });
         let addr = seed.dispatcher.inner.session.listen_addr().unwrap();
         let retained = seed.dispatcher.inner.session.clone();
-        let dispatcher = seed.dispatcher();
-        seed.serve(&Config::default(), move |req| {
-            dispatcher.dispatch(req).unwrap()
-        })
-        .unwrap();
-        let socket = seed_store.join("runtime/engine.sock");
-        assert!(socket.exists());
         assert!(InstanceLock::acquire_in(seed_store.join("runtime")).is_err());
 
         let client_runtime = NativeRuntime::new().unwrap();
@@ -356,7 +349,7 @@
         drop(seed);
         assert!(closed.elapsed() < Duration::from_secs(5));
         assert!(retained.cancellation_token().is_cancelled());
-        assert!(!socket.exists());
+        assert!(InstanceLock::acquire_in(seed_store.join("runtime")).is_ok());
         assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_err());
         let stopped_bytes = handle.stats().progress_bytes;
         std::thread::sleep(Duration::from_millis(500));
@@ -478,7 +471,6 @@
     fn pending_metadata_keeps_reads_responsive_and_cancels_on_close() {
         use std::io::Write;
         use std::net::TcpListener;
-        use std::os::unix::net::UnixStream;
         use std::sync::mpsc;
         use std::time::Instant;
 
@@ -498,19 +490,6 @@
         );
         let dispatcher = app.dispatcher();
         let (handled_tx, handled_rx) = mpsc::channel();
-        app.serve(&Config::default(), move |request| {
-            let result = dispatcher.dispatch(request).unwrap();
-            handled_tx
-                .send(
-                    result
-                        .as_ref()
-                        .map(|_| ())
-                        .map_err(|error| error.to_string()),
-                )
-                .unwrap();
-            result
-        })
-        .unwrap();
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         let url = format!("http://{}/pending.torrent", listener.local_addr().unwrap());
         let (connected_tx, connected_rx) = mpsc::channel();
@@ -522,14 +501,12 @@
             let _ = release_rx.recv_timeout(Duration::from_secs(10));
             drop(stream);
         });
-        // Exercise the real owned socket worker, whose join is part of app
-        // teardown. The HTTP peer remains open throughout the shutdown check.
-        let mut client = UnixStream::connect(directory.join("runtime/engine.sock")).unwrap();
-        let frame = serde_json::to_vec(&request("torrents/add", &[("urls", &url)])).unwrap();
-        client
-            .write_all(&(frame.len() as u32).to_be_bytes())
-            .unwrap();
-        client.write_all(&frame).unwrap();
+        // The API dispatch pool now owns the caller; exercise the same typed
+        // operation while its real HTTP metadata fetch remains blocked.
+        let pending = std::thread::spawn(move || {
+            let result = dispatcher.dispatch(&request("torrents/add", &[("urls", &url)])).unwrap();
+            handled_tx.send(result.map(|_| ()).map_err(|e| e.to_string())).unwrap();
+        });
         connected_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let began = Instant::now();
         let info = app
@@ -549,12 +526,12 @@
             .unwrap()
             .unwrap_err()
             .contains("closing"));
+        pending.join().unwrap();
         assert!(
             closing.elapsed() < Duration::from_secs(4),
-            "metadata lookup and socket worker must drain when the app closes"
+            "metadata lookup and dispatch worker must drain when the app closes"
         );
-        assert!(!directory.join("runtime/engine.sock").exists());
-        drop(client);
+        assert!(InstanceLock::acquire_in(directory.join("runtime")).is_ok());
         release_tx.send(()).unwrap();
         peer.join().unwrap();
         std::fs::remove_dir_all(directory).unwrap();

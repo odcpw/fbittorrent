@@ -11,7 +11,7 @@ mod tests;
 
 pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
     // An existing owner can answer hello while its engine is busy checking files.
-    // Do not turn a slow legacy version probe into an attempted manager start.
+    // Hello readiness is independent of torrent verification.
     match Presence::connect() {
         Ok(presence) => return Ok(presence),
         Err(error) if error.downcast_ref::<wire::RemoteError>().is_some_and(|error|error.0.code==crate::api::ErrorCode::ProtoUnsupported) => return Err(error),

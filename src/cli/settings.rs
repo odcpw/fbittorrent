@@ -44,7 +44,6 @@ pub fn run(
     }
     let (settings, ack, running) = match api::client::Client::connect(cfg, json_mode) {
         Ok(client) => {
-            super::native::warn(&client, json_mode);
             let ack = if patch.is_empty() {
                 json!({"applied":[],"restart":false})
             } else {
@@ -52,16 +51,8 @@ pub fn run(
             };
             (client.call("app.settings.get", json!({}))?, ack, true)
         }
-        Err(_) => {
-            // Owner lock prevents a concurrent daemon startup/final save from
-            // overwriting this offline edit. A live legacy owner is refused.
-            if crate::ipc::is_running(cfg) {
-                return Err(crate::agent::AppError::new(
-                    Code::Backend,
-                    "an older fbittorrent app is running; quit it with Q and retry",
-                )
-                .into());
-            }
+        Err(error) => {
+            if !error.downcast_ref::<std::io::Error>().is_some_and(|io|matches!(io.kind(),std::io::ErrorKind::NotFound|std::io::ErrorKind::ConnectionRefused)) {return Err(error);}
             let (_lock, _) = super::offline::locked()?;
             let current = Config::load()?;
             let (changed, ack) =
