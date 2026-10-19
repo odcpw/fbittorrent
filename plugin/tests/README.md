@@ -36,3 +36,17 @@ JSONL, daemon, compositor and QML logs go to `target/test-logs/<suite>/`.
 `daemon.py <debug-binary> --serve-fixture empty|paused|downloading` exposes the same
 real fixture as `FBTFIXTURE {runtime, root, state, row}` on stdout; close stdin to
 stop and reap all owned children. It never fabricates states for a screenshot.
+
+## Smoke probe (2026-10-19)
+
+| File | What it tests | Run | Last result |
+|---|---|---|---|
+| `smoke/probe-ui.qml` | Installed `qs.Ui.PanelHero` and `qs.Commons` imports via private symlinks | `FBT_BIN=<binary> plugin/tests/qs-smoke.sh` | PASS, Quickshell 0.3.2, revision 2b4501a282689792b62e94f3fb30d8f512324fe6 |
+| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | PASS on socket-polling fallback; live subscription restoration still needs the P1-08 server cap |
+
+The smoke runs offscreen and never uses an owner Wayland socket. It reads only
+`app.info` from an already running owner API socket before/after the test to check
+`clients.bar`; absent socket or changed instance is logged as a skip, and no owner
+daemon is started. The current pre-P1-11 binary lacks `status --quiet`, so readiness
+uses its equivalent read-only `status --json` until that flag appears. The owner
+probe likewise uses API 1 directly until the `api` CLI verb lands.

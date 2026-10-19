@@ -100,7 +100,7 @@ Item {
     return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.seed}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
-  function add(source, stage) { return mutate("torrents.add", {source:source, stage:!!stage}, stage ? "staging" : "") }
+  function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }
   function commitStaged(hash, files, seed, savePath) { return mutate("torrents.commit", {hash:hash, files:files, seed:seed, save_path:savePath}, "staging") }
   function discardStaged(hash) { return mutate("torrents.discard", {hash:hash}, "staging") }
   function openTarget(hash, file) {
@@ -135,7 +135,7 @@ Item {
     return "ok"
   }
   function stateJson() { return JSON.stringify(client ? client.state() : {online:false, instance:"", subs:{}, pending:[], view:null}) }
-  function toggleTorrent(t) { return t ? (Model.isStopped(t) ? resume(t.hash) : pause(t.hash)) : false }
+  function toggleTorrent(t) { var current=t ? store.torrents[t.hash] : null; return current ? (Model.isStopped(current) ? resume(current.hash) : pause(current.hash)) : false }
   function removeTorrent(t) { return t ? remove(t.hash, false) : false }
   function toggleSeeding(t) { return t ? toggleSeed(t.hash) : false }
   function openTorrent(t) { return t ? openTarget(t.hash) : false }
@@ -211,6 +211,7 @@ Item {
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { root.store = Store.create(); root.torrents = [] }})
+    client.visibility(popupOpen,dashboardVisible,detailTopics)
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()
