@@ -29,7 +29,7 @@ class NativeCleanup(unittest.TestCase):
     def child(self, root, *, ignore_term=False, cwd=None):
         ready = root / "ready"
         code = ("import os,signal,time; from pathlib import Path; " +
-                ("signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else "") +
+                (f"signal.signal(signal.SIGTERM, lambda *_: Path({str(root / 'term-received')!r}).touch()); " if ignore_term else "") +
                 f"Path({str(ready)!r}).touch(); time.sleep(600)")
         child = subprocess.Popen([sys.executable, "-c", code],
                                  env=dict(os.environ, HOME=str(root / "home")),
@@ -51,6 +51,12 @@ class NativeCleanup(unittest.TestCase):
         self.run.cleanup()
         self.assertEqual(child.wait(timeout=5), -signal.SIGKILL)
         self.assertFalse(self.run.survivors())
+
+    def test_expired_cleanup_budget_kills_without_starting_another_term_wait(self):
+        child = self.child(self.root, ignore_term=True)
+        self.run.cleanup(deadline=time.monotonic()-1)
+        self.assertEqual(child.wait(timeout=5), -signal.SIGKILL)
+        self.assertFalse((self.root / "term-received").exists())
 
     def test_other_run_and_similar_path_prefix_are_untouched(self):
         with tempfile.TemporaryDirectory(prefix=self.root.name + "-", dir="/tmp") as other:
@@ -143,8 +149,25 @@ class NativeCleanup(unittest.TestCase):
         self.assertEqual(len(error.exception.exceptions), 2)
         self.assertIsNotNone(child.poll())
 
+    def test_attached_tui_constructor_cleans_up_before_caller_can_register_it(self):
+        for failure in (RuntimeError, KeyboardInterrupt):
+            with self.subTest(failure=failure.__name__), native.daemon.Sandbox() as sandbox:
+                run = ProcessRun()
+                run.register(sandbox.root)
+                started = []
+                class FailedCase:
+                    def check(self, *_):
+                        started.extend(run.survivors())
+                        raise failure("injected failure during TUI construction")
+                # This is also the tui_smoke construction path: no native.main
+                # audit is active, and no ui object is returned to the caller.
+                with self.assertRaises(failure):
+                    native.AttachedTui(FailedCase(), "unused", sandbox, None, session="fbt-constructor-control")
+                self.assertTrue(any("tmux" in process.name for process in started), started)
+                self.assertFalse(run.survivors())
+
     def test_suite_audit_fails_survivors_even_after_early_return_or_exception(self):
-        for outcome in ("return", "exception", "termination"):
+        for outcome in ("return", "exception", "termination", "interrupt"):
             with self.subTest(outcome=outcome):
                 children = []
                 def cases():
@@ -154,6 +177,8 @@ class NativeCleanup(unittest.TestCase):
                             raise subprocess.TimeoutExpired("injected case", .01)
                         if outcome == "termination":
                             os.kill(os.getpid(), signal.SIGTERM)
+                        if outcome == "interrupt":
+                            os.kill(os.getpid(), signal.SIGINT)
                         return 0
                 logs = self.root / outcome
                 with patch.object(native, "run_cases", cases), patch.object(fbtlog, "LOG_ROOT", logs), \
@@ -162,13 +187,38 @@ class NativeCleanup(unittest.TestCase):
                     if outcome == "return":
                         self.assertEqual(native.main(), 1)
                     else:
-                        with self.assertRaises(subprocess.TimeoutExpired if outcome == "exception" else SystemExit):
+                        failure = {"exception": subprocess.TimeoutExpired, "termination": SystemExit,
+                                   "interrupt": KeyboardInterrupt}[outcome]
+                        with self.assertRaises(failure):
                             native.main()
                 self.assertIsNotNone(children[0].poll())
                 rows = [json.loads(line) for line in (logs / "native/process_cleanup.jsonl").read_text().splitlines()]
                 self.assertFalse(rows[0]["ok"], "a survivor must fail even when emergency cleanup succeeds")
                 self.assertTrue(rows[1]["ok"])
                 self.assertFalse(rows[-1]["ok"])
+
+    def test_interrupt_during_final_audit_cannot_skip_emergency_cleanup(self):
+        for phase in ("wait", "cleanup"):
+            with self.subTest(phase=phase):
+                children, sent = [], []
+                original = getattr(ProcessRun, phase)
+                def interrupt(run, *args, **kwargs):
+                    if not sent:
+                        sent.append(True)
+                        os.kill(os.getpid(), signal.SIGINT)
+                    return original(run, *args, **kwargs)
+                def cases():
+                    with native.private_directory(prefix="fbt-audit-interrupt-", dir="/tmp") as root:
+                        children.append(self.child(Path(root)))
+                    return 0
+                previous = signal.getsignal(signal.SIGINT)
+                with patch.object(native, "run_cases", cases), patch.object(ProcessRun, phase, interrupt), \
+                        patch.object(fbtlog, "LOG_ROOT", self.root / phase), patch.object(fbtlog, "_suites", {}), \
+                        contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(native.main(), 128 + signal.SIGINT)
+                self.assertEqual(signal.getsignal(signal.SIGINT), previous)
+                self.assertIsNone(native._cleanup_deadline.get())
+                self.assertIsNotNone(children[0].poll())
 
 
 @unittest.skipUnless(os.environ.get("FBT_CLEANUP_BINARY"), "set FBT_CLEANUP_BINARY for the real native fixture")
@@ -178,7 +228,7 @@ class NativeFixtureCleanup(unittest.TestCase):
         logs = Path(os.environ.get("FBT_CLEANUP_LOG_ROOT", fbtlog.LOG_ROOT / "cleanup-controls")) / mode
         logs.mkdir(parents=True, exist_ok=True)
         runner = r'''
-import json, os, signal, subprocess, sys
+import json, os, signal, subprocess, sys, time
 from pathlib import Path
 from unittest.mock import patch
 import native
@@ -189,35 +239,75 @@ wait = native.NativeHarness.wait_for
 run = subprocess.run
 write_bytes = Path.write_bytes
 observed = []
+interrupted_at = None
+def observe_started():
+    owned = native._process_run.get().survivors()
+    roles = set()
+    for process in owned:
+        try:
+            arguments = Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")
+            roles.update(role for role in ("serve", "tui") if role.encode() in arguments)
+        except FileNotFoundError:
+            pass
+    (logs / "started.json").write_text(json.dumps(dict(processes=[vars(p) for p in owned], roles=sorted(roles))))
+    observed.extend(owned)
+
 def wait_then_fail(self, check, label, seconds=10):
+    global interrupted_at
     result = wait(self, check, label, seconds)
+    if mode == "daemon_startup_interrupt" and label == "disposable daemon listener opens":
+        assert result
+        observe_started()
+        raise KeyboardInterrupt("injected interrupt during daemon startup")
     if label == "actual terminal startup enables unpressed pointer motion":
         assert result, "fault must follow successful real TUI startup"
-        owned = native._process_run.get().survivors()
-        roles = set()
-        for process in owned:
-            try:
-                arguments = Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")
-                roles.update(role for role in ("serve", "tui") if role.encode() in arguments)
-            except FileNotFoundError:
-                pass
-        (logs / "started.json").write_text(json.dumps(dict(processes=[vars(p) for p in owned], roles=sorted(roles))))
-        observed.extend(owned)
+        if mode == "group_interrupt_slow_daemon":
+            # A stubborn owned process plus a timed-out tmux cleanup must not
+            # consume the whole grace before detached children are collected.
+            ready = Path(self.env["HOME"]).parent / "stubborn.ready"
+            code = ("import signal,time; from pathlib import Path; "
+                    "signal.signal(signal.SIGINT,signal.SIG_IGN); signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                    f"Path({str(ready)!r}).touch(); time.sleep(600)")
+            self.serve = subprocess.Popen([sys.executable,"-c",code], env=self.env, start_new_session=True)
+            end = time.monotonic()+10
+            while not ready.exists() and time.monotonic()<end: time.sleep(.01)
+            assert ready.exists()
+        observe_started()
         if mode == "termination":
             os.kill(os.getpid(), signal.SIGTERM)
-        if mode != "normal":
+        if mode.startswith("group_interrupt"):
+            interrupted_at = time.monotonic()
+            os.killpg(os.getpgrp(), signal.SIGINT)
+        if mode not in ("normal", "default_log_root"):
             raise subprocess.TimeoutExpired("injected case timeout after real startup", 10)
     return result
 def broken_tmux(argv, *args, **kwargs):
     if mode == "teardown" and argv[0] == "tmux" and "kill-server" in argv:
         raise subprocess.TimeoutExpired("injected tmux kill-server timeout", kwargs.get("timeout"))
-    return run(argv, *args, **kwargs)
+    if mode in ("group_interrupt_cleanup_timeout", "group_interrupt_slow_daemon") and argv[0] == "tmux" and "kill-server" in argv:
+        # Consume the real cleanup timeout, leaving the detached tmux server
+        # alive for the final private-process sweep to find.
+        return run(["sleep", "600"], env=kwargs["env"], timeout=kwargs["timeout"])
+    result = run(argv, *args, **kwargs)
+    if mode in ("startup_error", "startup_interrupt") and argv[0] == "tmux" and "new-session" in argv:
+        observe_started()
+        if mode == "startup_interrupt":
+            raise KeyboardInterrupt("injected interrupt during tmux startup")
+        raise RuntimeError("injected exception during tmux startup")
+    return result
 def broken_artifact(path, data):
     if mode == "teardown" and path.name == "no_fake_seed_counts.terminal.typescript":
         raise OSError("injected terminal artifact failure")
     return write_bytes(path, data)
 sys.argv = ["native.py", binary, "--case", "no_fake_seed_counts" if mode == "teardown" else "dec_mouse_mode",
             "--log-root", str(logs)]
+if mode == "default_log_root":
+    # Use the invocation's existing default, without the optional CLI flag.
+    native.fbtlog.LOG_ROOT = logs
+    sys.argv = ["native.py", binary, "--case", "no_fake_seed_counts"]
+if mode.startswith("group_interrupt"):
+    # Shell-launched/background wrappers may have inherited SIGINT ignored.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 try:
     with patch.object(native.NativeHarness, "wait_for", wait_then_fail), \
             patch.object(subprocess, "run", broken_tmux), patch.object(Path, "write_bytes", broken_artifact):
@@ -235,16 +325,21 @@ finally:
         except (FileNotFoundError, ProcessLookupError):
             pass
     (logs / "survivors.json").write_text(json.dumps(alive))
+    if interrupted_at is not None:
+        (logs / "cleanup-time.json").write_text(json.dumps(dict(seconds=time.monotonic()-interrupted_at)))
 sys.exit(status)
 '''
         with (logs / "runner.log").open("w") as output:
             result = subprocess.run([sys.executable, "-c", runner, mode,
                                      str(Path(os.environ["FBT_CLEANUP_BINARY"]).resolve()), str(logs.resolve())],
-                                    cwd=Path(__file__).parent, stdout=output, stderr=subprocess.STDOUT, timeout=90)
-        self.assertEqual(result.returncode == 0, mode == "normal", (logs / "runner.log").read_text()[-4000:])
+                                    cwd=Path(__file__).parent, stdout=output, stderr=subprocess.STDOUT,
+                                    start_new_session=True, timeout=90)
+        self.assertEqual(result.returncode == 0, mode in ("normal", "default_log_root"), (logs / "runner.log").read_text()[-4000:])
         started = json.loads((logs / "started.json").read_text())
-        self.assertTrue(any("tmux" in process["name"] for process in started["processes"]), started)
-        self.assertTrue({"serve", "tui"} <= set(started["roles"]), started)
+        if mode != "daemon_startup_interrupt":
+            self.assertTrue(any("tmux" in process["name"] for process in started["processes"]), started)
+        roles = {"serve"} if mode in ("startup_error", "startup_interrupt", "daemon_startup_interrupt") else {"serve", "tui"}
+        self.assertTrue(roles <= set(started["roles"]), started)
         self.assertEqual(json.loads((logs / "survivors.json").read_text()), [])
         rows = [json.loads(line) for line in (logs / "native/process_cleanup.jsonl").read_text().splitlines()]
         self.assertTrue(rows[-1]["ok"], rows)
@@ -252,6 +347,9 @@ sys.exit(status)
             diagnostics = (logs / "runner.log").read_text()
             self.assertIn("injected terminal artifact failure", diagnostics)
             self.assertIn("injected tmux kill-server timeout", diagnostics)
+        if mode.startswith("group_interrupt"):
+            self.assertLess(json.loads((logs / "cleanup-time.json").read_text())["seconds"], 10,
+                            "cleanup must finish before the gate's TERM/KILL escalation")
 
     def test_normal(self):
         self.exercise("normal")
@@ -264,6 +362,27 @@ sys.exit(status)
 
     def test_terminated_runner(self):
         self.exercise("termination")
+
+    def test_daemon_startup_interrupt(self):
+        self.exercise("daemon_startup_interrupt")
+
+    def test_tmux_startup_interrupt(self):
+        self.exercise("startup_interrupt")
+
+    def test_tmux_startup_exception(self):
+        self.exercise("startup_error")
+
+    def test_process_group_interrupt(self):
+        self.exercise("group_interrupt")
+
+    def test_process_group_interrupt_with_timed_out_cleanup(self):
+        self.exercise("group_interrupt_cleanup_timeout")
+
+    def test_process_group_interrupt_with_stubborn_daemon_and_tmux_timeout(self):
+        self.exercise("group_interrupt_slow_daemon")
+
+    def test_artifact_cleanup_without_log_root_flag(self):
+        self.exercise("default_log_root")
 
 
 if __name__ == "__main__":
