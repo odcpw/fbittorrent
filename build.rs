@@ -4,6 +4,13 @@ fn git(args: &[&str]) -> Option<String> {
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 fn main() {
+    // Pack PIE's relative relocation offsets instead of faulting a large RELA
+    // table at startup. The Omarchy GNU loader supports RELR; PIE and RELRO stay.
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
+        && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu")
+    {
+        println!("cargo:rustc-link-arg-bin=fbittorrent=-Wl,-z,pack-relative-relocs");
+    }
     println!("cargo:rerun-if-env-changed=FBT_BUILD_ID_OVERRIDE");
     for path in ["src", "vendor", "Cargo.toml", "Cargo.lock", "build.rs"] {
         println!("cargo:rerun-if-changed={path}");

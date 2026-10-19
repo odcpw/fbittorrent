@@ -43,7 +43,7 @@ strip = true
 # Keep the CLI/API/UI's resident code compact. Transfer and runtime crates keep
 # the full optimization above; release-perf measures the same shipping choice.
 [profile.release.package.fbittorrent]
-opt-level = "s"
+opt-level = "z"
 
 # Keep the same optimization settings while retaining symbols for measurements.
 [profile.release-perf]
@@ -52,7 +52,7 @@ debug = "line-tables-only"
 strip = false
 
 [profile.release-perf.package.fbittorrent]
-opt-level = "s"
+opt-level = "z"
 
 [patch.crates-io]
 # Asupersync 0.5.0 with bounded cleanup of cancelled timer entries. Keeping the
