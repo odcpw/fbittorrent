@@ -62,6 +62,7 @@ impl TuiApp {
         let Some(details) = &self.details else { return };
         let th = &self.theme;
         let bounds = frame.bounds();
+        self.rects.borrow_mut().overlay();
         let area = details_area(bounds);
         self.rects.borrow_mut().details = Some(area);
         Paragraph::new(Text::from_lines((0..area.height).map(|_| {
@@ -156,6 +157,7 @@ impl TuiApp {
                 .render(sections[0], frame);
             self.view_imdb_card(&t.name, sections[1], frame);
         }
+        self.rects.borrow_mut().footer=footer;
         self.view_status(footer, frame);
     }
 }

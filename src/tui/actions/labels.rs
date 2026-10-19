@@ -26,6 +26,7 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
                     "Seed on"
                 }
             }
+            "search.card" if app.search_card => "Results",
             "search.submit" if app.search_input.value().trim().is_empty() => "Browse lists",
             "browse.open" => {
                 if app

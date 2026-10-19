@@ -24,6 +24,7 @@ impl TuiApp {
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
+        self.search_card.hash(&mut hash);
         self.search_input.value().trim().is_empty().hash(&mut hash);
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);

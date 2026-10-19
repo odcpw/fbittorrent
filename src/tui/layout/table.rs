@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(in crate::tui) enum Column {
     Marker,
+    Seeds, Rating, Uploaded, Provider,
     State,
     Name,
     Size,
@@ -21,7 +22,7 @@ pub(in crate::tui) enum Column {
 impl Column {
     pub fn sort_field(self) -> Option<store::TorrentSort> {
         Some(match self {
-            Self::Marker => return None,
+            Self::Marker|Self::Seeds|Self::Rating|Self::Uploaded|Self::Provider => return None,
             Self::State => store::TorrentSort::State,
             Self::Name => store::TorrentSort::Name,
             Self::Size => store::TorrentSort::Size,
@@ -34,6 +35,7 @@ impl Column {
     pub fn label(self) -> &'static str {
         match self {
             Self::Marker => "",
+            Self::Seeds=>"SEEDS", Self::Rating=>"★", Self::Uploaded=>"UPLOADED", Self::Provider=>"PROVIDER",
             Self::State => "STATE",
             Self::Name => "NAME",
             Self::Size => "SIZE",
@@ -53,6 +55,7 @@ pub(in crate::tui) struct Rects {
     pub table: Option<Rect>,
     pub details: Option<Rect>,
     pub files: Option<Rect>,
+    pub lists: [Option<Rect>;10],
 }
 impl Rects {
     pub fn begin(&mut self) {
@@ -60,6 +63,10 @@ impl Rects {
         self.table = None;
         self.details = None;
         self.files = None;
+        self.lists.fill(None);
+    }
+    pub fn overlay(&mut self) {
+        self.headers.clear(); self.table=None; self.lists.fill(None); self.files=None; self.details=None;
     }
     fn rows(&mut self, app: &TuiApp, range: std::ops::Range<usize>, area: Rect) {
         self.table = Some(area);
@@ -302,6 +309,7 @@ impl TuiApp {
                         Column::Download => metrics.down.clone(),
                         Column::Eta => metrics.eta.clone(),
                         Column::Peers => metrics.peers.clone(),
+                        _=>String::new(),
                     };
                     let style = if *column == Column::State
                         && (matches!(row.map(|r| r.state), Some(crate::api::TorrentState::Error))

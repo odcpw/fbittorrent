@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, VecDeque};
 mod pending;
 mod snapshot;
 mod sort;
+mod search_sort;
+pub(super) use search_sort::{SearchSort,search_order,legacy_search_order};
 use snapshot::Snapshot;
 pub(super) use sort::{TorrentSort,legacy_order};
 #[cfg(test)]

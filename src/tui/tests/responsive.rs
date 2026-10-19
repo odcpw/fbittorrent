@@ -252,3 +252,252 @@ fn priority_banner_preserves_disk_vpn_and_reconnect_order() {
         "no permanent empty banner slot"
     );
 }
+
+#[test]
+fn click_every_other_visible_list_row_at_each_size() {
+    use ftui::{MouseButton, MouseEvent, MouseEventKind};
+    for (width, height) in [(80, 24), (120, 30), (160, 45)] {
+        for surface in ["search", "shows", "rss", "files", "providers"] {
+            let mut app = fixture::app(surface);
+            draw(&app, width, height);
+            let lists = app.rects.borrow().lists;
+            for (list, rect) in [
+                MouseList::Results,
+                MouseList::Shows,
+                MouseList::Episodes,
+                MouseList::Feeds,
+                MouseList::Items,
+                MouseList::Files,
+                MouseList::Providers,
+            ]
+            .into_iter()
+            .filter_map(|list| lists[list as usize].map(|rect| (list, rect)))
+            {
+                let offset = app.mouse_list_state(list).borrow().offset;
+                for local in
+                    0..usize::from(rect.height).min(app.mouse_list_len(list).saturating_sub(offset))
+                {
+                    let index = offset + local;
+                    let x = rect.x + 2;
+                    let y = rect.y + local as u16;
+                    let identity = app.mouse_item_identity(list, index).unwrap();
+                    app.on_mouse(MouseEvent::new(
+                        MouseEventKind::Down(MouseButton::Left),
+                        x,
+                        y,
+                    ));
+                    assert_eq!(
+                        app.mouse_list_state(list).borrow().selected(),
+                        Some(index),
+                        "{surface} {width}x{height} {list:?} {x},{y}"
+                    );
+                    println!("{width}x{height} {list:?} click ({x},{y}) -> {identity}");
+                }
+            }
+        }
+    }
+}
+#[test]
+fn every_non_torrent_list_formats_only_its_visible_slice_once() {
+    for surface in ["search", "shows", "rss", "files", "providers"] {
+        let mut app = fixture::app(surface);
+        let list = match surface {
+            "search" => {
+                let template = app.search_results[0].clone();
+                app.search_results = (0..5000)
+                    .map(|i| {
+                        let mut r = template.clone();
+                        r.file_name = format!("Result {i}");
+                        r.file_url = format!("magnet:{i}");
+                        r
+                    })
+                    .collect();
+                MouseList::Results
+            }
+            "shows" => {
+                app.select_show_parent(1);
+                app.shows_focus_eps = true;
+                let template = app.shows.shows[0].episodes[0].clone();
+                app.shows.shows[0].episodes = (0..5000)
+                    .map(|i| {
+                        let mut e = template.clone();
+                        e.key = format!("S100E{i:04}");
+                        e
+                    })
+                    .collect();
+                MouseList::Episodes
+            }
+            "rss" => {
+                let t = app.feeds[0].articles[0].clone();
+                app.feeds[0].articles = (0..5000)
+                    .map(|i| {
+                        let mut a = t.clone();
+                        a.id = i.to_string();
+                        a
+                    })
+                    .collect();
+                MouseList::Items
+            }
+            "files" => {
+                let m = app.files.as_mut().unwrap();
+                let t = m.files[0].clone();
+                m.files = (0..5000)
+                    .map(|i| {
+                        let mut f = t.clone();
+                        f.index = i;
+                        f
+                    })
+                    .collect();
+                MouseList::Files
+            }
+            _ => {
+                let m = app.providers.as_mut().unwrap();
+                let t = m.plugins[0].clone();
+                m.plugins = (0..5000)
+                    .map(|i| {
+                        let mut p = t.clone();
+                        p.name = i.to_string();
+                        p
+                    })
+                    .collect();
+                MouseList::Providers
+            }
+        };
+        for _ in 0..32 {
+            draw(&app, 80, 24);
+        }
+        assert_eq!(
+            app.list_tables.borrow()[list as usize].builds,
+            1,
+            "{surface}"
+        );
+        let area = app.rects.borrow().lists[list as usize].unwrap();
+        assert!(area.height < 24);
+        let max = app.mouse_list_len(list) - 1;
+        app.mouse_list_state(list).borrow_mut().select(Some(max));
+        draw(&app, 80, 24);
+        assert_eq!(
+            app.list_tables.borrow()[list as usize].builds,
+            2,
+            "scroll formats one new slice for {surface}"
+        );
+        let state = app.mouse_list_state(list).borrow();
+        assert!(state.offset <= max && max < state.offset + area.height as usize);
+        println!("{surface}: 5000 rows, {} visible, one formatting build over 32 unchanged frames, last row reachable",area.height);
+    }
+}
+#[test]
+fn narrow_breadcrumb_navigation_and_search_card_do_not_start_work() {
+    let mut app = fixture::app("shows");
+    let before = app.shows.new_total();
+    let text = super::golden::render(&app, 80, 24);
+    assert!(text.contains("Shows › All unread"));
+    assert!(text.contains("S04E01") && text.contains("● Unread"));
+    app.on_key(KeyEvent::new(KeyCode::Char('h')));
+    assert!(!app.shows_focus_eps);
+    assert!(super::golden::render(&app, 80, 24).contains("Shows › Followed"));
+    app.on_key(KeyEvent::new(KeyCode::Char('l')));
+    assert!(app.shows_focus_eps);
+    assert_eq!(app.shows.new_total(), before);
+    let mut app = fixture::app("rss");
+    assert!(super::golden::render(&app, 80, 24).contains("RSS › Blender releases"));
+    app.on_key(KeyEvent::new(KeyCode::Char('h')));
+    assert!(!app.rss_focus_items);
+    assert!(super::golden::render(&app, 80, 24).contains("RSS › Feeds"));
+    app.on_key(KeyEvent::new(KeyCode::Char('l')));
+    assert!(app.rss_focus_items);
+    assert!(!app.rss_busy);
+    let mut app = fixture::app("search");
+    for width in [80, 120, 160] {
+        let text = super::golden::render(&app, width, 30);
+        assert!(text.contains("SEEDS") && text.contains('★'));
+        if width >= 100 {
+            assert!(
+                text.contains("UPLOADED") && text.contains("PROVIDER") && text.contains("PEERS")
+            );
+        }
+    }
+    assert!(matches!(
+        app.on_key(KeyEvent::new(KeyCode::Char('v'))),
+        Cmd::None
+    ));
+    assert!(app.search_card);
+    assert!(super::golden::render(&app, 80, 24).contains("╭ Details"));
+    assert!(matches!(
+        app.on_key(KeyEvent::new(KeyCode::Escape)),
+        Cmd::None
+    ));
+    assert!(!app.search_card);
+    assert_eq!(app.search_results.len(), 10);
+}
+
+#[test]
+fn search_header_clicks_compare_bytes_and_preserve_the_selected_source() {
+    use ftui::{MouseButton, MouseEvent, MouseEventKind};
+    for (width, height) in [(80, 24), (120, 30), (160, 45)] {
+        let mut app = fixture::app("search");
+        app.search_results.truncate(3);
+        for (row, size) in app
+            .search_results
+            .iter_mut()
+            .zip([943_718_400, 1_181_116_006, -1])
+        {
+            row.file_size = size;
+        }
+        draw(&app, width, height);
+        let header = app
+            .rects
+            .borrow()
+            .headers
+            .iter()
+            .find(|(c, _)| *c == Column::Size)
+            .unwrap()
+            .1;
+        let click = MouseEvent::new(MouseEventKind::Down(MouseButton::Left), header.x, header.y);
+        let source = app.selected_result().unwrap().file_url.clone();
+        app.on_mouse(click);
+        assert_eq!(
+            app.search_results
+                .iter()
+                .map(|r| r.file_size)
+                .collect::<Vec<_>>(),
+            [1_181_116_006, 943_718_400, -1]
+        );
+        assert_eq!(app.selected_result().unwrap().file_url, source);
+        app.on_mouse(click);
+        assert_eq!(
+            app.search_results
+                .iter()
+                .map(|r| r.file_size)
+                .collect::<Vec<_>>(),
+            [943_718_400, 1_181_116_006, -1]
+        );
+        assert_eq!(app.selected_result().unwrap().file_url, source);
+        println!("{width}x{height} search header: bytes compare numerically, absent last, selected URL preserved");
+    }
+}
+
+#[test]
+fn known_zero_search_size_and_absent_size_render_differently(){
+    let zero=SearchResult{file_size:0,..Default::default()};
+    let absent=SearchResult{file_size:-1,..Default::default()};
+    let theme=Theme::default();
+    assert!(result_line(&zero,None,80,&theme,None).spans()[2].content.contains("0 B"));
+    assert_eq!(result_line(&absent,None,80,&theme,None).spans()[2].content.trim(),"—");
+}
+
+#[test]
+fn details_draws_one_legend_and_keeps_confirmation_visible(){
+    for(width,height)in[(80,24),(120,30),(160,45)] {
+        let mut app=fixture::app("details");
+        let text=super::golden::render(&app,width,height);
+        assert_eq!(text.matches("[Details]").count(),1,"{text}");
+        app.on_key(KeyEvent::new(KeyCode::Char('d')));
+        assert!(app.prompt.as_ref().is_some_and(|p|p.yes_no));
+        let text=super::golden::render(&app,width,height);
+        assert!(text.contains("keep files"),"{text}");
+        assert!(text.contains("y / N (default: No)"),"{text}");
+        app.on_key(KeyEvent::new(KeyCode::Escape));
+        assert!(app.prompt.is_none() && app.details.is_some());
+    }
+}

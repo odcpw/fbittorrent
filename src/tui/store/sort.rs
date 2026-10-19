@@ -69,14 +69,14 @@ pub(in crate::tui) fn legacy_order(left:&crate::qbt::Torrent,right:&crate::qbt::
         TorrentSort::Peers=>optional(left.is_active().then_some(left.num_leechs.saturating_add(left.num_seeds)),right.is_active().then_some(right.num_leechs.saturating_add(right.num_seeds)),descending,i64::cmp),
     };order.then_with(||left.hash.cmp(&right.hash))
 }
-fn direction(value: Ordering, descending: bool) -> Ordering {
+pub(super) fn direction(value: Ordering, descending: bool) -> Ordering {
     if descending {
         value.reverse()
     } else {
         value
     }
 }
-fn optional<T>(
+pub(super) fn optional<T>(
     left: Option<T>,
     right: Option<T>,
     descending: bool,

@@ -56,3 +56,28 @@ def tui_details_narrow(binary, systemd):
 
 
 CASES=(tui_details_narrow,)
+
+
+def tui_search_narrow(binary, systemd):
+    import native
+    import daemon_search as search
+    with search.owned('tui_search_narrow',binary,systemd) as (case,sandbox,h,process,runtime),d.ApiConn(h) as client:
+        client.hello();native.prepare_imdb_fixture(sandbox.env,['辛特尔'])
+        ui=native.AttachedTui(case,str(binary),sandbox,h,session='fbt-fbt-p4-04-9lu-search')
+        try:
+            target,done=ui.start()
+            resize=ui.tmux('resize-window','-t',target,'-x','80','-y','24')
+            case.check(resize.returncode==0,'search terminal is 80 by 24',resize.stderr)
+            ui.keys(target,'2');ui.keys(target,'Sintel');ui.keys(target,'Enter',literal=False)
+            ui.assert_pane(target,'辛特尔');ui.assert_pane(target,'SEEDS');ui.assert_pane(target,'★')
+            pane=ui.capture(target)
+            case.check('╭ Details' not in pane,'narrow result list keeps its name/size/seeds/rating columns without a side card',pane)
+            ui.keys(target,'Escape',literal=False)
+            ui.keys(target,'v');ui.assert_pane(target,'╭ Details');ui.assert_pane(target,'alpha, beta')
+            ui.keys(target,'Escape',literal=False);ui.assert_pane(target,'Results (1)')
+            ui.keys(target,'q');h.wait_for(lambda:(done.exists(),ui.capture(target)),'q detaches after card navigation')
+            case.check(process.child.poll() is None,'card navigation never stops the owner',json.dumps(client.call('app.info')['result']))
+        finally:ui.close()
+
+
+CASES=CASES+(tui_search_narrow,)

@@ -63,6 +63,7 @@ impl TuiApp {
             MouseList::Shows=>{ if index>0 { let row=self.show_at(index)?; (&row.imdb,&row.title).hash(&mut hash); } }
             MouseList::Episodes=>{ let (show,row)=self.episode_at(index)?; (&show.imdb,&row.key,&row.title).hash(&mut hash); }
             MouseList::Files=>{ let modal=self.files.as_ref()?; let row=modal.files.get(index)?; (&modal.hash,row.index,&row.name).hash(&mut hash); }
+            MouseList::Settings=>return None,
             MouseList::Providers=>{ let row=self.providers.as_ref()?.plugins.get(index)?; (&row.name,&row.full_name).hash(&mut hash); }
         }
         Some(MarqueeTarget { list,index,revision:hash.finish() })

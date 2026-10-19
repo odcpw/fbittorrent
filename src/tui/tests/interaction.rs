@@ -143,7 +143,7 @@
         // Check only the seed column: names, dates and sizes may contain digits.
         for width in [50, 80, 120] {
             let line = result_line(&app.search_results[0], None, width, &app.theme, None);
-            assert_eq!(line.spans()[if width >= 60 { 4 } else { 2 }].content.as_ref(), "      ");
+            assert_eq!(line.spans()[4].content.as_ref(), "      ");
         }
         app.search_results[0].seeders = 0;
         app.search_results[0].leechers = 4;
@@ -427,7 +427,7 @@
         let mut app = app();
         app.screen = Screen::Search;
         for width in [99, 100, 120, 139, 140, 160] {
-            assert_eq!(render(&app, width, 24).contains(" Details "), width >= 100);
+            assert_eq!(render(&app, width, 24).contains("╭ Details "), width >= 140);
         }
     }
 
@@ -668,6 +668,7 @@
         for (width, height) in [(80, 24), (120, 30), (160, 44)] {
             for (screen, expected) in [(Screen::Torrents, "TorrentAlpha"), (Screen::Search, "SearchAlpha"), (Screen::Rss, "FeedItemAlpha"), (Screen::Shows, "ReleaseAlpha")] {
                 app.screen = screen;
+                if screen==Screen::Rss {app.rss_focus_items=true;}
                 let text = render(&app, width, height);
                 assert!(text.contains(expected), "{screen:?} {width}x{height}: {text}");
             }
