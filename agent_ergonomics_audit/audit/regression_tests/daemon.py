@@ -2648,7 +2648,8 @@ def contract_errors(binary, systemd):
 
 
 def contract_torrents(binary, systemd):
-    contract_group("torrents", binary, systemd)
+    from daemon_torrent_contract import run
+    run(binary, systemd)
 
 
 class InstalledUnit:
@@ -3924,8 +3925,9 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
-from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, disk_summary_subscription_cleanup
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_trackers import tracker_add_remove
 from daemon_download_limit import download_cap_holds
 from daemon_peers import peers_local_swarm, peer_rates_move
 from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
@@ -4917,7 +4919,7 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
@@ -4952,6 +4954,8 @@ CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
 from daemon_staging import staged_not_busy
 CASES["staged_not_busy"] = staged_not_busy
+from daemon_torznab import CASES as TORZNAB_CASES
+CASES.update((function.__name__,function) for function in TORZNAB_CASES)
 from daemon_watch import CASES as WATCH_CASES
 from daemon_catalog import CASES as CATALOG_CASES
 CASES.update((function.__name__,function) for function in CATALOG_CASES)

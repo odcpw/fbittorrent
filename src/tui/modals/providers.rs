@@ -95,7 +95,8 @@ impl TuiApp {
             let site = p.url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string();
             Line::from_spans([
                 Span::styled(mark, st),
-                Span::styled(readable_cell(&p.full_name, 22, hovered_for(&m.list,i,elapsed)), st),
+                Span::styled(readable_cell(&format!("{} · {}",if p.kind.is_empty(){"nova"}else{&p.kind},p.full_name), 22, hovered_for(&m.list,i,elapsed)), st),
+                Span::styled(" ", st),
                 Span::styled(cell(&site, iw.saturating_sub(4 + 22 + 1)), bg.fg(th.dim)),
             ])
             },frame);

@@ -119,6 +119,10 @@ pub struct EmptyArgs {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TrackerEditArgs {pub hash: Hash, pub url: String}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Client {
     pub name: ClientName,
     pub version: String,
@@ -429,7 +433,11 @@ pub enum Call {
     TorrentsRemove { args: RemoveArgs },
     #[serde(rename = "torrents.files")]
     TorrentsFiles { args: HashArgs },
-    #[serde(rename="torrents.peers")]
+    #[serde(rename = "torrents.add_tracker")]
+    TorrentsAddTracker { args: TrackerEditArgs },
+    #[serde(rename = "torrents.remove_tracker")]
+    TorrentsRemoveTracker { args: TrackerEditArgs },
+    #[serde(rename = "torrents.peers")]
     TorrentsPeers { args: HashArgs },
     #[serde(rename = "torrents.set_files")]
     TorrentsSetFiles { args: SetFilesArgs },
@@ -495,6 +503,8 @@ impl Call {
             Self::TorrentsRemove { .. } => "torrents.remove",
             Self::TorrentsFiles { .. } => "torrents.files",
             Self::TorrentsPeers { .. } => "torrents.peers",
+            Self::TorrentsAddTracker { .. } => "torrents.add_tracker",
+            Self::TorrentsRemoveTracker { .. } => "torrents.remove_tracker",
             Self::TorrentsSetFiles { .. } => "torrents.set_files",
             Self::TorrentsSetSeed { .. } => "torrents.set_seed",
             Self::TorrentsSetDownloadLimit { .. } => "torrents.set_download_limit",

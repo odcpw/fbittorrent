@@ -10,6 +10,9 @@ pub struct Operation {
 }
 pub const TABLE: &[Operation] = &[
     Operation {name:"torrents.pieces",mutating:false,idempotent:false,since:"P6-02",args:"`hash: hash`",result:"`Pieces` (MSB-first base64 verified bitfield)"},
+    Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
+    Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
+
     Operation {
         name: "app.free_space",
         mutating: false,
@@ -33,11 +36,11 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "search.stop", mutating: true, idempotent: false, since: "P3-01",
         args: "`search_id`", result: "`{state: \"done\"}`" },
     Operation { name: "search.providers", mutating: false, idempotent: false, since: "P3-01",
-        args: "none", result: "`{providers: [Provider]}`" },
+        args: "none", result: "`{providers: [Provider]}`; kind nova or torznab (P7-01)" },
     Operation { name: "search.set_provider", mutating: true, idempotent: true, since: "P3-01",
         args: "`name`, `enabled`", result: "`{state: \"done\"}`" },
     Operation { name: "search.install", mutating: true, idempotent: false, since: "P3-01",
-        args: "`curated?` or `sources?`", result: "pending ref, then `{installed, failed}`" },
+        args: "`curated?` or `sources?` (HTTPS Nova .py or Torznab endpoint; P7-01)", result: "pending ref, then `{installed, failed}`" },
     Operation { name: "search.browse_sources", mutating: false, idempotent: false, since: "P3-01",
         args: "none", result: "`{sources: [BrowseSource]}`" },
     Operation { name: "search.browse", mutating: false, idempotent: false, since: "P3-01",

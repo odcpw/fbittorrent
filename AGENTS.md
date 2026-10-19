@@ -37,6 +37,10 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 - Never touch the user's live data: tests run with isolated `XDG_*` directories as the harness
   (P0-15) prescribes. Never add, pause, seed or delete the user's real torrents.
 - Python 3 and `tmux` are installed. `sudo` is not available.
+- No hosted CI: GitHub Actions is disabled for this repository and `.github/workflows/ci.yml` is
+  `workflow_dispatch`-only. Never add `push`/`pull_request`/`schedule` triggers, re-enable Actions or
+  start hosted runs unless the owner asks; the local gate (`all.sh`, `daemon.py`,
+  `agent_contract.py`) is the check.
 
 ## Bead workflow (non-negotiable)
 

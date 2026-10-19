@@ -74,8 +74,11 @@ impl Indexer {
         endpoint(&self.url, self.api_key_file.is_some())?;
         if let Some(path) = &self.api_key_file {
             let key = key(path)?;
+            let encoded = super::worker::encoded(&key);
             anyhow::ensure!(
-                !self.url.contains(&key) && !self.name.contains(&key),
+                !self.url.contains(&key)
+                    && !self.name.contains(&key)
+                    && !self.url.contains(&encoded),
                 Invalid("inline credential (use api_key_file only)")
             );
         }

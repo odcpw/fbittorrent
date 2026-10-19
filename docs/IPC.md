@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `tracker_edit` | `torrents.add_tracker/remove_tracker` | P7-04 |
 | `download_limit` | `torrents.set_download_limit`, configured/effective torrent fields | P7-06 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
@@ -202,6 +203,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
+| `torrents.add_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
+| `torrents.remove_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
 | `torrents.set_upload_limit` | `hashes: [hash]`, `bps: bps?` (≥ 16384, or `null` for unlimited) | `{state: enum(done\|pending)}` (pending until P6-07) | yes | P1-06 |
 | `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder)}` | no | P1-06 |
@@ -395,58 +398,44 @@ fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
 
 
-**Live replay (P1-06, orchestrator ruling 3).** Under the standing owner authority of 2026-10-19, computed `*_at`/`*_until` timestamps compare by type and validity; an undo deadline must be future and within ten seconds of the keep-files removal that created it. Contradictory fixture sequences are repaired minimally with exact before/after byte evidence; operation semantics and types remain unchanged. The hello/errors/torrents runner
-generates real payloads and metainfo from transcript names, sizes, files and
-selection, adds them through the API, and drives the available state/error
-preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
-user/network namespace; it never adopts an existing directory or edits a ledger.
-The following single table is defined in daemon.py and reproduced verbatim here
-and in the P1-06 receipt. Identity bindings are bijective and checked at every
-occurrence. Volatile fields retain their presence/type/validity checks. All other
-fields asserted by the fixture compare byte-for-byte after canonical P1-05
-typed re-serialization. Under ruling 4C an optional member absent in the
-fixture may be present live: the frozen Rust checker validates the live frame
-and its form with that member removed. Every occurrence is logged as "extra
-optional field" with its JSON pointer and reproduced verbatim in the receipt.
-Missing or changed fixture-asserted members still fail. A
-future-capability/proto-2/unreachable-error frame is validated with the frozen
-P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
-mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
-Ruling 6 accepts the ruling-5 server behavior. P1-05b/P1-05c's fixture corrections
-are integrated: exact payload/file sizes feed the generator, and the opted-in
-network replay explicitly binds fixture0, yielding selection/interface `fixture0`,
-ready true and message `VPN bound: fixture0` inside the owned VPN namespace
-(`vpn.py`, `FBT_TEST_VPN=1`). Without that opt-in, the environment-conditional
-deferral remains accepted. Recheck/query attempts are bounded and logged;
-downloading uses a real loopback native seed and tracker. When receiving geometry
-is unspecified and the fixture asserts zero verified bytes, 1 MiB pieces allow a
-positive measured chunk rate before the first piece verifies. Missing-file restore
-preconditions complete the payload, delete it, restart dormant history and
-explicitly activate it, preserving startup's lazy restore policy. The diagnostic
-remains `<name> restore failed: missing files`, with reason `missing_files`.
-Ruling 7 treats checking measurements as state-conditioned volatile values:
-when the live torrent is checking, completed_bytes must be a u64 no greater than
-size, and finite progress must equal completed_bytes/size within 1e-9 absolute
-(zero size requires both zero). Presence is preserved. Checked and size remain
-exact; other states still compare completed_bytes/progress exactly. P1-05d's
-fixture correction to checked=false for an active check is integrated.
-Live validation checks every original frame against the frozen types, bounds,
-capabilities and canonical round trips, and retains revision checks. Its
-cross-reply agreement still checks static sizes and file totals. For any hash
-observed checking, its measurements are excluded from that history's agreement,
-including earlier samples and later cancellation; their raw values remain
-validated and non-checking fixture comparisons remain exact. A confirmed completed
-removal clears only that hash's completion history: a later re-add is a new torrent
-instance. Pending or failed removals do not clear it, and static size/file totals
-remain checked across re-adds. Fixture transcripts continue to use the unchanged
-strict whole-group agreement hook. Deferrals record
-file:line, pointer, class, target bead and reason. Capability/protocol deferrals
-apply only while that feature is unavailable; advertised features stay under
-active comparison. The receipt distinguishes undrivable catalogue frames from
-error codes that can be produced with a different shape and retains the bounded
-starting-window retry evidence. A retained missing-files restore error keeps its
-missing_files reason through Stop and retry until the error clears. Nonvolatile
-validation failures are recorded without a new mask or deferral.
+**Live contract checks.** `contract_hello` and `contract_errors` replay their
+scenarios with the normalization table below. Identity bindings are bijective;
+volatile fields retain presence, type and validity checks. Other asserted fields
+compare canonically. Additional optional members pass the frozen Rust checker
+both present and absent, with each occurrence recorded. Capability/protocol
+scenarios remain explicitly attributed until their feature exists.
+
+`contract_torrents` validates `torrents.ndjson` unchanged as a strict **field
+catalogue**, then records a separate real-daemon transcript. The catalogue's
+single list combines active downloads with a globally parked VPN state; its
+4 KiB video also claims readiness below DL-26's 32 MiB minimum. Those values
+exercise the wire types but cannot all describe one physical session. Enabling
+P5-05's `watch` capability exposed this distinction by activating previously
+deferred catalogue frames.
+
+The live case owns its literal `/tmp/fbt-fixture` directory and a private
+user/network namespace with a real seed and tracker. An 8 MiB payload throttled
+to 32 KiB/s stays incomplete across list/get/start observations. Both list and
+detail must report a positive measured rate, consistent progress and the ETA
+computed from remaining bytes and that rate. An already-running incomplete start
+has the exact skipped result; a completed torrent with seeding off must instead
+return `invalid_state` / `complete_no_seed`. The case also checks duplicate add,
+Stop, file sizes/progress, keep-files removal and undo, file selection, seed and
+upload policy changes, and `open_target`. All ten torrent states are observed in
+real transitions, including a separate parked engine epoch and missing-payload
+activation after restart. It never fabricates a response or changes a ledger.
+
+Every captured original frame round-trips through the frozen Rust types and
+passes bounds, capability and revision checks. The catalogue retains its strict
+whole-group size/completion agreement. Live captures retain static size/file
+geometry agreement while allowing completed bytes to advance during receiving.
+Raw progress must agree with completed bytes and size; backwards movement and
+paused drift fail unless a real verification phase or confirmed removal explains
+the transition. Pending/failed removal does not reset the history. Checking
+measurements retain their existing raw tuple validation. No optional field is
+made mandatory by this distinction, and no protocol version changes.
+
+The hello/error replay normalization table remains:
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
@@ -469,7 +458,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","pieces"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit","pieces"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -834,9 +823,9 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 |---|---|---|---|---|
 | `search.start` | `query`, `providers?`, `limit?` | `{search_id}` | yes | P3-01 |
 | `search.stop` | `search_id` | `{state: "done"}` | yes | P3-01 |
-| `search.providers` | none | `{providers: [Provider]}` | no | P3-01 |
+| `search.providers` | none | `{providers: [Provider]}`; kind nova or torznab (P7-01) | no | P3-01 |
 | `search.set_provider` | `name`, `enabled` | `{state: "done"}` | yes | P3-01 |
-| `search.install` | `curated?` or `sources?` | pending ref, then `{installed, failed}` | yes | P3-01 |
+| `search.install` | `curated?` or `sources?` (HTTPS Nova .py or Torznab endpoint; P7-01) | pending ref, then `{installed, failed}` | yes | P3-01 |
 | `search.browse_sources` | none | `{sources: [BrowseSource]}` | no | P3-01 |
 | `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
 | `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
@@ -911,7 +900,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.29**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.31**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -949,7 +938,9 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.26` | `list[].num_seeds` |
 | `1.2.27` | `download_limit_bps` |
 | `1.2.28` | `search.install_torznab` |
-| `1.2.29` | `pieces` |
+| `1.2.29` | `search.torznab` |
+| `1.2.30` | `trackers.edit` |
+| `1.2.31` | `pieces` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1119,6 +1110,19 @@ client-side in batches of 256 and emits `{ok,action:"limit",hashes,download_limi
 (the last field is null when explicitly cleared). Below-floor/overflow syntax
 is exit 2. Dashboard rendering is deferred to track C/D; no new TUI control.
 
+### P7-04: tracker editing (contract 1.2.30)
+
+`tracker_edit` enables idempotent `torrents.add_tracker {hash,url}` and
+`torrents.remove_tracker {hash,url}`, both returning `{state:"done"}`. URLs must
+use HTTP, HTTPS or UDP, contain a host, and fit within 4096 bytes; UDP requires an
+explicit port. Invalid input names `url` and never echoes it (queries may carry
+passkeys). An admitted handle is required, including when paused. The ordered
+set changes without restarting the handle or rechecking data. Each torrent has
+at most 256 edited trackers. Added URLs merge with metainfo on restore; durable
+removal tombstones prevent removed metainfo URLs from returning. Private torrents
+retain the first-tracker-only policy and never inherit session/public trackers.
+Both operations are available through the existing raw CLI `api` command.
+
 ### P7-01: native Torznab catalogue surface (contract 1.2.28)
 
 `search --install-torznab URL [--key-file PATH]` installs an indexer whose
@@ -1126,7 +1130,56 @@ credentials remain in a private file. Provider listings distinguish `kind`
 `nova` and `torznab`; the existing search capability and normalized result
 shapes are shared by both provider kinds. Invalid configuration exits 2.
 
-### P6-02: verified Pieces (contract 1.2.29)
+
+## Native Torznab providers (P7-01, CLI contract 1.2.29)
+
+Capability `torznab` enables the reserved `Provider.kind:"torznab"` alongside
+`nova`. `search.providers` lists both, and `search.start` runs selected enabled
+indexers through the same normalization/dedupe and keyed snapshots as Nova.
+`search.install {sources:["https://indexer.example/api"]}` registers native
+endpoints; a URL ending in `.py` installs a Nova script. Existing configured
+endpoints retain their kind. `torznab.ndjson` characterizes the mixed list.
+
+`fbittorrent search --install-torznab URL --key-file PATH` registers a native
+endpoint without placing the key on argv. The config is
+`$XDG_CONFIG_HOME/fbittorrent/indexers.toml`:
+
+```toml
+[[torznab]]
+name = "private_indexer"
+url = "https://indexer.example/api"
+api_key_file = "/absolute/path/to/indexer.key"
+```
+
+Both files must be regular, owned by the user, exactly 0600 and opened with
+`O_NOFOLLOW`; an unsafe mode or symlink is refused, never repaired. Up to 16
+indexers and 256 KiB of config are accepted; each key is bounded to 4096 bytes.
+Inline URL credentials and inline `apikey` parameters are refused. Keyed remote
+endpoints require HTTPS; keyed loopback HTTP is allowed. Configuration refusals
+are `invalid_args`; upstream/download failures are `upstream` with
+`details.source:"torznab"`.
+
+Queries send `t=search`, `q`, and `apikey` only inside a native child worker.
+Requests have a 30-second deadline, a 4 MiB response limit, bounded XML nesting,
+and a 5000-result limit. Redirects stay on the original scheme/host/port, with
+at most six hops; cross-origin redirects are refused before a second request.
+`search.stop` and owner teardown kill and reap those workers, including blocked
+TLS requests. Empty measurements remain absent. The TUI and dashboard show
+provider kind; native-only search does not invoke Python.
+
+Responses that echo the credential are redacted before leaving the worker,
+including literal/URL-encoded keys and credential-bearing URL query members.
+A `__FBT_TORZNAB_KEY__` marker in a result is redeemed only by the native worker
+against its configured origin, so `search.grab` can retrieve metainfo without
+exposing the key in API frames, results, config output, logs or process argv.
+When an interface is selected, both queries and metainfo downloads use the
+existing interface-bound DNS/TCP primitives, with readiness checks around I/O
+and ordinary TLS verification. Bound `localhost` resolves directly to IPv4/IPv6
+loopback; remote names use bound DNS. Missing/down interfaces fail without retrying
+on an ordinary socket. The HTTP worker owns its small runtime only for the
+request; it never creates an engine session or acquires the daemon lock.
+
+### P6-02: verified Pieces (contract 1.2.31)
 
 The `pieces` capability adds read-only `torrents.pieces {hash}` → `Pieces` and
 `torrent:<hash>.pieces`, a singleton `state {data: Pieces}` detail topic.

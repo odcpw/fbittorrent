@@ -1,0 +1,2 @@
+{"dir":"c2s","frame":{"id":1,"op":"search.providers"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"providers":[{"enabled":true,"full_name":"Local Nova","kind":"nova","name":"local_nova","url":"https://nova.invalid"},{"enabled":true,"full_name":"Private indexer","kind":"torznab","name":"private_fixture","url":"https://indexer.invalid/api"}]}}}

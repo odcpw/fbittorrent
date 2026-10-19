@@ -293,7 +293,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<Request, Invalid> {
             .split('`')
             .nth(1)
             .or_else(|| {
-                ["topics", "hashes", "bps", "since_seq", "limit", "source"]
+                ["topics", "hashes", "bps", "since_seq", "limit", "source", "url"]
                     .into_iter()
                     .find(|key| text.starts_with(&format!("{key}:")))
             })

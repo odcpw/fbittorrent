@@ -55,6 +55,22 @@ fn keyed_non_loopback_http_is_refused_before_network() {
     }
 }
 #[test]
+fn nonempty_attribute_elements_preserve_the_xml_stack() {
+    let rows=xml::parse(br#"<rss xmlns:torznab="urn:fixture"><channel><item><title>Video</title><enclosure url="/fixture.torrent" length="4096"></enclosure><torznab:attr name="seeders" value="3"></torznab:attr></item></channel></rss>"#, &indexer()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].file_url, "http://127.0.0.1:1234/fixture.torrent");
+    assert_eq!(rows[0].seeders, 3);
+    assert!(xml::parse(b"<rss><channel>", &indexer()).is_err());
+    assert!(xml::parse(&vec![b'x'; RESPONSE_CAP as usize + 1], &indexer()).is_err());
+}
+#[test]
+fn literal_and_encoded_credentials_are_redacted() {
+    let key = "fixture key&value";
+    let text = format!("{key}:{}", worker::encoded(key));
+    let redacted = worker::redact(&text, Some(key));
+    assert_eq!(redacted, format!("{KEY_TOKEN}:{KEY_TOKEN}"));
+}
+#[test]
 fn credentials_refuse_wrong_modes_symlinks_and_echoes() {
     let path = std::env::temp_dir().join(format!(
         "fbt-indexer-{}-{}",
@@ -102,4 +118,16 @@ fn credentials_refuse_wrong_modes_symlinks_and_echoes() {
     );
     std::fs::remove_dir_all(path).unwrap();
     println!("config/key files enforce 0600 and O_NOFOLLOW, refuse without repairing; errors contain no credential");
+}
+
+#[test]
+fn refused_install_source_never_echoes_inline_credentials() {
+    let source = "https://username:password@indexer.invalid/api?apikey=secret%20key&index=1";
+    let public = public_source(source);
+    for secret in ["username", "password", "secret%20key", "secret+key"] {
+        assert!(!public.contains(secret));
+    }
+    assert!(public.contains(KEY_TOKEN));
+    let safe = "https://indexer.invalid/api?index=1";
+    assert_eq!(public_source(safe), safe);
 }

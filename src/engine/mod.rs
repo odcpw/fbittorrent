@@ -38,6 +38,7 @@ pub(crate) mod pieces;
 mod bus;
 mod watch;
 pub(crate) mod peers;
+mod tracker_edit;
 mod queue;
 mod queue_policy;
 mod queue_ops;

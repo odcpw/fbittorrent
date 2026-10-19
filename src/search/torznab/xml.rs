@@ -29,45 +29,14 @@ pub(super) fn parse(bytes: &[u8], indexer: &Indexer) -> Result<Vec<SearchResult>
             .map_err(|_| anyhow!("Torznab returned invalid XML"))?
         {
             Event::DocType(_) => bail!("Torznab XML document types are not supported"),
-            Event::Start(e) | Event::Empty(e)
-                if e.local_name().as_ref() == b"attr"
-                    || e.local_name().as_ref() == b"enclosure" =>
-            {
-                if let Some(row) = item.as_mut() {
-                    let mut name = String::new();
-                    let mut value = String::new();
-                    for a in e.attributes() {
-                        let a =
-                            a.map_err(|_| anyhow!("Torznab returned invalid XML attributes"))?;
-                        let v = a
-                            .decode_and_unescape_value(reader.decoder())
-                            .map_err(|_| anyhow!("Torznab returned invalid XML attribute"))?
-                            .into_owned();
-                        match a.key.as_ref() {
-                            b"name" => name = v,
-                            b"value" => value = v,
-                            b"url" => row.enclosure = v,
-                            b"length" => row.size = v.parse::<i64>().ok().filter(|v| *v >= 0),
-                            _ => {}
-                        }
-                    }
-                    match name.to_ascii_lowercase().as_str() {
-                        "seeders" | "seeds" => {
-                            row.seeds = value.parse::<i64>().ok().filter(|v| *v >= 0)
-                        }
-                        "size" => row.size = value.parse::<i64>().ok().filter(|v| *v >= 0),
-                        "magneturl" => row.magnet = value,
-                        "infohash" => row.hash = value,
-                        _ => {}
-                    }
-                }
-            }
+            Event::Empty(e) => attributes(item.as_mut(), &e, reader.decoder())?,
             Event::Start(e) => {
                 anyhow::ensure!(tag.len() < 64, "Torznab XML exceeds nesting limit");
                 let name = e.local_name().as_ref().to_ascii_lowercase();
                 if name == b"item" {
                     item = Some(Item::default());
                 }
+                attributes(item.as_mut(), &e, reader.decoder())?;
                 tag.push(name);
             }
             Event::Text(e) => {
@@ -109,6 +78,43 @@ pub(super) fn parse(bytes: &[u8], indexer: &Indexer) -> Result<Vec<SearchResult>
     }
     anyhow::ensure!(tag.is_empty(), "Torznab XML ended inside an element");
     Ok(rows)
+}
+fn attributes(
+    item: Option<&mut Item>,
+    element: &quick_xml::events::BytesStart<'_>,
+    decoder: quick_xml::encoding::Decoder,
+) -> Result<()> {
+    if !matches!(element.local_name().as_ref(), b"attr" | b"enclosure") {
+        return Ok(());
+    }
+    let Some(row) = item else {
+        return Ok(());
+    };
+    let mut name = String::new();
+    let mut value = String::new();
+    for attribute in element.attributes() {
+        let attribute =
+            attribute.map_err(|_| anyhow!("Torznab returned invalid XML attributes"))?;
+        let text = attribute
+            .decode_and_unescape_value(decoder)
+            .map_err(|_| anyhow!("Torznab returned invalid XML attribute"))?
+            .into_owned();
+        match attribute.key.as_ref() {
+            b"name" => name = text,
+            b"value" => value = text,
+            b"url" => row.enclosure = text,
+            b"length" => row.size = text.parse::<i64>().ok().filter(|v| *v >= 0),
+            _ => {}
+        }
+    }
+    match name.to_ascii_lowercase().as_str() {
+        "seeders" | "seeds" => row.seeds = value.parse::<i64>().ok().filter(|v| *v >= 0),
+        "size" => row.size = value.parse::<i64>().ok().filter(|v| *v >= 0),
+        "magneturl" => row.magnet = value,
+        "infohash" => row.hash = value,
+        _ => {}
+    }
+    Ok(())
 }
 fn text(item: Option<&mut Item>, tag: Option<&[u8]>, text: &str) {
     if let Some(item) = item {

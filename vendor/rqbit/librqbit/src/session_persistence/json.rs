@@ -138,7 +138,7 @@ impl JsonSessionPersistenceStore {
         let st = SerializedTorrent {
             trackers: torrent
                 .shared()
-                .trackers
+                .trackers.snapshot()
                 .iter()
                 .map(|u| u.to_string())
                 .collect(),

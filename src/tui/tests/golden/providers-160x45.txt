@@ -17,9 +17,9 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 │                                     ╭ Search providers ────────────────────────────────────────────────────────────────╮                                     │
-│                                     │ ▌ [x] EZTV                  provider-0.invalid                                   │                                     │
-│                                     │   [ ] YTS                   provider-1.invalid                                   │                                     │
-│                                     │   [x] The Pirate Bay        provider-2.invalid                                   │                                     │
+│                                     │ ▌ [x] nova · EZTV            provider-0.invalid                                  │                                     │
+│                                     │   [ ] nova · YTS             provider-1.invalid                                  │                                     │
+│                                     │   [x] nova · The Pirate Bay  provider-2.invalid                                  │                                     │
 │                                     │                                                                                  │                                     │
 │                                     │                                                                                  │                                     │
 │                                     │ 2 of 3 enabled · Space toggle · a all · n none · o open site · Esc close         │                                     │
