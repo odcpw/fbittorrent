@@ -8,11 +8,13 @@
   "description": "Torrent status, transfer rates and quick actions in the open fbittorrent app.",
   "kinds": [
     "service",
-    "bar-widget"
+    "bar-widget",
+    "panel"
   ],
   "entryPoints": {
     "service": "Service.qml",
-    "barWidget": "BarWidget.qml"
+    "barWidget": "BarWidget.qml",
+    "panel": "Dashboard.qml"
   },
   "barWidget": {
     "displayName": "Torrents",

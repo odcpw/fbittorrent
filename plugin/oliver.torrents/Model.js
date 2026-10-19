@@ -1,5 +1,7 @@
 .pragma library
 .import "Glyphs.js" as Glyphs
+.import "Formats.js" as Formats
+.import "Palette.js" as Palette
 
 function parseStatus(raw) {
   try {
@@ -12,6 +14,7 @@ function parseStatus(raw) {
 }
 
 function bytes(n) {
+  if (n===undefined || n===null) return "—"
   n = Math.max(0, Number(n) || 0)
   var u = ["B", "KiB", "MiB", "GiB", "TiB"]
   var i = 0
@@ -19,11 +22,12 @@ function bytes(n) {
   return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]
 }
 
-function rate(n) { return n === undefined || n === null ? "—" : bytes(n) + "/s" }
+function legacyRate(n) { return n === undefined || n === null ? "—" : bytes(n) + "/s" }
+function rate(n, compact) { return Formats.rate(n,!!compact) }
 
-function eta(secs) {
+function legacyEta(secs) {
   secs = Number(secs)
-  if (!(secs >= 0) || secs >= 8640000) return "∞"
+  if (!(secs >= 0) || secs >= 8640000) return "—"
   var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60)
   if (h > 0) return h + "h" + (m < 10 ? "0" : "") + m + "m"
   if (m > 0) return m + "m" + (s < 10 ? "0" : "") + s + "s"
@@ -73,10 +77,10 @@ function glyph(t) {
 function meta(t) {
   if (t.intent !== undefined) {
     var values = []
-    if (t.progress !== undefined && t.progress !== null) values.push((t.progress * 100).toFixed(1) + "%")
+    if (t.progress !== undefined && t.progress !== null) values.push(percent(t.progress,t.state==="done" || t.state==="seeding"))
     if (t.dl_bps !== undefined && t.dl_bps !== null) values.push(rate(t.dl_bps))
-    if (t.eta_s !== undefined && t.eta_s !== null) values.push(eta(t.eta_s))
-    if (!values.length && t.size !== undefined && t.size !== null) values.push(bytes(t.size))
+    if (t.eta_s !== undefined && t.eta_s !== null) values.push(Formats.eta(t.eta_s,false))
+    if (!values.length && t.size !== undefined && t.size !== null) values.push(Formats.size(t.size,false))
     values.push(t.seed ? "seeding allowed" : "seed off")
     return values.join(" · ")
   }
@@ -89,14 +93,14 @@ function meta(t) {
     parts.push(bytes(t.size))
   } else if (isActive(t)) {
     parts.push(pct + "%")
-    parts.push(rate(t.dlspeed))
-    parts.push(eta(t.eta))
+    parts.push(legacyRate(t.dlspeed))
+    parts.push(legacyEta(t.eta))
   } else if (isStopped(t)) {
     parts.push(pct + "%")
     parts.push(bytes(t.size))
   } else {
     parts.push(bytes(t.size))
-    if (Number(t.upspeed) > 0) parts.push("↑ " + rate(t.upspeed))
+    if (Number(t.upspeed) > 0) parts.push("↑ " + legacyRate(t.upspeed))
     parts.push("ratio " + Number(t.ratio || 0).toFixed(2))
   }
   var flags = (t.seq_dl ? "S" : "") + (t.f_l_piece_prio ? "F" : "")
@@ -160,3 +164,12 @@ function sourceName(source) {
   }
   return value.split(/[?#]/)[0].split("/").pop() || "Torrent"
 }
+
+function size(value,compact) {return Formats.size(value,!!compact)}
+function eta(value,compact) {return Formats.eta(value,!!compact)}
+function percent(value,complete) {return Formats.percent(value,!!complete)}
+function count(value) {return Formats.count(value)}
+function when(value,now) {return Formats.when(value,now)}
+function ago(value,now) {return Formats.ago(value,now)}
+function dim(fg,bg) {return Palette.dim(fg,bg)}
+function accentText(accent,bg,fg) {return Palette.accentText(accent,bg,fg)}

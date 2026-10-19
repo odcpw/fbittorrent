@@ -4,9 +4,8 @@
 Run locally or in CI with --no-systemd (default), or use --systemd for disposable
 transient units and disposable static-unit links. Static-unit fixtures verify
 all private XDG paths and working directory before launch and in the child.
-P1-06 adds ApiConn. P1-07's fixture-serving and daemon
-seed/leech follow-up waits for those items; no --serve-fixture capability is
-claimed by this skeleton. There is no --self-test mode.
+P1-06 adds ApiConn. --serve-fixture provides owned real-engine UI preconditions
+through visual_fixture; EOF tears down every child. There is no --self-test mode.
 """
 import argparse
 import base64
@@ -3773,6 +3772,8 @@ SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_un
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
+    parser.add_argument("--serve-fixture", choices=("empty", "downloading", "paused"),
+                        help="hold a private real-engine UI state until stdin EOF")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
     parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
     parser.add_argument("--case", choices=CASES,
@@ -3783,6 +3784,9 @@ def main():
     mode.add_argument("--systemd", action="store_true", help="use disposable transient user units, never installed owner units")
     mode.add_argument("--no-systemd", action="store_true", help="foreground children (default; CI mode)")
     args = parser.parse_args()
+    if args.serve_fixture:
+        from visual_fixture import serve
+        return serve(args.binary,args.serve_fixture)
     if args.contract_validator:
         os.environ["FBT_API_CONTRACT_VALIDATOR"] = str(args.contract_validator.resolve())
     if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":

@@ -1,0 +1,449 @@
+[
+  {
+    "fn": "size",
+    "args": [
+      null,
+      false
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "size",
+    "args": [
+      0,
+      false
+    ],
+    "expect": "0 B"
+  },
+  {
+    "fn": "size",
+    "args": [
+      1024,
+      false
+    ],
+    "expect": "1.0 KiB"
+  },
+  {
+    "fn": "size",
+    "args": [
+      1503238553.6,
+      false
+    ],
+    "expect": "1.4 GiB"
+  },
+  {
+    "fn": "size",
+    "args": [
+      1181116006.4,
+      true
+    ],
+    "expect": "1.1G"
+  },
+  {
+    "fn": "size",
+    "args": [
+      1009778688,
+      true
+    ],
+    "expect": "963M"
+  },
+  {
+    "fn": "size",
+    "args": [
+      12288,
+      true
+    ],
+    "expect": "12K"
+  },
+  {
+    "fn": "size",
+    "args": [
+      1023,
+      true
+    ],
+    "expect": "1023B"
+  },
+  {
+    "fn": "size",
+    "args": [
+      -1,
+      false
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      null,
+      false
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      null,
+      true
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      0,
+      false
+    ],
+    "expect": "0 B/s"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      0,
+      true
+    ],
+    "expect": "0B"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      4200000,
+      false
+    ],
+    "expect": "4.2 MB/s"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      3100000,
+      true
+    ],
+    "expect": "3.1M"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      32000,
+      true
+    ],
+    "expect": "32K"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      999,
+      false
+    ],
+    "expect": "999 B/s"
+  },
+  {
+    "fn": "rate",
+    "args": [
+      1000,
+      false
+    ],
+    "expect": "1.0 KB/s"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      null,
+      false
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      -1,
+      true
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      0,
+      false
+    ],
+    "expect": "0 s"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      59,
+      true
+    ],
+    "expect": "59s"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      60,
+      false
+    ],
+    "expect": "1 min"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      65,
+      true
+    ],
+    "expect": "1m"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      720,
+      false
+    ],
+    "expect": "12 min"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      3900,
+      true
+    ],
+    "expect": "1h05"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      3900,
+      false
+    ],
+    "expect": "1 h 05"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      172800,
+      true
+    ],
+    "expect": "2d"
+  },
+  {
+    "fn": "eta",
+    "args": [
+      172800,
+      false
+    ],
+    "expect": "2 d"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      null
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      -0.1
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      1.1
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0
+    ],
+    "expect": "0%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.0004
+    ],
+    "expect": "<1%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.01
+    ],
+    "expect": "1%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.426
+    ],
+    "expect": "43%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.995
+    ],
+    "expect": "99%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.999
+    ],
+    "expect": "99.9%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      0.9999
+    ],
+    "expect": "99.9%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      1
+    ],
+    "expect": "99.9%"
+  },
+  {
+    "fn": "percent",
+    "args": [
+      1,
+      true
+    ],
+    "expect": "100%"
+  },
+  {
+    "fn": "count",
+    "args": [
+      null
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "count",
+    "args": [
+      0
+    ],
+    "expect": "0"
+  },
+  {
+    "fn": "count",
+    "args": [
+      9999
+    ],
+    "expect": "9999"
+  },
+  {
+    "fn": "count",
+    "args": [
+      10000
+    ],
+    "expect": "10\u2009000"
+  },
+  {
+    "fn": "count",
+    "args": [
+      1234567
+    ],
+    "expect": "1\u2009234\u2009567"
+  },
+  {
+    "fn": "count",
+    "args": [
+      1.2
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "when",
+    "args": [
+      "2026-10-19T12:41:00Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "12:41 today"
+  },
+  {
+    "fn": "when",
+    "args": [
+      "2026-10-12T12:41:00Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "Oct 12"
+  },
+  {
+    "fn": "when",
+    "args": [
+      "2025-10-12T12:41:00Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "2025-10-12"
+  },
+  {
+    "fn": "when",
+    "args": [
+      null,
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "when",
+    "args": [
+      "bad",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "ago",
+    "args": [
+      "2026-10-19T12:59:48Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "12 s ago"
+  },
+  {
+    "fn": "ago",
+    "args": [
+      "2026-10-19T12:48:00Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "12 min ago"
+  },
+  {
+    "fn": "ago",
+    "args": [
+      "2026-10-19T13:00:12Z",
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "in 12 s"
+  },
+  {
+    "fn": "ago",
+    "args": [
+      null,
+      "2026-10-19T13:00:00Z"
+    ],
+    "expect": "\u2014"
+  },
+  {
+    "fn": "when",
+    "args": [
+      1792413660,
+      1792414800
+    ],
+    "expect": "12:41 today"
+  },
+  {
+    "fn": "ago",
+    "args": [
+      1792414788,
+      1792414800
+    ],
+    "expect": "12 s ago"
+  }
+]
