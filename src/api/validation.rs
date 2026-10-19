@@ -139,6 +139,11 @@ impl Validate for Error {
     }
 }
 fn torrent(value: &Torrent, list_name: bool) -> Checked {
+    require(
+        value.state != TorrentState::Checking || !value.checked,
+        "torrent.checked",
+        "must be false while state is checking",
+    )?;
     if list_name {
         text(&value.name, 1024, "torrent.name")?;
     }
