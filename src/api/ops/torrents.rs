@@ -36,25 +36,47 @@ fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     })
 }
 fn hashes(values: &Hashes) -> HashSelection {
-    HashSelection::Hashes(values.as_slice().iter().map(ToString::to_string).collect())
+    HashSelection(values.as_slice().iter().map(ToString::to_string).collect())
 }
+/// The engine view is the API row; only identifiers and timestamps are checked.
 pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
-    let legacy: serde_json::Value =
-        serde_json::from_str(&view.to_cli_json().map_err(engine_error)?).unwrap();
-    let mut value = serde_json::to_value(view).unwrap();
-    if value["upload_limit_bps"] == 0 {
-        value.as_object_mut().unwrap().remove("upload_limit_bps");
-    }
-    if value.get("origin").is_none() {
-    if let Some(origin) = legacy["tags"].as_str().and_then(|tags| {
-        tags.split(',')
-            .find_map(|tag| tag.strip_prefix("fbt-origin:"))
-    }) {
-        value["origin"] = json!(origin);
-    } else { value["origin"]=json!("manual"); }
-    }
-    serde_json::from_value(value)
-        .map_err(|_| error(ErrorCode::Internal, "invalid normalized torrent", None))
+    let invalid = || error(ErrorCode::Internal, "invalid normalized torrent", None);
+    let unsigned = |value: i64| u64::try_from(value).map_err(|_| invalid());
+    Ok(Torrent {
+        hash: Hash::new(view.hash).map_err(|_| invalid())?,
+        name: view.name,
+        state: view.state,
+        intent: view.intent,
+        staged: view.staged,
+        checked: view.checked,
+        seed: view.seed,
+        upload_enabled: view.upload_enabled,
+        upload_policy: view.upload_policy,
+        save_path: view.save_path,
+        added_at: unsigned(view.added_at)?,
+        force: view.force,
+        reason: view.reason,
+        error: view.error,
+        progress: view.progress,
+        size: view.size,
+        completed_bytes: view.completed_bytes,
+        uploaded_bytes: view.uploaded_bytes,
+        dl_bps: view.dl_bps,
+        ul_bps: view.ul_bps,
+        eta_s: view.eta_s,
+        peers: view.peers,
+        seeds: view.seeds,
+        upload_limit_bps: view.upload_limit_bps.filter(|limit| *limit != 0),
+        download_limit_bps: view.download_limit_bps,
+        effective_download_limit_bps: view.effective_download_limit_bps,
+        ratio: view.ratio,
+        content_path: view.content_path,
+        completed_at: view.completed_at.map(unsigned).transpose()?,
+        origin: Some(view.origin.unwrap_or_else(|| "manual".into())),
+        imdb_id: None,
+        queue_pos: view.queue_pos,
+        playable: None,
+    })
 }
 pub fn list(daemon: &Daemon) -> ApiResult<Vec<Torrent>> {
     let EngineResult::Torrents(rows) = execute(daemon, EngineOp::Info)? else {
@@ -466,7 +488,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 let EngineResult::Start(result) = execute(
                     daemon,
                     EngineOp::Start {
-                        hashes: HashSelection::Hashes(wanted),
+                        hashes: HashSelection(wanted),
                         skip_complete: requested.len() > 1,
                     },
                 )?

@@ -40,8 +40,6 @@ fn is_false(value: &bool) -> bool { !value }
 
 fn known_progress() -> bool { true }
 
-/// Unlimited rate representation. Actual payload permission is gated separately.
-pub const NO_UPLOAD_LIMIT: i64 = 0;
 pub const SEED_TAG: &str = "seed";
 
 impl Torrent {

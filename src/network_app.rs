@@ -66,20 +66,4 @@ mod tests {
         cfg.network_interface = Some("proton".into());
         assert_eq!(state(&cfg).interface.as_deref(), Some("proton0"));
     }
-
-    #[test]
-    fn network_expectations_are_per_lifecycle() {
-        use crate::daemon::lifecycle::Lifecycle;
-        let cfg = Config::default();
-        let first = Lifecycle::default();
-        let second = Lifecycle::default();
-        assert_eq!(first.expected_network(), None);
-        let missing = Config { network_interface: Some("fbmissing0".into()), ..Default::default() };
-        first.set_expected_network(Some(state(&missing)));
-        second.set_expected_network(Some(state(&cfg)));
-        assert_eq!(first.expected_network(), Some(state(&missing)));
-        first.set_expected_network(None);
-        assert_eq!(first.expected_network(), None);
-        assert_eq!(second.expected_network(), Some(state(&cfg)));
-    }
 }

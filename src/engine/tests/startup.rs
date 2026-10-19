@@ -37,39 +37,36 @@
         for saved_paused in [false, true] {
             let (app, directory, hash, length) = hashing_fixture(saved_paused);
             let dispatcher = app.dispatcher();
-            let row = || -> Torrent {
-                let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
-                rows.into_iter().find(|row| row.hash == hash).unwrap()
-            };
+            let row = || crate::engine::tests::row(&dispatcher, &hash);
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 let checking = row();
-                if checking.state == "checkingDL" && checking.completed > 0 && checking.completed < length as i64 {
-                    println!("active hashing: state={} checked_bytes={}", checking.state, checking.completed);
+                if checking.state == view::TorrentState::Checking && checking.completed_bytes.is_some_and(|bytes| bytes > 0 && bytes < length) {
+                    println!("active hashing: state={:?} checked_bytes={:?}", checking.state, checking.completed_bytes);
                     break;
                 }
                 assert!(Instant::now() < deadline, "must stop during real hashing: {checking:?}");
                 std::thread::sleep(Duration::from_millis(1));
             }
-            dispatcher.dispatch(&request("torrents/stop", &[("hashes", &hash)])).unwrap().unwrap();
+            dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[&hash]) }).unwrap();
             let stopped = row();
-            println!("stopped hashing (saved_paused={saved_paused}): state={} checked_bytes={}", stopped.state, stopped.completed);
-            assert_eq!(stopped.state, "stoppedDL");
-            assert!(stopped.is_stopped(), "the shared client must offer Resume");
+            println!("stopped hashing (saved_paused={saved_paused}): state={:?} checked_bytes={:?}", stopped.state, stopped.completed_bytes);
+            assert_eq!(stopped.state, view::TorrentState::Paused);
+            assert_eq!(stopped.intent, view::Intent::Pause, "the shared client must offer Resume");
             std::thread::sleep(Duration::from_millis(20));
-            assert_eq!(row().completed, stopped.completed, "Stop must drain the real check, including a saved-paused check");
+            assert_eq!(row().completed_bytes, stopped.completed_bytes, "Stop must drain the real check, including a saved-paused check");
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
             assert!(saved.records[0].paused);
-            dispatcher.dispatch(&request("torrents/start", &[("hashes", &hash)])).unwrap().unwrap();
+            dispatcher.execute(ops::EngineOp::Start { hashes: crate::engine::tests::hashes(&[&hash]), skip_complete: false }).unwrap();
             let handle = dispatcher.inner.handle(&hash).unwrap();
             dispatcher.runtime.block_on(async {
                 time::timeout(dispatcher.runtime.cx(), Duration::from_secs(15),
                     handle.wait_until_initialized(dispatcher.runtime.cx())).await.unwrap().unwrap();
             });
             let resumed = row();
-            println!("resumed hashing: state={} verified_bytes={}", resumed.state, resumed.completed);
-            assert_eq!(resumed.state, "stalledDL");
-            assert!(resumed.completed > 0 && resumed.completed < length as i64);
+            println!("resumed hashing: state={:?} verified_bytes={:?}", resumed.state, resumed.completed_bytes);
+            assert_eq!(resumed.state, view::TorrentState::Stalled);
+            assert!(resumed.completed_bytes.is_some_and(|bytes| bytes > 0 && bytes < length));
             assert!(!read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
             drop(app);
             std::fs::remove_dir_all(directory).unwrap();
@@ -84,19 +81,18 @@
         let deadline = Instant::now() + Duration::from_secs(15);
         let mut active_observations = 0;
         loop {
-            let rows: Vec<Torrent> = serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap();
-            let row = rows.iter().find(|row| row.hash == hash).unwrap();
+            let row = crate::engine::tests::row(&dispatcher, &hash);
             assert!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
-            match row.state.as_str() {
-                "checkingDL" => {
-                    if row.completed > 0 && row.completed < length as i64 {
+            match row.state {
+                view::TorrentState::Checking => {
+                    if row.completed_bytes.is_some_and(|bytes| bytes > 0 && bytes < length) {
                         active_observations += 1;
                     }
                 }
-                "stoppedDL" => {
+                view::TorrentState::Paused => {
                     assert!(active_observations > 0, "saved-paused verification must be shown as checking while active: {row:?}");
                     assert!(matches!(dispatcher.inner.handle(&hash).unwrap().stats().state, TorrentStatsState::Paused));
-                    println!("saved-paused verification: {active_observations} active checking observations, then state={} verified_bytes={}", row.state, row.completed);
+                    println!("saved-paused verification: {active_observations} active checking observations, then state={:?} verified_bytes={:?}", row.state, row.completed_bytes);
                     break;
                 }
                 _ => panic!("unexpected saved-paused verification state: {row:?}"),
@@ -170,78 +166,78 @@
             assert!(tasks[&valid.hash].generation < tasks[&magnet.hash].generation);
             assert!(tasks[&bad.hash].generation < tasks[&magnet.hash].generation);
         }
-        let list = || -> Vec<Torrent> {
-            serde_json::from_str(&dispatcher.dispatch(&request("torrents/info", &[])).unwrap().unwrap()).unwrap()
-        };
+        let list = || rows(&dispatcher);
+        let start_one = |hash: &str| dispatcher.execute(ops::EngineOp::Start { hashes: crate::engine::tests::hashes(&[hash]), skip_complete: false }).unwrap();
+        let stop_one = |hash: &str| dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[hash]) }).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let rows = loop {
             let rows = list();
             assert_eq!(rows.len(), 3);
             let resolving = rows.iter().find(|row| row.hash == magnet.hash).unwrap();
-            assert_eq!(resolving.state, "metaDL");
-            assert!(resolving.error_message.is_none());
-            if rows.iter().any(|row| row.hash == bad.hash && row.state == "error") &&
+            assert_eq!(resolving.state, view::TorrentState::Metadata);
+            assert!(resolving.error.is_none());
+            if rows.iter().any(|row| row.hash == bad.hash && row.state == view::TorrentState::Error) &&
                 dispatcher.restore_outcomes().get(&valid.hash) == Some(&RestoreOutcome::Restored) { break rows; }
             assert!(Instant::now() < deadline, "rows: {rows:?}");
             std::thread::sleep(Duration::from_millis(20));
         };
-        for row in &rows { println!("{} state={} error_message={:?}", row.hash, row.state, row.error_message); }
+        for row in &rows { println!("{} state={:?} error={:?}", row.hash, row.state, row.error); }
         let failed = rows.iter().find(|row| row.hash == bad.hash).unwrap();
-        assert!(failed.error_message.as_ref().is_some_and(|message| message.contains("could not restore")));
+        assert!(failed.error.as_ref().is_some_and(|message| message.contains("could not restore")));
         assert!(matches!(dispatcher.restore_outcomes().get(&bad.hash), Some(RestoreOutcome::Failed { reason: "restore_failed", .. })));
         // Verify the cached pending mapping without racing a five-byte hash check.
         let mut pending = dispatcher.inner.restores.lock().unwrap();
         let entry = pending.get_mut(&bad.hash).unwrap();
         let failed_outcome = std::mem::replace(&mut entry.outcome, RestoreOutcome::Checking);
         drop(pending);
-        assert_eq!(dispatcher.inner.unrestored_snapshot(&bad).state, "checkingDL");
-        assert_eq!(dispatcher.inner.unrestored_snapshot(&bad).error_message, failed.error_message);
+        assert_eq!(dispatcher.inner.unrestored_view(&bad).state, view::TorrentState::Checking);
+        assert_eq!(dispatcher.inner.unrestored_view(&bad).error, failed.error);
         dispatcher.inner.restores.lock().unwrap().get_mut(&bad.hash).unwrap().outcome = failed_outcome;
 
         // A retry may spend another 90 seconds resolving metadata. Keep the
         // corruption diagnostic while it waits, and replace it only on a new
         // failure or clear it after successful restoration.
         std::fs::remove_file(&bad_path).unwrap();
-        dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        start_one(&bad.hash);
         let retry = list().into_iter().find(|row| row.hash == bad.hash).unwrap();
-        assert_eq!(retry.state, "metaDL");
-        assert_eq!(retry.error_message, failed.error_message);
-        println!("pending retry state={} error_message={:?}", retry.state, retry.error_message);
-        dispatcher.dispatch(&request("torrents/stop", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        assert_eq!(retry.state, view::TorrentState::Metadata);
+        assert_eq!(retry.error, failed.error);
+        println!("pending retry state={:?} error={:?}", retry.state, retry.error);
+        stop_one(&bad.hash);
         std::fs::write(&bad_path, &valid_bytes).unwrap(); // Real but mismatched metainfo.
-        dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        start_one(&bad.hash);
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let row = list().into_iter().find(|row| row.hash == bad.hash).unwrap();
-            assert!(row.error_message.is_some(), "a retry must retain a diagnostic: {row:?}");
-            if row.state == "error" {
-                assert!(row.error_message.as_ref().unwrap().contains("does not match saved record"));
-                println!("failed retry state={} error_message={:?}", row.state, row.error_message);
+            assert!(row.error.is_some(), "a retry must retain a diagnostic: {row:?}");
+            if row.state == view::TorrentState::Error {
+                assert!(row.error.as_ref().unwrap().contains("does not match saved record"));
+                println!("failed retry state={:?} error={:?}", row.state, row.error);
                 break;
             }
             assert!(Instant::now() < deadline, "{row:?}");
             std::thread::sleep(Duration::from_millis(10));
         }
         std::fs::write(&bad_path, repaired_bytes).unwrap();
-        dispatcher.dispatch(&request("torrents/start", &[("hashes", &bad.hash)])).unwrap().unwrap();
+        start_one(&bad.hash);
         let deadline = Instant::now() + Duration::from_secs(10);
         while dispatcher.restore_outcomes().get(&bad.hash) != Some(&RestoreOutcome::Restored) {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(list().iter().find(|row| row.hash == bad.hash).unwrap().error_message.is_none());
+        assert!(list().iter().find(|row| row.hash == bad.hash).unwrap().error.is_none());
         println!("repaired cache retried and restored");
 
-        dispatcher.dispatch(&request("torrents/stop", &[("hashes", &magnet.hash)])).unwrap().unwrap();
-        assert_eq!(list().iter().find(|row| row.hash == magnet.hash).unwrap().state, "stoppedDL");
+        stop_one(&magnet.hash);
+        assert_eq!(list().iter().find(|row| row.hash == magnet.hash).unwrap().state, view::TorrentState::Paused);
         let deadline = Instant::now() + Duration::from_secs(1);
         while dispatcher.inner.restores.lock().unwrap()[&magnet.hash].task.as_ref().is_some_and(|task| !task.is_finished()) {
             assert!(Instant::now() < deadline, "stopped resolver must finish its cleanup");
             std::thread::sleep(Duration::from_millis(10));
         }
-        dispatcher.dispatch(&request("torrents/start", &[("hashes", &magnet.hash)])).unwrap().unwrap();
-        assert_eq!(list().iter().find(|row| row.hash == magnet.hash).unwrap().state, "metaDL");
-        dispatcher.dispatch(&request("torrents/delete", &[("hashes", &magnet.hash)])).unwrap().unwrap();
+        start_one(&magnet.hash);
+        assert_eq!(list().iter().find(|row| row.hash == magnet.hash).unwrap().state, view::TorrentState::Metadata);
+        dispatcher.execute(ops::EngineOp::Delete { hashes: crate::engine::tests::hashes(&[&magnet.hash]), files: false }).unwrap();
         assert_eq!(list().len(), 2);
         assert!(!dispatcher.restore_outcomes().contains_key(&magnet.hash));
         // Leave a resolver active at shutdown, proving it belongs to this runtime.

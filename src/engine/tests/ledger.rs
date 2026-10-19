@@ -20,7 +20,7 @@ fn deferred_record_from_magnet() {
     let prior = crate::engine::tests::review_record("ab00000000000000000000000000000000000000", &directory);
     let mut ledger = Ledger::default();ledger.records.push(prior.clone());
     save_parked_ledger(&directory, &ledger).unwrap();
-    let parked = crate::engine::ParkedLedger::new(directory.clone(), Lifecycle::default());
+    let parked = crate::engine::ParkedLedger::new(directory.clone());
     let generation = parked.ledger_generation().current();
     let EngineResult::Added(added) = parked.execute(EngineOp::AddMagnet(options.clone())).unwrap() else { panic!("add result") };
     assert!(added[0].deferred && !added[0].duplicate);
@@ -111,12 +111,12 @@ fn parked_ledger_generations_survive_reads_and_each_durable_save() {
     use crate::engine::ops::{EngineOp, HashSelection};
     let directory = review_directory("parked-generations");
     save_parked_ledger(&directory, &Ledger::default()).unwrap();
-    let parked = crate::engine::ParkedLedger::new(directory.clone(), Lifecycle::default());
+    let parked = crate::engine::ParkedLedger::new(directory.clone());
     let generation = parked.ledger_generation();
     for expected in 1..=2 {
         parked
             .execute(EngineOp::Stop {
-                hashes: HashSelection::All,
+                hashes: HashSelection(Vec::new()),
             })
             .unwrap();
         assert_eq!(generation.current(), expected);
@@ -143,7 +143,7 @@ fn save_preserves_order() {
     save_parked_ledger(&directory,&ledger).unwrap();
     let saved=read_ledger(&directory.join("torrents.json")).unwrap();
     assert_eq!(saved.records.iter().map(|r|r.hash.clone()).collect::<Vec<_>>(),expected);
-    let parked=crate::engine::ParkedLedger::new(directory.clone(),Lifecycle::default());
+    let parked=crate::engine::ParkedLedger::new(directory.clone());
     let crate::engine::ops::EngineResult::Torrents(rows)=parked.execute(crate::engine::ops::EngineOp::Info).unwrap() else {panic!("rows");};
     assert_eq!(rows.iter().map(|r|r.queue_pos.unwrap()).collect::<Vec<_>>(),[1,3,2],"display sort cannot change ledger positions");
     assert_eq!(read_ledger(&directory.join("torrents.json")).unwrap().records.iter().map(|r|r.hash.clone()).collect::<Vec<_>>(),expected);

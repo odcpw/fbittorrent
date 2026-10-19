@@ -1,6 +1,6 @@
 //! Typed saved-history and durable-intent operations without a native session.
 use super::*;
-use ops::{AddedTorrent, EngineOp, EngineResult, QueueInfo};
+use ops::{AddedTorrent, EngineOp, EngineResult};
 use view::TorrentView;
 
 // Preserve cross-request serialization for the legacy compatibility function as
@@ -42,15 +42,13 @@ fn parked_view(record: &Record, directory: &Path) -> Result<TorrentView> {
 
 pub struct ParkedLedger {
     directory: PathBuf,
-    lifecycle: Lifecycle,
     generation: Arc<LedgerGeneration>,
     undo: Arc<undo::History>,
 }
 impl ParkedLedger {
-    pub fn new(directory: PathBuf, lifecycle: Lifecycle) -> Self {
+    pub fn new(directory: PathBuf) -> Self {
         Self {
             directory,
-            lifecycle,
             generation: Arc::default(),
             undo: Arc::default(),
         }
@@ -66,36 +64,14 @@ impl ParkedLedger {
         let _guard = PARKED_LEDGER_LOCK
             .lock()
             .map_err(|_| anyhow!("saved torrent lock is unavailable"))?;
-        let snapshot = self
-            .lifecycle
-            .expected_network()
-            .unwrap_or_else(|| crate::network_app::state(&Config::default()));
-        if let Some(result) = op.control(&snapshot, &self.lifecycle) {
-            return result;
-        }
         match &op {
-            EngineOp::Version => {
-                return Ok(EngineResult::Version(format!(
-                    "native librqbit {} (waiting for ProtonVPN)",
-                    librqbit::version()
-                )));
-            }
             EngineOp::TransferInfo => {
                 return Ok(EngineResult::Transfer(TransferInfo {
                     connection_status: "vpn_waiting".into(),
                     ..Default::default()
                 }));
             }
-            EngineOp::SetQueue { limit } => {
-                if *limit == 0 {
-                    bail!("max_active_downloads must be at least 1");
-                }
-                let mut cfg = Config::load()?;
-                cfg.max_active_downloads = *limit;
-                cfg.save()?;
-                return Ok(EngineResult::Acknowledged);
-            }
-            EngineOp::Rename {..} | EngineOp::Queue
+            EngineOp::Rename {..}
             | EngineOp::Info
             | EngineOp::Files { .. }
             | EngineOp::Trackers { .. }
@@ -160,21 +136,6 @@ impl ParkedLedger {
             EngineOp::Trackers {hash} => {
                 let record=ledger.records.iter().find(|r|&r.hash==hash).context("torrent record not found")?;
                 return Ok(EngineResult::Trackers(trackers::saved(record,&self.directory)?));
-            }
-            EngineOp::Queue => {
-                return Ok(EngineResult::Queue(QueueInfo {
-                    max_active_downloads: Config::load()?.max_active_downloads,
-                    active_downloads: 0,
-                    queued_downloads: ledger
-                        .records
-                        .iter()
-                        .filter(|record| {
-                            !record.paused
-                                && !(record.stop_on_complete() && record.completion_on > 0)
-                        })
-                        .count(),
-                    network_blocked: true,
-                }));
             }
             EngineOp::Info => {
                 let mut queue_position=0;

@@ -16,80 +16,46 @@
             records: vec![record],
         };
         save_parked_ledger(&directory, &ledger).unwrap();
-        let info: serde_json::Value = serde_json::from_str(
-            &dispatch_parked_in(&request("torrents/info", &[]), &directory)
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(info[0]["state"], "waitingVPN");
-        assert_eq!(info[0]["size"], 1);
-        assert_eq!(info[0]["progress_known"], false);
-        let files: serde_json::Value = serde_json::from_str(
-            &dispatch_parked_in(&request("torrents/files", &[("hash", &hash)]), &directory)
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(files[0]["name"], "offline.bin");
-        assert_eq!(files[0]["progress_known"], false);
-        dispatch_parked_in(&request("torrents/stop", &[("hashes", &hash)]), &directory)
-            .unwrap()
-            .unwrap();
+        let parked = ParkedLedger::new(directory.clone());
+        let info = parked_rows(&directory);
+        assert_eq!(info[0].state, view::TorrentState::WaitingVpn);
+        assert_eq!(info[0].size, Some(1));
+        assert!(info[0].progress.is_none());
+        let ops::EngineResult::Files(files) = parked.execute(ops::EngineOp::Files { hash: hash.clone() }).unwrap() else {
+            unreachable!("typed parked files")
+        };
+        assert_eq!(files[0].name, "offline.bin");
+        assert!(!files[0].progress_known);
+        parked.execute(ops::EngineOp::Stop { hashes: hashes(&[&hash]) }).unwrap();
         assert!(
             read_ledger(&directory.join("torrents.json"))
                 .unwrap()
                 .records[0]
                 .paused
         );
-        dispatch_parked_in(&request("torrents/start", &[("hashes", &hash)]), &directory)
-            .unwrap()
-            .unwrap();
+        parked.execute(ops::EngineOp::Start { hashes: hashes(&[&hash]), skip_complete: false }).unwrap();
         assert!(
             !read_ledger(&directory.join("torrents.json"))
                 .unwrap()
                 .records[0]
                 .paused
         );
-        assert!(dispatch_parked_in(
-            &request(
-                "torrents/add",
-                &[(
-                    "urls",
-                    "magnet:?xt=urn:btih:0000000000000000000000000000000000000000"
-                )]
-            ),
-            &directory
-        )
-        .unwrap()
-        .is_err());
-        assert!(dispatch_parked_in(
-            &request(
-                "torrents/delete",
-                &[("hashes", &hash), ("deleteFiles", "true")]
-            ),
-            &directory
-        )
-        .unwrap()
-        .is_err());
+        assert!(parked
+            .execute(ops::EngineOp::Add(add_request(
+                vec!["magnet:?xt=urn:btih:0000000000000000000000000000000000000000".into()],
+                None,
+            )))
+            .is_err());
+        assert!(parked.execute(ops::EngineOp::Delete { hashes: hashes(&[&hash]), files: true }).is_err());
         let saved = std::fs::read(directory.join("torrents.json")).unwrap();
         std::fs::create_dir(directory.join("torrents.json.tmp")).unwrap();
-        assert!(
-            dispatch_parked_in(&request("torrents/stop", &[("hashes", &hash)]), &directory)
-                .unwrap()
-                .is_err()
-        );
+        assert!(parked.execute(ops::EngineOp::Stop { hashes: hashes(&[&hash]) }).is_err());
         assert_eq!(
             std::fs::read(directory.join("torrents.json")).unwrap(),
             saved
         );
         std::fs::remove_dir(directory.join("torrents.json.tmp")).unwrap();
-        dispatch_parked_in(
-            &request("torrents/delete", &[("hashes", &hash)]),
-            &directory,
-        )
-        .unwrap()
-        .unwrap();
+        parked.execute(ops::EngineOp::Delete { hashes: hashes(&[&hash]), files: false }).unwrap();
         assert!(read_ledger(&directory.join("torrents.json"))
             .unwrap()
             .records
@@ -207,7 +173,7 @@
             source: String::new(),
             output_folder: "/tmp/fixture".into(),
             only_files: Some(vec![1]),
-            upload_limit: NO_UPLOAD_LIMIT,
+            upload_limit: 0,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             ratio_limit: 0.0,
             category: String::new(),
@@ -251,19 +217,8 @@
         let make_app = |ledger: Ledger| test_app(&directory, &downloads, ledger, None);
         let app = make_app(Ledger::default());
         let dispatcher = app.dispatcher();
-        dispatcher
-            .dispatch(&Request {
-                method: "POST".into(),
-                path: "torrents/add".into(),
-                args: vec![],
-                file: Some(crate::engine::tests::fixture::Upload {
-                    name: "fixture.torrent".into(),
-                    bytes: torrent,
-                }),
-            })
-            .unwrap()
-            .unwrap();
-        let (hash, mut saved) = dispatcher.runtime.block_on(async {
+        dispatcher.execute(ops::EngineOp::Add(add_request(vec![String::new()], Some(torrent)))).unwrap();
+        let record = dispatcher.runtime.block_on(async {
             let record = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), &test_cx())
                 .await
                 .unwrap()
@@ -287,41 +242,23 @@
                 handle.is_paused(),
                 "manual download must stop at completion"
             );
-            let duplicate = Request {
-                method: "POST".into(),
-                path: "torrents/add".into(),
-                args: vec![(
-                    "urls".into(),
-                    format!("magnet:?xt=urn:btih:{}", record.hash),
-                )],
-                file: None,
-            };
-            time::timeout(
-                &test_cx(),
-                Duration::from_secs(2),
-                dispatcher.add(&test_cx(), &duplicate),
-            )
-            .await
+            record
+        });
+        let (sent, received) = std::sync::mpsc::channel();
+        let actor = dispatcher.clone();
+        let duplicate = format!("magnet:?xt=urn:btih:{}", record.hash);
+        std::thread::spawn(move || {
+            let _ = sent.send(actor.execute(ops::EngineOp::Add(add_request(vec![duplicate], None))).map(|_| ()));
+        });
+        received
+            .recv_timeout(Duration::from_secs(2))
             .expect("a saved magnet must not need peer metadata lookup")
             .unwrap();
-            let saved: Ledger = serde_json::from_slice(
-                &rqbit_runtime::fs::read(directory.join("torrents.json"))
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(
-                saved.records.len(),
-                1,
-                "duplicate magnet must keep one durable record"
-            );
-            assert!(
-                !saved.records[0].paused,
-                "completion suspension preserves running intent"
-            );
-            assert!(saved.records[0].completion_on > 0);
-            (record.hash, saved)
-        });
+        let mut saved = read_ledger(&directory.join("torrents.json")).unwrap();
+        assert_eq!(saved.records.len(), 1, "duplicate magnet must keep one durable record");
+        assert!(!saved.records[0].paused, "completion suspension preserves running intent");
+        assert!(saved.records[0].completion_on > 0);
+        let hash = record.hash;
         let old_session = dispatcher.inner.session.clone();
         drop(dispatcher);
         drop(app);
@@ -366,11 +303,7 @@
         std::fs::create_dir(directory.join("torrents.json.tmp")).unwrap();
         assert!(app
             .dispatcher
-            .dispatch(&request(
-                "torrents/delete",
-                &[("hashes", &hash), ("deleteFiles", "true")],
-            ))
-            .unwrap()
+            .execute(ops::EngineOp::Delete { hashes: hashes(&[&hash]), files: true })
             .is_err());
         assert_eq!(
             std::fs::read(directory.join("torrents.json")).unwrap(),
@@ -383,11 +316,7 @@
         assert!(app.dispatcher.inner.handle(&hash).is_ok());
         std::fs::remove_dir(directory.join("torrents.json.tmp")).unwrap();
         app.dispatcher
-            .dispatch(&request(
-                "torrents/delete",
-                &[("hashes", &hash), ("deleteFiles", "true")],
-            ))
-            .unwrap()
+            .execute(ops::EngineOp::Delete { hashes: hashes(&[&hash]), files: true })
             .unwrap();
         assert!(!downloads.join("fixture.txt").exists());
         assert!(!app.dispatcher.inner.torrent_path(&hash).unwrap().exists());

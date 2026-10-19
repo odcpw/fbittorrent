@@ -1,33 +1,6 @@
-//! Normalized torrent views and the single legacy qBittorrent conversion.
+//! Normalized torrent views: the engine side of the one torrent model.
 use super::*;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TorrentState {
-    Metadata,
-    Checking,
-    Downloading,
-    Stalled,
-    Queued,
-    Paused,
-    Done,
-    Seeding,
-    WaitingVpn,
-    Error,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Intent {
-    Run,
-    Pause,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UploadPolicy {
-    Off,
-    Unlimited,
-    Custom,
-}
+pub use crate::api::{Intent, TorrentState, UploadPolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Activity {
@@ -82,90 +55,48 @@ fn derive_state(f: StateFacts) -> (TorrentState, Option<&'static str>) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Source {
-    Handle,
-    Dormant,
-    Unrestored {
-        checking: bool,
-        stopped: bool,
-        failed: bool,
-    },
-    Parked,
-}
+/// Unknown values are None; the API serializes them by omission.
 #[derive(Debug, Clone)]
-struct Legacy {
-    source: Source,
-    facts: StateFacts,
-    name: String,
-    category: String,
-    tags: String,
-    completion_on: i64,
-    ratio_limit: f64,
-    progress_known: bool,
-    content_path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct TorrentView {
     pub hash: String,
     pub name: String,
     pub state: TorrentState,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub intent: Intent,
     pub staged: bool,
     pub checked: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub uploaded_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub dl_bps: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ul_bps: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub eta_s: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub peers: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub seeds: Option<u64>,
     pub seed: bool,
     pub upload_policy: UploadPolicy,
     pub upload_enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_limit_bps: Option<u64>,
-    #[serde(skip_serializing_if="Option::is_none")]
     pub download_limit_bps: Option<u64>,
-    #[serde(skip_serializing_if="Option::is_none")]
     pub effective_download_limit_bps: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
     pub save_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub content_path: Option<String>,
     pub added_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<i64>,
     pub force: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub queue_pos: Option<u64>,
-    #[serde(skip)]
     pub piece_length: Option<u64>,
-    #[serde(skip)]
-    legacy: Legacy,
+    activity: Activity,
+    dormant: bool,
+    original_name: String,
 }
 
 impl TorrentView {
-    pub(crate) fn original_name(&self)->&str {&self.legacy.name}
+    pub(crate) fn original_name(&self)->&str {&self.original_name}
 
     fn rechecking(&mut self) {
         self.state = TorrentState::Checking;
@@ -182,7 +113,6 @@ impl TorrentView {
         self.progress = None;
         self.completed_bytes = None;
         self.completed_at = None;
-        self.legacy.progress_known = false;
     }
 
     fn retain_restore_reason(&mut self) {
@@ -203,7 +133,7 @@ impl TorrentView {
         }
     }
 
-    fn record(record: &Record, facts: StateFacts, source: Source) -> Self {
+    fn record(record: &Record, facts: StateFacts, dormant: bool) -> Self {
         let (state, reason) = derive_state(facts);
         Self {
             hash: record.hash.clone(),
@@ -243,17 +173,9 @@ impl TorrentView {
             force: record.force,
             queue_pos: None,
             piece_length: None,
-            legacy: Legacy {
-                source,
-                facts,
-                name: record.name.clone(),
-                category: record.category.clone(),
-                tags: record.tags.clone(),
-                completion_on: record.completion_on,
-                ratio_limit: record.ratio_limit,
-                progress_known: false,
-                content_path: record.output_folder.clone(),
-            },
+            activity: facts.activity,
+            dormant,
+            original_name: record.name.clone(),
         }
     }
 
@@ -261,10 +183,9 @@ impl TorrentView {
         let facts=StateFacts {activity:Activity::Paused,paused:true,finished:value.have==value.size,
             stop_on_complete:record.stop_on_complete(),record_paused:record.paused,
             check_cancelled:false,receiving:false,parked:false};
-        let mut view=Self::record(record,facts,Source::Handle);
+        let mut view=Self::record(record,facts,false);
         view.checked=true;view.size=Some(value.size);view.completed_bytes=Some(value.have);
         view.progress=Some(if value.size==0 {1.0} else {value.have as f64/value.size as f64});
-        view.legacy.progress_known=true;
         view
     }
 
@@ -289,7 +210,7 @@ impl TorrentView {
                 .is_some_and(|live| live.download_speed.as_bytes() > 0),
             parked: false,
         };
-        let mut view = Self::record(record, facts, Source::Handle);
+        let mut view = Self::record(record, facts, false);
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
         view.effective_download_limit_bps=handle.effective_download_bps();
@@ -304,18 +225,13 @@ impl TorrentView {
                 handle.output_folder().to_path_buf()
             };
             view.content_path = Some(content.to_string_lossy().into());
-            view.legacy.content_path = view.content_path.clone().unwrap();
         }
         view
     }
 
     fn populate_stats(&mut self, stats: &librqbit::TorrentStats, metadata_known: bool) {
         self.error = stats.error.clone();
-        self.checked = matches!(
-            self.legacy.facts.activity,
-            Activity::Paused | Activity::Live
-        );
-        self.legacy.progress_known = true;
+        self.checked = matches!(self.activity, Activity::Paused | Activity::Live);
         if metadata_known {
             self.progress = Some(if stats.total_bytes > 0 {
                 (stats.progress_bytes as f64 / stats.total_bytes as f64).min(1.0)
@@ -330,7 +246,7 @@ impl TorrentView {
             self.ratio = (stats.progress_bytes > 0)
                 .then(|| stats.uploaded_bytes as f64 / stats.progress_bytes as f64);
         }
-        if self.legacy.facts.activity == Activity::Live {
+        if self.activity == Activity::Live {
             if let Some(live) = &stats.live {
                 self.dl_bps = Some(live.download_speed.as_bytes());
                 self.ul_bps = Some(live.upload_speed.as_bytes());
@@ -352,18 +268,17 @@ impl TorrentView {
                 stop_on_complete: true, record_paused: record.paused,
                 check_cancelled: false, receiving: false, parked: false,
             };
-            let mut view = Self::record(record, facts, Source::Dormant);
+            let mut view = Self::record(record, facts, true);
             // Completion is saved history, explicitly not a new data check.
             view.state = TorrentState::Done;
             view.reason = Some("complete_no_seed".into());
             view.progress = Some(1.0);
-            view.legacy.progress_known = true;
             return view;
         }
         if record.staged {
             let facts=StateFacts {activity:Activity::Paused,paused:true,finished:false,
                 stop_on_complete:record.stop_on_complete(),record_paused:true,check_cancelled:false,receiving:false,parked:false};
-            let mut view=Self::record(record,facts,Source::Unrestored {checking:false,stopped:true,failed:false});
+            let mut view=Self::record(record,facts,false);
             if let Some(RestoreOutcome::Failed {reason,message})=restore.map(|r|&r.outcome) {
                 view.reason=Some(if message.contains("metadata lookup timed out") {"metadata_timeout"} else {reason}.into());
             }
@@ -392,15 +307,7 @@ impl TorrentView {
             receiving: false,
             parked: false,
         };
-        let mut view = Self::record(
-            record,
-            facts,
-            Source::Unrestored {
-                checking,
-                stopped,
-                failed,
-            },
-        );
+        let mut view = Self::record(record, facts, false);
         view.error = restore.and_then(|entry| entry.last_error.clone());
         if let Some(RestoreOutcome::Failed { reason, message }) =
             restore.map(|entry| &entry.outcome)
@@ -429,7 +336,7 @@ impl TorrentView {
             receiving: false,
             parked: true,
         };
-        let mut view = if record.staged {Self::unrestored(record,None)} else {Self::record(record, facts, Source::Parked)};
+        let mut view = if record.staged {Self::unrestored(record,None)} else {Self::record(record, facts, false)};
         if let Some((size, path)) = metadata {
             view.size = Some(size);
             view.content_path = Some(
@@ -437,98 +344,8 @@ impl TorrentView {
                     .to_string_lossy()
                     .into(),
             );
-            view.legacy.content_path = view.content_path.clone().unwrap();
         }
         view
-    }
-
-    /// This is the only qBittorrent state-string mapping. Preserve legacy unknown
-    /// sentinels here; normalized serialization above always omits unknown data.
-    pub fn to_cli_json(&self) -> Result<String> {
-        let f = self.legacy.facts;
-        let state = match self.legacy.source {
-            Source::Dormant if self.state == TorrentState::Error => "error",
-            Source::Dormant => "stoppedUP",
-            Source::Parked if !f.record_paused => "waitingVPN",
-            Source::Parked => {
-                if f.finished {
-                    "stoppedUP"
-                } else {
-                    "stoppedDL"
-                }
-            }
-            Source::Unrestored { failed: true, .. } => "error",
-            Source::Unrestored { checking: true, .. } => "checkingDL",
-            Source::Unrestored { stopped: true, .. } => {
-                if f.finished {
-                    "stoppedUP"
-                } else {
-                    "stoppedDL"
-                }
-            }
-            Source::Unrestored { .. } => "metaDL",
-            Source::Handle
-                if f.paused
-                    && !f.record_paused
-                    && !f.finished
-                    && f.activity != Activity::Error
-                    && (f.activity != Activity::Checking || f.check_cancelled) =>
-            {
-                "queuedDL"
-            }
-            Source::Handle => match f.activity {
-                Activity::Checking if f.check_cancelled => "stoppedDL",
-                Activity::Checking => "checkingDL",
-                Activity::Paused => {
-                    if f.finished {
-                        "stoppedUP"
-                    } else {
-                        "stoppedDL"
-                    }
-                }
-                Activity::Live if f.finished => "uploading",
-                Activity::Live if f.receiving => "downloading",
-                Activity::Live => "stalledDL",
-                Activity::Error => "error",
-                Activity::Metadata => "metaDL",
-            },
-        };
-        let dl = self.dl_bps.unwrap_or(0);
-        json(&Torrent {
-            hash: self.hash.clone(),
-            staged: self.staged,
-            name: self.legacy.name.clone(),
-            state: state.into(),
-            error_message: self.error.clone(),
-            progress: self.progress.unwrap_or(0.0),
-            progress_known: self.legacy.progress_known,
-            size: self.size.unwrap_or(0) as i64,
-            completed: self.completed_bytes.unwrap_or(0) as i64,
-            dlspeed: dl as i64,
-            upspeed: self.ul_bps.unwrap_or(0) as i64,
-            eta: if dl > 0 {
-                (self
-                    .size
-                    .unwrap_or(0)
-                    .saturating_sub(self.completed_bytes.unwrap_or(0))
-                    / dl) as i64
-            } else {
-                8640000
-            },
-            num_seeds: self.seeds.unwrap_or(0) as i64,
-            num_leechs: self.peers.unwrap_or(0) as i64,
-            ratio: self.ratio.unwrap_or(0.0),
-            seq_dl: true,
-            f_l_piece_prio: true,
-            save_path: self.save_path.clone(),
-            content_path: self.legacy.content_path.clone(),
-            category: self.legacy.category.clone(),
-            added_on: self.added_at,
-            completion_on: self.legacy.completion_on,
-            up_limit: self.upload_limit_bps.unwrap_or(0) as i64,
-            ratio_limit: self.legacy.ratio_limit,
-            tags: self.legacy.tags.clone(),
-        })
     }
 }
 
@@ -538,7 +355,7 @@ impl Inner {
         if record.staged {
             if let Ok(saved)=self.saved_torrent(record) {view.size=Some(saved.files.iter().map(|f|f.size.max(0) as u64).sum());}
         }
-        if matches!(view.legacy.source, Source::Dormant) {
+        if view.dormant {
             if let Ok(saved) = self.saved_torrent(record) {
                 view.size = Some(saved.selected_bytes);
                 view.completed_bytes = Some(saved.selected_bytes);
@@ -547,15 +364,10 @@ impl Inner {
                     path.push(&saved.files[0].name);
                 }
                 view.content_path = Some(path.to_string_lossy().into());
-                view.legacy.content_path = view.content_path.clone().unwrap();
                 if !saved.selected_files_present { view.files_missing(); }
             }
         }
         view
-    }
-    #[cfg(test)]
-    pub(super) fn unrestored_snapshot(&self, record: &Record) -> Torrent {
-        serde_json::from_str(&self.unrestored_view(record).to_cli_json().unwrap()).unwrap()
     }
 }
 impl EngineDispatcher {

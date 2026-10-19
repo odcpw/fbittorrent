@@ -1,5 +1,5 @@
 use super::*;
-use crate::engine::tests::review_record;
+use crate::engine::tests::{review_record, wire};
 
 #[test]
 fn state_mapping_table() {
@@ -115,7 +115,7 @@ fn state_mapping_table() {
 }
 
 #[test]
-fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
+fn normalized_unknowns_are_absent_from_the_wire() {
     let mut record = review_record(
         "0000000000000000000000000000000000000001",
         Path::new("/fixture/downloads"),
@@ -123,7 +123,7 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
     record.completion_on = -1;
     record.name = "é".repeat(1030);
     let view = TorrentView::unrestored(&record, None);
-    let normalized = serde_json::to_value(&view).unwrap();
+    let normalized = wire(&view);
     for key in [
         "reason",
         "error",
@@ -139,7 +139,6 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
         "ratio",
         "content_path",
         "completed_at",
-        "origin",
         "imdb_id",
         "queue_pos",
         "playable",
@@ -151,25 +150,21 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
     assert_eq!(normalized["intent"], "run");
     assert_eq!(normalized["upload_policy"], "off");
     assert_eq!(normalized["seed"], false);
-    let legacy: Torrent = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
-    assert_eq!(legacy.completion_on, -1);
-    assert_eq!(legacy.eta, 8640000);
-    assert_eq!(legacy.name, record.name);
-    assert_eq!(legacy.state, "metaDL");
+    assert_eq!(normalized["origin"], "manual");
+    assert_eq!(view.original_name(), record.name);
     let parked = TorrentView::parked(
         &record,
         Some((5, Some(PathBuf::from("/fixture/downloads/file")))),
     );
-    let normalized = serde_json::to_value(&parked).unwrap();
+    let normalized = wire(&parked);
     assert_eq!(normalized["state"], "waiting_vpn");
     assert_eq!(normalized["reason"], "vpn_down");
     assert_eq!(normalized["size"], 5);
     assert!(normalized.get("progress").is_none());
     record.paused = true;
     let parked = TorrentView::parked(&record, None);
-    let legacy: Torrent = serde_json::from_str(&parked.to_cli_json().unwrap()).unwrap();
-    assert_eq!(legacy.state, "stoppedDL");
     assert_eq!(parked.state, TorrentState::WaitingVpn);
+    assert_eq!(parked.intent, Intent::Pause);
 }
 
 #[test]
@@ -179,7 +174,7 @@ fn policy_and_restore_reason_are_normalized_without_fabricated_completion() {
         Path::new("/fixture"),
     );
     for (limit, ratio, policy, seed) in [
-        (NO_UPLOAD_LIMIT, 0.0, UploadPolicy::Off, false),
+        (0, 0.0, UploadPolicy::Off, false),
         (0, -2.0, UploadPolicy::Unlimited, true),
         (65536, -2.0, UploadPolicy::Custom, true),
         (0, 0.0, UploadPolicy::Off, false),
@@ -215,14 +210,13 @@ fn retained_missing_files_error_keeps_its_reason_after_stop_and_during_retry() {
     );
     record.paused = true;
     let message = format!("{} restore failed: missing files", record.name);
-    for (outcome, state, legacy_state) in [
+    for (outcome, state) in [
         (
             RestoreOutcome::Failed { reason: "missing_files", message: message.clone() },
             TorrentState::Error,
-            "error",
         ),
-        (RestoreOutcome::Stopped, TorrentState::Paused, "stoppedDL"),
-        (RestoreOutcome::Checking, TorrentState::Checking, "checkingDL"),
+        (RestoreOutcome::Stopped, TorrentState::Paused),
+        (RestoreOutcome::Checking, TorrentState::Checking),
     ] {
         let restore = RestoreTask {
             generation: 1, outcome, last_error: Some(message.clone()),
@@ -232,16 +226,12 @@ fn retained_missing_files_error_keeps_its_reason_after_stop_and_during_retry() {
         assert_eq!(view.state, state);
         assert_eq!(view.reason.as_deref(), Some("missing_files"));
         assert_eq!(view.error.as_deref(), Some(message.as_str()));
-        let wire: crate::api::Torrent = serde_json::from_value(serde_json::to_value(&view).unwrap()).unwrap();
-        wire.validate().unwrap();
-        let legacy: Torrent = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
-        assert_eq!(legacy.state, legacy_state);
-        assert_eq!(legacy.error_message.as_deref(), Some(message.as_str()));
+        crate::api::ops::torrents::torrent(view).unwrap().validate().unwrap();
     }
     let recovered = TorrentView::unrestored(&record, None);
     assert!(recovered.error.is_none());
     assert_ne!(recovered.reason.as_deref(), Some("missing_files"));
-    println!("missing-files error/reason survive stop and retry; paused/checking states and legacy errors stay intact; clearing the error clears its reason");
+    println!("missing-files error/reason survive stop and retry; paused/checking states and errors stay intact; clearing the error clears its reason");
 }
 
 #[test]
@@ -274,7 +264,7 @@ fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
     live.download_speed.mbps = 1.0;
     live.upload_speed.mbps = 0.5;
     live.snapshot.peer_stats.live = 3;
-    let mut view = TorrentView::record(&record, facts, Source::Handle);
+    let mut view = TorrentView::record(&record, facts, false);
     view.populate_stats(&stats, true);
     assert_eq!(view.state, TorrentState::Downloading);
     assert_eq!(view.progress, Some(0.2));
@@ -291,7 +281,7 @@ fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
             activity: Activity::Paused,
             ..facts
         },
-        Source::Handle,
+        false,
     );
     paused.populate_stats(&stats, true);
     assert!(
@@ -309,7 +299,7 @@ fn normalized_stats_have_real_counters_and_conditional_eta_and_ratio() {
             receiving: false,
             ..facts
         },
-        Source::Handle,
+        false,
     );
     stalled.populate_stats(&stats, true);
     assert_eq!(stalled.state, TorrentState::Stalled);
@@ -326,7 +316,7 @@ fn rechecking_set_forces_checking() {
         let record = crate::engine::tests::review_record("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Path::new("/fixture"));
         let mut view = TorrentView::record(&record, StateFacts { activity: Activity::Checking,
             paused, finished: false, stop_on_complete: true, record_paused: paused,
-            check_cancelled: true, receiving: false, parked: false }, Source::Handle);
+            check_cancelled: true, receiving: false, parked: false }, false);
         view.rechecking();
         assert_eq!(view.state, TorrentState::Checking);
         assert!(!view.checked);

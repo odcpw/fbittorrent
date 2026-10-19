@@ -82,10 +82,10 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("fbt-parked-adapter-{}-{}",
             std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&directory).unwrap();
-        let ledger = ParkedLedger::new(directory.clone(), crate::daemon::lifecycle::Lifecycle::default());
+        let ledger = ParkedLedger::new(directory.clone());
         let generation = ledger.ledger_generation();
         for expected in 1..=2 {
-            ledger.execute(EngineOp::Stop { hashes: HashSelection::All }).unwrap();
+            ledger.execute(EngineOp::Stop { hashes: HashSelection(Vec::new()) }).unwrap();
             let EngineResult::Torrents(rows) = ledger.execute(EngineOp::Info).unwrap() else { panic!("expected torrent list") };
             assert!(rows.is_empty());
             assert_eq!(generation.wait_after(expected - 1, std::time::Duration::ZERO), Some(expected));

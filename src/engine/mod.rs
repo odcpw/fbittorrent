@@ -28,11 +28,9 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
-use crate::daemon::lifecycle::{Lifecycle, StopReason};
+use crate::daemon::lifecycle::Lifecycle;
 use crate::ipc::InstanceLock;
-#[cfg(test)]
-use tests::fixture::{Request, Route};
-use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
+use crate::qbt::{TorrentFile, TransferInfo, SEED_TAG};
 
 mod ledger;
 pub(crate) mod rename;
@@ -61,7 +59,7 @@ pub mod view;
 mod parked;
 
 use ledger::{Record, Ledger, read_ledger, save_parked_ledger};
-use ops::{mutation_hashes, json, now};
+use ops::{mutation_hashes, now};
 pub use parked::ParkedLedger;
 pub use ledger::LedgerGeneration;
 pub use dormant::InvalidTorrentState;

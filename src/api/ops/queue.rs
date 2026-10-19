@@ -35,7 +35,7 @@ fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     })
 }
 fn selection(hashes: &Hashes) -> HashSelection {
-    HashSelection::Hashes(hashes.as_slice().iter().map(ToString::to_string).collect())
+    HashSelection(hashes.as_slice().iter().map(ToString::to_string).collect())
 }
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     Ok(match call {
@@ -83,7 +83,7 @@ pub fn start_forced(daemon: &Daemon, args: &StartArgs) -> ApiResult<Reply> {
     execute(
         daemon,
         EngineOp::ForceStart {
-            hashes: HashSelection::Hashes(hashes.iter().map(ToString::to_string).collect()),
+            hashes: HashSelection(hashes.iter().map(ToString::to_string).collect()),
             on: true,
         },
     )?;

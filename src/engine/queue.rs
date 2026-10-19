@@ -109,37 +109,6 @@ impl Inner {
         }
         self.reconcile_queue(cx, &mut ledger, &HashSet::new()).await
     }
-    pub(super) async fn set_download_limit(&self, cx: &Cx, limit: usize) -> Result<()> {
-        if limit == 0 {
-            bail!("max_active_downloads must be at least 1");
-        }
-        let mut ledger = OwnedMutexGuard::lock(self.ledger.clone(), cx).await?;
-        let old = self.max_active_downloads.load(Ordering::Acquire);
-        let mut cfg = Config::load()?;
-        let saved = cfg.max_active_downloads;
-        let previous = cfg.clone();
-        cfg.max_active_downloads = limit;
-        if let Err(error) = cfg.save() {
-            // A directory fsync can fail after rename. Restore the previous
-            // setting even when the staged writer reported a failed save.
-            if let Err(rollback) = previous.save() {
-                bail!("saving download limit failed: {error:#}; restoring previous settings failed: {rollback:#}");
-            }
-            return Err(error).context("saving download limit; previous settings restored");
-        }
-        self.max_active_downloads.store(limit, Ordering::Release);
-        if let Err(error) = self.reconcile_queue(cx, &mut ledger, &HashSet::new()).await {
-            self.max_active_downloads.store(old, Ordering::Release);
-            cfg.max_active_downloads = saved;
-            let persisted = cfg.save();
-            let resumed = self.reconcile_queue(cx, &mut ledger, &HashSet::new()).await;
-            if let Err(rollback) = persisted.and(resumed) {
-                bail!("changing download limit failed: {error:#}; restoring previous limit failed: {rollback:#}");
-            }
-            return Err(error).context("changing download limit; previous limit restored");
-        }
-        Ok(())
-    }
 }
 
 impl EngineDispatcher {

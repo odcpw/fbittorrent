@@ -145,7 +145,7 @@ fn fixture(dormant: bool) -> (AppEngine, PathBuf, String, Arc<StorageCounts>) {
 
 fn set_seed(dispatcher: &EngineDispatcher, hash: &str, on: bool) -> Result<EngineResult> {
     dispatcher.execute(EngineOp::SetSeed {
-        hashes: HashSelection::Hashes(vec![hash.into()]),
+        hashes: HashSelection(vec![hash.into()]),
         on,
     })
 }
@@ -203,7 +203,7 @@ fn typed_seed_live_retains_handle_and_never_checks() {
                 "typed_seed_live",
                 "fail the durable seed-policy save",
                 "A failed save preserves the current policy, cap and running state.",
-                serde_json::json!({"requested_seed":on,"row":after}),
+                serde_json::json!({"requested_seed":on,"row":wire(&after)}),
             );
         }
         for _ in 0..2 {
@@ -243,26 +243,24 @@ fn typed_seed_live_retains_handle_and_never_checks() {
                 TorrentStatsState::Initializing { .. }
             ));
             assert_eq!(current.is_paused(), !on);
-            let legacy: Torrent = serde_json::from_str(&r.to_cli_json().unwrap()).unwrap();
-            assert_eq!(legacy.state, if on { "uploading" } else { "stoppedUP" });
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
             assert_eq!(saved.records[0].upload_limit, 0);
             assert_eq!(saved.records[0].ratio_limit, if on { -2.0 } else { 0.0 });
             assert_eq!(saved.records[0].tags, if on { "keep,seed" } else { "keep" });
-            states.push(legacy.state);
+            states.push(r.state);
             observe("typed_seed_live", "apply typed SetSeed twice to the same checked handle", "No read, new storage, handle/metadata replacement or checking; policy and pause state match seed intent.",
-                serde_json::json!({"seed":on,"handle_id":current.id(),"creates_reads_bytes":counts.snapshot(),"row":r}));
+                serde_json::json!({"seed":on,"handle_id":current.id(),"creates_reads_bytes":counts.snapshot(),"row":wire(&r)}));
         }
     }
     assert_eq!(
         states,
         [
-            "stoppedUP",
-            "stoppedUP",
-            "uploading",
-            "uploading",
-            "stoppedUP",
-            "stoppedUP"
+            TorrentState::Done,
+            TorrentState::Done,
+            TorrentState::Seeding,
+            TorrentState::Seeding,
+            TorrentState::Done,
+            TorrentState::Done
         ]
     );
     drop(app);
@@ -294,7 +292,7 @@ fn typed_seed_dormant_checks_once_then_retains_handle() {
     assert_eq!(verified.upload_policy, UploadPolicy::Unlimited);
     assert_eq!(verified.upload_limit_bps, Some(0));
     observe("typed_seed_dormant", "activate a dormant completed torrent with typed SetSeed", "Exactly one real filesystem admission and one five-byte checksum read; checked seeding with unlimited policy.",
-        serde_json::json!({"handle_id":admitted.id(),"creates_reads_bytes":counts.snapshot(),"row":verified}));
+        serde_json::json!({"handle_id":admitted.id(),"creates_reads_bytes":counts.snapshot(),"row":wire(&verified)}));
     for on in [true, false, true, false] {
         set_seed(&dispatcher, &hash, on).unwrap();
         assert!(Arc::ptr_eq(
@@ -314,7 +312,7 @@ fn typed_seed_dormant_checks_once_then_retains_handle() {
         );
         assert_eq!(r.upload_limit_bps, Some(0));
         observe("typed_seed_dormant", "toggle seed policy after the dormant check", "Retain the admitted handle and the single check; apply unlimited/default caps without checking again.",
-            serde_json::json!({"seed":on,"handle_id":admitted.id(),"creates_reads_bytes":counts.snapshot(),"row":r}));
+            serde_json::json!({"seed":on,"handle_id":admitted.id(),"creates_reads_bytes":counts.snapshot(),"row":wire(&r)}));
     }
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
@@ -371,7 +369,7 @@ fn force_on_finished_without_saved_timestamp_is_refused() {
         let mut ledger=OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(),dispatcher.runtime.cx()).await.unwrap();
         ledger.records[0].completion_on=0;
     });
-    let failure=dispatcher.execute(EngineOp::ForceStart{hashes:HashSelection::Hashes(vec![hash.clone()]),on:true}).unwrap_err();
+    let failure=dispatcher.execute(EngineOp::ForceStart{hashes:HashSelection(vec![hash.clone()]),on:true}).unwrap_err();
     assert_eq!(failure.downcast_ref::<InvalidTorrentState>().unwrap().reason,"complete_no_seed");
     let mut ledger=dispatcher.runtime.block_on(OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(),dispatcher.runtime.cx())).unwrap();
     ledger.records[0].force=true;
@@ -388,7 +386,7 @@ fn undo_rechecks_real_data_once_without_redownload() {
     let (app,directory,hash,counts)=fixture(true);
     let dispatcher=app.dispatcher();
     assert_eq!(counts.snapshot(),(0,0,0));
-    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}).unwrap();
+    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection(vec![hash.clone()])}).unwrap();
     assert!(dormant_rows(&dispatcher).is_empty());
     dispatcher.execute(EngineOp::RestoreUndo {hash:hash.clone()}).unwrap();
     let deadline=std::time::Instant::now()+Duration::from_secs(10);

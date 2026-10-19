@@ -22,7 +22,7 @@ fn upload_cap_edit_retains_handle_and_checked_data() {
             sources: vec![],
             torrent: Some(("hello.torrent".into(), bytes)),
             save_path: Some(downloads.to_string_lossy().into()),
-            upload_limit: NO_UPLOAD_LIMIT,
+            upload_limit: 0,
             ratio_limit: 0.0,
             stopped: true,
             category: String::new(),
@@ -35,10 +35,10 @@ fn upload_cap_edit_retains_handle_and_checked_data() {
         .block_on(original.wait_until_initialized(dispatcher.runtime.cx()))
         .unwrap();
     let cap = |limit| EngineOp::SetUploadLimit {
-        hashes: HashSelection::Hashes(vec![hash.clone()]),
+        hashes: HashSelection(vec![hash.clone()]),
         limit,
     };
-    for limit in [131072, 0, NO_UPLOAD_LIMIT, NO_UPLOAD_LIMIT] {
+    for limit in [131072, 0, 0, 0] {
         assert!(matches!(
             dispatcher.execute(cap(limit)).unwrap(),
             EngineResult::Acknowledged
@@ -82,7 +82,7 @@ fn upload_cap_edit_retains_handle_and_checked_data() {
             .unwrap()
             .records[0]
             .upload_limit,
-        NO_UPLOAD_LIMIT
+        0
     );
     std::fs::remove_dir(directory.join("torrents.json.tmp")).unwrap();
     drop(app);

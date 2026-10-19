@@ -13,7 +13,7 @@ fn options(folder: &Path) -> ops::AddRequest {
         sources: vec![],
         torrent: Some(("hello.torrent".into(), bytes)),
         save_path: Some(folder.to_string_lossy().into()),
-        upload_limit: NO_UPLOAD_LIMIT,
+        upload_limit: 0,
         ratio_limit: 0.0,
         stopped: false,
         category: String::new(),

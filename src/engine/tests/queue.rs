@@ -18,25 +18,9 @@
             .unwrap()
             .info_hash
             .as_string();
-        dispatcher
-            .dispatch(&Request {
-                method: "POST".into(),
-                path: "torrents/add".into(),
-                args: if seed {
-                    vec![
-                        ("ratioLimit".into(), "-2".into()),
-                        ("upLimit".into(), "0".into()),
-                    ]
-                } else {
-                    vec![]
-                },
-                file: Some(crate::engine::tests::fixture::Upload {
-                    name: format!("queue-{index}.torrent"),
-                    bytes,
-                }),
-            })
-            .unwrap()
-            .unwrap();
+        let mut add = add_request(vec![String::new()], Some(bytes));
+        if seed { add.ratio_limit = -2.0; }
+        dispatcher.execute(ops::EngineOp::Add(add)).unwrap();
         dispatcher.runtime.block_on(async {
             let handle = dispatcher.inner.handle(&hash).unwrap();
             time::timeout(
@@ -69,7 +53,7 @@
     }
 
     #[test]
-    fn queue_caps_downloads_preserves_fifo_pause_delete_completion_and_restart() {
+    fn queue_caps_downloads_preserves_fifo_pause_delete_and_restart() {
         let directory = review_directory("queue-lifecycle");
         let downloads = directory.join("downloads");
         let app = test_app(&directory, &downloads, Ledger::default(), None);
@@ -78,42 +62,15 @@
             .map(|index| add_queue_fixture(&dispatcher, index, false))
             .collect();
         assert_eq!(active_queue(&dispatcher), hashes[..3]);
-        let info: Vec<Torrent> = serde_json::from_str(
-            &dispatcher
-                .dispatch(&request("torrents/info", &[]))
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
         assert_eq!(
-            info.iter()
-                .filter(|torrent| torrent.state == "queuedDL")
-                .count(),
+            rows(&dispatcher).iter().filter(|torrent| torrent.state == view::TorrentState::Queued).count(),
             3
         );
-        let status: serde_json::Value = serde_json::from_str(
-            &dispatcher
-                .dispatch(&request("app/queue", &[]))
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(status["active_downloads"], 3);
-        assert_eq!(status["queued_downloads"], 3);
-        assert!(dispatcher
-            .dispatch(&request("app/setQueue", &[("max_active_downloads", "0")]))
-            .unwrap()
-            .is_err());
-        assert_eq!(active_queue(&dispatcher), hashes[..3]);
 
-        dispatcher
-            .dispatch(&request("torrents/stop", &[("hashes", &hashes[0])]))
-            .unwrap()
-            .unwrap();
+        dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[&hashes[0]]) }).unwrap();
         assert_eq!(active_queue(&dispatcher), hashes[1..4]);
         dispatcher
-            .dispatch(&request("torrents/start", &[("hashes", &hashes[0])]))
-            .unwrap()
+            .execute(ops::EngineOp::Start { hashes: crate::engine::tests::hashes(&[&hashes[0]]), skip_complete: false })
             .unwrap();
         assert_eq!(
             active_queue(&dispatcher),
@@ -121,38 +78,13 @@
             "resume keeps the original FIFO position"
         );
         dispatcher
-            .dispatch(&request("torrents/delete", &[("hashes", &hashes[1])]))
-            .unwrap()
+            .execute(ops::EngineOp::Delete { hashes: crate::engine::tests::hashes(&[&hashes[1]]), files: false })
             .unwrap();
         assert_eq!(
             active_queue(&dispatcher),
             vec![hashes[0].clone(), hashes[2].clone(), hashes[3].clone()]
         );
-        dispatcher
-            .dispatch(&request(
-                "torrents/filePrio",
-                &[("hash", &hashes[0]), ("id", "0"), ("priority", "0")],
-            ))
-            .unwrap()
-            .unwrap();
-        assert!(
-            dispatcher
-                .inner
-                .handle(&hashes[0])
-                .unwrap()
-                .stats()
-                .finished
-        );
-        assert!(dispatcher.inner.handle(&hashes[0]).unwrap().is_paused());
-        assert_eq!(
-            active_queue(&dispatcher),
-            hashes[2..5],
-            "selected-file completion must admit the next download"
-        );
-        dispatcher
-            .dispatch(&request("torrents/stop", &[("hashes", &hashes[5])]))
-            .unwrap()
-            .unwrap();
+        dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[&hashes[5]]) }).unwrap();
         let saved = read_ledger(&directory.join("torrents.json")).unwrap();
         assert_eq!(
             saved
@@ -162,10 +94,7 @@
                 .collect::<Vec<_>>(),
             vec![&hashes[0], &hashes[2], &hashes[3], &hashes[4], &hashes[5]]
         );
-        assert!(
-            !saved.records[0].paused,
-            "automatic completion suspension must retain running intent"
-        );
+        assert!(!saved.records[0].paused, "running intent is durable");
         assert!(
             saved.records.last().unwrap().paused,
             "manual pause must be durable"
@@ -189,20 +118,12 @@
             }
             app.dispatcher.inner.maintain(&test_cx()).await.unwrap();
         });
-        assert_eq!(active_queue(&app.dispatcher), hashes[2..5]);
-        assert!(app.dispatcher.inner.handle(&hashes[5]).unwrap().is_paused());
-        app.dispatcher
-            .dispatch(&request(
-                "torrents/filePrio",
-                &[("hash", &hashes[0]), ("id", "0"), ("priority", "1")],
-            ))
-            .unwrap()
-            .unwrap();
         assert_eq!(
             active_queue(&app.dispatcher),
             vec![hashes[0].clone(), hashes[2].clone(), hashes[3].clone()],
-            "expanding completed selection must respect the cap"
+            "restart restores the FIFO queue"
         );
+        assert!(app.dispatcher.inner.handle(&hashes[5]).unwrap().is_paused());
         drop(app);
         drop(old_session);
         std::fs::remove_dir_all(directory).unwrap();
@@ -272,16 +193,16 @@
             save_parked_ledger(&directory, &Ledger { generation: Default::default(),
                 migrated_legacy: false, records: vec![record],
             }).unwrap();
-            for selection in [hash, "all"] {
-                let result: serde_json::Value = serde_json::from_str(&dispatch_parked_in(
-                    &request("torrents/start", &[("hashes", selection)]), &directory)
-                    .unwrap().unwrap()).unwrap();
-                assert_eq!(result, serde_json::json!({"started": [hash], "skipped": []}));
+            let parked = ParkedLedger::new(directory.clone());
+            for skip_complete in [false, true] {
+                let ops::EngineResult::Start(result) = parked
+                    .execute(ops::EngineOp::Start { hashes: crate::engine::tests::hashes(&[hash]), skip_complete })
+                    .unwrap() else { unreachable!("typed start result") };
+                assert_eq!(result, crate::qbt::StartResult { started: vec![hash.into()], skipped: vec![] });
                 let saved = read_ledger(&directory.join("torrents.json")).unwrap();
                 assert!(!saved.records[0].paused);
                 assert_eq!(saved.records[0].completion_on, completion_on);
-                dispatch_parked_in(&request("torrents/stop", &[("hashes", hash)]), &directory)
-                    .unwrap().unwrap();
+                parked.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[hash]) }).unwrap();
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
@@ -306,20 +227,26 @@
             migrated_legacy: false, records: vec![done, download, seeder],
         }).unwrap();
         let before = std::fs::read(directory.join("torrents.json")).unwrap();
-        let selected = format!("{download_hash}|{done_hash}");
-        let error = dispatch_parked_in(&request("torrents/start", &[("hashes", &selected)]), &directory)
-            .unwrap().unwrap_err();
+        let parked = ParkedLedger::new(directory.clone());
+        let error = parked
+            .execute(ops::EngineOp::Start { hashes: crate::engine::tests::hashes(&[download_hash, done_hash]), skip_complete: false })
+            .unwrap_err();
         let typed = error.downcast_ref::<crate::agent::AppError>().unwrap_or_else(|| panic!("typed refusal: {error:#}"));
         assert_eq!(typed.code, crate::agent::Code::Failure);
         assert_eq!(typed.message, "already complete; seeding is off for this torrent");
         assert_eq!(typed.hint, Some(format!("fbittorrent seed {done_hash}")));
         assert_eq!(std::fs::read(directory.join("torrents.json")).unwrap(), before);
-        let selected = format!("{done_hash}|{download_hash}|{seed_hash}");
-        for args in [vec![("hashes", "all")], vec![("hashes", &selected), ("skip_complete", "true")]] {
-            let result: serde_json::Value = serde_json::from_str(&dispatch_parked_in(
-                &request("torrents/start", &args), &directory).unwrap().unwrap()).unwrap();
-            assert_eq!(result, serde_json::json!({"started": [download_hash, seed_hash],
-                "skipped": [{"hash": done_hash, "reason": "complete_no_seed"}]}));
+        for _ in 0..2 {
+            let ops::EngineResult::Start(result) = parked
+                .execute(ops::EngineOp::Start {
+                    hashes: crate::engine::tests::hashes(&[done_hash, download_hash, seed_hash]),
+                    skip_complete: true,
+                })
+                .unwrap() else { unreachable!("typed start result") };
+            assert_eq!(result, crate::qbt::StartResult {
+                started: vec![download_hash.into(), seed_hash.into()],
+                skipped: vec![crate::qbt::StartSkipped { hash: done_hash.into(), reason: "complete_no_seed".into() }],
+            });
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
             assert!(saved.records[0].paused);
             assert!(!saved.records[1].paused && !saved.records[2].paused);

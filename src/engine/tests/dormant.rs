@@ -146,12 +146,12 @@ fn restore_dormant_record() {
         .all(|r| dispatcher.inner.handle(&r.hash).is_err()));
     dormant_diagnostic(
         "list five complete records without any admitted handles",
-        serde_json::json!({"elapsed_ms": started.elapsed().as_secs_f64()*1000.0,"rows":rows}),
+        serde_json::json!({"elapsed_ms": started.elapsed().as_secs_f64()*1000.0,"rows":wire_rows(&rows)}),
     );
     // Pausing a dormant torrent must not schedule a check or lose its completion.
     dispatcher
         .execute(EngineOp::Stop {
-            hashes: HashSelection::All,
+            hashes: HashSelection(records.iter().map(|r| r.hash.clone()).collect()),
         })
         .unwrap();
     assert!(dormant_rows(&dispatcher)
@@ -159,14 +159,14 @@ fn restore_dormant_record() {
         .all(|r| r.state == TorrentState::Done && !r.checked));
     let error = dispatcher
         .execute(EngineOp::Start {
-            hashes: HashSelection::Hashes(vec![records[0].hash.clone()]),
+            hashes: HashSelection(vec![records[0].hash.clone()]),
             skip_complete: false,
         })
         .unwrap_err();
     assert!(error.downcast_ref::<crate::agent::AppError>().is_some());
     dispatcher
         .execute(EngineOp::SetSeed {
-            hashes: HashSelection::Hashes(vec![records[0].hash.clone()]),
+            hashes: HashSelection(vec![records[0].hash.clone()]),
             on: false,
         })
         .unwrap();
@@ -182,7 +182,7 @@ fn dormant_seed_checks() {
     let hash = &records[0].hash;
     dispatcher
         .execute(EngineOp::SetSeed {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             on: true,
         })
         .unwrap();
@@ -200,7 +200,7 @@ fn dormant_seed_checks() {
     assert_eq!(dispatcher.inner.session.with_torrents(|t| t.count()), 1);
     dormant_diagnostic(
         "seed one restores and verifies only that torrent",
-        serde_json::json!(rows),
+        wire_rows(&rows),
     );
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
@@ -216,7 +216,7 @@ fn dormant_missing_files() {
     let hash = &records[0].hash;
     let error = dispatcher
         .execute(EngineOp::SetSeed {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             on: true,
         })
         .unwrap_err();
@@ -248,7 +248,7 @@ fn dormant_missing_files() {
         .all(|r| r.state == TorrentState::Error && r.reason.as_deref()==Some("missing_files") && r.progress.is_none()));
     dormant_diagnostic(
         "missing files are reported before seed and refused before admission",
-        serde_json::json!(rows),
+        wire_rows(&rows),
     );
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
@@ -280,7 +280,7 @@ fn dormant_open_no_check() {
     assert!(!row.checked && dispatcher.inner.handle(hash).is_err());
     dormant_diagnostic(
         "open target stats without hashing",
-        serde_json::json!({"roundtrip_ms":elapsed.as_secs_f64()*1000.0,"row":row}),
+        serde_json::json!({"roundtrip_ms":elapsed.as_secs_f64()*1000.0,"row":wire(&row)}),
     );
     std::fs::remove_file(path).unwrap();
     let error = dispatcher
@@ -299,7 +299,7 @@ fn dormant_open_no_check() {
     assert!(!row.checked);
     dormant_diagnostic(
         "missing open target records structured failure",
-        serde_json::json!(row),
+        wire(&row),
     );
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
@@ -315,9 +315,17 @@ fn dormant_recheck_clears_corrupt_completion() {
         b"wrong",
     )
     .unwrap();
-    dispatcher
-        .execute(EngineOp::Recheck { hash: hash.clone() })
-        .unwrap();
+    let EngineResult::Recheck(batch) = dispatcher
+        .execute(EngineOp::RecheckBatch { hashes: vec![hash.clone()] })
+        .unwrap()
+    else {
+        unreachable!("verification receipt")
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while batch.result().is_none() {
+        assert!(std::time::Instant::now() < deadline, "recheck must finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     wait_for_check(&dispatcher, hash);
     let row = dormant_rows(&dispatcher)
         .into_iter()
@@ -335,7 +343,7 @@ fn dormant_recheck_clears_corrupt_completion() {
     );
     dormant_diagnostic(
         "recheck actually hashes corrupt data and clears completion",
-        serde_json::json!(row),
+        wire(&row),
     );
     drop(app);
     // Production restart must check this incomplete record again, not mark done.
@@ -402,26 +410,9 @@ fn dormant_file_selection_validates_before_admission() {
         dispatcher.inner.handle(hash).unwrap().only_files(),
         Some(vec![0])
     );
-    // The legacy file-priority route uses the same dormant admission policy.
-    let hash = &records[1].hash;
-    dispatcher
-        .execute(EngineOp::FilePriority {
-            hash: hash.clone(),
-            ids: vec![0],
-            priority: 1,
-        })
-        .unwrap();
-    wait_for_check(&dispatcher, hash);
-    assert!(
-        dormant_rows(&dispatcher)
-            .into_iter()
-            .find(|r| &r.hash == hash)
-            .unwrap()
-            .checked
-    );
     dormant_diagnostic(
         "nonempty file selections check dormant data",
-        serde_json::json!(dormant_rows(&dispatcher)),
+        wire_rows(&dormant_rows(&dispatcher)),
     );
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
@@ -444,7 +435,7 @@ fn unknown_completion_and_seeding_restore_normally() {
         wait_for_check(&dispatcher, &records[0].hash);
         dormant_diagnostic(
             "unknown completion and saved seed intent still check",
-            serde_json::json!({"completion":completion,"seed":seed,"rows":dormant_rows(&dispatcher)}),
+            serde_json::json!({"completion":completion,"seed":seed,"rows":wire_rows(&dormant_rows(&dispatcher))}),
         );
         drop(app);
         std::fs::remove_dir_all(directory).unwrap();
@@ -583,11 +574,6 @@ fn dormant_restart_preserves_selected_piece_totals() {
         );
     }
     assert_eq!(saved_files[3].size, 32768);
-    // The compatibility view uses the corrected counts with its existing wire
-    // shape; all ten existing wire fixtures remain unchanged.
-    let legacy = dispatcher.inner.unrestored_snapshot(&saved.records[0]);
-    assert_eq!(legacy.size, stats.total_bytes as i64);
-    assert_eq!(legacy.completed, stats.progress_bytes as i64);
 
     // Metadata-only edges: absent/empty selection, an overlapping selection,
     // just the short last piece, and an empty file (which selects no pieces).
@@ -611,7 +597,7 @@ fn dormant_restart_preserves_selected_piece_totals() {
     }
     dormant_diagnostic(
         "restart retains the checked selected-piece totals and skips missing unselected data",
-        serde_json::json!({"live": live, "dormant": dormant, "files": saved_files,
+        serde_json::json!({"live": wire(&live), "dormant": wire(&dormant), "files": saved_files,
             "selected_file_bytes": 20480, "selected_piece_bytes": stats.total_bytes,
             "unselected_whole_piece_bytes": 32768, "session_handles": 0}),
     );

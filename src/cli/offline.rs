@@ -2,7 +2,6 @@
 use crate::{
     api,
     config::{self, Config},
-    daemon::lifecycle::Lifecycle,
     engine::{
         ops::{EngineOp, EngineResult},
         ParkedLedger,
@@ -23,7 +22,7 @@ fn locked_for(timeout:Duration)->Result<(InstanceLock,ParkedLedger)> {
     let lock = InstanceLock::acquire_wait(config::runtime_dir(), timeout)?;
     Ok((
         lock,
-        ParkedLedger::new(config::data_dir().join("engine"), Lifecycle::default()),
+        ParkedLedger::new(config::data_dir().join("engine")),
     ))
 }
 pub fn list() -> Result<Vec<api::Torrent>> {
@@ -84,7 +83,7 @@ pub fn mutation(
                 .map_err(api::errors::app_error)?;
             let hashes = crate::cli_sources::resolve_in(&super::shapes::legacy(&rows)?, selectors)?;
             use crate::engine::ops::HashSelection;
-            let selection = HashSelection::Hashes(hashes.clone());
+            let selection = HashSelection(hashes.clone());
             ledger.execute(if stop {
                 EngineOp::Stop { hashes: selection }
             } else {

@@ -34,7 +34,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
         dlspeed: if i == 0 { 2_097_152 } else { 0 }, upspeed: if i == 0 { 1024 } else { 0 },
         eta: if i == 0 { 297 } else { 0 }, num_seeds: 0, num_leechs: 3,
         seq_dl: true, f_l_piece_prio: true,
-        save_path: "/fixture/downloads".into(), up_limit: crate::qbt::NO_UPLOAD_LIMIT,
+        save_path: "/fixture/downloads".into(), up_limit: 0,
         completion_on: if i == 1 { 1_792_281_600 } else { 0 }, ratio_limit: 0.0,
         // Render immediately after construction, keeping the relative label "just now".
         added_on: crate::shows::now(), ..Default::default()

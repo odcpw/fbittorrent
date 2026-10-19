@@ -223,7 +223,6 @@ impl EngineDispatcher {
         if !matches!(
             op,
             EngineOp::OpenTarget { .. }
-                | EngineOp::Recheck { .. }
                 | EngineOp::SetFiles { .. }
                 | EngineOp::SetSeed { .. }
         ) {
@@ -289,7 +288,6 @@ impl EngineDispatcher {
                 } else {
                     let hash = match op {
                         EngineOp::OpenTarget { hash }
-                        | EngineOp::Recheck { hash }
                         | EngineOp::SetFiles { hash, .. } => hash,
                         _ => unreachable!(),
                     };

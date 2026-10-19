@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use crate::network_app::NetworkState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopReason {
@@ -39,7 +38,6 @@ pub enum Request {
 #[derive(Default)]
 struct State {
     requests: VecDeque<Request>,
-    expected_network: Option<NetworkState>,
 }
 
 #[derive(Clone, Default)]
@@ -96,23 +94,6 @@ impl Lifecycle {
             .requests
             .front()
             .copied()
-    }
-
-    pub fn expected_network(&self) -> Option<NetworkState> {
-        let (mutex, _) = &*self.0;
-        mutex
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .expected_network
-            .clone()
-    }
-
-    pub fn set_expected_network(&self, network: Option<NetworkState>) {
-        let (mutex, _) = &*self.0;
-        mutex
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .expected_network = network;
     }
 }
 
