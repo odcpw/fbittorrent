@@ -18,7 +18,7 @@ def install(case,box,binary):
     shell=cfg/'omarchy/shell.json';shell.parent.mkdir();shell.write_text('{"bar":{"layout":{"left":["oliver.torrents"]}},"plugins":[{"id":"other.overlay"}]}\n')
     sentinel=box.downloads/'keep.bin';sentinel.write_bytes(b'owned payload')
     # Commands are recorded in this private fixture; never contact the live shell/manager.
-    for command in ['systemctl','omarchy','omarchy-shell']:fixtures.path_shim(command,'exit 0',box.root)
+    for command in ['systemctl','omarchy','omarchy-shell','omarchy-restart-shell']:fixtures.path_shim(command,'exit 0',box.root)
     def setup(*args):
         step=case.step('private setup '+' '.join(args),'exit 0 with one JSON object; private paths only')
         result=subprocess.run([str(binary),'--no-start','setup',*args,'--json'],env=box.env,capture_output=True,text=True,timeout=15)

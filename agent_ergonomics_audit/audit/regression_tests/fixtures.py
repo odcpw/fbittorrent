@@ -86,7 +86,7 @@ class Sandbox:
         for name in ("daemon_fixture_bin", "two_files", "fixture_mkv", "fixture_iso"):
             (titles / (name + ".json")).write_text('{"missing":true}')
         for name in ("notify-send", "xdg-open", "wl-paste", "wl-copy", "systemctl",
-                     "systemd-inhibit", "omarchy-launch-or-focus-tui"):
+                     "systemd-inhibit", "omarchy-launch-or-focus-tui", "omarchy-restart-shell"):
             path_shim(name, "exit 99\n", self.root)
 
     def __enter__(self):

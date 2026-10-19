@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Handler magnet -> one review -> Enter -> real loopback payload, private state."""
-import argparse,base64,hashlib,http.server,json,os,socket,subprocess,threading,time,tomllib,traceback,urllib.parse
+import argparse,base64,hashlib,http.server,json,os,shutil,socket,subprocess,threading,time,tomllib,traceback,urllib.parse
 from contextlib import ExitStack
 from pathlib import Path
-from dashboard import Session
+from dashboard import Session,ROOT
 import daemon,fixtures,daemon_notify as notify
 from fbtlog import Case,suite_status
 
@@ -122,5 +122,8 @@ def run(binary,early=False):
     return suite_status('qs_handler_magnet')
 if __name__=='__main__':
     import private_net
-    private_net.enter();p=argparse.ArgumentParser(description=__doc__);p.add_argument('--binary',required=True,type=Path);p.add_argument('--early',action='store_true');a=p.parse_args()
+    private_net.enter()
+    old=ROOT/'target/test-logs/qs_handler_magnet'
+    if old.exists():shutil.copytree(old,ROOT/'target/test-logs/qs_handler_magnet_runs'/str(time.time_ns()))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--binary',required=True,type=Path);p.add_argument('--early',action='store_true');a=p.parse_args()
     raise SystemExit(run(a.binary.resolve(),a.early))

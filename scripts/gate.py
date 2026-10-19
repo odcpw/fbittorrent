@@ -99,7 +99,7 @@ def unit_environment(command, rust_test=False):
         env['FBITTORRENT_UNIT'] = 'fbt-fixture-' + root.name + '.service'
         env['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=' + str(root / 'absent-bus')
         shims = root / 'shims'; shims.mkdir()
-        for name in ('systemctl', 'xdg-open', 'notify-send', 'omarchy-launch-or-focus-tui'):
+        for name in ('systemctl', 'xdg-open', 'notify-send', 'omarchy-launch-or-focus-tui', 'omarchy-restart-shell'):
             path = shims / name; path.write_text('#!/bin/sh\nexit 99\n'); path.chmod(0o700)
         env['PATH'] = str(shims) + os.pathsep + env.get('PATH', '')
         for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'SWAYSOCK', 'HYPRLAND_INSTANCE_SIGNATURE'):

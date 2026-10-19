@@ -82,6 +82,7 @@ Item {
     if(typeof payload.query==="string")query=payload.query.slice(0,200)
     if(typeof payload.filter==="string")filter=payload.filter.slice(0,80)
     if(typeof payload.hash==="string" && /^[0-9a-f]{40}$/.test(payload.hash)){selectedHash=payload.hash;if(torrents)torrents.cursorHash=payload.hash}
+    if(svc)svc.closePopups()
     closingFromHost=false
     window.visible=true
     if(svc && !svc.online)svc.startDaemon()

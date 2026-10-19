@@ -19,16 +19,23 @@ from headless import Headless
 
 
 class Session:
-    def __init__(self,case,sandbox,hooks=True):
-        self.hooks=hooks;self.case=case;self.compositor=Headless(sandbox,case)
+    def __init__(self,case,sandbox,hooks=True,recipe="dashboard",source_link=None):
+        self.recipe=recipe;self.source_link=source_link;self.hooks=hooks;self.case=case;self.compositor=Headless(sandbox,case)
         try:self.start(sandbox)
         except BaseException:self.compositor.close();raise
 
     def start(self,sandbox):
-        config,self.env=prepare(sandbox,Path(__file__).with_name('dashboard'))
+        config,self.env=prepare(sandbox,Path(__file__).with_name(self.recipe),source=self.source_link)
         self.config=sandbox.root/'shell';config.rename(self.config)
+        if self.source_link:
+            assert self.source_link.is_relative_to(sandbox.root),'only private installed sources may be linked'
+            shutil.rmtree(self.config/'Plugin');(self.config/'Plugin').symlink_to(self.source_link,target_is_directory=True)
         host=self.config/'Host';host.mkdir()
         shutil.copyfile('/usr/share/omarchy/shell/services/PluginRegistry.qml',host/'PluginRegistry.qml')
+        if self.recipe=='bar-host':
+            (self.config/'HostBar').symlink_to('/usr/share/omarchy/shell/plugins/bar',target_is_directory=True)
+            for name in ('BarWidgetRegistry.qml','PluginShellApi.qml'):
+                shutil.copyfile('/usr/share/omarchy/shell/services/'+name,host/name)
         self.env.update(self.compositor.env)
         self.env['FBT_FONT_FAMILY']=os.environ.get('FBT_FONT_FAMILY') or subprocess.check_output(['fc-match','monospace','-f','%{family[0]}'],text=True)
         self.env.pop('HYPRLAND_INSTANCE_SIGNATURE',None)
