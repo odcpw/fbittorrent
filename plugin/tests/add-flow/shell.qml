@@ -57,6 +57,8 @@ ShellRoot {
     s.store.topics[s.addTopics[0]]={0:files[0],1:files[1]};f.frame({topic:s.addTopics[0],ev:"snapshot.end"})
     check("subscription","completed file snapshot makes staged add ready",f.snapshot(),f.snapshot().phase==="ready" && f.snapshot().files.length===2)
     f.commit();var reference="unit-3";s.reply("torrents.commit",{state:"pending",ref:reference})
+    s.store.mutations[reference]={status:"pending"};f.frame({topic:"events",ev:"delta"})
+    check("pending_commit","a pending event snapshot keeps Download in progress and never offers review again",f.snapshot(),f.snapshot().phase==="committing" && !f.snapshot().error)
     s.store.mutations[reference]={status:"done"};f.frame({topic:"events",ev:"delta"})
     check("subscription","pending commit with no result resolves from event delta",f.snapshot(),!f.snapshot().visible)
     s=service(["torrents","staging"]);f=Flow.create(s,function(){},true);f.open(source);s.reply("torrents.add",{hash:hash});s.now=90000;f.tick()
@@ -91,7 +93,7 @@ ShellRoot {
     check("space_refusal","selected file lengths determine required bytes",f.snapshot(),f.snapshot().insufficientSpace && f.snapshot().neededBytes===100*1024*1024)
     f.toggle(1);check("space_refusal","skipping an oversized file enables the remaining60 MiB",f.snapshot(),f.snapshot().destinationReady && f.snapshot().neededBytes===60*1024*1024)
     console.log("FBTQS-PASS space_refusal")
-    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})
+    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription","pending_commit","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})
     Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})
   }
 }

@@ -181,6 +181,7 @@ function create(service,changed,debug) {
       if(outcome)f.frame({ev:"mutation.result",ref:s.pendingRef,outcome:outcome.status,result:outcome.result,error:outcome.error})
     }
     if(frame.ev==="mutation.result" && s.pendingRef && frame.ref===s.pendingRef){
+      if(frame.outcome==="pending")return
       record("event",s.pendingOp,frame)
       if(frame.outcome==="done"){var done=s.pendingDone;s.pendingRef="";done(frame.result || {})}else if(frame.outcome!=="done")error(frame.error ? frame.error.message : "Result unknown; refresh before trying again")
     }
