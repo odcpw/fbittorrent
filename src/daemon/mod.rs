@@ -13,6 +13,7 @@ pub(crate) mod shows;
 pub(crate) mod staged_sources;
 pub(crate) mod watch;
 pub(crate) mod history;
+pub(crate) mod config_cache;
 pub(crate) mod stats;
 mod upgrade;
 mod test_ready;
@@ -43,6 +44,8 @@ pub struct Daemon {
     pub launcher: &'static str,
     pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub(crate) settings: crate::api::ops::settings::Service,
+    /// Last valid config.toml for the sampler and engine restarts.
+    pub(crate) config: config_cache::ConfigCache,
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
@@ -308,7 +311,9 @@ fn supervise(
             Some(LifecycleRequest::Restart(reason)) => {
                 eprintln!("INFO daemon restarting engine reason={reason:?}");
                 drop(daemon.replace(Slot::Starting)?);
-                cfg = Config::load()?;
+                // A broken edit must not end the owner: restart with the last
+                // valid settings; the sampler reports the unreadable file.
+                cfg = daemon.config.config();
                 if daemon.no_notify {
                     cfg.notify = false;
                 }
@@ -368,6 +373,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         },
         policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         settings: Default::default(),
+        config: config_cache::ConfigCache::new(cfg.clone()),
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,

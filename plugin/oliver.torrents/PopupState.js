@@ -4,6 +4,12 @@ function diskBanner(disk) {
   if(!disk || !disk.low)return ""
   return "Not enough space for the running downloads: "+Model.size(disk.needed_bytes,false)+" needed, "+(disk.free_bytes===undefined ? "free space unknown" : Model.size(disk.free_bytes,false)+" free")
 }
+function warningBanner(warnings) {
+  if(!warnings || !warnings.length)return ""
+  var first=warnings[0],file={config:"config.toml",shows:"shows.json",rss:"rss.json"}[first.source] || first.source
+  return file+" is unreadable; "+(first.source==="config" ? "using the last valid settings" : "showing the last loaded list")+
+    (warnings.length>1 ? " (+"+(warnings.length-1)+" more)" : "")+". Fix the file to clear this."
+}
 function describe(s) {
   if(!s)return {message:"fbittorrent is not running",banner:"",urgent:false,dim:false}
   var client=s.client || {},hello=client.hello || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
@@ -16,6 +22,7 @@ function describe(s) {
     r.banner="Waiting for ProtonVPN ("+(network.interface || network.selection || "proton0")+"). Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
+  else if(s.online && daemon.warnings && daemon.warnings.length)r.banner=warningBanner(daemon.warnings)
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
   if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
   if(s.online && daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"

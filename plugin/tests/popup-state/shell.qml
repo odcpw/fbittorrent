@@ -50,6 +50,7 @@ ShellRoot {
     s.backendState="parked";s.store.summary.network={interface:"proton0"};r=State.describe(s);check("states","VPN banner dims rows",r,r.dim && r.urgent && r.banner.indexOf("proton0")>=0)
     s.backendState="error";s.lastError="Engine restore failed";r=State.describe(s);check("states","engine failure preserves message",r,r.banner==="Engine restore failed" && r.urgent)
     s.backendState="running";s.store.summary={daemon:{upgrade_pending:true}};r=State.describe(s);check("states","upgrade pending",r,r.banner.indexOf("restarts when idle")>=0)
+    s.store.summary={daemon:{warnings:[{source:"config",message:"parsing config.toml"},{source:"rss",message:"parsing rss.json"}]}};r=State.describe(s);check("states","unreadable config banner keeps last valid settings",r,r.banner==="config.toml is unreadable; using the last valid settings (+1 more). Fix the file to clear this." && !r.urgent)
     s.store.summary={daemon:{idle_exit_in_s:240}};r=State.describe(s);check("states","optional idle countdown",r,r.idle==="Idle · stops in 4 min")
     s.online=false;r=State.describe(s);check("states","offline omits the cached idle countdown",r,r.idle==="" && r.message.indexOf("stopped.")>=0)
     s.online=true

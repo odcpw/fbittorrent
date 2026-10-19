@@ -30,6 +30,7 @@ fn rev_monotonic() {
     };
     let mut sample = Sample {
         topics: subscription.topics.iter().map(|t|t.topic.clone()).collect(),
+        failed: BTreeSet::new(),
         history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
@@ -177,7 +178,7 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {topics:BTreeSet::from([topic.clone()]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {topics:BTreeSet::from([topic.clone()]),failed:BTreeSet::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
@@ -196,7 +197,7 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
         topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
         since:None,epoch:None,active:true};
     // The worker collected its topic set before this subscription arrived.
-    let mut sample=Sample {topics:BTreeSet::from([Topic::Stats]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+    let mut sample=Sample {topics:BTreeSet::from([Topic::Stats]),failed:BTreeSet::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
         rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
         network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
         shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),
@@ -214,7 +215,7 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
 
 fn sample_for(topics: &[Topic]) -> Sample {
     Sample {
-        topics: topics.iter().cloned().collect(), history: vec![], stats: Value::Null,
+        topics: topics.iter().cloned().collect(), failed: BTreeSet::new(), history: vec![], stats: Value::Null,
         epoch: 1, state: "running".into(), rows: vec![], completions: vec![], logs: json!([]),
         searches: BTreeMap::new(), files: BTreeMap::new(), peers: BTreeMap::new(),
         pieces: BTreeMap::new(), trackers: BTreeMap::new(), network: json!({}), settings: json!({}),
@@ -307,4 +308,43 @@ fn skipped_pieces_sample_still_invalidates_the_old_engine_bitfield() {
     sample.topics.insert(topic);
     subscription.update(&sample,&[],1).unwrap();
     assert_eq!(subscription.sink.take_frames()[0]["data"]["have"],"gA==","the new engine must republish even identical data");
+}
+
+#[test]
+fn a_failed_store_topic_is_local_and_keeps_the_subscription() {
+    // A corrupt shows.json fails only its own topic. Summary still reports the
+    // warning, rss.feeds still snapshots and the connection stays open.
+    let topics = [Topic::Summary, Topic::Shows, Topic::RssFeeds];
+    let mut subscription = Subscription {
+        sub: 1, sink: EventSink::testing_with_hello(), rev: 0,
+        topics: topics.iter().cloned().map(|topic| TopicState {topic, interval: Duration::from_secs(86400), due: Instant::now(), sent: None}).collect(),
+        since: None, epoch: None, active: true,
+    };
+    let mut sample = sample_for(&topics);
+    sample.network = json!({"ready":true,"message":"ready"});
+    sample.daemon = json!({"state":"running","busy_reasons":[],"upgrade_pending":false,
+        "warnings":[{"source":"shows","message":"parsing shows.json; existing history was preserved"}]});
+    sample.failed.insert(Topic::Shows);
+    for _ in 0..3 { subscription.update(&sample, &[], 1).unwrap(); }
+    let frames = subscription.sink.take_frames();
+    assert!(!subscription.sink.closed(), "a store failure never closes the shared connection");
+    let summary = frames.iter().find(|f| f["topic"] == "summary" && f["ev"] == "state").expect("summary delivered");
+    assert_eq!(summary["data"]["daemon"]["warnings"][0]["source"], "shows");
+    assert!(frames.iter().any(|f| f["topic"] == "rss.feeds" && f["ev"] == "snapshot.end"), "{frames:?}");
+    assert!(!frames.iter().any(|f| f["topic"] == "shows"), "unknown is not empty: {frames:?}");
+    let shows = subscription.topics.iter().find(|t| t.topic == Topic::Shows).unwrap();
+    assert!(shows.sent.is_none() && shows.due > Instant::now() + Duration::from_millis(800), "retry is bounded to once a second");
+    // Readable again: the pending topic receives its first snapshot.
+    sample.failed.clear();
+    sample.shows = json!([]);
+    subscription.topics.iter_mut().filter(|t| t.topic == Topic::Shows).for_each(|t| t.due = Instant::now());
+    subscription.update(&sample, &[], 1).unwrap();
+    let frames = subscription.sink.take_frames();
+    assert!(frames.iter().any(|f| f["topic"] == "shows" && f["ev"] == "snapshot.begin"), "{frames:?}");
+    // A later failure keeps the delivered value instead of erasing it.
+    sample.failed.insert(Topic::Shows);
+    let rev = subscription.rev;
+    subscription.update(&sample, &[], 1).unwrap();
+    assert!(subscription.sink.take_frames().is_empty());
+    assert_eq!(subscription.rev, rev);
 }
