@@ -8,6 +8,8 @@ import "ApiClient.js" as ApiClient
 import "Store.js" as Store
 import "Model.js" as Model
 import "Focus.js" as Focus
+import "AddFlow.js" as AddFlow
+import "AddSource.js" as AddSource
 
 Item {
   id: root
@@ -21,6 +23,13 @@ Item {
   property var windowFocus:null
   property int windowFocusSteps:0
   property var detailTopics: []
+  property var addTopics:[]
+  property var addFlow:null
+  property int addRevision:0
+  property bool clipboardForSheet:false
+  function beginAdd(source,options){if(addFlow)return addFlow.open(source,options);return false}
+  function addClipboardSheet(){if(!beginAdd(null))return;clipboardForSheet=true;addFromClipboard()}
+  function finishAdd(hash){if(dashboardOwner && hash)dashboardOwner.selectTorrent(hash)}
   property string runtimeOverride: ""
   readonly property string runtimeDir: runtimeOverride || Quickshell.env("XDG_RUNTIME_DIR")
   readonly property string bin: String(settings.binary || "fbittorrent")
@@ -133,6 +142,7 @@ Item {
     try { rowsChanged = store.apply(frame, request) }
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
     syncRows();badgeCounts=store.badges
+    if(addFlow)addFlow.frame(frame)
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
@@ -182,7 +192,7 @@ Item {
   }
   function advanceWindowFocus() {
     var request=windowFocus
-    if(!request || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
+    if(!request || !request.target || !request.window || !request.window.visible){windowFocus=null;focusRetry.stop();return}
     request.target.forceActiveFocus()
     var backing=request.window._backingWindow,elapsed=Date.now()-request.started
     if(backing && backing.active && request.target.activeFocus){windowFocus=null;focusRetry.stop();return}
@@ -241,21 +251,16 @@ Item {
   function addFromClipboard() {
     if (!clipboard.running) { clipboardTooLarge = false; clipboard.running = true }
   }
-  function clipboardSource(text) {
-    var value = text.trim(), source = null, hash = ""
-    if (/^magnet:\?/i.test(value)) {
-      var match = /[?&]xt=urn:btih:([0-9a-f]{40})(?:&|$)/i.exec(value)
-      if (match) hash = match[1].toLowerCase()
-      source = {magnet:value}
-    } else if (/^https?:\/\//i.test(value)) source = {url:value}
-    else if (/^\//.test(value) && /\.torrent$/i.test(value)) source = {path:value}
-    if (hash && store.torrents[hash]) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
+  function clipboardSource(text,allowDuplicate) {
+    var parsed=AddSource.parse(text),source=parsed ? parsed.source : null,hash=parsed ? parsed.hash : ""
+    if (hash && store.torrents[hash] && !allowDuplicate) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
-  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
+  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
+  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
+  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics))
+  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics))
 
   FileView {
     id:preferences
@@ -294,7 +299,7 @@ Item {
       if (!socket.connected) restart()
     }
   }
-  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows() } }
+  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick() } }
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
@@ -312,20 +317,22 @@ Item {
       }
       onStreamFinished: {
         if (root.clipboardTooLarge) return
-        var source = root.clipboardSource(text)
-        if (source) root.clipboardOffer={source:source,name:Model.sourceName(source)}
+        var sheet=root.clipboardForSheet;root.clipboardForSheet=false
+        var source = root.clipboardSource(text,sheet)
+        if(source){if(sheet)root.beginAdd(source);else root.clipboardOffer={source:source,name:Model.sourceName(source)}}
       }
     }
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }
   }
   Component.onCompleted: {
+    addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { root.store = Store.create(); root.torrents = [] }})
-    client.visibility(popupOpen,dashboardVisible,detailTopics)
+    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics))
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

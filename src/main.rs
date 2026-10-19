@@ -230,11 +230,12 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
         }
-        Cmd::Dashboard { view, query } => {
+        Cmd::Dashboard { view, query, hash } => {
+            if let Some(hash)=&hash {api::Hash::new(hash.clone()).map_err(|message|AppError::new(Code::Usage,message))?;}
             let mut explicit = cfg.clone();
             explicit.autostart = !no_start;
             backend::ensure_running(&explicit, &c)?;
-            backend::dashboard(view.as_deref(), query.as_deref())?;
+            backend::dashboard_hash(view.as_deref(), query.as_deref(), hash.as_deref())?;
             emit(json, serde_json::json!({"ok":true,"action":"dashboard","count":0,"hashes":[]}), || {});
             Ok(Code::Ok)
         }

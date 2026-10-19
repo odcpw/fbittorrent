@@ -2,6 +2,7 @@
 use super::*;
 pub mod shapes;
 mod native;
+mod handler;
 mod offline;
 pub(super) mod settings;
 pub(super) use native::{handles as native_handles, run as run_native};
@@ -63,7 +64,7 @@ pub(super) enum Cmd {
     /// Start the daemon; --ui also opens the dashboard or TUI
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
-    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
+    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String>, #[arg(long)] hash: Option<String> },
     /// Restart the running engine; daemon upgrade handling follows in P1-17
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)

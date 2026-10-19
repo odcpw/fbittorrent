@@ -3792,8 +3792,17 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+def handler_confirm_stages(binary, systemd=False):
+    # Reuse the private native shell fixture; the daemon case retains its own JSONL.
+    sys.path.insert(0, str(REPO / "plugin/tests"))
+    import private_net
+    private_net.enter()
+    from add_sheet import handler
+    handler(binary, "daemon", "handler_confirm_stages")
+
+
 CASES = {function.__name__: function for function in
-         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
+         (handler_confirm_stages, settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
           settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic,
           fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           tui_single_connection, systemd_without_bus_address, interim_engine_socket, ready_notify,
