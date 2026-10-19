@@ -576,3 +576,22 @@ saves the private config without starting the daemon when stopped.
 Adds capability `settings`, the two operation-table rows, and the independent
 `settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
 `applied`, `restart` and `running`; existing CLI settings keys remain available.
+
+## P6-11 additive destination inspection (contract 1.2.5)
+
+Capability `free_space` adds read-only `app.free_space` (since P6-11):
+
+| Operation | Arguments | Result |
+|---|---|---|
+| `app.free_space` | `path: str` (absolute local directory, ≤4096 bytes, no controls) | `{free_bytes: bytes?, writable: bool}` |
+
+`free_bytes` uses the filesystem's available blocks and fragment size from
+`statvfs`; it is absent on lookup failure, a negative/unrepresentable block
+count, or arithmetic overflow. Zero means the known available space is zero.
+`writable` checks effective directory write/search permission and a read-only
+filesystem without creating a probe file. An absent/non-directory path returns
+`{writable:false}`. Malformed arguments return `invalid_args` with `details.key`
+`path`. Permission and capacity can change after this read; the actual write
+can still fail. Native `add --save` uses the same check and exits 2 before
+submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
+covers known, absent and zero space.

@@ -5,6 +5,8 @@
 
 pub mod client;
 pub mod errors;
+pub mod destination;
+pub use destination::*;
 pub mod events;
 pub mod mutations;
 pub mod objects;

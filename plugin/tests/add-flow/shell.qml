@@ -58,7 +58,15 @@ ShellRoot {
     s=service(["torrents","staging"]);f=Flow.create(s,function(){},true);f.open(source);s.reply("torrents.add",{hash:hash});s.now=90000;f.tick()
     s.mutate=function(){s.lastError="fixture refuses Keep paused";return false};f.keep()
     check("timeout","failed Keep paused remains retryable with the typed message",f.snapshot(),f.snapshot().phase==="error" && f.snapshot().error==="fixture refuses Keep paused")
-    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription"].forEach(function(name){console.log("FBTQS-PASS "+name)})
+    s=service(["torrents","free_space"]);f=Flow.create(s,function(){},true);f.open(source)
+    check("destination","destination inspection starts without a mutation",s.calls,s.calls.length===1 && s.calls[0].op==="app.free_space" && !f.snapshot().destinationReady)
+    s.reply("app.free_space",{writable:false});f.commit()
+    check("destination","unwritable folder disables confirmation and sends no add",f.snapshot(),s.calls.length===1 && !f.snapshot().destinationReady && f.snapshot().space.free_bytes===undefined)
+    f.path("/good");s.now=300;f.tick();f.path("/latest");s.reply("app.free_space",{writable:true,free_bytes:4096})
+    check("destination","old path replies cannot enable a new destination",f.snapshot(),!f.snapshot().destinationReady && f.snapshot().savePath==="/latest")
+    s.now=600;f.tick();s.reply("app.free_space",{writable:true,free_bytes:0});f.commit()
+    check("destination","known zero is kept and writable destination reaches add",s.calls[s.calls.length-1],f.snapshot().space.free_bytes===0 && s.calls[s.calls.length-1].op==="torrents.add" && s.calls[s.calls.length-1].args.save_path==="/latest")
+    ;["source","preview","staging","cancel_race","timeout","duplicate","subscription","destination"].forEach(function(name){console.log("FBTQS-PASS "+name)})
     Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})
   }
 }

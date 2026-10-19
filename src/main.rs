@@ -12,6 +12,7 @@ mod api;
 mod backend;
 mod browse;
 mod config;
+mod free_space;
 mod daemon;
 mod engine;
 mod native_runtime;

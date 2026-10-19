@@ -202,6 +202,7 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    AppFreeSpace(super::FreeSpaceResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -229,6 +230,7 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "app.free_space" => serde_json::from_value(result).map(Self::AppFreeSpace),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),

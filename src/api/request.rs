@@ -262,6 +262,8 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "app.free_space")]
+    AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -327,6 +329,7 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::AppFreeSpace { .. } => "app.free_space",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",

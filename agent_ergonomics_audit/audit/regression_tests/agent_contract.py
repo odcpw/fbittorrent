@@ -209,7 +209,14 @@ def exit_code_dictionary_total(binary,systemd):
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 
-CASES={f.__name__:f for f in [reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+def add_save_unwritable(binary, systemd):
+    sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
+    import private_net
+    private_net.enter()
+    from destination import cli_unwritable
+    cli_unwritable(binary,systemd)
+
+CASES={f.__name__:f for f in [add_save_unwritable,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

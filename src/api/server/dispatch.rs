@@ -89,7 +89,8 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::AppSettingsGet { .. }
+                Call::AppFreeSpace { .. }
+                | Call::AppSettingsGet { .. }
                 | Call::AppSettingsSet { .. }
                 | Call::AppInfo { .. }
                 | Call::AppNetwork { .. }
