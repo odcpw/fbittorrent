@@ -249,7 +249,44 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                             Some("source.url"),
                         ));
                     }
-                    add.sources.push(url.clone());
+                    // Fetch through the live slot's interface-bound runtime,
+                    // then admit validated bytes through the usual atomic add.
+                    let began = std::time::Instant::now();
+                    let dispatcher = loop {
+                        if daemon.is_stopping() {
+                            return Err(engine_error(anyhow::anyhow!("engine is closing")));
+                        }
+                        let slot = daemon.slot.read().unwrap();
+                        match &slot.slot {
+                            crate::daemon::slot::Slot::Running(app) => break app.dispatcher(),
+                            crate::daemon::slot::Slot::Starting
+                                if began.elapsed() < std::time::Duration::from_secs(60) => {}
+                            _ => {
+                                return Err(engine_error(anyhow::anyhow!(
+                                    "engine_unavailable state={}",
+                                    slot.slot.state().name()
+                                )))
+                            }
+                        }
+                        drop(slot);
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    };
+                    let network = daemon.network();
+                    let bytes = dispatcher
+                        .fetch_api_torrent(url, network.interface.as_deref())
+                        .map_err(|value| {
+                            let mut failure = engine_error(value);
+                            if failure.code == Internal {
+                                failure =
+                                    error(Upstream, "could not fetch valid torrent metainfo", None);
+                            }
+                            failure.details = Some(serde_json::Map::from_iter([(
+                                "source".into(),
+                                json!("url"),
+                            )]));
+                            failure
+                        })?;
+                    add.torrent = Some(("URL metadata.torrent".into(), bytes));
                     false
                 }
                 AddSource::Magnet(source) => {
@@ -265,12 +302,25 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                                 .join(","),
                         );
                     }
+                    if source
+                        .query_pairs()
+                        .any(|(key, value)| key == "xt" && value.starts_with("urn:btmh:"))
+                        && !source
+                            .query_pairs()
+                            .any(|(key, value)| key == "xt" && value.starts_with("urn:btih:"))
+                    {
+                        return Err(error(
+                            Unsupported,
+                            "v2-only magnets are unsupported",
+                            Some("source.magnet"),
+                        ));
+                    }
                     let parsed = librqbit::Magnet::parse(source.as_str()).map_err(|_| {
                         error(InvalidArgs, "invalid v1 magnet", Some("source.magnet"))
                     })?;
                     if parsed.as_id20().is_none() {
                         return Err(error(
-                            InvalidArgs,
+                            Unsupported,
                             "a v1 magnet hash is required",
                             Some("source.magnet"),
                         ));

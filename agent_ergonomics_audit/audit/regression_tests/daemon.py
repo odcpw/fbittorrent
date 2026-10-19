@@ -2966,6 +2966,313 @@ def install_atomic(binary, systemd):
             h.cli("down", start=True)
 
 
+# P1-09: every mutation records its complete envelope, including resend identity.
+def mutation_request(client, op, args, ref=None, instance=None, error=None):
+    identifier = client.next_id
+    client.next_id += 1
+    frame = dict(id=identifier, op=op, args=args)
+    if ref is not None:
+        frame["ref"] = ref
+    if instance is not None:
+        frame["instance"] = instance
+    step = client.case.step(json.dumps(frame, sort_keys=True),
+                            "matching success envelope" if error is None else f"error.code == {error}")
+    client.send_frame(frame, typed=error is None)
+    while (reply := client.receive()) is not None:
+        if "ev" in reply:
+            client.pushed.append(reply)
+            continue
+        step.close(reply.get("id") == identifier and
+                   (reply.get("ok") is True if error is None else reply.get("error", {}).get("code") == error),
+                   json.dumps(reply, sort_keys=True))
+        return reply
+    step.fail("EOF before the matching response")
+    raise EOFError(op)
+
+
+def mutation_hello(client, name):
+    return mutation_request(client, "hello", dict(proto=1, client=dict(name=name, version="0", kind="test")))["result"]
+
+
+def mutation_outcome(client, reference):
+    for frame in client.events():
+        if frame.get("ev") == "mutation.result" and frame.get("ref") == reference:
+            client.case.check(frame.get("outcome") == "done", "pending mutation finishes with done", json.dumps(frame, sort_keys=True))
+            return frame
+    raise EOFError("mutation.result " + reference)
+
+
+def mutation_add_path(client, sandbox, name="payload"):
+    root = sandbox.root / name
+    root.mkdir()
+    fixture = fixtures.two_file_fixture(root)
+    # Keep a real incomplete torrent; completion does not race a stop assertion.
+    fixtures.corrupt_byte(fixture.files[0], 0)
+    args = dict(source=dict(path=str(fixture.torrent)), stopped=True, save_path=str(root))
+    reply = mutation_request(client, "torrents.add", args)
+    client.case.check(reply.get("result", {}).get("hash") == fixture.info_hash,
+                      "path add returns its exact durable hash", json.dumps(reply))
+    return fixture, args
+
+
+def ref_replay_remove(binary, systemd):
+    with api_owned("ref_replay_remove", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "ref-remove")
+        fixture, args = mutation_add_path(client, sandbox)
+        remove = dict(hashes=[fixture.info_hash], delete_files=False)
+        first = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        case.check(first.get("result") == replay.get("result"), "remove replay returns the stored first result", json.dumps(replay))
+        mutation_request(client, "torrents.add", args, ref="readd")
+        replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check(first.get("result") == replay.get("result") and [row["hash"] for row in rows] == [fixture.info_hash],
+                   "old remove ref does not remove a later add of the same hash", json.dumps(rows))
+
+
+def ref_per_client(binary, systemd):
+    with api_owned("ref_per_client", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as first, ApiConn(harness) as second:
+        mutation_hello(first, "client-one"); mutation_hello(second, "client-two")
+        inputs = []
+        for client, name in [(first, "one"), (second, "two")]:
+            fixture, args = mutation_add_path(client, sandbox, name)
+            inputs.append(fixture.info_hash)
+            mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash], delete_files=False), ref="same-ref")
+        case.check(len(set(inputs)) == 2 and first.call("torrents.list", {})["result"]["torrents"] == [],
+                   "distinct client names apply both independent removals with the same ref", str(inputs))
+
+
+def remove_requires_flag(binary, systemd):
+    with api_owned("remove_requires_flag", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "required-flag")
+        fixture, _ = mutation_add_path(client, sandbox)
+        failure = mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash]), ref="missing-flag", error="invalid_args")
+        case.check(failure["error"].get("details", {}).get("key") == "delete_files", "missing delete_files names the mandatory argument", json.dumps(failure))
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check([row["hash"] for row in rows] == [fixture.info_hash] and all(path.exists() for path in fixture.files),
+                   "invalid removal changes neither ledger nor payload", json.dumps(rows))
+
+
+@contextmanager
+def held_torrent_source(case, document):
+    import http.server
+    release, entered = threading.Event(), threading.Event()
+    requests = []
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def do_GET(self):
+            requests.append(self.path)
+            entered.set()
+            release.wait(10)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(document)))
+                self.end_headers()
+                self.wfile.write(document)
+            except OSError:
+                pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = False
+    thread = threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=.05))
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/legal.torrent", entered, release, requests
+    finally:
+        release.set(); server.shutdown(); server.server_close(); thread.join(2)
+        case.check(not thread.is_alive(), "held HTTP fixture joins", f"alive={thread.is_alive()}")
+
+
+def add_url_pending_then_result(binary, systemd):
+    with api_owned("add_url_pending_then_result", binary, systemd) as (case, sandbox, harness, process):
+        payload = sandbox.root / "Example e2.mkv"
+        payload.write_bytes(b"legal local mutation fixture\n" * 16384)
+        fixture = fixtures.torrent_fixture(sandbox.root, [payload], name="mutation-url")
+        trace = []
+        with held_torrent_source(case, fixture.torrent.read_bytes()) as (url, entered, release, requests), \
+                ApiConn(harness) as origin, ApiConn(harness, trace=trace) as replay:
+            hello = mutation_hello(origin, "url-reconnect")
+            mutation_hello(replay, "url-reconnect")
+            case.check("mutations" in hello["caps"], "hello advertises the mutation capability", json.dumps(hello))
+            args = dict(source=dict(url=url), save_path=str(sandbox.root), stopped=True)
+            first = mutation_request(origin, "torrents.add", args, ref="test-add", instance=hello["instance"])
+            case.check(entered.wait(2) and first["result"] == dict(state="pending", ref="test-add"),
+                       "URL pending is correlated and has no fabricated hash before the fetch", json.dumps(first))
+            again = mutation_request(replay, "torrents.add", args, ref="test-add", instance=hello["instance"])
+            case.check(again["result"] == first["result"], "in-flight replay receives the stored pending response", json.dumps(again))
+            # The worker is daemon-owned; losing its original connection does not
+            # discard the result or prevent delivery to a replaying connection.
+            origin.close()
+            release.set()
+            outcome = mutation_outcome(replay, "test-add")
+            case.check(outcome.get("result", {}).get("hash") == fixture.info_hash and outcome["result"]["duplicate"] is False
+                       and requests == ["/legal.torrent"], "one real URL fetch completes on the replaying connection after original disconnect", json.dumps(outcome))
+            frozen = [json.loads(line) for line in (REPO / "contracts/ipc/v1/mutations.ndjson").read_text().splitlines()]
+            normalizer = ReplayNormalizer()
+            normalizer.compare(frozen[4]["frame"], again)
+            normalizer.compare(dict(result=frozen[12]["frame"]["result"]), dict(result=outcome["result"]))
+            case.check(True, "pending and add result match the frozen mutation fixture using P1-06 normalization", json.dumps(outcome))
+            if os.environ.get("FBT_API_CONTRACT_VALIDATOR"):
+                validate_live_contract(case, sandbox, trace)
+                # The frozen result omits optional duplicate. Keep P1-06's
+                # extra-optional rule: both present and absent must validate.
+                absent = json.loads(json.dumps(trace))
+                for row in absent:
+                    if row.get("frame", {}).get("ev") == "mutation.result":
+                        row["frame"].get("result", {}).pop("duplicate", None)
+                validate_live_contract(case, sandbox, absent, kind="optional-absent")
+            # Reconnect after completion still gets the original pending receipt,
+            # followed by the retained complete outcome.
+            late = mutation_request(replay, "torrents.add", args, ref="test-add")
+            event = mutation_outcome(replay, "test-add")
+            case.check(late["result"] == first["result"] and event == outcome,
+                       "late replay returns the original receipt and the same outcome", json.dumps(event))
+
+
+def duplicate_add(binary, systemd):
+    with api_owned("duplicate_add", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "duplicate")
+        fixture, args = mutation_add_path(client, sandbox)
+        before = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        duplicate = mutation_request(client, "torrents.add", dict(args, seed=True, stopped=False, category="changed"), ref="duplicate-path")
+        after = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(duplicate["result"]["duplicate"] is True and duplicate["result"]["hash"] == fixture.info_hash
+                   and all(before[key] == after[key] for key in ("intent", "seed", "save_path")),
+                   "duplicate path add preserves existing transfer policy", json.dumps(duplicate))
+        with fixtures.HttpFixture(sandbox.root, {"/duplicate.torrent": dict(file=str(fixture.torrent.relative_to(sandbox.root)))}) as http:
+            mutation_request(client, "torrents.add", dict(source=dict(url=http.base + "/duplicate.torrent"), stopped=False, seed=True), ref="duplicate-url")
+            event = mutation_outcome(client, "duplicate-url")
+            case.check(event["result"]["duplicate"] is True and event["result"]["hash"] == fixture.info_hash,
+                       "URL duplicate is a successful correlated result", json.dumps(event))
+
+
+def ref_reused_different_args(binary, systemd):
+    with api_owned("ref_reused_different_args", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "ref-fingerprint")
+        fixture, _ = mutation_add_path(client, sandbox)
+        args = dict(hashes=[fixture.info_hash], delete_files=False)
+        mutation_request(client, "torrents.remove", args, ref="fingerprint")
+        for op, changed in [("torrents.remove", dict(args, delete_files=True)), ("torrents.stop", dict(hashes=[fixture.info_hash]))]:
+            failure = mutation_request(client, op, changed, ref="fingerprint", error="invalid_args")
+            case.check(failure["error"]["message"] == "ref reused for a different request" and failure["error"]["details"]["key"] == "ref",
+                       "ref fingerprint rejects changed operation or arguments", json.dumps(failure))
+        # Failures are receipts too: making the missing record exist must not
+        # convert a replay of its old error into a new application.
+        missing = "b" * 40
+        stop = dict(hashes=[missing])
+        failure = mutation_request(client, "torrents.stop", stop, ref="stored-error", error="not_found")
+        mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + missing), stopped=True))
+        replay = mutation_request(client, "torrents.stop", stop, ref="stored-error", error="not_found")
+        case.check(failure["error"] == replay["error"], "replay returns the stored error after state changes", json.dumps(replay))
+
+
+def stale_instance_remove_refused(binary, systemd):
+    with api_owned("stale_instance_remove_refused", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "stale-remove")
+        fixture, _ = mutation_add_path(client, sandbox)
+        stale = ("0" if hello["instance"][0] != "0" else "1") + hello["instance"][1:]
+        failure = mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash], delete_files=True), ref="old-remove", instance=stale, error="invalid_state")
+        case.check(failure["error"]["message"] == "daemon restarted since this request; check the list" and all(path.exists() for path in fixture.files),
+                   "stale destructive intent is refused before removing data", json.dumps(failure))
+        case.check(len(client.call("torrents.list", {})["result"]["torrents"]) == 1, "stale removal retains the record")
+
+
+def stale_instance_stop_applies(binary, systemd):
+    with api_owned("stale_instance_stop_applies", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "stale-stop")
+        fixture, _ = mutation_add_path(client, sandbox)
+        mutation_request(client, "torrents.start", dict(hashes=[fixture.info_hash]))
+        stale = ("0" if hello["instance"][0] != "0" else "1") + hello["instance"][1:]
+        reply = mutation_request(client, "torrents.stop", dict(hashes=[fixture.info_hash]), ref="old-stop", instance=stale)
+        row = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(reply["result"]["state"] == "done" and row["intent"] == "pause", "stale idempotent stop still applies durable pause intent", json.dumps(reply))
+
+
+def hashes_cap_257(binary, systemd):
+    with api_owned("hashes_cap_257", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "hash-bound")
+        case.check(hello["limits"]["hashes"] == 256, "hello publishes the authoritative hash cap", json.dumps(hello["limits"]))
+        for hashes in [[], ["a" * 40] * 257]:
+            for op, extra in [("torrents.start", {}), ("torrents.stop", {}), ("torrents.remove", dict(delete_files=False)),
+                              ("torrents.set_seed", dict(on=True)), ("torrents.set_upload_limit", dict(bps=32768))]:
+                failure = mutation_request(client, op, dict(hashes=hashes, **extra), error="invalid_args")
+                case.check(failure["error"].get("details", {}).get("key") == "hashes", "out-of-bounds hash list identifies hashes", json.dumps(failure))
+
+
+def mutation_magnets_and_file_removal(binary, systemd):
+    with api_owned("mutation_magnets_and_file_removal", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "magnet-controls")
+        digest = "c1" * 20
+        base32 = base64.b32encode(bytes.fromhex(digest)).decode()
+        result = mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + base32 + "&dn=Local%20name")), ref="base32")
+        case.check(result["result"]["hash"] == digest and result["result"]["name"] == "Local name" and result["result"]["state"] == "pending",
+                   "base32 magnet immediately has its lowercase hash and display name", json.dumps(result))
+        row = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
+        case.check(row["state"] == "metadata" and "size" not in row and "progress" not in row, "unresolved magnet has a truthful metadata row", json.dumps(row))
+        duplicate = mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + digest + "&dn=Changed"), stopped=True), ref="duplicate-magnet")
+        case.check(duplicate["result"]["duplicate"] is True and duplicate["result"]["name"] == "Local name", "duplicate magnet preserves its saved name and intent", json.dumps(duplicate))
+        mutation_request(client, "torrents.stop", dict(hashes=[digest]))
+        ledger = json.loads((Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json").read_text())
+        case.check(next(row for row in ledger["records"] if row["hash"] == digest)["paused"], "stop of metadata persists pause before responding")
+        mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btmh:1220" + "ab" * 32)), error="unsupported")
+        fixture, _ = mutation_add_path(client, sandbox)
+        args = dict(hashes=[fixture.info_hash], delete_files=True)
+        pending = mutation_request(client, "torrents.remove", args)
+        reference = pending["result"]["ref"]
+        case.check(pending["result"]["state"] == "pending" and re.fullmatch("srv-" + hello["instance"][:8] + r"-\d+", reference),
+                   "file deletion is pending with a server-generated instance ref", json.dumps(pending))
+        mutation_outcome(client, reference)
+        case.check(not any(path.exists() for path in fixture.files), "file-removal done follows real payload deletion")
+        replay = mutation_request(client, "torrents.remove", args, ref=reference)
+        case.check(replay["result"] == pending["result"], "generated ref is replayable", json.dumps(replay))
+        mutation_outcome(client, reference)
+
+
+def mutation_url_input_bounds(binary, systemd):
+    with api_owned("mutation_url_input_bounds", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "url-bounds")
+        payload = sandbox.root / "input.bin"
+        payload.write_bytes(b"only local fixture bytes")
+        fixture = fixtures.torrent_fixture(sandbox.root, [payload])
+        (sandbox.root / "invalid.torrent").write_bytes(b"not bencoded torrent metadata")
+        padding = b"x" * (16 * fixtures.MIB)
+        (sandbox.root / "oversized.torrent").write_bytes(b"d7:comment" + str(len(padding)).encode() + b":" + padding + fixture.torrent.read_bytes()[1:])
+        with fixtures.HttpFixture(sandbox.root) as http:
+            for filename in ["invalid.torrent", "oversized.torrent"]:
+                reference = filename.split(".")[0]
+                reply = mutation_request(client, "torrents.add", dict(source=dict(url=http.base + "/" + filename)), ref=reference)
+                case.check(reply["result"] == dict(state="pending", ref=reference), "URL input is acknowledged before fetching", json.dumps(reply))
+                for event in client.events():
+                    if event.get("ev") == "mutation.result" and event.get("ref") == reference:
+                        case.check(event.get("outcome") == "failed" and event.get("error", {}).get("code") == "upstream",
+                                   "invalid or oversized URL metainfo fails before admission", json.dumps(event))
+                        break
+            case.check(client.call("torrents.list", {})["result"]["torrents"] == [], "rejected URL bodies create no torrent records")
+
+
+def ref_survives_engine_restart(binary, systemd):
+    with api_owned("ref_survives_engine_restart", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "engine-slot-replay")
+        fixture, args = mutation_add_path(client, sandbox)
+        remove = dict(hashes=[fixture.info_hash], delete_files=False)
+        first = mutation_request(client, "torrents.remove", remove, ref="before-slot-restart")
+        mutation_request(client, "torrents.add", args)
+        mutation_request(client, "app.restart", dict(scope="engine"), ref="slot-restart")
+        def restarted():
+            info = client.call("app.info")["result"]
+            return info["state"] == "running" and info["engine_epoch"] > hello["engine_epoch"], json.dumps(info)
+        harness.wait_for(restarted, "engine slot restarts within the same daemon instance")
+        replay = mutation_request(client, "torrents.remove", remove, ref="before-slot-restart", instance=hello["instance"])
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check(first["result"] == replay["result"] and [row["hash"] for row in rows] == [fixture.info_hash],
+                   "engine replacement retains the daemon-owned ref ring", json.dumps(replay))
+
+
+MUTATION_CASES = (ref_replay_remove, ref_per_client, remove_requires_flag, add_url_pending_then_result,
+                  duplicate_add, ref_reused_different_args, stale_instance_remove_refused,
+                  stale_instance_stop_applies, hashes_cap_257, mutation_magnets_and_file_removal, mutation_url_input_bounds, ref_survives_engine_restart)
+
+
 CASES = {function.__name__: function for function in
          (fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
@@ -2980,6 +3287,7 @@ CASES = {function.__name__: function for function in
           api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
           api_missing_completed_payload, api_loopback_seed_receives,
           contract_hello, contract_errors, contract_torrents)}
+CASES.update((function.__name__, function) for function in MUTATION_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",
@@ -2991,6 +3299,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
+    parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
     parser.add_argument("--case", choices=CASES,
                         help="run one named case; systemd_without_bus_address requires --systemd")
     parser.add_argument("--contract-validator", type=Path,
@@ -3009,7 +3318,7 @@ def main():
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else [name for name in CASES if name != "install_atomic" and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (args.systemd or name not in SYSTEMD_CASES)]):
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")
