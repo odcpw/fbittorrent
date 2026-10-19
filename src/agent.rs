@@ -175,17 +175,14 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "delete", aliases: &["rm", "remove"], summary: "Remove torrents; --files deletes data and needs --yes; --dry-run previews", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "seed", aliases: &[], summary: "Allow upload for torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "noseed", aliases: &[], summary: "Cap upload and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "seq", aliases: &[], summary: "Unsupported stub: native streaming scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "first-last", aliases: &[], summary: "Toggle first/last priority in legacy mode; native scheduling is intrinsic", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
-        CommandDoc { name: "reconcile", aliases: &[], summary: "Native scheduling stub (no connection); legacy mode applies default flags", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "imdb", aliases: &[], summary: "Title, rating, blurb and poster for a release name", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "up", aliases: &[], summary: "Start the daemon; --ui also opens the dashboard or TUI", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "dashboard", aliases: &[], summary: "Start the daemon and summon the dashboard, falling back to the TUI", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "restart", aliases: &[], summary: "Restart the daemon now; wait up to 30 seconds for its replacement hello", json: true, mutating: true, needs_backend: false },
-        CommandDoc { name: "down", aliases: &[], summary: "Close the app and wait for its engine to stop; legacy mode stops its service", json: true, mutating: true, needs_backend: false },
+        CommandDoc { name: "down", aliases: &[], summary: "Stop the daemon and wait for engine cleanup", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
@@ -292,7 +289,7 @@ WHAT IT IS
   locally without starting downloads.
   Upload is capped at {upload_policy}.
   Files land in the configured download folder or the desktop Downloads folder.
-  Only the native daemon is supported; engine = "qbittorrent" is rejected in v0.4.0.
+  The native daemon is the only backend.
 
 RULES
   - {json_convention}
@@ -312,10 +309,7 @@ RULES
   - `--no-start` (global) or FBITTORRENT_NO_START=1 prevents engine startup,
     including explicit `up` and `tui`. A closed engine returns exit 4 with a hint.
     autostart=false is the persistent form for ordinary torrent commands.
-    Native `reconcile` is a no-op and never connects to the engine.
-  - Native sequential and first/last scheduling are intrinsic. Toggle commands
-    and --no-seq/--no-first-last are unsupported; file priority only
-    supports skip/normal. Peer encryption defaults to prefer; require refuses
+  - Streaming priority is intrinsic. File priority supports skip/normal. Peer encryption defaults to prefer; require refuses
     plaintext peers. F6 or `settings` changes encryption, queue limit and VPN.
   - Three downloads run at once by default. Extra downloads wait in FIFO order.
     Manual pause remains paused. Completed seeders do not consume queue slots.

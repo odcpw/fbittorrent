@@ -186,6 +186,10 @@ def _worker_parent_cleanup() -> None:
     import ctypes
     import os
     import signal
+    # Spawn imports this module, including Nova's group-killing TERM handler.
+    # Pool.__exit__ terminates idle workers with TERM: only the Nova parent
+    # may kill the group. A worker must retire without killing its parent.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     parent = os.getppid()
     ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL, 0, 0, 0)
     if parent == 1 or os.getppid() != parent:

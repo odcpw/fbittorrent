@@ -1,11 +1,8 @@
 mod agent;
 mod cli;
-#[path = "cli/local.rs"]
-mod cli_local;
 #[path = "cli/sources.rs"]
 mod cli_sources;
 use cli::{Cli, Cmd, RssCmd, ShowsCmd};
-use cli_local::*;
 use cli_sources::{short, local_torrent_source};
 pub use cli_sources::{magnet_hash, magnet_name};
 mod api;
@@ -32,7 +29,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
 use qbt::{human_bytes, AddOptions, Torrent};
-use cli::local_client::Client;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -115,10 +111,8 @@ fn run(cli: Cli) -> Result<Code> {
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if cli::native_handles(&cmd) { return cli::run_native(&cfg, &cmd, json, no_start); }
-    if matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
-        return Err(AppError::new(Code::Usage, "unsupported: sequential and first/last scheduling are intrinsic")
-            .hint("fbittorrent show <hash> --json   # inspect streaming scheduling").into());
-    }
+    if let Cmd::Rss(sub)=&cmd {return cli::catalog_rss::run(&cfg,sub,json,no_start);}
+    if let Cmd::Shows(sub)=&cmd {return cli::catalog_shows::run(&cfg,sub,json,no_start);}
 
     // Commands that never touch the backend.
     match cmd {
@@ -156,8 +150,6 @@ fn run(cli: Cli) -> Result<Code> {
         _ => {}
     }
 
-    let c = Client::from_config(&cfg);
-
     match cmd {
         Cmd::Up { ui } => {
             let mut explicit = cfg.clone();
@@ -191,14 +183,6 @@ fn run(cli: Cli) -> Result<Code> {
             tui::run(cfg, screen)?;
             Ok(Code::Ok)
         }
-        Cmd::Reconcile { recent: _ } => {
-            emit(json,reconcile_result(),|| println!("native scheduling is intrinsic"));
-            Ok(Code::Ok)
-        }
-        Cmd::Rss(sub) => {
-            rss(&c, sub, json, &cfg)
-        }
-        Cmd::Shows(sub) => shows_cmd(&cfg, &c, sub, json),
         Cmd::Search { query, wait, limit, install, install_url, plugins, install_torznab, key_file } => {
             if let Some(url)=install_torznab {
                 let key_file=key_file.map(|p|if p.is_absolute(){Ok(p)}else{std::env::current_dir().map(|dir|dir.join(p))}).transpose()?;
@@ -208,7 +192,7 @@ fn run(cli: Cli) -> Result<Code> {
             }
             cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json)
         }
-        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seq {..} | Cmd::FirstLast {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } | Cmd::Rss(..) | Cmd::Shows(..) => unreachable!(),
     }
 }
 
@@ -221,10 +205,6 @@ fn native_may_start(cmd: &Cmd) -> bool {
 
 fn no_start_requested(flag: bool, environment: Option<&std::ffi::OsStr>) -> bool {
     flag || environment == Some(std::ffi::OsStr::new("1"))
-}
-
-fn reconcile_result() -> serde_json::Value {
-    serde_json::json!({"ok":true,"touched":0,"note":"native scheduling is intrinsic"})
 }
 
 /// Search providers belong to the invoking CLI or app process, including errors.
@@ -261,13 +241,6 @@ mod source_tests {
             assert!(no_start_requested(true, value.map(std::ffi::OsStr::new)));
         }
         assert!(no_start_requested(false, Some(std::ffi::OsStr::new("1"))));
-    }
-
-    #[test]
-    fn native_reconcile_returns_stub_without_connecting() {
-        let result = reconcile_result();
-        println!("native Cmd::Reconcile: {result}");
-        assert_eq!(result, serde_json::json!({"ok": true, "touched": 0, "note": "native scheduling is intrinsic"}));
     }
 
     #[test]

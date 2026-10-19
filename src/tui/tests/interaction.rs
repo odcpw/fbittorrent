@@ -69,8 +69,7 @@
     fn app() -> TuiApp {
         let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
         app.kitty = None;
-        app.rss_initial_refresh_pending = false;
-        app
+            app
     }
 
     #[test]
@@ -615,6 +614,13 @@
         assert!(app.status_is_error);
         assert!(app.status.contains("1 results"));
         assert!(app.status.contains("one provider failed"));
+    }
+
+    #[test]
+    fn rss_no_initial_refresh() {
+        let mut app=app();
+        assert!(matches!(app.update(Msg::Rss {revision:0,result:Ok(vec![feed(vec![article("item","FeedItemAlpha")])])}),Cmd::None));
+        assert!(!app.rss_busy,"loading cached rows cannot start a network refresh");
     }
 
     #[test]

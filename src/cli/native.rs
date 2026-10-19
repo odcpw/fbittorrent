@@ -186,13 +186,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             wait,
             timeout,
             origin,
-            no_seq,
-            no_first_last,
             ..
         } => {
-            if *no_seq || *no_first_last {
-                return Err(AppError::new(Code::Usage,"sequential and first/last scheduling are intrinsic; drop --no-seq and --no-first-last").into());
-            }
             if let Some(path) = save { crate::free_space::require_writable(path)?; }
             let client = connect(cfg, true, no_start, json_mode)?;
             if origin=="handler" && cfg.handler=="confirm" {

@@ -1176,3 +1176,36 @@ and ordinary TLS verification. Bound `localhost` resolves directly to IPv4/IPv6
 loopback; remote names use bound DNS. Missing/down interfaces fail without retrying
 on an ordinary socket. The HTTP worker owns its small runtime only for the
 request; it never creates an engine session or acquires the daemon lock.
+
+
+## Native CLI catalogues (P3-07, CLI contract 1.2.27)
+
+Search, IMDb, RSS and Shows share the same normalized data and native handlers
+with their local CLI path. A read-only hello has a 200 ms budget. Running capable
+owners answer through api.sock; absent, parked or stopping owners use today's
+local data files and native service functions without starting an engine.
+RSS and Shows grabs use rss.grab/shows.grab and start the owner on demand unless
+startup was disabled. They return the actual confirmed hash and deferred:true
+when the owner accepted a parked intent. Read flags/history change only after
+successful admission. Pending replies wait for their own mutation.result; checks
+also observe the pushed shows.checked event, while RSS refreshes subscribe to
+rss.feeds and return after confirmed loading has cleared. Lost pending results
+exit 8 and are never resubmitted by these commands. Collection reads first use
+a fresh operation result; a response above the single-frame cap uses bounded
+subscription snapshots.
+
+Both data paths use one CLI renderer. Feed/item order is id and published time/id;
+shows sort by title, releases by published time/key. Item dates use canonical UTC
+rather than preserving a source's original date spelling; last_build_date remains
+empty when the channel date is unavailable in A.9. Release read/new intent and
+transfer facts remain separate: added/transfer describe the known transfer or
+retained history; grabbed is omitted where its provenance is unknown from A.9.
+Zero values for unavailable numeric display fields carry seeds_known/size_known.
+The owner explicitly retired old-binary compatibility work on 2026-10-19; no
+v0.1 shape adapter, old-protocol reader or compatibility warning is added.
+
+The TUI no longer initiates an RSS or Shows check merely by opening. The daemon's
+interactive edge refreshes only stale catalogues. The existing UI connection
+subscribes to rss.feeds/shows and reloads today's atomic files on pushed updates;
+shows.checked also refreshes the cached Shows view. A fresh reconnect does not
+fetch again. Explicit user refresh/check remains available.

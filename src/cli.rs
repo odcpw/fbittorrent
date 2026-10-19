@@ -4,6 +4,9 @@ pub mod shapes;
 pub(super) mod catalog_search;
 pub(super) mod catalog_imdb;
 mod fallback;
+mod catalogue;
+pub(super) mod catalog_rss;
+pub(super) mod catalog_shows;
 pub(super) mod logs;
 pub(super) mod stream;
 pub(super) mod raw;
@@ -129,12 +132,6 @@ pub(super) enum Cmd {
         /// Attribution retained by the daemon.
         #[arg(long, default_value="manual", value_parser=["manual","handler","agent"])]
         origin: String,
-        /// Do not enable sequential download
-        #[arg(long)]
-        no_seq: bool,
-        /// Do not prioritise first and last pieces
-        #[arg(long)]
-        no_first_last: bool,
         /// Add in stopped state
         #[arg(long)]
         stopped: bool,
@@ -197,20 +194,10 @@ pub(super) enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Unsupported stub: streaming scheduling is intrinsic
-    Seq { selectors: Vec<String> },
-    /// Unsupported stub: first/last piece priority is intrinsic
-    FirstLast { selectors: Vec<String> },
     /// Allow uploading/seeding
     Seed { selectors: Vec<String> },
     /// Limit uploading and stop when complete (default for new torrents)
     Noseed { selectors: Vec<String> },
-    /// Successful scheduling stub: native defaults are intrinsic
-    Reconcile {
-        /// Only touch torrents added within the last N seconds (0 = all)
-        #[arg(long, default_value_t = 0)]
-        recent: i64,
-    },
     /// Add whatever magnet/URL is on the Wayland clipboard
     AddClipboard,
     /// Open the file (single-file torrent) or folder in the desktop
@@ -376,6 +363,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_current_native_commands_and_add_options_are_exposed() {
+        for command in ["seq","first-last","reconcile"] {
+            assert!(Cli::try_parse_from(["fbittorrent",command]).is_err());
+        }
+        for option in ["--no-seq","--no-first-last"] {
+            assert!(Cli::try_parse_from(["fbittorrent","add","magnet:?xt=urn:btih:0000000000000000000000000000000000000000",option]).is_err());
+        }
+    }
+    #[test]
     fn serve_idle_override_preserves_config_default_and_short_test_delays() {
         let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();
         assert!(matches!(cli.cmd, Some(Cmd::Serve { idle_exit_secs: None, .. })));
@@ -415,8 +411,6 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
     Ok(Code::Ok)
 }
 
-pub(crate) mod local_client;
-pub(crate) mod local_add;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Until { Complete, Playable, StallFree }

@@ -115,7 +115,7 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.idle_exit_secs == 0 || self.idle_exit_secs >= 30,
                         "idle_exit_secs must be 0 or at least 30 seconds");
-        anyhow::ensure!(self.engine == "native", crate::agent::AppError::new(crate::agent::Code::Usage, "engine must be native; the qBittorrent backend was removed in v0.4.0"));
+        anyhow::ensure!(self.engine == "native", crate::agent::AppError::new(crate::agent::Code::Usage, "engine must be native"));
         anyhow::ensure!(self.max_active_downloads > 0, "max_active_downloads: must be at least 1");
         anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer_encryption: must be off, prefer, or require");
         if let Some(name) = &self.network_interface {
@@ -282,7 +282,7 @@ mod native_backend_tests {
     fn removed_backend_fails_before_startup() {
         let cfg=Config {engine:"qbittorrent".into(),..Default::default()};
         let error=cfg.validate().unwrap_err();
-        assert!(error.to_string().contains("removed in v0.4.0"));
+        assert!(error.to_string().contains("engine must be native"));
         println!("removed backend: {error}");
     }
     #[test]

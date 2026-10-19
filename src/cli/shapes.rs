@@ -89,6 +89,36 @@ pub(crate) fn imdb(card:&api::ImdbCard) -> Value {
     value["ok"]=json!(true);value["found"]=json!(true);value["url"]=json!(card.url);value["poster_path"]=json!(card.poster_path);value
 }
 
+/// The current CLI view is built from A.9 on both paths. Dates are canonical UTC.
+pub(crate) fn article(item:&api::FeedItem)->qbt::RssArticle {
+    let ts=item.published_at.and_then(|value|i64::try_from(value).ok()).unwrap_or(0);
+    let date=if ts>0 {format!("{}T{:02}:{:02}:{:02}Z",qbt::ymd(ts),ts%86400/3600,ts%3600/60,ts%60)}else{String::new()};
+    qbt::RssArticle {id:item.id.clone(),title:item.title.clone(),link:item.link.clone().unwrap_or_default(),
+        torrent_url:item.torrent_url.clone().or_else(||item.magnet.clone()).unwrap_or_default(),date,
+        description:item.description.clone().unwrap_or_default(),is_read:item.read,size:item.size.and_then(|value|i64::try_from(value).ok()),ts}
+}
+pub(crate) fn feed(feed:&api::Feed,items:&[api::FeedItem])->qbt::RssFeed {
+    qbt::RssFeed {name:feed.name.clone(),uid:feed.id.clone(),url:feed.url.clone(),title:feed.title.clone().unwrap_or_default(),last_build_date:String::new(),
+        is_loading:feed.loading,has_error:feed.error.is_some(),articles:items.iter().map(article).collect()}
+}
+pub(crate) fn show(show:&api::Show)->Value {
+    json!({"imdb":show.imdb,"title":show.title,"year":show.year,"quality":show.quality,"added":show.added_at,
+        "last_checked":show.last_check_at.unwrap_or(0),"error":show.warning,"catalogue_complete":show.catalogue_complete,
+        "episodes":show.counts.episodes,"new":show.unread,"seen":show.counts.seen,"grabbed":show.counts.grabbed})
+}
+pub(crate) fn release(row:&api::Release)->Value {
+    // Read intent and current transfer facts are independent. A live transfer
+    // does not prove whether it was added from Shows, so omit unknown history.
+    let grabbed=match row.transfer {api::ReleaseTransfer::None=>Some(false),api::ReleaseTransfer::AddedBefore=>Some(true),_=>None};
+    let mut value=json!({"key":row.key,"season":row.season.unwrap_or(0),"episode":row.episode.unwrap_or(0),"state":if grabbed==Some(true){"grabbed"}else if row.read{"seen"}else{"new"},
+        "read":row.read,"new":!row.read,"season_pack":row.season_pack,"title":row.title,"magnet":row.magnet.clone().unwrap_or_default(),
+        "seeds":row.seeds.unwrap_or(0),"size":row.size.unwrap_or(0),"released":row.published_at.unwrap_or(0),"quality":row.quality.clone().unwrap_or_default(),"candidates":row.candidates.unwrap_or(0),"transfer":row.transfer,"added":row.transfer!=api::ReleaseTransfer::None,"seeds_known":row.seeds.is_some(),"size_known":row.size.is_some()});
+    if let Some(grabbed)=grabbed{value["grabbed"]=json!(grabbed);}
+    value
+}
+
+pub(crate) fn show_label(show:&api::Show)->String {show.year.map_or_else(||show.title.clone(),|year|format!("{} ({year})",show.title))}
+
 #[cfg(test)]
 mod tests {
     use super::*;

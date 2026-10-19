@@ -353,9 +353,7 @@ exit 4 with an opening hint. This also prevents explicit `up`, `dashboard`, `tui
 Setup installs the native daemon for explicit, on-demand startup. The widget uses
 `--no-start` for status polling and every torrent action. Explicit Open TUI
 requests may launch the app: middle-click, `t`/`T`, the TUI header button
-(including keyboard activation), and the panel's `tui()` IPC method. Native
-`reconcile` is a no-op: it reports that scheduling is intrinsic without connecting.
-`autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
+(including keyboard activation), and the panel's `tui()` IPC method. `autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
 read markers, provider choices, and torrent records live in
 `~/.local/share/fbittorrent`; none needs a third-party account.
 
@@ -366,10 +364,8 @@ drain and reopen the engine. `settings --vpn off` disables interface binding.
 While waiting for a required VPN, saved file names and pause choices remain
 available; percentages are unknown until the engine can check files again.
 
-The native daemon is the only backend. `engine = "qbittorrent"` is rejected
-at startup in v0.4.0. Streaming priority is intrinsic and files support
-include/skip. `seq` and `first-last` remain unsupported command stubs with an
-inspection hint; `reconcile` remains a successful no-op. Today's native ledger,
+The native daemon is the only backend (`engine = "native"`). Streaming
+priority is intrinsic and files support include/skip. Today's native ledger,
 RSS, Shows and settings files load directly; no source application is launched.
 
 With opt-in clipboard watching enabled, the TUI offers each new magnet in its
