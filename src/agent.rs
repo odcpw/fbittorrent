@@ -16,6 +16,9 @@ pub const CONTRACT_VERSION: &str = "1.2.2";
 
 const NATIVE_LIFETIME: &str = "fbittorrent serve owns the daemon and its replaceable engine; clients connect through api.sock. Reads never start it; writes start it on demand.";
 const SERVE_LIMITATIONS: &str = "serve has no idle exit yet; API v1 serves torrents, files, mutations and IMDb; subscriptions and automatic idle/upgrade policy follow their owner beads. Settings use app.settings.get/set while running and the private config while stopped.";
+
+const NATIVE_LIFETIME: &str = "The daemon owns the engine independently of windows. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
+const SERVE_LIMITATIONS: &str = "serve currently has no idle exit yet; systemd starts it on demand for writes or a TUI. CLI and TUI data use the framed legacy socket (engine.sock); API v1 provides interactive presence and owner commands.";
 const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
 const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
 

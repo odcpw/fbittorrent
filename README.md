@@ -19,8 +19,12 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
   dashboard or TUI. Reads and status queries never start it. Nothing runs at
   login: the user unit is static. `down` stops the owner and drains the engine.
-  The current standalone TUI can still own an engine when started first;
-  full daemon attachment and quit verbs arrive in P1-15.
+  The TUI starts or attaches to that daemon in the current terminal, including
+  over SSH. `q` or Ctrl+C closes only the TUI; transfers continue. `Q` stops
+  fbittorrent, asking for lowercase `y` when transfers are active. `down` also
+  stops the daemon. The first `q` prints a one-time background-transfer notice
+  after restoring the terminal; its preference lives in
+  `$XDG_STATE_HOME/fbittorrent/notices.json`.
 - **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
   pause/remove, add from clipboard, one click to the TUI. It only shows while the
   app is open. Hover clipped names or details to see their full text.
@@ -404,6 +408,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |

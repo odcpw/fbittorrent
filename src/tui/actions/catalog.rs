@@ -33,6 +33,7 @@ mod shows;
 mod torrents;
 pub(super) const TABLE: &[&[Action]] = &[
     global::ACTIONS,
+    global::STOPPED,
     torrents::ACTIONS,
     search::ACTIONS,
     rss::ACTIONS,

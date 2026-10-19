@@ -31,7 +31,7 @@ impl TuiApp {
                 return self.action("toggled first/last", move |c| c.toggle_first_last(&[t.hash]));
             },
             actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
-                let allow = !t.seed_allowed();
+                let allow = !self.seed_allowed(&t);
                 return self.action(if allow { "seeding allowed" } else { "seeding off · upload capped" },
                     move |c| if allow { c.allow_seeding(&[t.hash]) } else { c.deny_seeding(&[t.hash]) });
             },
@@ -70,8 +70,8 @@ impl TuiApp {
         let th = &self.theme;
         let cols = torrent_columns(area);
         let queued = self.torrents.iter().filter(|t| t.state == "queuedDL").count();
-        let network = crate::network_app::state(&self.cfg);
-        let title = if self.cfg.native() && !network.ready { format!(" {} ", network.message) }
+        let (network_ready,network_message) = self.network_banner();
+        let title = if self.cfg.native() && !network_ready { format!(" {} ", network_message) }
             else if queued > 0 { format!(" Torrents ({}) · {queued} queued ", self.torrents.len()) }
             else { format!(" Torrents ({}) ", self.torrents.len()) };
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title);
@@ -79,10 +79,10 @@ impl TuiApp {
         block.render(cols[0], frame);
 
         if !self.online {
-            let msg = format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error);
+            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
             Paragraph::new(msg).style(th.err()).wrap(WrapMode::Word).render(pad(inner), frame);
         } else if self.torrents.is_empty() {
-            let text = if !network.ready { format!("{}\n\nConnect your VPN to start transfers.\n(F6) Download and VPN settings\n\nYour saved downloads stay here.", network.message) }
+            let text = if !network_ready { format!("{}\n\nConnect your VPN to start transfers.\n(F6) Download and VPN settings\n\nYour saved downloads stay here.", network_message) }
                 else { "No torrents.\n\n(A)dd a magnet link or URL\n(C)lipboard: add a copied link\n(2) Search".into() };
             Paragraph::new(text)
                 .style(th.dimmed()).render(pad(inner), frame);
@@ -92,7 +92,7 @@ impl TuiApp {
             Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.torrents.iter().enumerate().map(|(i, t)|
-                li(torrent_line(t, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
+                li(torrent_line(t, self.store.torrents.get(&t.hash), inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.tor_list.borrow_mut());
         }
@@ -111,20 +111,18 @@ impl TuiApp {
         let flags = if self.cfg.native() { "streaming priority automatic".to_string() } else {
             format!("{}sequential  {}first/last", if t.seq_dl { "✓ " } else { "✗ " }, if t.f_l_piece_prio { "✓ " } else { "✗ " })
         };
-        let upload = if t.seed_allowed() { "seeding allowed  (u to turn off)".to_string() }
-            else { "32 KiB/s cap · stops when complete  (u to seed)".to_string() };
-        let peers = if self.cfg.native() { t.num_leechs } else { t.num_seeds + t.num_leechs };
+        let metrics = format::Metrics {legacy:t,api:self.store.torrents.get(&t.hash)};
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
             kv("state", state_label(t)),
-            kv("progress", if t.progress_known { format!("{:.1}%  {} of {}", t.progress * 100.0, human_bytes(t.completed), human_bytes(t.size)) } else if t.state == "waitingVPN" { "checked when the VPN connects".into() } else { "waiting for metadata or verification".into() }),
-            kv("speed", format!("↓ {}   ↑ {}", human_rate(t.dlspeed), human_rate(t.upspeed))),
-            kv("eta", human_eta(t.eta)),
-            kv("peers", format!("{peers} peers connected")),
-            kv("ratio", format!("{:.2}", t.ratio)),
+            kv("progress", metrics.progress()),
+            kv("speed", metrics.speed()),
+            kv("eta", metrics.eta()),
+            kv("peers", metrics.peers(self.cfg.native())),
+            kv("ratio", metrics.ratio()),
             kv("flags", flags),
-            kv("upload", upload),
+            kv("upload", metrics.upload()),
             kv("path", t.save_path.clone()),
             kv("added", ago(t.added_on)),
         ];
@@ -159,12 +157,12 @@ pub(super) fn state_label(t: &Torrent) -> String {
     }.to_string()
 }
 
-pub(super) fn torrent_line(t: &Torrent, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
+pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
     let bar_w: u16 = 10;
     let percent = if t.progress_known { format!("{:>6.1}%", t.progress * 100.0) } else { "      —".into() };
-    let right = format!(" {percent} {:>11} {:>7} {}{}{}", if t.is_active() { human_rate(t.dlspeed) } else { human_bytes(t.size) },
-        if t.is_active() { human_eta(t.eta) } else { "".into() }, if t.seq_dl { "S" } else { "·" }, if t.f_l_piece_prio { "F" } else { "·" },
-        if t.seed_allowed() { "U" } else { "·" });
+    let right = format!(" {percent} {:>11} {:>7} {}{}{}", if t.is_active() { api.map_or_else(||human_rate(t.dlspeed),|row|row.dl_bps.map_or_else(||"—".into(),|rate|human_rate(i64::try_from(rate).unwrap_or(i64::MAX)))) } else { api.map_or_else(||human_bytes(t.size),|row|row.size.map_or_else(||"—".into(),|size|human_bytes(i64::try_from(size).unwrap_or(i64::MAX)))) },
+        if t.is_active() { api.map_or_else(||human_eta(t.eta),|row|row.eta_s.map_or_else(||"—".into(),|seconds|human_eta(i64::try_from(seconds).unwrap_or(i64::MAX)))) } else { "".into() }, if t.seq_dl { "S" } else { "·" }, if t.f_l_piece_prio { "F" } else { "·" },
+        if api.map_or_else(||t.seed_allowed(),|row|row.seed) { "U" } else { "·" });
     let name_w = (width as usize).saturating_sub(bar_w as usize + 1 + right.len());
     let name = readable_cell(&t.name, name_w, selected_for);
     let padn = 0;

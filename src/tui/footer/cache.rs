@@ -29,8 +29,8 @@ impl TuiApp {
         if let Some(torrent) = self.selected_torrent() {
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
-            torrent.complete_no_seed().hash(&mut hash);
-            torrent.seed_allowed().hash(&mut hash);
+            self.complete_no_seed(torrent).hash(&mut hash);
+            self.seed_allowed(torrent).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);
@@ -96,7 +96,7 @@ impl TuiApp {
         let context_width = dw(&context).min(available);
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
-        let feedback = if self.status.is_empty() {
+        let feedback = if self.daemon_stopped || self.status.is_empty() {
             self.footer_selection().unwrap_or_default()
         } else {
             self.status.clone()

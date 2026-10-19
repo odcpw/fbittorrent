@@ -95,7 +95,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
             });
         },
         "settings" => app.settings = Some(SettingsModal {
-            cfg: app.cfg.clone(), list: selected_list(), connections: vec![Some("proton".into()), None],
+            cfg: app.cfg.clone(), list: selected_list(), saving:false, connections: vec![Some("proton".into()), None],
             error: String::new(),
         }),
         "prompt" => {

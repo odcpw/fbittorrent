@@ -3747,8 +3747,55 @@ def settings_offline_no_start(binary, systemd):
                    "settings reads and writes never invoke a manager or create a live engine", json.dumps(bad))
 
 
+def tui_single_connection(binary, systemd):
+    """Disable engine.sock to prove native rows/files travel on the one v1 connection."""
+    import native
+    with api_owned("tui_single_connection", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client,"tui-observer")
+        fixture, _ = mutation_add_path(client,sandbox)
+        cache=Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent/imdb/by-name-v2/two_files.json"
+        cache.write_text('{"missing":true}')
+        before=client.call("app.info")["result"]["clients"]
+        case.check(before["tui"]==0,"no TUI presence before the real terminal starts",json.dumps(before))
+        hidden=harness.engine_path.with_name("hidden-compat.sock")
+        harness.engine_path.rename(hidden)
+        ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p")
+        try:
+            target,done=ui.start()
+            ui.assert_pane(target,"two-files")
+            def one_client():
+                info=client.call("app.info")["result"]
+                return info["clients"]["tui"]==1,json.dumps(info["clients"])
+            harness.wait_for(one_client,"one TUI connection after loading its real API rows")
+            ui.keys(target,"Enter",literal=False)
+            ui.assert_pane(target,"first.bin")
+            ui.assert_pane(target,"second.bin")
+            ui.keys(target," ")
+            def first_skipped():
+                reply=client.call("torrents.files",dict(hash=fixture.info_hash))
+                files=reply["result"]["files"]
+                return not files[0]["included"] and files[1]["included"],json.dumps(files)
+            harness.wait_for(first_skipped,"Space changes the actual engine selection over API v1")
+            ui.keys(target,"Escape",literal=False)
+            ui.assert_pane(target,"two-files")
+            # Keep the UI through another scheduled refresh with the compat path unavailable.
+            time.sleep(2.2)
+            case.check("offline" not in ui.capture(target) and not harness.engine_path.exists(),
+                       "native torrent and file reads remain online with engine.sock absent",ui.capture(target))
+            harness.wait_for(one_client,"data and file operations retain the same one TUI connection")
+            ui.keys(target,"q")
+            harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches the API client")
+            harness.wait_for(lambda:((counts:=client.call("app.info")["result"]["clients"])["tui"]==0,json.dumps(counts)),
+                             "TUI presence is released on detach")
+        finally:
+            ui.close()
+            if hidden.exists(): hidden.rename(harness.engine_path)
+
+
 CASES = {function.__name__: function for function in
          (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+
+         (tui_single_connection, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
