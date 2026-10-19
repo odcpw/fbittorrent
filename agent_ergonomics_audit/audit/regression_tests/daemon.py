@@ -1813,7 +1813,7 @@ def replay_owned(group, binary, systemd):
             command = DaemonContract.command(str(binary), 300, True)
             if group == "torrents":
                 config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
-                select_replay_interface(config, None)
+                select_replay_interface(config, "fixture0" if os.environ.get("FBT_TEST_VPN") == "1" else None)
                 config.write_text(config.read_text() + '\nmax_active_downloads = 1\n')
                 seedbox = harness.resources.enter_context(Sandbox())
                 seedconfig = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
@@ -1901,7 +1901,7 @@ def replay_preconditions(lines, client, normalizer, root):
             specs = [(row["name"] if count == 1 else row["name"] + f" {index + 1}.bin",
                       total // count + (index < total % count), row.get("progress", 0.0)) for index in range(count)]
         if files and "size" in row:
-            client.case.check(True, "record fixture totals; ruling 4F defers contradictory line 13 to P1-05b",
+            client.case.check(row["size"] == sum(size for _, size, _ in specs), "fixture total matches its real file lengths",
                               f"JSON pointer /preconditions/{fixture_hash}/size: torrent size={row['size']}; sum of file sizes={sum(size for _, size, _ in specs)}")
         payloads = []
         for name, size, _ in specs:
@@ -1915,7 +1915,14 @@ def replay_preconditions(lines, client, normalizer, root):
         pristine.mkdir()
         for payload in payloads:
             shutil.copyfile(payload, pristine / payload.name)
-        fixture = fixtures.torrent_fixture(directory, payloads, name=row["name"], piece_length=detail.get("piece_size", 1024))
+        # A receiving frame can still have zero verified bytes: use a larger
+        # piece when its geometry is unspecified, so real incoming chunks raise
+        # the measured rate before the first piece finishes verification.
+        default_piece = fixtures.MIB if row["state"] == "downloading" and row.get("completed_bytes") == 0 else 1024
+        fixture = fixtures.torrent_fixture(directory, payloads, name=row["name"], piece_length=detail.get("piece_size", default_piece))
+        client.case.check(True, "record generated transcript payload geometry",
+                          json.dumps(dict(fixture_hash=fixture_hash, bytes=sum(size for _, size, _ in specs),
+                                          piece_size=fixture.info["piece length"]), sort_keys=True))
         fixture.info["private"] = int(detail.get("private", False))
         document = dict(info=fixture.info)
         if row["state"] == "downloading":
@@ -2278,8 +2285,8 @@ def contract_group(group, binary, systemd):
                     if group == "torrents" and number in (43, 63):
                         minimum = (64 if number == 43 else 8) * fixtures.MIB
                         size = expected.get("result", {}).get("torrent", {}).get("size", 0)
-                        if size < minimum:
-                            case.check(True, "P1-05b pending fixture size; comparison remains active", json.dumps(dict(fixture=str(path.relative_to(REPO)), line=number, pointer="/result/torrent/size", size=size, required_minimum=minimum, bead="P1-05b", reason="ruling 5: tiny fixture cannot retain the required live state; pending enlarged transcript"), sort_keys=True))
+                        case.check(size >= minimum, "fixture payload supports the required live state",
+                                   json.dumps(dict(fixture=str(path.relative_to(REPO)), line=number, pointer="/result/torrent/size", size=size, required_minimum=minimum), sort_keys=True))
                     if request is None and group == "errors":
                         # Dedicated input validation scenarios have no c2s line.
                         raw = b'{"id":0,"op":"app.info"}\n' if number == 36 else b'x' * 65537 if number == 37 else None
@@ -2307,9 +2314,7 @@ def contract_group(group, binary, systemd):
                     # both run through frozen P1-05 validation, never synthesized.
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
-                        owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 5: auto selection resolving to a present, ready fixture0 interface requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
-                    if group == "torrents" and number == 13:
-                        owners.append(("/result/torrents/0/size", "P1-05b", "ruling 4F: hash has total size 4096 but its two file sizes total 8192; impossible fixture precondition"))
+                        owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
                     if group == "torrents" and number in (27, 29, 31, 35, 37, 39):
                         pointer = "/result/torrent/hash" if number == 39 else "/result"
                         owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))

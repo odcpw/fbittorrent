@@ -359,23 +359,23 @@ Missing or changed fixture-asserted members still fail. A
 future-capability/proto-2/unreachable-error frame is validated with the frozen
 P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
 mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
-Ruling 6 accepts the ruling-5 server behavior and assigns the four remaining red
-transcript lines to fixture corrections: P1-05b enlarges the checking/downloading
-payloads (torrents lines 43/63), while P1-05c corrects the network precondition
-(line 9) and missing-file diagnostic (line 55). The corrected network frame
-requires an explicit fixture0 binding with selection/interface `fixture0`, ready
-true and message `VPN bound: fixture0`, inside the VPN namespace fixture
+Ruling 6 accepts the ruling-5 server behavior. P1-05b/P1-05c's fixture corrections
+are integrated: exact payload/file sizes feed the generator, and the opted-in
+network replay explicitly binds fixture0, yielding selection/interface `fixture0`,
+ready true and message `VPN bound: fixture0` inside the owned VPN namespace
 (`vpn.py`, `FBT_TEST_VPN=1`). Without that opt-in, the environment-conditional
-deferral remains accepted. The receipt preserves the original ruling-5 deferral
-records verbatim and separately records these pending fixture corrections;
-historical red comparisons are not relabelled as passes. After the orchestrator
-merges both fixture changes, replay must establish the corrected binding and run
-with VPN opt-in off and on before final qualification. Recheck/query attempts
-are bounded and logged; downloading uses a real loopback native seed and tracker.
-Missing-file restore preconditions complete the payload, delete it, restart
-dormant history and explicitly activate it, preserving startup's lazy restore
-policy. The diagnostic remains `<name> restore failed: missing files`, with reason
-`missing_files`; no comparison mask is added for these fixture corrections.
+deferral remains accepted. Recheck/query attempts are bounded and logged;
+downloading uses a real loopback native seed and tracker. When receiving geometry
+is unspecified and the fixture asserts zero verified bytes, 1 MiB pieces allow a
+positive measured chunk rate before the first piece verifies. Missing-file restore
+preconditions complete the payload, delete it, restart dormant history and
+explicitly activate it, preserving startup's lazy restore policy. The diagnostic
+remains `<name> restore failed: missing files`, with reason `missing_files`.
+The integrated receipt records the remaining active-check field mismatches and
+the frozen checker's rejection of changing completed-byte counts in a live
+precondition/query history. These remain failures; no comparison mask or new
+deferral is added. Previously approved capability/protocol/error deferrals remain
+listed individually, alongside P6-08's post-remove scenarios.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
