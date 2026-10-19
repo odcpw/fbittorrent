@@ -51,16 +51,35 @@ pub enum EngineOp {
     },
     TransferInfo,
     Info,
+    Get {
+        hash: String,
+    },
     Files {
         hash: String,
     },
     // Typed engine entry points for the daemon adapter. These do not add routes
     // to the legacy transport or advertise v1 operations before that API lands.
-    OpenTarget { hash: String },
-    Recheck { hash: String },
-    SetFiles { hash: String, include: Vec<usize> },
-    SetSeed { hashes: HashSelection, on: bool },
+    OpenTarget {
+        hash: String,
+    },
+    Recheck {
+        hash: String,
+    },
+    SetFiles {
+        hash: String,
+        include: Vec<usize>,
+    },
+    SetSeed {
+        hashes: HashSelection,
+        on: bool,
+    },
     Add(AddRequest),
+    AddSelected {
+        options: AddRequest,
+        files: Vec<usize>,
+    },
+    /// API adds persist unresolved magnets without waiting for peer metadata.
+    AddMagnet(AddRequest),
     Start {
         hashes: HashSelection,
         skip_complete: bool,
@@ -109,7 +128,7 @@ impl EngineOp {
             Self::SetShareLimits { ratio, .. } if !matches!(ratio, -2.0 | 0.0) => bail!(
                 "native share limits support unlimited (-2) or stop on completion (ratio 0, Stop)"
             ),
-            Self::Add(options) => {
+            Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} => {
                 if options.upload_limit < 0 {
                     bail!("upload limit cannot be negative");
                 }
@@ -180,11 +199,69 @@ pub struct EngineSettings {
     pub network_interface: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AddedTorrent {
+    pub hash: String,
+    pub name: String,
+    pub duplicate: bool,
+    pub deferred: bool,
+}
+
+#[derive(Debug)]
+pub struct TorrentDetails {
+    pub torrent: super::super::view::TorrentView,
+    pub private: bool,
+    pub file_count: Option<u64>,
+    pub piece_count: Option<u64>,
+    pub piece_size: Option<u64>,
+    pub tracker_count: Option<u64>,
+    pub comment: Option<String>,
+    pub created_by: Option<String>,
+}
+
+impl TorrentDetails {
+    pub(in crate::engine) fn from_bytes(
+        torrent: super::super::view::TorrentView,
+        bytes: Option<&[u8]>,
+    ) -> Result<Self> {
+        let mut detail = Self {
+            torrent,
+            private: false,
+            file_count: None,
+            piece_count: None,
+            piece_size: None,
+            tracker_count: None,
+            comment: None,
+            created_by: None,
+        };
+        if let Some(bytes) = bytes {
+            let metadata = librqbit::torrent_from_bytes(bytes)?;
+            detail.private = metadata.info.data.private;
+            detail.piece_size = Some(u64::from(metadata.info.data.piece_length));
+            detail.tracker_count = Some(metadata.iter_announce().count() as u64);
+            let info = metadata.info.data.validate()?;
+            detail.file_count = Some(info.iter_file_details().count() as u64);
+            detail.piece_count = Some(info.lengths().total_pieces() as u64);
+            detail.comment = metadata
+                .comment
+                .as_ref()
+                .map(|s| String::from_utf8_lossy(s.as_ref()).into_owned());
+            detail.created_by = metadata
+                .created_by
+                .as_ref()
+                .map(|s| String::from_utf8_lossy(s.as_ref()).into_owned());
+        }
+        Ok(detail)
+    }
+}
+
 #[derive(Debug)]
 pub enum EngineResult {
     Acknowledged,
     Version(String),
     Torrents(Vec<super::super::view::TorrentView>),
+    Detail(TorrentDetails),
+    Added(Vec<AddedTorrent>),
     Files(Vec<TorrentFile>),
     OpenTarget(PathBuf),
     Transfer(TransferInfo),
@@ -196,7 +273,8 @@ pub enum EngineResult {
 impl EngineResult {
     pub fn to_legacy_json(&self) -> Result<String> {
         match self {
-            Self::Acknowledged => Ok("Ok.".into()),
+            Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
+            Self::Detail(_) => bail!("torrent detail has no legacy route"),
             Self::Version(version) => Ok(version.clone()),
             Self::Torrents(rows) => Ok(format!(
                 "[{}]",

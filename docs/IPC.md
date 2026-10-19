@@ -329,7 +329,7 @@ timeouts are shorter so clients receive a typed timeout. Hash lists contain
 
 Each line is c2s/frame (Request), s2c/frame (typed reply/event), expect/model
 (expected client store) or a first-line volatile/paths. Paths are relative to a
-frame (for example result.instance). Live replay masks those paths; typed round
+frame (for example result.instance). Live replay uses the declared normalization below; typed round
 trips mask nothing. Files are independent conversations. A repeated hello in
 hello.ndjson begins a new mismatch-banner scenario for proto 2, not a serve flag.
 
@@ -340,6 +340,74 @@ revision: the suspect delta is not applied, resync becomes true, then c2s
 unsubscribe/subscribe and a new snapshot rebuild the store. This is a reducer
 fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
+
+
+**Live replay (P1-06, orchestrator ruling 3).** The hello/errors/torrents runner
+generates real payloads and metainfo from transcript names, sizes, files and
+selection, adds them through the API, and drives the available state/error
+preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
+user/network namespace; it never adopts an existing directory or edits a ledger.
+The following single table is defined in daemon.py and reproduced verbatim here
+and in the P1-06 receipt. Identity bindings are bijective and checked at every
+occurrence. Volatile fields retain their presence/type/validity checks. All other
+fields asserted by the fixture compare byte-for-byte after canonical P1-05
+typed re-serialization. Under ruling 4C an optional member absent in the
+fixture may be present live: the frozen Rust checker validates the live frame
+and its form with that member removed. Every occurrence is logged as "extra
+optional field" with its JSON pointer and reproduced verbatim in the receipt.
+Missing or changed fixture-asserted members still fail. A
+future-capability/proto-2/unreachable-error frame is validated with the frozen
+P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
+mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
+Ruling 6 accepts the ruling-5 server behavior. P1-05b/P1-05c's fixture corrections
+are integrated: exact payload/file sizes feed the generator, and the opted-in
+network replay explicitly binds fixture0, yielding selection/interface `fixture0`,
+ready true and message `VPN bound: fixture0` inside the owned VPN namespace
+(`vpn.py`, `FBT_TEST_VPN=1`). Without that opt-in, the environment-conditional
+deferral remains accepted. Recheck/query attempts are bounded and logged;
+downloading uses a real loopback native seed and tracker. When receiving geometry
+is unspecified and the fixture asserts zero verified bytes, 1 MiB pieces allow a
+positive measured chunk rate before the first piece verifies. Missing-file restore
+preconditions complete the payload, delete it, restart dormant history and
+explicitly activate it, preserving startup's lazy restore policy. The diagnostic
+remains `<name> restore failed: missing files`, with reason `missing_files`.
+Ruling 7 treats checking measurements as state-conditioned volatile values:
+when the live torrent is checking, completed_bytes must be a u64 no greater than
+size, and finite progress must equal completed_bytes/size within 1e-9 absolute
+(zero size requires both zero). Presence is preserved. Checked and size remain
+exact; other states still compare completed_bytes/progress exactly. P1-05d's
+fixture correction to checked=false for an active check is integrated.
+Live validation checks every original frame against the frozen types, bounds,
+capabilities and canonical round trips, and retains revision checks. Its
+cross-reply agreement still checks static sizes and file totals. For any hash
+observed checking, its measurements are excluded from that history's agreement,
+including earlier samples and later cancellation; their raw values remain
+validated and non-checking fixture comparisons remain exact. Fixture transcripts
+continue to use the unchanged strict whole-group agreement hook. Deferrals record
+file:line, pointer, class, target bead and reason. Capability/protocol deferrals
+apply only while that feature is unavailable; advertised features stay under
+active comparison. The receipt distinguishes undrivable catalogue frames from
+error codes that can be produced with a different shape and retains the bounded
+starting-window retry evidence. A retained missing-files restore error keeps its
+missing_files reason through Stop and retry until the error clears. Nonvolatile
+validation failures are recorded without a new mask or deferral.
+
+| JSON pointer(s) | Comparison | Validity |
+|---|---|---|
+| `/id` | identity:request | positive u64, consistent first-occurrence bijection |
+| `/result/instance` | identity:instance | 32 lowercase hex, consistent first-occurrence bijection |
+| `/**/hash; /result/started/*; /result/stopped/*` | identity:hash | 40 lowercase hex; API-generated hashes bound to fixture identities |
+| `/ref; /result/ref` | identity:ref | at most 64 ASCII characters, consistent first-occurrence bijection |
+| `/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at` | timestamp | positive u64; presence preserved |
+| `/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps` | u64 | nonnegative u64; presence preserved |
+| `/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds` | u64 | nonnegative u64; presence preserved |
+| `/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*` | u64 | nonnegative u64; presence preserved |
+| `/result/server/pid` | timestamp | positive u64; presence preserved |
+| `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
+| `/result/server/version` | version | semantic version string; presence preserved |
+| `/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress` | checking only | live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals |
+| `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
+| `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
@@ -400,3 +468,15 @@ For the planned v1 adapter, `torrents.set_upload_limit {hashes, bps?}` can retur
 wire compatibility. `torrents.set_seed` must use the same live setter for
 existing handles. The v1 adapter is not present in this checkout, so this entry
 does not advertise a new operation, capability or active NDJSON endpoint.
+
+### P7-09 — deferred adds while waiting for the VPN
+
+The `deferred_add` capability enables parked `torrents.add` for magnets and local
+`.torrent` paths. It saves the record and local metadata privately, keeps the
+requested run/pause and upload policies, appends to queue order, and returns
+`state:done`, the hash, and `deferred:true`. Rows remain `waiting_vpn` with unknown
+progress until the interface returns. Activation resolves metadata and restores
+the saved queue intent; the deferred marker clears after admission. Duplicate
+adds preserve the existing record. URL sources are refused while parked before
+fetching or returning a pending receipt. Characterization: `deferred-add.ndjson`;
+live cases: `deferred_add_saved_record` and opt-in `deferred_add`.

@@ -152,6 +152,18 @@ pub struct TorrentView {
 }
 
 impl TorrentView {
+    fn retain_restore_reason(&mut self) {
+        if self
+            .error
+            .as_deref()
+            .is_some_and(|message| message.ends_with(" restore failed: missing files"))
+        {
+            // Stop and retry retain the last restore error until success. Its
+            // reason must remain consistent with that visible error as well.
+            self.reason = Some("missing_files".into());
+        }
+    }
+
     fn record(record: &Record, facts: StateFacts, source: Source) -> Self {
         let (state, reason) = derive_state(facts);
         Self {
@@ -338,6 +350,7 @@ impl TorrentView {
                 .to_string(),
             );
         }
+        view.retain_restore_reason();
         view
     }
 
@@ -497,6 +510,7 @@ impl EngineDispatcher {
                     .get(&record.hash)
                     .and_then(|restore| restore.last_error.clone());
             }
+            view.retain_restore_reason();
             torrents.push(view);
         }
         torrents.sort_by(|a, b| b.added_at.cmp(&a.added_at));

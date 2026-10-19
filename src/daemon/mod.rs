@@ -33,6 +33,61 @@ pub struct Daemon {
 }
 
 impl Daemon {
+    pub(crate) fn network(&self) -> network_app::NetworkState {
+        self.network.read().unwrap().clone()
+    }
+
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::Acquire)
+    }
+
+    /// Typed access shares the owner's slot and cancellation with legacy IPC.
+    pub(crate) fn execute(&self, op: engine::ops::EngineOp) -> Result<engine::ops::EngineResult> {
+        if self.is_stopping() {
+            return Err(Self::unavailable(State::Stopping));
+        }
+        if let Some(result) = op.control(&self.network(), &self.lifecycle) {
+            return result;
+        }
+        let began = Instant::now();
+        loop {
+            let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
+            if self.is_stopping() {
+                return Err(Self::unavailable(State::Stopping));
+            }
+            match &slot.slot {
+                Slot::Starting if began.elapsed() < Duration::from_secs(60) => {}
+                Slot::Starting => return Err(Self::unavailable(State::Starting)),
+                Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
+                Slot::Parked(ledger) => {
+                    if let engine::ops::EngineOp::Get { hash } = &op {
+                        return engine::ops::parked_get(
+                            ledger,
+                            hash,
+                            &crate::config::data_dir().join("engine"),
+                        );
+                    }
+                    return ledger.execute(op);
+                }
+                Slot::Running(app) => {
+                    return app.dispatcher().execute(op).map_err(|error| {
+                        if app.is_quiescing() {
+                            Self::unavailable(if self.is_stopping() {
+                                State::Stopping
+                            } else {
+                                State::Starting
+                            })
+                        } else {
+                            error
+                        }
+                    })
+                }
+            }
+            drop(slot);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     pub fn info(&self) -> serde_json::Value {
         let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
         serde_json::json!({
@@ -81,21 +136,23 @@ impl Daemon {
                         "DEBUG api legacy dispatch path={:?}",
                         request.path.chars().take(80).collect::<String>()
                     );
-                    return crate::api::legacy::running(&app.dispatcher(), op)
-                        .map_err(|error| {
-                            if app.is_quiescing() {
-                                Self::unavailable(if self.stopping.load(Ordering::Acquire) {
-                                    State::Stopping
-                                } else {
-                                    State::Starting
-                                })
+                    return crate::api::legacy::running(&app.dispatcher(), op).map_err(|error| {
+                        if app.is_quiescing() {
+                            Self::unavailable(if self.stopping.load(Ordering::Acquire) {
+                                State::Stopping
                             } else {
-                                error
-                            }
-                        });
+                                State::Starting
+                            })
+                        } else {
+                            error
+                        }
+                    });
                 }
                 Slot::Parked(ledger) => {
-                    let interface = network.interface.as_deref().unwrap_or("configured interface");
+                    let interface = network
+                        .interface
+                        .as_deref()
+                        .unwrap_or("configured interface");
                     return crate::api::legacy::parked(ledger, op, interface);
                 }
                 Slot::Stopping => return Err(Self::unavailable(State::Stopping)),
@@ -217,7 +274,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
     let directory = crate::config::runtime_dir();
     runtime_dir::validate(&directory)?;
     let lock = Arc::new(ipc::InstanceLock::acquire_wait(
-        directory,
+        directory.clone(),
         Duration::from_secs(5),
     )?);
     let lifecycle = Lifecycle::default();
@@ -243,6 +300,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
     });
     let dispatch = daemon.clone();
     let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
+    let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
     eprintln!(
         "INFO daemon listening {} no_notify={no_notify}",
         daemon.info()
@@ -271,6 +329,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();
+    api.stop_accepting();
     let began = Instant::now();
     if daemon
         .slot
@@ -286,6 +345,18 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         "INFO daemon slot released elapsed_ms={}",
         began.elapsed().as_millis()
     );
+    let drain_reason = if panicked.load(Ordering::Acquire) {
+        StopReason::Panic
+    } else {
+        result
+            .as_ref()
+            .ok()
+            .and_then(|outcome| outcome.as_ref().ok())
+            .copied()
+            .unwrap_or(StopReason::Panic)
+    };
+    api.drain(drain_reason);
+    drop(api);
     drop(server);
     eprintln!("INFO daemon sockets unlinked");
     drop(lock);
