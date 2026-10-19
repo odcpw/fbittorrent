@@ -96,7 +96,7 @@ PanelKeyCatcher {
     if(t==="q")owner.close()
     else if(t==="Q")power()
     else if(t==="a")svc.addFromClipboard()
-    else if(t==="w"){if(focusSection==="groups" && sections[groupIndex])svc.openDashboardFilter(sections[groupIndex].key);else svc.openDashboard();owner.close()}
+    else if(t==="w"){if(focusSection==="groups" && sections[groupIndex])svc.openDashboardFilter(PopupState.dashboardFilter(sections[groupIndex].key));else svc.openDashboard();owner.close()}
     else if(t==="/")dashboard("search")
     else if(t==="t")owner.openTui()
     else if(t==="z")svc.setTurtle(!svc.store.summary.alt)
