@@ -42,6 +42,9 @@ pub(super) struct Store {
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
     pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
+    pub rss_feeds:BTreeMap<String,api::Feed>,
+    pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
+    pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
     pub network: Option<api::NetworkState>,
@@ -73,6 +76,17 @@ impl Store {
         reply.validate()?;
         self.caps.reply(&reply)?;
         match (call, reply) {
+            (_,api::Reply::ShowsList(result))=>{ensure!(result.shows.len()<=MAX_ITEMS,"show list exceeds UI row budget");self.shows=result.shows.into_iter().map(|row|(row.imdb.clone(),row)).collect();},
+            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
+            (_,api::Reply::RssFeeds(result))=>{
+                ensure!(result.feeds.len()<=MAX_ITEMS,"feed list exceeds UI row budget");
+                self.rss_feeds=result.feeds.into_iter().map(|row|(row.id.clone(),row)).collect();
+            },
+            (api::Call::RssItems {args},api::Reply::RssItems(result))=>{
+                ensure!(result.items.len()<=MAX_ITEMS,"feed items exceed UI row budget");
+                self.rss_items.clear(); // Keep only the currently selected feed's rows.
+                self.rss_items.insert(args.feed.clone(),result.items.into_iter().map(|row|(row.id.clone(),row)).collect());
+            },
             (_, api::Reply::TorrentsList(result)) => {
                 ensure!(
                     result.torrents.len() <= MAX_ITEMS,
@@ -236,6 +250,10 @@ impl Store {
                 removed,
                 ..
             } => match topic {
+                api::Topic::Shows=>patch(&mut self.shows,changed,added,removed,|item|match item{api::Item::Show(row)=>Some((row.imdb.clone(),row.clone())),_=>None})?,
+                api::Topic::ShowReleases(id)=>patch(&mut self.show_releases,changed,added,removed,|item|match item{api::Item::Release(row)=>Some((api::release_key(id=="inbox",row),row.clone())),_=>None})?,
+                api::Topic::RssFeeds=>patch(&mut self.rss_feeds,changed,added,removed,|item|match item{api::Item::Feed(row)=>Some((row.id.clone(),row.clone())),_=>None})?,
+                api::Topic::RssItems(id)=>patch(self.rss_items.entry(id.clone()).or_default(),changed,added,removed,|item|match item{api::Item::FeedItem(row)=>Some((row.id.clone(),row.clone())),_=>None})?,
                 api::Topic::Torrents => patch(
                     &mut self.torrents,
                     changed,
@@ -298,6 +316,10 @@ impl Store {
     fn commit(&mut self, topic: &api::Topic, snapshot: Snapshot) -> Result<()> {
         ensure!(snapshot.len() == snapshot.count, "incomplete snapshot");
         match topic {
+            api::Topic::Shows=>self.shows=snapshot.shows,
+            api::Topic::ShowReleases(_)=>self.show_releases=snapshot.releases,
+            api::Topic::RssFeeds=>self.rss_feeds=snapshot.feeds,
+            api::Topic::RssItems(id)=>{self.rss_items.clear();self.rss_items.insert(id.clone(),snapshot.feed_items);},
             api::Topic::Torrents => {
                 self.torrents = snapshot.torrents;
                 self.stale = false;

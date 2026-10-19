@@ -121,11 +121,18 @@ struct Sample {
     network: Value,
     settings: Value,
     disk: Disk,
+    shows:Value,
+    show_releases:BTreeMap<String,Value>,
+    rss_feeds: Value,
+    rss_items: BTreeMap<String,Value>,
     daemon: Value,
 }
 impl Sample {
     fn value(&self, topic: &Topic) -> Value {
         match topic {
+            Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
+            Topic::RssFeeds=>self.rss_feeds.clone(),
+            Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
             Topic::Network => self.network.clone(),
@@ -250,6 +257,8 @@ impl Bus {
         }
         let sample = self.sample(&args.topics)?;
         for topic in &args.topics {
+            if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
+            if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
             if let Topic::Files(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
@@ -289,7 +298,7 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
-                            Topic::Network | Topic::Settings | Topic::Events | Topic::Log => {
+                            Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
                             Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
@@ -438,7 +447,16 @@ impl Bus {
         effective.idle_exit_secs = self.daemon.idle_exit_secs();
         effective.notify &= !self.daemon.no_notify;
         let settings = serde_json::to_value(ops::settings::view(&effective)).unwrap();
+        let mut show_releases=BTreeMap::new();
+        for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
+            show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
+        }
         Ok(Sample {
+            shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
+            show_releases,
+
+            rss_feeds: if topics.contains(&Topic::RssFeeds){serde_json::to_value(self.daemon.rss.feeds().map_err(ops::rss::failure)?).unwrap()}else{json!([])},
+            rss_items: topics.iter().filter_map(|t|if let Topic::RssItems(id)=t{Some(id)}else{None}).map(|id|Ok((id.clone(),serde_json::to_value(self.daemon.rss.snapshot().map_err(ops::rss::failure)?.items.get(id).cloned().unwrap_or_default()).unwrap()))).collect::<ApiResult<_>>()?,
             epoch,
             state,
             rows,
@@ -464,6 +482,8 @@ impl Bus {
         let mut generation_threads = Vec::new();
         let mut generation_stop: Option<Arc<AtomicBool>> = None;
         let mut config_stamp = None;
+        let mut rss_stamp = None;
+        let mut shows_stamp=None;
         while !self.stopping.load(Ordering::Acquire) {
             self.daemon.search.sweep();
             self.daemon.policy.lock().unwrap().searches(self.daemon.search.count(), Instant::now());
@@ -536,6 +556,13 @@ impl Bus {
             if stamp != config_stamp {
                 dirty = true;
                 config_stamp = stamp;
+            }
+            if self.registry.lock().unwrap().subscriptions.values().any(|s|s.topics.iter().any(|t|matches!(t.topic,Topic::RssFeeds|Topic::RssItems(_)))) {
+                let stamp=self.daemon.rss.stamp();
+                if stamp!=rss_stamp {rss_stamp=stamp;dirty=true;}
+            }
+            if self.registry.lock().unwrap().subscriptions.values().any(|s|s.topics.iter().any(|t|matches!(t.topic,Topic::Shows|Topic::ShowReleases(_)))) {
+                let stamp=self.daemon.shows.stamp();if stamp!=shows_stamp{shows_stamp=stamp;dirty=true;}
             }
             let due = self
                 .registry
@@ -695,7 +722,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log
+                Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
             )
         });
         for index in order {
@@ -708,7 +735,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log);
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Files(_));
             if t.sent.is_none() || reset {

@@ -186,10 +186,10 @@ def api_list_matches_ipc_md(binary,systemd):
         case.check(independent['operations']==catalog,'static catalogue works even with an invalid private config',json.dumps(independent))
         additive=[row for row in caps['changes'] if row['since']!='1.2.0']
         patches=[row['since'] for row in additive]
-        case.check(patches==[f'1.2.{patch}' for patch in range(18,0,-1)]
+        case.check(patches==[f'1.2.{patch}' for patch in range(20,0,-1)]
                    and all(row.get('version')==row['since'] and row['breaking'] is False for row in additive),
                    'every additive change has a unique patch in integration order',json.dumps(additive))
-        case.check(caps['contract_version']=='1.2.18'  and all(any(c['field']==name for c in caps['changes']) for name in ['events','api']),
+        case.check(caps['contract_version']=='1.2.20'  and all(any(c['field']==name for c in caps['changes']) for name in ['events','api']),
                    'additive event/API changes advance current patch without downgrading integrated fields',json.dumps(caps['changes']))
 
 

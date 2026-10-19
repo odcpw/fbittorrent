@@ -392,13 +392,14 @@ class Harness:
         except OSError as error:
             return step.fail(f"Lock unavailable: {error}.")
 
-    def cli(self, *args, code=0, timeout=10, start=False):
+    def cli(self, *args, code=0, timeout=10, start=False, on_exit=None):
         private_environment(self.sandbox)
         command = [self.binary, *([] if start else ["--no-start"]), *args, "--json"]
         step = self.case.step("CLI " + shlex.join(command), f"exit {code} with one JSON object")
         child = self.case.popen(command, env=self.sandbox.env, cwd=self.sandbox.root, stdout=subprocess.PIPE, text=True)
         try:
             stdout, _ = child.communicate(timeout=timeout)
+            if on_exit is not None:on_exit(time.monotonic())
         except subprocess.TimeoutExpired:
             child.kill()
             stdout, _ = child.communicate(timeout=2)
@@ -2459,7 +2460,23 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
             client.case.check(frame.get("error", {}).get("code") == code,
                               "drive bounded dispatch/in-flight pressure rather than inject a server error",
                               f"elapsed={time.monotonic()-began:.3f}s; frame={frame!r}")
-            return frame, deferred
+            expected_frame = frame
+        # Releasing the HTTP source completes the auxiliary requests. Drain
+        # their actual replies and mutation outcomes before the next fixture
+        # input; response(identifier) may already have consumed some of them.
+        identifiers = {job["id"] for job in jobs}
+        def remaining():
+            replies = [line["frame"] for line in frames if line["dir"] == "s2c" and line["frame"].get("id") in identifiers]
+            pending = {reply["result"]["ref"] for reply in replies if reply.get("result", {}).get("state") == "pending"}
+            completed = {line["frame"].get("ref") for line in frames if line["dir"] == "s2c" and line["frame"].get("ev") == "mutation.result"}
+            return identifiers - {reply["id"] for reply in replies}, pending - completed
+        deadline = time.monotonic() + 20
+        while any(remaining()) and time.monotonic() < deadline:
+            if client.receive() is None: break
+        outstanding = remaining()
+        client.case.check(not any(outstanding), "drain every real pressure-fixture reply/outcome before protocol validation",
+                          json.dumps(dict(unanswered=sorted(outstanding[0]), pending=sorted(outstanding[1]))))
+        return expected_frame, deferred
     # These complete expected error frames have no P1-06 RPC producer. Do not
     # mistake the old catalogue's app.info requests for a way to trigger them.
     owners = {"ambiguous": "P1-11", "safety": "P1-11", "unsupported": "P1-18",
@@ -3903,6 +3920,8 @@ def tui_single_connection(binary, systemd):
 
 from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
+from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
@@ -4677,7 +4696,7 @@ def tracker_saved_views(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,

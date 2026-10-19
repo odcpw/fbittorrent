@@ -386,7 +386,7 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::File(_) | Item::Search(_) | Item::Log(_) => Ok(()),
+                Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
@@ -442,6 +442,8 @@ impl NegotiatedCaps {
 fn items(topic: &Topic, values: &[Item]) -> Checked {
     for value in values {
         match (topic, value) {
+            (Topic::Shows,Item::Show(row))=>row.validate()?,(Topic::ShowReleases(_),Item::Release(row))=>row.validate()?,
+            (Topic::RssFeeds, Item::Feed(_)) | (Topic::RssItems(_), Item::FeedItem(_))=>{},
             (Topic::Log, Item::Log(entry)) => entry.validate()?,
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
@@ -529,6 +531,8 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
+                                Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
+                                Topic::Shows | Topic::ShowReleases(_) => key.is_string(),
                                 Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
                                 Topic::Search(_) => key.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 8192),
                                 _ => false,
@@ -548,6 +552,8 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => lower_hex(key, 40),
+                                Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
+                                Topic::Shows | Topic::ShowReleases(_) => !key.is_empty(),
                                 Topic::Files(_) => key.parse::<u64>().is_ok(),
                                 Topic::Search(_) => !key.is_empty() && key.len() <= 8192,
                                 _ => false,

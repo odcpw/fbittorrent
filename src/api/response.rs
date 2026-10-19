@@ -1,6 +1,8 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
 use super::{objects::*, scalar::*, search::*};
+use super::rss::*;
+use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -223,6 +225,9 @@ pub enum Reply {
     SearchGrab(AddResult),
 
     TorrentsRecheck(RecheckReply),
+    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
+    RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
+    RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
@@ -270,6 +275,13 @@ impl Reply {
             "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
 
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
+            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
+            "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
+            "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
+            "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),
+            "rss.remove"=>serde_json::from_value(result).map(Self::RssRemove), "rss.refresh"=>serde_json::from_value(result).map(Self::RssRefresh),
+            "rss.items"=>serde_json::from_value(result).map(Self::RssItems), "rss.set_read"=>serde_json::from_value(result).map(Self::RssSetRead),
+            "rss.mark_feed_read"=>serde_json::from_value(result).map(Self::RssMarkFeedRead), "rss.grab"=>serde_json::from_value(result).map(Self::RssGrab),
             "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),

@@ -161,6 +161,23 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
+| `shows.follow` | `query?: str`, `imdb?: str`, `quality?: str` | `{show: Show}` | yes | P3-03 |
+| `shows.unfollow` | `imdb: str` | `{}` | yes | P3-03 |
+| `shows.check` | `imdb?: str` | `{state: "pending", ref: str}`, then `shows.checked` and `mutation.result {new}` | yes | P3-03 |
+| `shows.releases` | `imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str` | `{releases: [Release]}` | no | P3-03 |
+| `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
+| `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
+| `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
+| `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
+| `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
+| `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
+| `rss.refresh` | `feed?: str` | `{state: enum(pending\|done), ref?: str}` | yes | P3-02 |
+| `rss.items` | `feed: str`, `unread_only?: bool` | `{items: [FeedItem]}` | no | P3-02 |
+| `rss.set_read` | `feed: str`, `item: str`, `read: bool` | `{}` | yes | P3-02 |
+| `rss.mark_feed_read` | `feed: str` | `{count: u64}` | yes | P3-02 |
+| `rss.grab` | `feed: str`, `item: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-02 |
 | `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
@@ -444,7 +461,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -833,7 +850,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.18**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.20**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -861,6 +878,8 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.16` | `app.free_space` |
 | `1.2.17` | `add.disk` |
 | `1.2.18` | `clipboard` |
+| `1.2.19` | `rss` |
+| `1.2.20` | `shows` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -920,3 +939,51 @@ A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
 discovery. No transfer starts before an explicit Add action. Hello/error fixtures
 now advertise the exact live caps including clipboard; changes[].cap records it.
 The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.
+
+### P3-02: daemon RSS (contract 1.2.19)
+
+Capability `rss` adds the rss.* operations above and keyed on-change topics
+`rss.feeds` (id) and `rss.items:<feed-id>` (item id). Feed ids are the existing
+stable URL ids; feeds sort by id, items by published time descending then id.
+`Feed` contains id, name, url, title?, unread, last_refresh_at?, loading, error?.
+`FeedItem` contains id, title, description?, published_at?, size?, link?, magnet?,
+torrent_url?, read, grabbed. Unknown dates/sizes are omitted. Topic removals use
+string ids. The store is reloaded on inode/size/mtime changes before reads; the
+bus checks that stamp while RSS topics are subscribed so local CLI edits push.
+
+A new interactive presence schedules one stale check (older than 30 minutes)
+per feed; bar/glance/idle presence does not fetch. A single owned worker
+coalesces opens and rechecks staleness under its refresh lock. Explicit
+rss.refresh returns pending with a ref; mutation.result carries done or the
+upstream failure (details.source=rss). Bodies are capped at 4 MiB and each fetch
+at ten seconds or the shorter configured timeout; errors retain cached items.
+Drain stops scheduling and waits for the current bounded fetch. RSS refresh
+never adds a torrent. rss.grab uses the item's magnet/torrent URL with origin
+rss, and marks read/grabbed only after a successful ledger add. Existing
+in-process CLI paths and atomic store merge/rename behaviour remain available.
+Hello/error fixture caps now exactly include rss; rss.ndjson covers every op.
+
+### P3-03: daemon Shows (contract 1.2.20)
+
+Capability shows adds the shows.* operations above, `shows` snapshots keyed by
+imdb and `shows.releases:<imdb|inbox>` keyed by release key (imdb/key in inbox
+changes/removals). Release.key itself stays S02E03/S02; show_imdb disambiguates.
+Read state is independent of transfer: none/downloading/queued/paused/done/
+added_before comes from live ledger btih and saved grab history. Releases sort
+by published time descending then key; shows by title. Unknown optional source
+facts are omitted. Inbox defaults to unread-only; explicit unread_only overrides.
+
+A new interactive client checks only shows older than Show::is_stale's 30-minute
+boundary. Bar and idle activity do not fetch; one owned worker coalesces opens.
+Explicit check returns pending with ref, then shows.checked {imdb?,new,warnings}
+and mutation.result {new}, or upstream/eztv if all selected checks fail. Checks
+never add torrents. Drain cancels between pages; an in-flight fetch is bounded
+by the existing ten-second per-request / 30-second catalogue budget. All EZTV
+calls (including browse) honor FBT_EZTV_BASE_URL in isolated environments.
+
+The shared store's inode/size/mtime invalidates reads and on-change topics for
+in-process CLI edits. set_read changes only seen intent; mark_show_read preserves
+the one-level undo target; undo_read restores the last individual read mark to
+unread, and the next undo is empty. Grab marks read/grabbed only after a successful
+ledger add with origin shows. The new transcript covers every operation and
+inbox identity; existing hello/error arrays exactly include the shows cap.

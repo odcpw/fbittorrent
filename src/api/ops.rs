@@ -43,6 +43,23 @@ pub const TABLE: &[Operation] = &[
         args: "`hash: hash`, `to: enum(top|up|down|bottom)`", result: "`{state: \"done\", queue_pos: u64}`" },
     Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03",
         args: "`hashes: [hash]` (1..256)", result: "`{state: \"pending\", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}`" },
+    Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
+    Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
+    Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },
+    Operation { name:"shows.check",mutating:true,idempotent:false,since:"P3-03",args:"`imdb?: str`",result:"`{state: \"pending\", ref: str}`, then `shows.checked` and `mutation.result {new}`" },
+    Operation { name:"shows.releases",mutating:false,idempotent:false,since:"P3-03",args:"`imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str`",result:"`{releases: [Release]}`" },
+    Operation { name:"shows.set_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`, `key: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"shows.mark_show_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`",result:"`{count: u64}`" },
+    Operation { name:"shows.undo_read",mutating:true,idempotent:false,since:"P3-03",args:"none",result:"`{restored?: {imdb: str, key: str}}`" },
+    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
+    Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
+    Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
+    Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
+    Operation { name:"rss.refresh",mutating:true,idempotent:false,since:"P3-02",args:"`feed?: str`",result:"`{state: enum(pending|done), ref?: str}`" },
+    Operation { name:"rss.items",mutating:false,idempotent:false,since:"P3-02",args:"`feed: str`, `unread_only?: bool`",result:"`{items: [FeedItem]}`" },
+    Operation { name:"rss.set_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`, `item: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"rss.mark_feed_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`",result:"`{count: u64}`" },
+    Operation { name:"rss.grab",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`, `item: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
     Operation { name: "app.clipboard.dismiss", mutating: true, idempotent: true, since: "P6-13",
         args: "`hash: hash`", result: "`{}`" },
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
@@ -106,6 +123,8 @@ pub mod search;
 pub mod recheck;
 pub mod queue;
 pub mod trackers;
+pub mod rss;
+pub mod shows;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

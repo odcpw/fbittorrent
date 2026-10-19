@@ -8,6 +8,8 @@ mod sdnotify;
 mod signals;
 mod inhibit;
 mod clipboard;
+pub(crate) mod rss;
+pub(crate) mod shows;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -45,6 +47,8 @@ pub struct Daemon {
     resume: Arc<engine::resume::Store>,
     pub(crate) inhibitor: inhibit::Inhibitor,
     pub(crate) clipboard: clipboard::Watcher,
+    pub(crate) rss: rss::Service,
+    pub(crate) shows: shows::Service,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
@@ -395,6 +399,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         notifier: notify::Notifier::new(cfg.notify)?,
         inhibitor: inhibit::Inhibitor::new()?,
         clipboard: clipboard::Watcher::new()?,
+        rss: rss::Service::new()?,
+        shows: shows::Service::new()?,
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),
@@ -407,6 +413,9 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     let dispatch = daemon.clone();
     let mut server = ipc::Server::start(&cfg, &lock, move |request| dispatch.dispatch(request))?;
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
+    let rss_bus=api.event_bus();
+    daemon.shows.set_bus(api.event_bus());
+    daemon.rss.set_waker(Arc::new(move || {if let Some(bus)=rss_bus.upgrade(){bus.refresh();}}));
     daemon.clipboard.start(Arc::downgrade(&daemon), api.event_bus())?;
     daemon.clipboard.enabled(cfg.clipboard_watch);
     eprintln!(
@@ -435,6 +444,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.shows.stop();
+    daemon.rss.stop();
     daemon.clipboard.stop();
     daemon.inhibitor.stop();
     daemon.notifier.stop();

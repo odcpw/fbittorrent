@@ -30,6 +30,8 @@ fn rev_monotonic() {
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
+        shows:json!([]),show_releases:BTreeMap::new(),
+        rss_feeds:json!([]),rss_items:BTreeMap::new(),
         daemon: json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),
     };
     subscription.update(&sample, &[], 1).unwrap();
@@ -97,4 +99,20 @@ fn events_ring_resync() {
     r.entries.front_mut().unwrap().0 = Instant::now() - Duration::from_secs(601);
     assert_eq!(r.oldest(), 4);
     assert_eq!(EventRing::default().append(json!({}))["seq"], 1);
+}
+
+#[test]
+fn merged_search_and_show_inbox_keep_distinct_removal_keys() {
+    let cases = [
+        (Topic::Search(1), json!([{"key":"first"},{"key":"second"}]),
+            json!([{"key":"second"}]), "first"),
+        (Topic::ShowReleases("inbox".into()),
+            json!([{"show_imdb":"tt1","key":"S01E01"},{"show_imdb":"tt2","key":"S01E01"}]),
+            json!([{"show_imdb":"tt2","key":"S01E01"}]), "tt1/S01E01"),
+    ];
+    for (topic, before, after, removed_key) in cases {
+        let (changed, added, removed) = diff(&topic, &before, &after);
+        assert!(changed.is_empty() && added.is_empty());
+        assert_eq!(removed, vec![json!(removed_key)]);
+    }
 }

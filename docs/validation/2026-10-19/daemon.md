@@ -492,3 +492,84 @@ is under `target/test-logs/fbt-p6-13-dxe/`, mirrored in
 Wayland clipboard/day-long owner evaluation remain deferred to tracks C/D/owner.
 No all.sh between track beads. Follow-up: hash-only notification adds rely on
 ordinary peer discovery rather than retaining clipboard tracker parameters.
+
+## P3-02 — RSS daemon/API (fbt-p3-02-n95)
+
+Added eight typed RSS operations, feed/item objects, keyed on-change topics,
+an owned coalescing stale-on-interactive scheduler, cached views invalidated by
+inode/size/mtime, 4 MiB feed reads, persistent grabbed history and rss-origin adds.
+Checks never add torrents. A grab marks read/grabbed only after an accepted real
+engine add. Feed-id removal is exact, preserving nested display names. The
+in-process CLI still uses the shared locked/atomic store. Contract 1.2.10 adds
+rss cap/changes and rss.ndjson; hello/error arrays compare exactly with live caps.
+Neighbours: API types/catalogue/dispatch/framing, bus/diff, presence/drain hooks,
+add-origin validation, and the TUI API mirror's typed RSS collections (rendering
+is deferred; no UI completion claimed). Snapshot row/byte bounds are retained,
+and only the selected feed's item table remains in that mirror.
+
+`FBT_BEAD=fbt-p3-02-n95 python3 /tmp/fbt-track-a-run.py api`, `units rss::`,
+`build` pass: 89 API tests and 13 RSS/store tests. All four
+`cases rss_refresh_on_interactive rss_cli_edit_visible rss_oversized_refused
+rss_grab_marks_read_only_on_success` pass both modes (`final-{foreground,systemd}/`):
+counted local feed hits follow stale interactive edges only; CLI add pushes in
+**103 ms** both modes; >4 MiB refresh returns pending then upstream/rss failure
+while both cached items survive; failed grab leaves read/grabbed false, successful
+local metainfo add persists rss origin and read/grabbed; nested-name removal and
+CLI read-history interoperability pass. One full `cargo test --locked -- --nocapture`
+ran (`full-final/`): **381 passed, 1 failed, 3 ignored**. The sole failure was the
+new RSS snapshot encountering the TUI mirror's unsupported item type. It was
+implemented without changing that test; final `units tui::store::` passes all
+**12** tests including every transcript (`tui-mirror-final/`). No second full run
+is claimed, following the one-full-run track cadence.
+
+Exact hello replay passes both modes (`caps-{foreground,systemd}/`). Error replay
+exposed a pre-existing pressure-fixture race: auxiliary URL replies crossed into
+the next line-cap scenario. The harness now drains every admitted reply and
+pending outcome after releasing its actual HTTP fixture; canonical expectations
+are unchanged. Final `cases contract_errors` passes both modes
+(`replay-fixed-{foreground,systemd}/`), with empty outstanding sets recorded.
+Logs are under `target/test-logs/fbt-p3-02-n95/`, mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p3-02-n95/`. No all.sh between track beads.
+Follow-up: the existing legacy error replay still records its older capability/
+operation deferrals; this bead adds no new comparison mask or deferral.
+
+## P3-03 — Shows daemon/API (fbt-p3-03-oyg)
+
+Moved src/shows.rs mechanically into shows/mod.rs plus tests.rs (Git detects
+69% rename; production prefix/test-body identity in `split-proof.json`; all
+15 `shows::` tests pass). Applied the isomorphic skill's byte-preservation/API
+path discipline within the owner's scoped move/test cadence; no separate
+workspace, tracker ceremony, benchmarks or compile-memory claim. Added typed
+Shows operations/views, keyed show/release topics (compound imdb/key inbox
+identities), one stale-on-interactive worker, inode/size/mtime reload, cancellation
+between bounded EZTV pages, and FBT_EZTV_BASE_URL shared by Shows and browse.
+Read intent stays independent of ledger transfer state; paused intent takes
+precedence for unresolved magnets. Single read marks establish one undo target;
+bulk marking preserves it; undo consumes it; explicit grab alone adds and marks
+read/grabbed with shows origin. Fresh interactive opens do not rewrite/check
+history. Contract 1.2.11 adds shows cap/changes and shows.ndjson, with exact
+hello/error caps. Minimal neighbours: types/catalogue/dispatch/presence/drain,
+bus/diff, origin validation, browse endpoint, typed TUI API mirror (no renderer
+completion claimed) and the CLI test helper's optional pre-log exit timestamp.
+
+`FBT_BEAD=fbt-p3-03-oyg python3 /tmp/fbt-track-a-run.py check`, `api`,
+`units tui::store::`, `build` pass (89 API tests; 12 mirror tests).
+One full `cargo test --locked -- --nocapture` passes **382/0/3 ignored**
+(`full-final/`), also confirming P3-02's RSS mirror integration is green.
+`cases shows_inbox_semantics shows_check_never_downloads shows_cli_edit_visible
+shows_check_only_when_asked` passes foreground (final inbox/check/CLI in
+`final-foreground/`, idle in `live-foreground/`) and systemd (inbox/check/idle in
+`final-systemd/`). Each idle case records **60 one-second zero-hit observations**,
+then one stale interactive check, no fresh reconnect fetch and a deliberate
+explicit check. Four unread releases are newest first; m/M/u semantics,
+one-level undo, Shows-origin grab and independent paused transfer pass. CLI
+follow through the in-process path appears in the topic; an independent socket
+reader timestamps receipt against the CLI exit before JSONL writes, retaining
+the exact <=2 s assertion: **85.7/94.2 ms** foreground/systemd
+(`timed-cli-{foreground,systemd}/`). The previous poll-based systemd run timed
+out after one observation under load; it remains retained, not counted green.
+Final `cases contract_hello contract_errors` passes both modes (`caps-*/`).
+Evidence: `target/test-logs/fbt-p3-03-oyg/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p3-03-oyg/`. UI rendering stays with C/D; no all.sh
+between track beads. Follow-up: legacy EZTV episodes do not distinguish a missing
+source seed/size from zero; API omits nonpositive legacy values conservatively.
