@@ -293,3 +293,27 @@ def state_watcher_cancellation_stress(binary, systemd):
             stream.frames.clear()
         case.check(True, "60 ledger mutations replace and cancel watchers without starving the engine worker",
                    json.dumps(dict(cycles=30, last_rev=stream.revisions[sub], gaps=0)))
+
+
+def events_since_seq_replay(binary, systemd):
+    with d.api_owned("events_since_seq_replay", binary, systemd) as (case, sandbox, harness, process), d.ApiConn(harness) as client, d.ApiConn(harness) as writer:
+        client.hello(); writer.hello()
+        sub = client.call("subscribe", dict(topics=["events"]))["result"]["sub"]
+        stream = RevisionStream(client)
+        stream.snapshot(sub, ["events"])
+        events = []
+        for index in range(3):
+            item = fixture(writer, sandbox, stopped=True, name=f"replay-{index}")
+            frame = stream.until(lambda f: any(row.get("hash") == item.info_hash
+                                               for row in f.get("added", [])))
+            events.extend(frame["added"])
+        case.check([row["seq"] for row in events] == [1, 2, 3]
+                   and all(row["ev"] == "torrent.added" for row in events),
+                   "new additions use one instance-wide event sequence starting at one", str(events))
+        client.call("unsubscribe", dict(sub=sub))
+        replacement = client.call("subscribe", dict(topics=["events"], since_seq=1))["result"]["sub"]
+        replay = RevisionStream(client).snapshot(replacement, ["events"])
+        rows = [row for frame in replay for row in frame.get("items", [])]
+        case.check(rows == events[1:] and replay[0]["reason"] == "subscribe",
+                   "since_seq replays only events after the last seen sequence without changing their timestamps or identities",
+                   str(replay))

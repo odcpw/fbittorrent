@@ -2959,10 +2959,10 @@ if __name__ == "__main__":
 from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
                         structural_frame_within_100ms, detail_topic_released,
                         engine_restart_keeps_connection, slow_client_closed_others_live,
-                        rev_soak_10min, state_watcher_cancellation_stress)
+                        rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay)
 
 CASES = {function.__name__: function for function in
-         (bus_subscriptions, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
+         (bus_subscriptions, events_since_seq_replay, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
           engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
           fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
