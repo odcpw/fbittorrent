@@ -397,7 +397,7 @@ fn file_size_frames(op: &str) -> (Vec<Value>, Vec<Value>) {
         ],
         vec![
             json!({"dir":"c2s","frame":{"id":2,"op":"torrents.files","args":{"hash":hash}}}),
-            json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":rows[24]["frame"]["result"]}}),
+            json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":rows.iter().find(|row|row["frame"]["result"]["files"].is_array()).unwrap()["frame"]["result"]}}),
         ],
     )
 }
@@ -411,12 +411,13 @@ fn inconsistent_catalogue_file_lengths_fail_at_the_exact_line_and_pointer() {
         .1;
     check_group("torrents", text).unwrap();
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    assert_eq!(lines[24].matches("\"size\":2048").count(), 2);
+    let index=lines.iter().position(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["files"].is_array()).unwrap();
+    assert_eq!(lines[index].matches("\"size\":2048").count(), 2);
     // Recreate precisely the original inconsistent files reply, preserving all
     // other records, and send it through the ordinary round-trip checker.
-    lines[24] = lines[24].replace("\"size\":2048", "\"size\":4096");
+    lines[index] = lines[index].replace("\"size\":2048", "\"size\":4096");
     let error = check_group("files-size-negative", &(lines.join("\n") + "\n")).unwrap_err();
-    assert_eq!(error, "contracts/ipc/v1/files-size-negative.ndjson:25: /frame/result/files: sum of file lengths must equal the torrent size for the same hash");
+    assert_eq!(error, format!("contracts/ipc/v1/files-size-negative.ndjson:{}: /frame/result/files: sum of file lengths must equal the torrent size for the same hash",index+1));
     println!("original file-length mismatch rejected: {error}");
 }
 
@@ -563,16 +564,17 @@ fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
         .find(|(group, _)| *group == "torrents")
         .unwrap()
         .1;
-    for (hash, field, wrong_value, line) in [
-        ("2".repeat(40), "size", 4096, 43),
-        ("2".repeat(40), "completed_bytes", 2048, 43),
-        ("a".repeat(40), "size", 4096, 63),
-        ("a".repeat(40), "completed_bytes", 1, 63),
+    for (hash, field, wrong_value) in [
+        ("2".repeat(40), "size", 4096),
+        ("2".repeat(40), "completed_bytes", 2048),
+        ("a".repeat(40), "size", 4096),
+        ("a".repeat(40), "completed_bytes", 1),
     ] {
         let mut frames: Vec<Value> = text
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
+        let line=frames.iter().position(|row|row["frame"]["result"]["torrent"]["hash"]==hash).unwrap()+1;
         let torrent = frames[12]["frame"]["result"]["torrents"]
             .as_array_mut()
             .unwrap()
@@ -598,10 +600,8 @@ fn missing_files_restore_errors_require_the_matching_reason() {
         .unwrap()
         .1
         .lines()
-        .nth(54)
-        .map(|line| {
-            serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()
-        })
+        .map(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone())
+        .find(|row|row["name"]=="Fixture error")
         .unwrap();
     assert_eq!(detail["name"], "Fixture error");
     assert_eq!(
@@ -664,10 +664,8 @@ fn checking_torrents_cannot_claim_a_completed_hash_check() {
         .unwrap()
         .1
         .lines()
-        .nth(42)
-        .map(|line| {
-            serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()
-        })
+        .map(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone())
+        .find(|row|row["name"]=="Fixture checking")
         .unwrap();
     assert_eq!(detail["state"], "checking");
     assert_eq!(detail["checked"], false);

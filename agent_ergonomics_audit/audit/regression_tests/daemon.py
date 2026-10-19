@@ -1786,6 +1786,8 @@ REPLAY_NORMALIZATION = (
     ("/**/hash; /result/started/*; /result/stopped/*", "identity:hash", "40 lowercase hex; API-generated hashes bound to fixture identities"),
     ("/ref; /result/ref", "identity:ref", "at most 64 ASCII characters, consistent first-occurrence bijection"),
     ("/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at", "timestamp", "positive u64; presence preserved"),
+    ("/**/undo_until", "undo deadline", "positive u64; future time at observation, at most 10 seconds after the originating keep-files remove reply; originating remove required"),
+    ("/**/*_at; /**/*_until", "timestamp", "server-computed Unix seconds: positive u64; presence preserved"),
     ("/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps", "u64", "nonnegative u64; presence preserved"),
     ("/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds", "u64", "nonnegative u64; presence preserved"),
     ("/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*", "u64", "nonnegative u64; presence preserved"),
@@ -1811,6 +1813,8 @@ class ReplayNormalizer:
     def __init__(self):
         self.identities = {kind: {} for kind in ("request", "instance", "hash", "ref")}
         self.extra_optional = []
+        self.undo_windows = {}
+        self.undo_hash_windows = {}
 
     def bind(self, kind, fixture, live, pointer):
         valid = (type(live) is int and 0 < live < 2**64) if kind == "request" else (
@@ -1848,10 +1852,17 @@ class ReplayNormalizer:
             return value
         return rewrite(frame)
 
+    def observe(self, request, response):
+        if request and request["op"] == "torrents.remove" and not request["args"]["delete_files"] and response.get("ok"):
+            now = time.time()
+            self.undo_windows[response["id"]] = now
+            for hash_ in request["args"]["hashes"]:
+                self.undo_hash_windows[self.identities["hash"].get(hash_, hash_)] = now
+
     @staticmethod
     def matches(pattern, pointer):
-        if pattern == "/**/hash":
-            return pointer.endswith("/hash")
+        if pattern.startswith("/**/"):
+            return re.fullmatch(re.escape(pattern[4:]).replace(r"\*", ".*"), pointer.rsplit("/",1)[-1]) is not None
         return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]+"), pointer) is not None
 
     def compare(self, expected, live):
@@ -1862,6 +1873,14 @@ class ReplayNormalizer:
                          for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
             if rule == "checking only":
                 rule = "exact"
+            if rule == "undo deadline":
+                began = self.undo_windows.get(live.get("id")) if pointer == "/result/undo_until" else None
+                if began is None:
+                    hash_ = live.get("result", {}).get("torrent", {}).get("hash")
+                    began = self.undo_hash_windows.get(hash_)
+                if type(got) is not int or began is None or not time.time() < got <= began + 10:
+                    raise ReplayMismatch(f"JSON pointer {pointer}: undo_until must be future and within 10 seconds of its originating keep-files remove: {got!r}")
+                return got
             if rule.startswith("identity:"):
                 if wanted is None:  # Failure.id is the single nullable wire field.
                     if got is not None:
@@ -2116,8 +2135,12 @@ def replay_preconditions(lines, client, normalizer, root):
                                           piece_size=fixture.info["piece length"]), sort_keys=True))
         fixture.info["private"] = int(detail.get("private", False))
         document = dict(info=fixture.info)
-        if row["state"] == "downloading":
+        tracker_count=detail.get("tracker_count",int(row["state"]=="downloading"))
+        if tracker_count:
             document["announce"] = client.harness.replay_network["tracker"]
+            if tracker_count>1:
+                document.pop("announce")
+                document["announce-list"]=[[client.harness.replay_network["tracker"]+f"?fixture={index}"] for index in range(tracker_count)]
         for key, wire_key in (("comment", "comment"), ("created_by", "created by")):
             if key in detail: document[wire_key] = detail[key]
         fixture.torrent.write_bytes(fixtures.bencode(document))
@@ -2221,11 +2244,13 @@ def drive_replay_state(client, prepared, fixture_hash, harness, query):
     available = client.call("torrents.list", {})["result"]["torrents"]
     live_hashes = {value["hash"] for value in available}
     if digest not in live_hashes:
-        client.case.check(True, "ruling 4E defers the removed-record detail precondition to P6-08", f"JSON pointer /result/torrent/hash: {fixture_hash} was removed earlier; no silent re-add")
+        client.case.check(False, "detail fixture has a present record after explicit undo/restore", f"JSON pointer /result/torrent/hash: {fixture_hash} is missing")
         return None
     if desired in ("queued", "stalled", "downloading"):
         for other in prepared.values():
-            if other["hash"] != digest and other["hash"] in live_hashes:
+            if other["hash"] != digest and any(value["hash"]==other["hash"] and value["state"] in ("downloading","stalled","queued","checking") for value in available):
+                # Only competing downloads occupy queue slots. Stopping a done
+                # record would invent paused intent in its later fixture detail.
                 client.call("torrents.stop", dict(hashes=[other["hash"]]))
         if desired == "queued":
             # Prior checking scenarios may have re-added the earlier blocker.
@@ -2303,6 +2328,33 @@ def api_replay_normalization(binary, systemd):
                 case.check(False, label + " fails comparison", "unexpected match")
             except ReplayMismatch as error:
                 case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
+        normalizer.compare(dict(result=dict(future_added_at=1, nested=dict(staged_until=2))),
+                           dict(result=dict(future_added_at=int(time.time()), nested=dict(staged_until=int(time.time())+10))))
+        case.check(True,"computed timestamp suffixes compare by type and validity","Nested *_at and *_until values keep positive-u64 and presence checks.")
+        for bad in (False,-1,0,"tomorrow"):
+            try:
+                normalizer.compare(dict(result=dict(created_at=1)),dict(result=dict(created_at=bad)))
+                case.check(False,"invalid computed timestamps fail","unexpected match")
+            except ReplayMismatch as error:
+                case.check("/result/created_at" in str(error),"invalid computed timestamps fail at their pointer",str(error))
+        undo_normalizer=ReplayNormalizer()
+        expected_undo=dict(id=1,ok=True,result=dict(undo_until=123))
+        live_undo=dict(id=77,ok=True,result=dict(undo_until=int(time.time())+10))
+        for label,value in (("no originating removal",live_undo),("expired",dict(live_undo,result=dict(undo_until=int(time.time())-1)))):
+            try:
+                undo_normalizer.compare(expected_undo,value)
+                case.check(False,label+" undo deadline fails","unexpected match")
+            except ReplayMismatch as error:
+                case.check("/result/undo_until" in str(error),label+" undo deadline fails at its pointer",str(error))
+        undo_normalizer.observe(dict(op="torrents.remove",args=dict(delete_files=False,hashes=["a"*40])),live_undo)
+        undo_normalizer.compare(expected_undo,live_undo)
+        case.check(True,"undo deadline is tied to a real removal response","Positive future timestamp is within the ten-second removal window.")
+        for value in (int(time.time())-1,int(time.time())+11,True):
+            try:
+                undo_normalizer.compare(expected_undo,dict(live_undo,result=dict(undo_until=value)))
+                case.check(False,"invalid undo window fails","unexpected match")
+            except ReplayMismatch as error:
+                case.check("/result/undo_until" in str(error),"invalid undo window fails at its pointer",str(error))
         watch_frame = dict(result=dict(torrent=dict(playable=dict(ready=True))))
         pending_frame = dict(result=dict(state="pending"))
         undo_frame = dict(result=dict(torrent=dict(undo_until=123)))
@@ -2523,8 +2575,9 @@ def contract_group(group, binary, systemd):
                         client.send_frame(live_request)
                 elif line["dir"] == "s2c":
                     expected = line["frame"]
-                    if group == "torrents" and number in (43, 63):
-                        minimum = (64 if number == 43 else 8) * fixtures.MIB
+                    state_row=expected.get("result",{}).get("torrent",{})
+                    if group == "torrents" and state_row.get("name") in ("Fixture checking", "New transfer"):
+                        minimum = (64 if state_row["name"] == "Fixture checking" else 8) * fixtures.MIB
                         size = expected.get("result", {}).get("torrent", {}).get("size", 0)
                         case.check(size >= minimum, "fixture payload supports the required live state",
                                    json.dumps(dict(fixture=str(path.relative_to(REPO)), line=number, pointer="/result/torrent/size", size=size, required_minimum=minimum), sort_keys=True))
@@ -2546,6 +2599,8 @@ def contract_group(group, binary, systemd):
                         actual = client.receive()
                         while actual and (actual.get("ev") in ("heartbeat", "mutation.result")):
                             actual = client.receive()
+                    if actual is not None:
+                        normalizer.observe(current, actual)
                     if actual is None:
                         case.check(False, "fixture receives a live response", f"EOF at {path.name}:{number}")
                         break
@@ -2558,13 +2613,6 @@ def contract_group(group, binary, systemd):
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
-                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39, 61) and "origin" not in available_caps:
-                        if number == 61:
-                            case.check(actual.get("error", {}).get("code") == "not_found",
-                                       "post-remove upload-limit fixture reaches the actual missing-record condition",
-                                       json.dumps(actual, sort_keys=True))
-                        pointer = "/result/torrent/hash" if number == 39 else "/result"
-                        owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
@@ -2574,6 +2622,14 @@ def contract_group(group, binary, systemd):
                     if owners:
                         for pointer, bead, reason in owners: defer(number, pointer, bead, reason)
                         continue
+                    if current and current["op"]=="torrents.remove" and current["args"]["delete_files"] and actual.get("result",{}).get("state")=="pending":
+                        reference=actual["result"]["ref"]
+                        outcome=next((ev for ev in client.pushed if ev.get("ev")=="mutation.result" and ev.get("ref")==reference),None)
+                        while outcome is None:
+                            ev=client.receive()
+                            if ev is None:raise RuntimeError("EOF before file-removal completion")
+                            if ev.get("ev")=="mutation.result" and ev.get("ref")==reference:outcome=ev
+                        case.check(outcome["outcome"]=="done","file-deleting removal completes before subsequent missing-record scenario",json.dumps(outcome))
                     step = case.step(f"replay {path.relative_to(REPO)}:{number}", "canonical bytes match under the single declared normalization table")
                     try:
                         first_extra = len(normalizer.extra_optional)
