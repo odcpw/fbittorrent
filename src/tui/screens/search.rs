@@ -1,7 +1,7 @@
 //! Existing screens search behavior.
 use super::*;
 
-pub(super) struct SearchSub { pub(super) id: SubId, pub(super) query: String, pub(super) cfg: Config }
+pub(super) struct SearchSub { pub(super) id: SubId, pub(super) query: String, pub(super) cfg: Config, pub(super) presence:Option<Arc<attach::Presence>> }
 
 impl TuiApp {
     pub(super) fn selected_result(&self) -> Option<&SearchResult> {
@@ -213,7 +213,7 @@ impl Subscription<Msg> for SearchSub {
     fn run(&self, sender: Sender<Msg>, stop: StopSignal) {
         let id = self.id;
         let fail = |e: String| Msg::SearchBatch { id, results: vec![], done: true, error: Some(e) };
-        let c = Client::from_config(&self.cfg);
+        let c = Client::from_config(&self.cfg,self.presence.clone());
         if let Err(e) = c.login() { let _ = sender.send(fail(e.to_string())); return; }
         let sid = match c.search_start(&self.query) {
             Ok(i) => i,

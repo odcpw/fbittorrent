@@ -161,6 +161,24 @@
         assert!(text.contains("could not restore: corrupt cache"), "{text}");
     }
 
+    #[test]
+    fn reconnect_keeps_confirmed_rows_visible_without_retrying_mutations() {
+        let mut app=app();
+        app.torrents=vec![Torrent {hash:"a".repeat(40),name:"confirmed before disconnect".into(),state:"downloading".into(),..Default::default()}];
+        app.tor_list.borrow_mut().select(Some(0));
+        let reference=crate::api::MutationRef::new("remove-before-disconnect").unwrap();
+        app.store.begin_mutation(reference.clone(),"torrents.remove".into(),vec![crate::api::Hash::new("a".repeat(40)).unwrap()]).unwrap();
+        app.recovery.connected("0.1.0","0.1.0");
+        app.connection_lost(false);
+        let text=render(&app,120,30);
+        assert!(text.contains("Connecting")&&text.contains("confirmed before disconnect"),"{text}");
+        assert!(app.store.stale);
+        assert!(app.store.pending_for_key(&"a".repeat(40)).is_none());
+        assert!(matches!(app.recovery_tick(),Cmd::None),"the initial backoff does not dispatch a request");
+        assert_eq!(app.store.pending.len(),1,"the unknown ref is retained for reconciliation");
+        assert!(app.status.contains("Result unknown"));
+    }
+
     fn episode(key: &str, released: i64) -> Episode {
         Episode { key: key.into(), season: 1, episode: if key == "S01" { 0 } else { 1 }, title: format!("Fixture.{key}.1080p"), quality: "1080p".into(), magnet: format!("magnet:?xt=urn:btih:{released:040}"), seeds: 10, size: 100, released, candidates: 1 }
     }

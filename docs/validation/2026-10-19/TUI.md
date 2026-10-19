@@ -229,3 +229,101 @@ The native helper now accepts the bead's unique tmux session name. Remaining:
 push/ApiSub transport, native mutations, reconnect UI, settings service and
 Track B namespaces. The existing timer remains until the push server arrives;
 no full-suite/all.sh run for this coherent intermediate integration.
+
+P4-03 mutation checkpoint: native start/stop/seed/remove/add/open and file
+selection use the single API connection. Its bounded multiplexing worker emits
+ordered mutation refs and events, keeps heartbeats/RPCs responsive during pending
+URL fetches, caches completion before waking callers, and cancels on UI close.
+Rows remain confirmed; pending verbs dim rows and disable the same actions in
+both keys and footer. Search/RSS/Shows keep their current service implementation
+behind `remote::ScreenClient`; RSS and Shows mark downloaded only after real
+admission, including a failure control. Local provider metadata handoffs are
+private and bounded to eight unconfirmed files. Reconnect to the same daemon
+resets connection-scoped revisions and stale replies cannot overwrite new data.
+`cargo test --locked -p fbittorrent tui:: -- --nocapture`: **106 passed**, all
+**34 prior goldens unchanged** (`action_ready_units.*`). Debug build, source size
+self-test and Python compilation pass (`action_ready_binary.*`,
+`mutations_sizes.*`). Two real tmux cases pass with engine.sock hidden
+(`action_ready_live/daemon/{tui_single_connection,tui_pending_rss_failure}.jsonl`):
+file selection, start, seed, stop, one HTTP add, API target/open, keep-files
+remove, one TUI connection 0→1→0; held/failed HTTP admission stays responsive and
+leaves RSS unread. The first repeat exposed a truthful-action race: the footer
+advertised Resume before file selection settled. The catalogue now disables
+pending row actions and the test waits for their visible readiness (no timeout
+or outcome assertion relaxed). Five P1-15 lifetime cases pass in
+`lifetime_regression/native/`; q_confirms passes in
+`lifetime_confirm_verified/native/` after a minimal adjacent harness fix that
+verifies a process has exited when /proc vanishes during shutdown rather than
+throwing ProcessLookupError. Every live-child isolation check remains enforced.
+The bead remains incomplete: the branch lacks the bus/shared-client/settings
+and Track B service integrations; its two-second fallback timer remains until
+push is available. Reconnect UI is the next independent step. No full-suite or
+all.sh run at this coherent intermediate checkpoint.
+
+P4-03 recovery checkpoint: initial attachment runs off the UI thread and shows
+Connecting; connection loss preserves dimmed confirmed rows, marks in-flight
+results unknown, and retries only the socket at 0.5/1/2/4/8/10 seconds (then 10).
+Only explicit opening/Enter can start a daemon. One handshake runs at a time;
+success resets the backoff and the connection-scoped mirror. Unsupported
+protocols produce a persistent banner before decoding foreign reply shapes;
+newer installed stable versions show the restart-to-update notice. The footer
+cache hashes the notice/countdown without formatting on unchanged frames.
+The full `cargo test --locked` run is green: **327 passed, 2 ignored**, including
+**110 TUI tests** and all **34 unchanged goldens** (`full_cargo_test.*`). Debug
+build and source size self-test pass (`recovery_binary.*`, `recovery_sizes.*`).
+The original lifecycle/owner-request assertion is unchanged and passes; a
+session-less poll still has no effect on the daemon owner's lifecycle.
+The six real lifetime cases pass in `recovery_lifetime/native/`; the terminal
+helper now waits for the new interactive hello before asserting owner state.
+The core mutations and failed RSS admission cases pass in
+`recovery_live/daemon/`. The replacement-owner case passes in
+`recovery_owner_verified/daemon/tui_reconnect_existing_owner.jsonl` (5.180 s):
+shutdown keeps the cached row and terminal, retries leave the socket absent,
+an independently started owner has a different instance, the same terminal
+reattaches without Enter with exactly one TUI connection, fresh removal clears
+the old row, and q releases the connection. The receiver is closed/reopened
+between daemon generations so stale STATUS datagrams cannot satisfy or spoil
+the successor's exact READY=1 check; failed development attempts are retained.
+Python compilation and git diff checks pass. No release build/all.sh is needed
+for this track checkpoint. Remaining P4-03 acceptance is explicitly unmet:
+remove the native timer and local service/legacy bridge after bus, shared
+api::Client, settings and Track B namespaces are merged into this branch.
+The regex for qbt::Client alone is insufficient proof while the isolated
+LegacyClient bridge still exists. P4-04 is skipped pending the missing
+P2-08 contracts/ui/states.json and the remaining P4-03 integration; P4-10 and
+P4-11 require its modal/layout, P4-07 additionally needs the Track B services,
+and P4-09 requires the completed API migration. No frozen fixture or old golden
+was changed; no daemon lifecycle/teardown implementation was touched.
+
+P1-15/P4-03 native gate repair: each attachment fixture now has a sandbox-specific
+tmux socket and asserts server creation; q is checked against the same live
+daemon PID/instance rather than interactive presence. The stderr allowlist
+already recognized daemon startup; it now also accepts the named Settings
+restart reason and explicitly rejects unknown lines/reasons. Parked readiness
+uses app.info/app.network; unknown completion remains absent on API v1, is
+shaped as zero by the API CLI or retained as -1 by the legacy adapter, and the
+saved -1 is still asserted unchanged on disk. The TUI now uses saved intent for
+Pause/Resume and its footer cache, including VPN-waiting rows; positive
+completion dates keep Resume hidden when seeding is off. The timestamp case
+presses p twice and verifies both real ledger intents through the API. All
+three requested cases pass against the final debug binary via the unmodified
+native.py entrypoint with --case (`native_gate_final_{q_detaches,quit_restart_down,
+resume_unknown_timestamp}/native/*.jsonl`). The one all-native invocation
+(`native_gate_all/native/summary.json`) ran 26 cases: 24 passed, two failed.
+The run exposed an additional asynchronous-attach regression: --no-start tui
+waited instead of returning exit 4. Attach-only opening now checks the existing
+owner before fullscreen and avoids opening a second connection; the adjacent
+backend policy getter is identical to the one already on main. Its existing
+real-terminal/zero-launcher control now passes
+(`native_gate_final_launcher_never_called/native/launcher_never_called.jsonl`),
+as do the three requested cases on the final binary. The remaining full-native
+failure is startup_survives_bad_record: legacy CLI show exited 4 after a 211 ms
+probe, followed by a missing-state KeyError (steps 46/47); retained unchanged
+for the API CLI integration, which is not on this branch. Full cargo test
+--locked passed once: 328 passed, 2 ignored (`native_gate_cargo_test.*`); after
+the small attach-only correction, the touched TUI suite passed 111 tests with
+34 unchanged goldens (`native_gate_attach_units.*`). Debug build, Python
+compilation, size gate and diff checks pass. settings_queue_vpn_restart was
+verified byte-identical and passed locally; its main-gate repair remains the
+integrator's. No release/all.sh run, frozen fixture change, or state-table
+change. All log paths above are under target/test-logs/fbt-p4-03-r5p/.

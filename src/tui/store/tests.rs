@@ -245,3 +245,13 @@ fn staging_byte_budget_and_subscription_count_are_bounded() {
         .is_err());
     assert_eq!(store.subscriptions.len(), api::MAX_SUBSCRIPTIONS);
 }
+
+#[test]
+fn reconnecting_to_the_same_instance_resets_connection_scoped_revisions() {
+    let (mut store, _) = replay(&fixture("subscribe-gap.ndjson")).unwrap();
+    let before = store.torrents.clone();
+    store.hello(store.hello.clone().unwrap());
+    assert!(store.subscriptions.is_empty());
+    assert!(store.stale);
+    assert_eq!(store.torrents, before);
+}

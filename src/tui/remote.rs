@@ -1,8 +1,13 @@
 //! Available API read operations; one existing presence connection owns transport.
 use super::*;
+mod client;
+mod metadata;
+pub(super) use client::ScreenClient;
+mod subscription;
 use crate::api;
 use serde::de::DeserializeOwned;
 use serde_json::json;
+pub(super) use subscription::{verb as mutation_verb, ApiSub};
 
 pub(super) struct ReadSnapshot {
     pub torrents: api::ListResult,
@@ -48,7 +53,7 @@ pub(super) fn set_files(
         .map(|index| u64::try_from(*index))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let field = if priority == 0 { "skip" } else { "include" };
-    connection.request("torrents.set_files", json!({"hash":hash,(field):indices}))?;
+    connection.request_confirmed("torrents.set_files", json!({"hash":hash,(field):indices}))?;
     files(connection, hash)
 }
 impl TuiApp {
@@ -85,7 +90,13 @@ impl TuiApp {
     pub(super) fn complete_no_seed(&self, torrent: &Torrent) -> bool {
         self.store.torrents.get(&torrent.hash).map_or_else(
             || torrent.complete_no_seed(),
-            |row| row.state == api::TorrentState::Done && !row.seed,
+            |row| (row.state == api::TorrentState::Done || row.completed_at.is_some()) && !row.seed,
+        )
+    }
+    pub(super) fn torrent_paused(&self, torrent: &Torrent) -> bool {
+        self.store.torrents.get(&torrent.hash).map_or_else(
+            || torrent.is_stopped(),
+            |row| row.intent == api::Intent::Pause,
         )
     }
     pub(super) fn network_banner(&self) -> (bool, std::borrow::Cow<'_, str>) {
@@ -153,7 +164,10 @@ mod tests {
                 interfaces: vec![],
             },
         };
-        app.update(Msg::ApiRead(Ok(snapshot)));
+        app.update(Msg::ApiRead {
+            connection: None,
+            result: Ok(snapshot),
+        });
         assert!(app.online, "{}", app.backend_error);
         assert_eq!(app.network_banner().1, "Waiting for fixture VPN");
         let row = &app.store.torrents[metadata.as_str()];
@@ -202,5 +216,47 @@ mod tests {
             upload.contains("64") && upload.contains("cap") && !upload.contains("seeding allowed"),
             "{upload}"
         );
+    }
+    #[test]
+    fn responses_from_an_old_connection_cannot_change_the_new_models_state() {
+        let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
+        app.poll_inflight = true;
+        app.online = true;
+        app.update(Msg::ApiRead {
+            connection: Some(42),
+            result: Err("old connection failed".into()),
+        });
+        assert!(app.online && app.poll_inflight);
+        assert!(app.backend_error.is_empty());
+    }
+
+    #[test]
+    fn vpn_waiting_controls_follow_saved_intent_and_known_completion() {
+        let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
+        let mut row = torrents().into_iter().find(|row|row.state==api::TorrentState::Done).unwrap();
+        row.state=api::TorrentState::WaitingVpn;
+        row.reason=Some("vpn_down".into());
+        row.intent=api::Intent::Pause;
+        row.completed_at=None;
+        row.seed=false;
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        app.torrents=vec![format::torrent(&row)];
+        app.tor_list.borrow_mut().select(Some(0));
+        let action=actions::all().find(|action|action.id=="torrents.pause").unwrap();
+        assert_eq!((action.label)(&app).as_deref(),Some("Resume"));
+        assert!(app.torrent_paused(&app.torrents[0]));
+        assert!(!app.complete_no_seed(&app.torrents[0]));
+        let paused=app.footer_signature(120);
+        row.intent=api::Intent::Run;
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        assert_eq!((action.label)(&app).as_deref(),Some("Pause"));
+        assert!(!app.torrent_paused(&app.torrents[0]));
+        assert_ne!(paused,app.footer_signature(120),"intent changes must refresh the legend while the VPN state stays the same");
+        row.completed_at=Some(123);
+        app.store.torrents.insert(row.hash.to_string(),row.clone());
+        assert!((action.label)(&app).is_none(),"known complete no-seed records never offer Resume");
+        row.seed=true;
+        app.store.torrents.insert(row.hash.to_string(),row);
+        assert_eq!((action.label)(&app).as_deref(),Some("Pause"));
     }
 }

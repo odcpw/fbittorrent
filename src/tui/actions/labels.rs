@@ -9,7 +9,7 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
                 if app.complete_no_seed(torrent) {
                     return None;
                 }
-                if torrent.is_stopped() {
+                if app.torrent_paused(torrent) {
                     "Resume"
                 } else {
                     "Pause"

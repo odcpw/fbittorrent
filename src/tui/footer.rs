@@ -68,6 +68,7 @@ impl TuiApp {
     }
 
     pub(super) fn footer_selection(&self) -> Option<String> {
+        if let Some(notice)=self.connection_banner() {return Some(notice.into_owned());}
         if self.daemon_stopped {return Some("fbittorrent stopped · Enter starts it again".into());}
         if let Some(files) = &self.files {
             return files

@@ -11,16 +11,18 @@ pub(super) struct ProvidersModal {
 impl TuiApp {
     pub(super) fn load_plugins(&self) -> Cmd<Msg> {
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             Msg::Plugins(c.login().and_then(|_| c.search_plugins()).map_err(|e| e.to_string()))
         })
     }
 
     pub(super) fn set_plugins(&self, names: Vec<String>, enable: bool) -> Cmd<Msg> {
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let r = c.login()
                 .and_then(|_| { for n in &names { c.search_set_plugin(n, enable)?; } Ok(()) })
                 .and_then(|_| c.search_plugins())

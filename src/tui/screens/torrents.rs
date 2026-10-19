@@ -13,6 +13,10 @@ impl TuiApp {
 
     pub(super) fn on_torrents_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let n = self.torrents.len();
+        if matches!(intent,actions::Intent::Pause|actions::Intent::Seed|actions::Intent::Remove|actions::Intent::DeleteFiles)
+            &&self.selected_torrent().is_some_and(|torrent|self.store.pending_for_key(&torrent.hash).is_some()) {
+            self.set_status("Waiting for confirmation",false);return Cmd::none();
+        }
         match intent {
             actions::Intent::Down => { if n > 0 { self.tor_list.borrow_mut().select_next(n); } }
             actions::Intent::Up => self.tor_list.borrow_mut().select_previous(),
@@ -20,7 +24,7 @@ impl TuiApp {
             actions::Intent::Last => self.tor_list.borrow_mut().select(n.checked_sub(1)),
             actions::Intent::Pause => {
                 if let Some(t) = self.selected_torrent().cloned() {
-                    let stopped = t.is_stopped();
+                    let stopped = self.torrent_paused(&t);
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }
@@ -43,8 +47,8 @@ impl TuiApp {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: true },
                     &format!("DELETE '{}' AND ITS FILES? y/N", short(&t.name, 50)), true);
             },
-            actions::Intent::Open => if let Some(t) = self.selected_torrent() {
-                let _ = std::process::Command::new("xdg-open").arg(crate::qbt::open_target(t)).spawn();
+            actions::Intent::Open => if let Some(t) = self.selected_torrent().cloned() {
+                return self.action("open requested",move|client|client.open(&t));
             },
             actions::Intent::Imdb => if let Some(t) = self.selected_torrent() {
                 let name = t.name.clone();
@@ -78,8 +82,8 @@ impl TuiApp {
         let inner = block.inner(cols[0]);
         block.render(cols[0], frame);
 
-        if !self.online {
-            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
+        if !self.online && !(self.recovery.active && !self.torrents.is_empty()) {
+            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else if let Some(notice)=self.connection_banner() {notice.into_owned()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
             Paragraph::new(msg).style(th.err()).wrap(WrapMode::Word).render(pad(inner), frame);
         } else if self.torrents.is_empty() {
             let text = if !network_ready { format!("{}\n\nConnect your VPN to start transfers.\n(F6) Download and VPN settings\n\nYour saved downloads stay here.", network_message) }
@@ -92,7 +96,7 @@ impl TuiApp {
             Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.torrents.iter().enumerate().map(|(i, t)|
-                li(torrent_line(t, self.store.torrents.get(&t.hash), inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
+                li(torrent_line(t, self.store.torrents.get(&t.hash), self.store.pending_for_key(&t.hash), self.recovery.active&&self.store.stale, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.tor_list.borrow_mut());
         }
@@ -115,7 +119,7 @@ impl TuiApp {
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
-            kv("state", state_label(t)),
+            kv("state", self.store.pending_for_key(&t.hash).map_or_else(||state_label(t),|op|format!("{}…",remote::mutation_verb(op)))),
             kv("progress", metrics.progress()),
             kv("speed", metrics.speed()),
             kv("eta", metrics.eta()),
@@ -157,7 +161,7 @@ pub(super) fn state_label(t: &Torrent) -> String {
     }.to_string()
 }
 
-pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
+pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, pending:Option<&str>, stale:bool, width: u16, th: &Theme, selected_for: Option<Duration>) -> Line<'static> {
     let bar_w: u16 = 10;
     let percent = if t.progress_known { format!("{:>6.1}%", t.progress * 100.0) } else { "      —".into() };
     let right = format!(" {percent} {:>11} {:>7} {}{}{}", if t.is_active() { api.map_or_else(||human_rate(t.dlspeed),|row|row.dl_bps.map_or_else(||"—".into(),|rate|human_rate(i64::try_from(rate).unwrap_or(i64::MAX)))) } else { api.map_or_else(||human_bytes(t.size),|row|row.size.map_or_else(||"—".into(),|size|human_bytes(i64::try_from(size).unwrap_or(i64::MAX)))) },
@@ -166,11 +170,13 @@ pub(super) fn torrent_line(t: &Torrent, api:Option<&crate::api::Torrent>, width:
     let name_w = (width as usize).saturating_sub(bar_w as usize + 1 + right.len());
     let name = readable_cell(&t.name, name_w, selected_for);
     let padn = 0;
-    let bar = if t.is_queued() { "  Queued  ".into() }
+    let bar = if let Some(op)=pending {cell(remote::mutation_verb(op),bar_w as usize)}
+        else if api.is_some()&&!t.progress_known&&t.state!="waitingVPN" {cell(if t.state=="metaDL" {"Metadata"} else {"—"},bar_w as usize)}
+        else if t.is_queued() { "  Queued  ".into() }
         else if t.state == "waitingVPN" { " Wait VPN ".into() }
         else { MiniBar::new(t.progress, bar_w).show_percent(false).filled_char('█').empty_char('░').render_string() };
-    let bar_style = if t.is_active() { Style::new().fg(th.accent) } else if t.is_stopped() { th.dimmed() } else { th.ok() };
-    let name_style = if t.is_stopped() { th.dimmed() } else if t.state == "error" || t.state == "missingFiles" { th.err() } else { th.text() };
+    let bar_style = if stale||pending.is_some() {th.dimmed()} else if t.is_active() { Style::new().fg(th.accent) } else if t.is_stopped() { th.dimmed() } else { th.ok() };
+    let name_style = if stale||pending.is_some()||t.is_stopped() { th.dimmed() } else if t.state == "error" || t.state == "missingFiles" { th.err() } else { th.text() };
     Line::from_spans([
         Span::styled(name, name_style),
         Span::raw(" ".repeat(padn + 1)),

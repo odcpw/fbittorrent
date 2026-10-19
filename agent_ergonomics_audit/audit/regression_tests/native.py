@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import daemon
@@ -428,6 +429,13 @@ class NativeHarness:
                 return False
         self.wait_for(ready, "disposable daemon answers its legacy version request")
 
+    def api(self, op, args=None):
+        """Read real daemon state independently of the CLI's legacy/API shaper."""
+        adapter = SimpleNamespace(case=self.get_case(), sandbox=SimpleNamespace(env=self.env))
+        with daemon.ApiConn(adapter) as connection:
+            connection.hello()
+            return connection.call(op, {} if args is None else args)["result"]
+
     @property
     def engine_path(self):
         return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
@@ -815,7 +823,7 @@ def expected_daemon_stderr(stderr, complete=True):
                 r'INFO engine session exists restores=[0-9]+',
                 r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
                 r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
-                r'INFO daemon restarting engine reason=Explicit', r'INFO network Waiting for fbmissing0',
+                r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
                 r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
                 r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
                 r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
@@ -1136,15 +1144,18 @@ ATTACH_CASES = ("tui_starts_daemon", "q_detaches", "q_confirms", "first_q_notice
 class AttachedTui:
     def __init__(self, case, binary, sandbox, harness, session="fbt-fbt-p1-15-h0l"):
         self.case, self.binary, self.sandbox, self.h = case, binary, sandbox, harness
-        self.socket = session + "-" + str(os.getpid())
+        self.socket = session + "-" + str(os.getpid()) + "-" + sandbox.root.name
         self.session, self.counter = session, 0
-        self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+        created = self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+        case.check(created.returncode == 0, "case owns a fresh private tmux server",
+                   f"socket={self.socket}; exit={created.returncode}; stderr={created.stderr}")
 
     def tmux(self, *args):
         return subprocess.run(["tmux", "-L", self.socket, "-f", "/dev/null", *args],
                               env=self.sandbox.env, capture_output=True, text=True, timeout=5)
 
     def start(self):
+        before = self.clients() if daemon.DaemonContract.socket_path(self.sandbox).exists() else 0
         self.counter += 1
         done = self.sandbox.root / f"ui-{self.counter}.exit"
         stderr = self.case.path.with_suffix(f".tui-{self.counter}.stderr")
@@ -1154,6 +1165,8 @@ class AttachedTui:
         target = result.stdout.strip()
         self.case.check(result.returncode == 0, "a new TUI starts in this terminal", f"target={target}; {result.stderr}")
         self.h.wait_for(lambda: ("Torrents" in self.capture(target), self.capture(target)), "attached TUI draws its first frame")
+        self.h.wait_for(lambda: ((count := self.clients()) == before + 1, f"tui clients={count}; before={before}"),
+                        "new terminal completes its interactive API hello")
         self.status()
         return target, done
 
@@ -1690,12 +1703,24 @@ def main():
             if options.case == "settings_queue_vpn_restart":
                 return suite_status("native")
             with Case("native", "quit_restart_down", enabled=options.case in (None, "quit_restart_down")) as case:
+                owner_before = harness.api("app.info")
                 keys("q")
                 wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1, "q detaches TUI", seconds=6)
-                case.check(socket_path.exists() and cli("status")["app_open"], 'q leaves the daemon running.')
+                status = cli("status")
+                owner_after = harness.api("app.info")
+                reported_running = status["running"] if "running" in status else (
+                    status.get("engine") == "native" and status.get("connection") in ("connected", "vpn_waiting"))
+                case.check(socket_path.exists() and status["ok"] and reported_running is True and
+                           owner_after["instance"] == owner_before["instance"] and
+                           owner_after["server"]["pid"] == owner_before["server"]["pid"] and
+                           owner_after["state"] in ("starting", "running", "parked"),
+                           'q leaves the same daemon running.', json.dumps(dict(status=status, before=owner_before, after=owner_after)))
                 diagnostics = error_file.read_bytes()[engine_stderr_offset:].decode()
                 case.check(expected_daemon_stderr(diagnostics, complete=False),
                            'Daemon and CLI stderr contain only known success phases and legacy dispatch traces.', diagnostics)
+                case.check(not expected_daemon_stderr(diagnostics + "WARNING unexpected\n", complete=False) and
+                           not expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=Unknown\n", complete=False),
+                           "Daemon stderr allowlist still rejects unknown lines and restart reasons")
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
@@ -1750,17 +1775,37 @@ def main():
                 parked_harness.ensure_serve()
                 harness.start_tmux(tmux, session, parked_launch)
                 parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
-                wait_for(lambda: parked_socket.exists() and parked_cli("status").get("connection") == "vpn_waiting",
-                         "parked engine fixture opens without a network session")
+                def parked_without_session():
+                    if not parked_socket.exists(): return False
+                    owner = parked_harness.api("app.info")
+                    network = parked_harness.api("app.network")["state"]
+                    return owner["state"] == "parked" and network["ready"] is False and network["interface"] == "fbmissing0"
+                wait_for(parked_without_session, "parked engine fixture opens without a network session")
                 listed = {torrent["hash"]: torrent for torrent in parked_cli("list")["torrents"]}
                 unknown, zero, done = [item["hash"] for item in records]
-                case.check(listed[unknown]["completion_on"] == -1 and listed[unknown]["state"] == "stoppedDL",
+                normalized = {row["hash"]: row for row in parked_harness.api("torrents.list")["torrents"]}
+                case.check(normalized[unknown]["intent"] == "pause" and normalized[unknown]["state"] == "waiting_vpn" and
+                           "completed_at" not in normalized[unknown] and "progress" not in normalized[unknown] and
+                           normalized[done]["completed_at"] == 123,
+                           "API preserves pause intent, omits unknown completion, and keeps the known date", json.dumps(normalized))
+                # API omits an unknown date; contract-1.x shapes it as zero.
+                # The legacy adapter retains the disk sentinel. Both must stay incomplete.
+                expected_cli_unknown = 0 if "native_state" in listed[unknown] else -1
+                case.check(listed[unknown]["completion_on"] == expected_cli_unknown and listed[unknown]["state"] == "stoppedDL",
                            "A saved -1 record remains incomplete.", json.dumps(listed[unknown]))
                 keys("1")
                 wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
                 keys("Home")  # The -1 record has the newest added_on timestamp.
                 wait_for(lambda: "(p) Resume" in capture(),
                          "unknown-date selection keeps the incomplete-row Resume control")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "run",
+                         "Resume in the TUI changes the paused VPN-waiting record to run intent")
+                wait_for(lambda: "(p) Pause" in capture(), "VPN-waiting run intent offers Pause")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "pause",
+                         "Pause in the TUI restores saved pause intent without opening a network session")
+                wait_for(lambda: "(p) Resume" in capture(), "VPN-waiting paused intent offers Resume again")
                 result = parked_cli("start", unknown)
                 case.check(result["hashes"] == [unknown] and result["skipped"] == [],
                            "Explicit start accepts the existing -1 record.", json.dumps(result))

@@ -2,16 +2,20 @@
 use super::*;
 mod notices;
 mod presence;
+mod recovery;
+pub(super) use recovery::{Failure, Notice, Recovery};
 mod wire;
-pub(super) use presence::Presence;
+pub(super) use presence::{Presence, Update as ApiUpdate};
 #[cfg(test)]
 mod tests;
 
 pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
     // An existing owner can answer hello while its engine is busy checking files.
     // Do not turn a slow legacy version probe into an attempted manager start.
-    if let Ok(presence) = Presence::connect() {
-        return Ok(presence);
+    match Presence::connect() {
+        Ok(presence) => return Ok(presence),
+        Err(error) if error.downcast_ref::<wire::RemoteError>().is_some_and(|error|error.0.code==crate::api::ErrorCode::ProtoUnsupported) => return Err(error),
+        Err(_) => {}
     }
     ensure(cfg)?;
     Presence::connect()
@@ -20,7 +24,7 @@ pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
 fn ensure(cfg: &Config) -> Result<()> {
     let mut explicit = cfg.clone();
     explicit.autostart = true;
-    crate::backend::ensure_running(&explicit, &Client::from_config(&explicit))?;
+    crate::backend::ensure_running(&explicit, &LegacyClient::from_config(&explicit))?;
     Ok(())
 }
 
@@ -80,7 +84,38 @@ impl TuiApp {
         })
     }
     pub(super) fn start_daemon(&mut self) -> Cmd<Msg> {
+        if !self.recovery.begin(std::time::Instant::now()) {return Cmd::none();}
+        self.daemon_stopped=false;
         let cfg = self.cfg.clone();
-        Cmd::task(move || Msg::Attached(connect(&cfg).map_err(|error| error.to_string())))
+        Cmd::task(move || Msg::Attached(connect(&cfg).map_err(Failure::capture)))
+    }
+}
+
+impl TuiApp {
+    pub(in crate::tui) fn connection_lost(&mut self, intentional: bool) {
+        if !self.recovery.lost(std::time::Instant::now(),intentional) {return;}
+        let pending = !self.store.pending.is_empty();
+        self.store.disconnected();
+        self.online=false;
+        self.poll_inflight=false;
+        self.daemon_stopped=self.recovery.stopped(std::time::Instant::now());
+        if pending {self.set_status("Result unknown; the list will tell.",true);}
+    }
+    pub(in crate::tui) fn recovery_tick(&mut self) -> Cmd<Msg> {
+        if !self.cfg.native() {return Cmd::none();}
+        if self.presence.as_ref().is_some_and(|connection|!connection.alive()) {
+            self.connection_lost(false);
+        }
+        if !self.recovery.active {return Cmd::none();}
+        let now=std::time::Instant::now();
+        self.daemon_stopped=self.recovery.stopped(now);
+        if self.recovery.retry_due(now) {
+            // Reconnect is a read: never call ensure_daemon or retry a mutation here.
+            return Cmd::task(||Msg::Attached(Presence::connect().map_err(Failure::capture)));
+        }
+        Cmd::none()
+    }
+    pub(in crate::tui) fn connection_banner(&self) -> Option<std::borrow::Cow<'static,str>> {
+        self.recovery.notice(std::time::Instant::now()).map(Notice::text)
     }
 }

@@ -183,9 +183,10 @@ impl TuiApp {
                     let token = format!("{imdb}:{}", e.key);
                     if !self.show_grabbing.insert(token) { return Cmd::none(); }
                     let cfg = self.cfg.clone();
+                    let presence = self.presence.clone();
                     let opts = self.add_opts();
                     return Cmd::task(move || {
-                        let c = Client::from_config(&cfg);
+                        let c = Client::from_config(&cfg, presence.clone());
                         let result = c.login().and_then(|_| c.add_url(&e.magnet, &opts)).map_err(|err| err.to_string());
                         Msg::ShowGrab { imdb, episode: e, result }
                     });
