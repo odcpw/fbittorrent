@@ -271,7 +271,7 @@ Item {
       if(result)notify(result.state==="pending" ? "Recheck accepted · Checking files…" : "Recheck complete")
     })
   }
-  function needsStopConfirm(){return Number(status.active)>0 || Number(status.seeding)>0 || transferring}
+  function needsStopConfirm(){return status.loaded!==true || Number(status.active)>0 || Number(status.seeding)>0 || transferring}
   function shutdownPrompt(){return "Stop fbittorrent? Transfers pause until it starts again."}
   readonly property string idleLabel:{var confirmed=status;return PopupState.idle(store.summary.daemon,online)}
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
