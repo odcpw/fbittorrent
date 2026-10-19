@@ -256,6 +256,7 @@ impl TuiApp {
     pub(in crate::tui) fn sync_native_shows(&mut self) {
         let parent = self.selected_show().map(|s| s.imdb.clone());
         let selected = self.selected_release_target();
+        let old_index = self.ep_list.borrow().selected().unwrap_or(0);
         let old = std::mem::take(&mut self.shows.shows)
             .into_iter()
             .map(|s| (s.imdb.clone(), s))
@@ -333,16 +334,6 @@ impl TuiApp {
             self.shows_focus_eps = false;
         }
         self.reorder_releases();
-        if let Some(target) = selected {
-            if self.shows_inbox() {
-                self.ep_list.borrow_mut().select(self.inbox_rows.iter().position(|r|*r==target));
-            } else {
-                let pos = self
-                    .selected_show()
-                    .filter(|s| s.imdb == target.imdb)
-                    .and_then(|s| s.episodes.iter().position(|e| e.key == target.key));
-                self.ep_list.borrow_mut().select(pos);
-            }
-        }
+        self.restore_release_selection(selected, old_index);
     }
 }

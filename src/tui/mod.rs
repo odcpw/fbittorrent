@@ -83,6 +83,9 @@ mod limit_tests;
 #[path="tests/services.rs"]
 mod service_tests;
 #[cfg(test)]
+#[path="tests/shows_selection.rs"]
+mod shows_selection_tests;
+#[cfg(test)]
 #[path="tests/disk.rs"]
 mod disk_tests;
 #[cfg(test)]

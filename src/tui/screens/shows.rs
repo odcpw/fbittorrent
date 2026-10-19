@@ -12,7 +12,17 @@ impl TuiApp {
         self.show_list.borrow().selected().and_then(|i| self.show_at(i))
     }
 
+    pub(super) fn releases_ready(&self) -> bool {
+        // Before attachment there is no API projection; after hello, only the
+        // selected topic's complete snapshot can make cached rows actionable.
+        self.store.hello.is_none()
+            || (self.store.connected
+                && self.store.releases_topic.as_deref()
+                    == Some(self.selected_show().map_or("inbox", |s| s.imdb.as_str())))
+    }
+
     pub(super) fn episode_at(&self, index: usize) -> Option<(&Show, &Episode)> {
+        if !self.releases_ready() { return None; }
         if self.shows_inbox() {
             let target = self.inbox_rows.get(index)?;
             let show = self.shows.get(&target.imdb)?;
@@ -28,6 +38,7 @@ impl TuiApp {
     }
 
     pub(super) fn selected_release_target(&self) -> Option<ShowReleaseTarget> {
+        if !self.releases_ready() { return None; }
         if self.shows_inbox() {
             self.ep_list.borrow().selected().and_then(|i| self.inbox_rows.get(i)).cloned()
         } else {
@@ -36,6 +47,7 @@ impl TuiApp {
     }
 
     pub(super) fn episode_count(&self) -> usize {
+        if !self.releases_ready() { return 0; }
         if self.shows_inbox() { self.inbox_rows.len() } else { self.selected_show().map_or(0, |s| s.episodes.len()) }
     }
 
@@ -156,6 +168,8 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
+                } else if !self.releases_ready() {
+                    self.set_status("Loading releases… select a visible row before marking it read", false);
                 } else if self.cfg.native(){
                     if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (u)ndo"}else{"release marked unread"});}
                 } else if let Some(label) = self.mark_selected_release() {
@@ -183,6 +197,10 @@ impl TuiApp {
                 if !self.shows_focus_eps {
                     self.shows_focus_eps = true;
                     if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
+                    return Cmd::none();
+                }
+                if !self.releases_ready() {
+                    self.set_status("Loading releases… select a visible row before downloading", false);
                     return Cmd::none();
                 }
                 let picked = self.selected_episode().map(|(s, e)| (s.imdb.clone(), e.clone()));
@@ -484,7 +502,9 @@ impl TuiApp {
                 .render(rows[2], frame);
         }
         if self.episode_count() == 0 {
-            let message = if self.shows.shows.is_empty() {
+            let message = if !self.releases_ready() || (inbox && unread > 0) {
+                "Loading releases…"
+            } else if self.shows.shows.is_empty() {
                 "No shows followed yet.\n\n(N) Follow a title or IMDb id\n(F)ollow a Search or RSS item\n(Shift+F) Follow a torrent\n\nChecks find releases. Enter downloads your choice."
             } else if inbox {
                 if !self.shows_refreshing.is_empty() {

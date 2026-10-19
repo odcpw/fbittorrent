@@ -90,21 +90,25 @@ impl TuiApp {
     }
     pub(super) fn reorder_releases(&mut self) {
         let selected = self.selected_release_target();
+        let old_index = self.ep_list.borrow().selected().unwrap_or(0);
         let sort = self.release_sort;
         let descending = self.release_descending;
         for show in &mut self.shows.shows {
             show.episodes.sort_by(|a, b| sort.compare(a, b, descending));
         }
         self.rebuild_inbox();
-        if let Some(target) = selected {
-            let index = if self.shows_inbox() {
+        self.restore_release_selection(selected, old_index);
+    }
+    pub(super) fn restore_release_selection(&mut self, selected: Option<ShowReleaseTarget>, old_index: usize) {
+        let index = selected.and_then(|target| {
+            if self.shows_inbox() {
                 self.inbox_rows.iter().position(|r| *r == target)
             } else {
                 self.selected_show()
                     .filter(|s| s.imdb == target.imdb)
                     .and_then(|s| s.episodes.iter().position(|e| e.key == target.key))
-            };
-            self.ep_list.borrow_mut().select(index);
-        }
+            }
+        }).or_else(|| self.episode_count().checked_sub(1).map(|last| old_index.min(last)));
+        self.ep_list.borrow_mut().select(index);
     }
 }
