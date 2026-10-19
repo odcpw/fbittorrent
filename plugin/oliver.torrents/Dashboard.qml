@@ -120,7 +120,7 @@ Item {
       Shortcut {sequence:"Shift+Tab";context:Qt.WindowShortcut;enabled:window.visible && (!torrents || !torrents.dialogOpen);onActivated:root.cycleView(-1)}
       ColumnLayout {
         anchors.fill:parent
-        anchors.margins:0
+        anchors.margins:Commons.Style.space(0)
         spacing:Commons.Style.spacing.panelGap
         RowLayout {
           Layout.fillWidth:true
