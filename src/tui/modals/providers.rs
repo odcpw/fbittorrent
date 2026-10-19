@@ -11,16 +11,18 @@ pub(super) struct ProvidersModal {
 impl TuiApp {
     pub(super) fn load_plugins(&self) -> Cmd<Msg> {
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             Msg::Plugins(c.login().and_then(|_| c.search_plugins()).map_err(|e| e.to_string()))
         })
     }
 
     pub(super) fn set_plugins(&self, names: Vec<String>, enable: bool) -> Cmd<Msg> {
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let r = c.login()
                 .and_then(|_| { for n in &names { c.search_set_plugin(n, enable)?; } Ok(()) })
                 .and_then(|_| c.search_plugins())
@@ -62,6 +64,7 @@ impl TuiApp {
     pub(super) fn view_providers(&self, frame: &mut Frame) {
         let th = &self.theme;
         let Some(m) = &self.providers else { return };
+        self.rects.borrow_mut().overlay();
         let area = providers_area(frame.bounds(), m.plugins.len());
         let bg = Style::new().bg(th.selection);
         let blank = Text::from_lines((0..area.height).map(|_| Line::styled(" ".repeat(area.width as usize), bg)));
@@ -74,7 +77,7 @@ impl TuiApp {
             return;
         }
         if !m.error.is_empty() {
-            Paragraph::new(m.error.clone()).style(bg.fg(th.red)).wrap(WrapMode::Word).render(inner, frame);
+            Paragraph::new(th.error_message(&m.error)).style(th.err().bg(th.selection)).wrap(WrapMode::Word).render(inner, frame);
             return;
         }
         if m.plugins.is_empty() {
@@ -84,18 +87,18 @@ impl TuiApp {
         let rows = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(1)]).split(inner);
         let iw = inner.width.saturating_sub(2) as usize;
         let elapsed = self.marquee_elapsed();
-        let items: Vec<ListItem> = m.plugins.iter().enumerate().map(|(i, p)| {
+        self.view_rows(MouseList::Providers,rows[0],m.plugins.len(),
+            |i|layout::fingerprint(&(&m.plugins[i],self.cfg.native())),
+            |i|{let p=&m.plugins[i];
             let mark = if p.enabled { "[x] " } else { "[ ] " };
             let st = if p.enabled { bg.fg(th.fg) } else { bg.fg(th.dim) };
             let site = p.url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string();
-            li(Line::from_spans([
+            Line::from_spans([
                 Span::styled(mark, st),
                 Span::styled(readable_cell(&p.full_name, 22, hovered_for(&m.list,i,elapsed)), st),
                 Span::styled(cell(&site, iw.saturating_sub(4 + 22 + 1)), bg.fg(th.dim)),
-            ]))
-        }).collect();
-        let list = List::new(items).style(bg).highlight_style(th.selected().bg(th.accent).fg(th.selection)).highlight_symbol("▌");
-        StatefulWidget::render(&list, rows[0], frame, &mut m.list.borrow_mut());
+            ])
+            },frame);
         let on = m.plugins.iter().filter(|p| p.enabled).count();
         let foot = format!("{on} of {} enabled · Space toggle · a all · n none · o open site · Esc close", m.plugins.len());
         Paragraph::new(foot).style(bg.fg(th.dim)).wrap(WrapMode::None).render(rows[1], frame);

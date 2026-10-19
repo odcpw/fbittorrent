@@ -151,7 +151,7 @@ impl Validate for Request {
             },
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
-            _ => Ok(()),
+            _ => super::search::validate_call(&self.call),
         }
     }
 }
@@ -195,6 +195,9 @@ impl Validate for TorrentDetail {
         torrent(&self.torrent, false)
     }
 }
+impl Validate for SearchItem {
+    fn validate(&self) -> Checked { SearchItem::validate(self) }
+}
 impl Validate for File {
     fn validate(&self) -> Checked {
         progress(self.progress)
@@ -220,6 +223,16 @@ impl Validate for Reply {
                 for entry in &result.entries { entry.validate()?; }
                 Ok(())
             }
+            Self::TorrentsTrackers(result) => {
+                let mut previous=None;
+                for row in &result.trackers {
+                    text(&row.url,65536,"trackers.url")?;
+                    require(previous.is_none_or(|url:&str|url<row.url.as_str()),"trackers","URLs must be sorted and unique")?;
+                    previous=Some(row.url.as_str());
+                    if let Some(message)=&row.message {text(message,200,"trackers.message")?;}
+                }
+                Ok(())
+            }
             Self::TorrentsList(result) => {
                 for value in &result.torrents {
                     value.validate()?;
@@ -233,6 +246,11 @@ impl Validate for Reply {
                     value.validate()?;
                 }
                 Ok(())
+            }
+            Self::SearchStart(result) if result.search_id == 0 => Err(Violation("search_id: must be positive".into())),
+            Self::SearchBrowse(result) => {
+                require(result.items.len() <= 5000, "items", "search result cap is 5000")?;
+                for value in &result.items { value.validate()?; } Ok(())
             }
             Self::Subscribe(result) => count(result.topics.len(), MAX_SUBSCRIPTIONS, "topics"),
             _ => Ok(()), // Pending refs are required by their serde variants.
@@ -253,6 +271,15 @@ struct FileSizeObservations {
     file_totals: BTreeSet<u64>,
 }
 impl TorrentFileSizes {
+    /// A confirmed removal ends this torrent instance's measured completion.
+    /// The info hash's static geometry still applies after re-admission.
+    #[cfg(test)]
+    pub(crate) fn removed(&mut self, hash: &Hash) {
+        if let Some(observed) = self.by_hash.get_mut(hash) {
+            observed.completed_bytes.clear();
+        }
+    }
+
     fn torrent(&mut self, value: &Torrent, path: &str) -> Checked {
         let observed = self.by_hash.entry(value.hash.clone()).or_default();
         if let Some(size) = value.size {
@@ -371,7 +398,7 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::Peer(_) | Item::File(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
+                Item::Peer(_) | Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
@@ -433,6 +460,7 @@ fn items(topic: &Topic, values: &[Item]) -> Checked {
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
             (Topic::Peers(_), Item::Peer(p)) => p.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
+            (Topic::Search(_), Item::Search(s)) => s.validate()?,
             (Topic::Events, Item::Event(e))
                 if e.subscription_revision().is_none()
                     && !matches!(
@@ -519,6 +547,7 @@ impl Validate for Event {
                                 Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
                                 Topic::Shows | Topic::ShowReleases(_) => key.is_string(),
                                 Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
+                                Topic::Search(_) => key.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 8192),
                                 _ => false,
                             },
                             "removed",
@@ -539,6 +568,7 @@ impl Validate for Event {
                                 Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
                                 Topic::Shows | Topic::ShowReleases(_) => !key.is_empty(),
                                 Topic::Files(_) => key.parse::<u64>().is_ok(),
+                                Topic::Search(_) => !key.is_empty() && key.len() <= 8192,
                                 _ => false,
                             },
                             "changed",

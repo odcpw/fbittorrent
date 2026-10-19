@@ -1,5 +1,8 @@
 //! Subscription owner. One sampler serves every connection; snapshots and
 //! revisions are serialized here, while socket writes use the server's outbox.
+mod summary;
+pub(crate) use summary::counts as summary_counts;
+
 use super::{
     ops::{self, error, ApiResult},
     server::EventSink,
@@ -116,6 +119,7 @@ struct Sample {
     rows: Vec<Torrent>,
     completions: Vec<Value>,
     logs: Value,
+    searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     peers: BTreeMap<String, Value>,
     network: Value,
@@ -139,22 +143,17 @@ impl Sample {
             Topic::Network => self.network.clone(),
             Topic::Settings => self.settings.clone(),
             Topic::Summary => self.summary(),
+            Topic::Search(id) => self.searches.get(id).cloned().unwrap_or(json!([])),
             Topic::Events => unreachable!(),
             Topic::Log => self.logs.clone(),
         }
     }
     fn summary(&self) -> Value {
-        let mut counts = json!({"total":self.rows.len(),"downloading":0,"stalled":0,"metadata":0,"checking":0,"queued":0,"paused":0,"done":0,"seeding":0,"waiting_vpn":0,"error":0,"staged":0,"ready":0});
-        for row in &self.rows {
-            let key = serde_json::to_value(row.state).unwrap();
-            let key = key.as_str().unwrap();
-            if let Some(v) = counts.get_mut(key) {
-                *v = json!(v.as_u64().unwrap() + 1);
-            }
-        }
+        let counts = summary_counts(&self.rows);
         let top: Vec<_> = self
             .rows
             .iter()
+            .filter(|row| !row.staged)
             .take(5)
             .map(|r| {
                 let mut v = json!({"hash":r.hash,"name":r.name,"state":r.state});
@@ -254,6 +253,9 @@ impl Bus {
     /// Prepare without emitting: the server must queue the successful response
     /// before activation. Otherwise a fast sampler could precede that response.
     pub fn subscribe(&self, sink: EventSink, args: &SubscribeArgs) -> ApiResult<Reply> {
+        for topic in &args.topics {
+            if let Topic::Search(id) = topic { self.daemon.search.reclaim(sink.id(), *id)?; }
+        }
         let sample = self.sample(&args.topics)?;
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
@@ -300,6 +302,7 @@ impl Bus {
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_) => {
                                 Duration::from_secs(86400)
                             }
+                            Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
                             Topic::Summary => {
                                 Duration::from_millis(args.effective_interval_ms(summary_interval))
                             }
@@ -353,11 +356,7 @@ impl Bus {
         let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
         let epoch = slot.engine_epoch;
         let state = slot.slot.state().name().to_owned();
-        let restoring = match &slot.slot {
-            Slot::Running(app) => app.dispatcher().has_pending_restore(),
-            _ => false,
-        };
-        let (rows, details) = match &slot.slot {
+        let (rows, details, restoring) = match &slot.slot {
             Slot::Running(app) => app
                 .dispatcher()
                 .bus_sample(&files)
@@ -382,25 +381,36 @@ impl Bus {
                         }
                     }
                     if before == g.current() {
-                        break (rows, details);
+                        break (rows, details, false);
                     }
                 }
             }
-            Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new()),
+            Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new(), false),
         };
-        let completions = match &slot.slot {
+        let mut completions = match &slot.slot {
             Slot::Running(app) => app.dispatcher().take_completions(),
             _ => Vec::new(),
         };
         self.daemon.disk.lock().unwrap().observe(&rows);
         if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
-        let rows: Vec<Torrent> = rows
+        if let Slot::Running(app)=&slot.slot {
+            let mut watch=self.daemon.watch.lock().unwrap();
+            if watch.due() {
+                completions.extend(watch.sample(app.dispatcher().watch_samples().map_err(ops::engine_error)?));
+            }
+        } else {
+            let mut watch=self.daemon.watch.lock().unwrap();
+            if watch.due() {watch.sample(Vec::new());}
+        }
+        let mut rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)
             .collect::<ApiResult<Vec<_>>>()?;
+        self.daemon.watch.lock().unwrap().decorate(&mut rows);
         let files = details
             .into_iter()
             .map(|(hash, files)| {
+                let playable=rows.iter().find(|r|r.hash.as_str()==hash).and_then(|r|r.playable.clone());
                 (
                     hash,
                     json!(files
@@ -412,7 +422,7 @@ impl Bus {
                             progress: f.progress,
                             included: f.priority != 0,
                             sort_key: ops::torrents::sort_key(&f.name),
-                            ready: None
+                            ready: playable.as_ref().filter(|p|p.file==f.index as u64).map(|p|p.ready)
                         })
                         .collect::<Vec<_>>()),
                 )
@@ -420,10 +430,20 @@ impl Bus {
             .collect();
         let cfg = crate::config::Config::load().map_err(ops::engine_error)?;
         let activity = crate::daemon::policy::Transfers::from_torrents(&rows, &state, restoring);
+        let mut searches = BTreeMap::new();
+        for id in topics.iter().filter_map(|t| if let Topic::Search(id) = t { Some(*id) } else { None }).collect::<BTreeSet<_>>() {
+            let mut items = self.daemon.search.items(id).unwrap_or_default();
+            let hashes: BTreeSet<_> = rows.iter().map(|r| r.hash.clone()).collect();
+            for item in &mut items {
+                item.added = Hash::new(&item.key).ok().filter(|h| hashes.contains(h));
+            }
+            searches.insert(id, json!(items));
+        }
         let mut daemon = {
             let mut policy = self.daemon.policy.lock().unwrap();
             let now = Instant::now();
             policy.configure(cfg.idle_exit_secs, now);
+            policy.searches(self.daemon.search.count(), now);
             policy.transfers(activity, now);
             serde_json::to_value(policy.snapshot(now)).unwrap()
         };
@@ -457,6 +477,7 @@ impl Bus {
             rows,
             completions,
             logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            searches,
             files,
             network,
             settings,
@@ -479,6 +500,19 @@ impl Bus {
         let mut rss_stamp = None;
         let mut shows_stamp=None;
         while !self.stopping.load(Ordering::Acquire) {
+            self.daemon.search.sweep();
+            self.daemon.policy.lock().unwrap().searches(self.daemon.search.count(), Instant::now());
+            for event in self.daemon.search.completed() {
+                let mut r = self.registry.lock().unwrap();
+                let event = r.events.append(event);
+                let id = event["search_id"].as_u64().unwrap();
+                let mut sent = BTreeSet::new();
+                for sub in r.subscriptions.values().filter(|s| s.active && s.topics.iter().any(|t| t.topic == Topic::Search(id))) {
+                    if sent.insert(sub.sink.id()) { let _ = sub.sink.send(serde_json::from_value(event.clone()).unwrap()); }
+                }
+                dirty = true;
+            }
+
             {
                 let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
                 let current = (slot.engine_epoch, slot.slot.state().name().to_owned());
@@ -555,6 +589,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
+            if self.daemon.watch.lock().unwrap().due() { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;
@@ -704,7 +739,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
+                Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
             )
         });
         for index in order {
@@ -717,7 +752,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_));
             if t.sent.is_none() || reset {

@@ -33,10 +33,20 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+pub(crate) mod staging;
 mod bus;
+mod watch;
 pub(crate) mod peers;
 mod tracker_edit;
 mod queue;
+mod queue_policy;
+mod queue_ops;
+mod trackers;
+pub(crate) mod moving;
+pub mod recheck;
+pub mod undo;
+pub(crate) mod resume;
+mod undo_ops;
 mod settings;
 pub(crate) mod disk;
 pub mod ops;
@@ -89,10 +99,17 @@ struct Inner {
     completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
+    operations: Arc<Mutex<()>>,
+    moves: moving::Moves,
     directory: PathBuf,
     default_folder: PathBuf,
+    rechecks: recheck::Rechecks,
+    resume: Arc<resume::Store>,
+    resume_prepared: resume::Prepared,
+    undo: std::sync::Mutex<Arc<undo::History>>,
     stopping: AtomicBool,
     max_active_downloads: AtomicUsize,
+    queue_pins: std::sync::Mutex<HashSet<String>>,
     network_blocked: AtomicBool,
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
     // Removing/retrying an intent does not end the previous task's cleanup.
@@ -123,12 +140,12 @@ pub struct AppEngine {
 
 pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
     cfg.validate()?;
-    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?))
+    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?), None)
 }
 
 /// Start one replaceable session under the daemon owner's existing lock. The
 /// listener and the owner's Arc stay alive while this engine drains/restarts.
-pub(crate) fn start_with_lock(cfg: &Config, lifecycle: Lifecycle, instance: Arc<InstanceLock>) -> Result<AppEngine> {
+pub(crate) fn start_with_lock(cfg: &Config, lifecycle: Lifecycle, instance: Arc<InstanceLock>, resume: Option<Arc<resume::Store>>) -> Result<AppEngine> {
     cfg.validate()?;
     start_shared(cfg, lifecycle, crate::config::data_dir().join("engine"), instance, SessionOptions {
         peer_encryption: match cfg.peer_encryption.as_str() {
@@ -149,19 +166,21 @@ pub(crate) fn start_with_lock(cfg: &Config, lifecycle: Lifecycle, instance: Arc<
         persistence: None,
         fastresume: false,
         ..Default::default()
-    })
+    }, resume)
 }
 
 // The production startup path, with explicit paths/options for local-only tests.
 #[cfg(test)]
 fn start_in(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: InstanceLock, options: SessionOptions) -> Result<AppEngine> {
-    start_shared(cfg, lifecycle, directory, Arc::new(instance), options)
+    start_shared(cfg, lifecycle, directory, Arc::new(instance), options, None)
 }
 
-fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, options: SessionOptions) -> Result<AppEngine> {
+fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance: Arc<InstanceLock>, options: SessionOptions, resume: Option<Arc<resume::Store>>) -> Result<AppEngine> {
     std::fs::create_dir_all(&directory)?;
     let ledger_path = directory.join("torrents.json");
     let ledger = read_ledger(&ledger_path)?;
+    let resume=resume.map(Ok).unwrap_or_else(||resume::Store::open(&directory).map(Arc::new))?;
+    let resume_prepared=resume.prepare(&directory,&ledger.records)?;
     // Both TUI start() and daemon start_with_lock() enter here. Capture the
     // same generation before moving the ledger or starting background restores.
     let generation = ledger.generation.clone();
@@ -189,10 +208,15 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
+        operations: Default::default(), moves: Default::default(),
         directory,
         default_folder,
+        rechecks: Default::default(),
+        resume, resume_prepared,
+        undo: Default::default(),
         stopping: AtomicBool::new(false),
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
+        queue_pins: Default::default(),
         network_blocked: AtomicBool::new(false),
         restores: std::sync::Mutex::new(HashMap::new()),
         retired_restores: std::sync::Mutex::new(Vec::new()),
@@ -221,6 +245,9 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             if inner.stopping.load(Ordering::Acquire) {
                 break;
             }
+            if let Err(error) = inner.periodic_resume(cx).await {
+                eprintln!("WARN resume periodic snapshot error={error:?}");
+            }
             if let Err(error) = inner.maintain(cx).await {
                 eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
             }
@@ -244,6 +271,9 @@ impl AppEngine {
     pub(crate) fn quiesce(&self) {
         self.dispatcher.inner.stopping.store(true, Ordering::Release);
         self.dispatcher.inner.session.cancellation_token().cancel();
+        self.dispatcher.inner.moves.cancel.cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }
@@ -281,6 +311,7 @@ impl AppEngine {
             .inner
             .stopping
             .store(true, Ordering::Release);
+        self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
         }
@@ -290,6 +321,10 @@ impl AppEngine {
         let mut drained = true;
         if let Some(runtime) = self.runtime.take() {
             let cx = runtime.cx();
+            match runtime.block_on(time::timeout(cx,bound.saturating_sub(began.elapsed()),self.dispatcher.inner.moves.drain())) {
+                Ok(Ok(()))=>{},
+                result=>{drained=false;crate::native_runtime::log_teardown(drain_failure("joining payload moves",Some(format!("{result:?}"))));}
+            }
             // Resolve the protocol stop and observe every restore's completion
             // while its application context and the session are still alive.
             // Cancelling their regions first races the resolver's close epilogue.
@@ -335,6 +370,12 @@ impl AppEngine {
                     ));
                 }
             }
+            if drained {
+                match runtime.block_on(time::timeout(cx,bound.saturating_sub(began.elapsed()),self.dispatcher.inner.save_resume(cx,true))) {
+                    Ok(Ok(()))=>{},
+                    result=>{self.dispatcher.inner.resume.abandon_clean();eprintln!("WARN resume clean snapshot unavailable result={result:?}");},
+                }
+            }
             self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
                 drained = false;
@@ -343,6 +384,7 @@ impl AppEngine {
                     Some(format!("{error:#}")),
                 ));
             }
+            if !drained {self.dispatcher.inner.resume.abandon_clean();}
             if drained {
                 crate::native_runtime::log_teardown(format!(
                     "INFO engine drained in {} ms",
@@ -394,7 +436,7 @@ mod startup_reconciliation_tests {
         for _ in 0..2 {
             let app = start_shared(&cfg, lifecycle.clone(), directory.clone(), owner.clone(), SessionOptions {
                 dht: None, disable_trackers: true, disable_local_service_discovery: true, ..Default::default()
-            }).unwrap();
+            }, None).unwrap();
             let dispatcher = app.dispatcher();
             let generation = dispatcher.ledger_generation();
             let before = generation.current();

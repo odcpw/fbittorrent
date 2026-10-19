@@ -17,6 +17,8 @@ fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
         | EngineOp::EditTracker { hash, .. }
+        | EngineOp::Commit {hash, ..}
+        | EngineOp::Discard {hash}
         | EngineOp::Files { hash }
         | EngineOp::OpenTarget { hash }
         | EngineOp::SetFiles { hash, .. } => Some(hash.clone()),
@@ -42,11 +44,13 @@ pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
     if value["upload_limit_bps"] == 0 {
         value.as_object_mut().unwrap().remove("upload_limit_bps");
     }
+    if value.get("origin").is_none() {
     if let Some(origin) = legacy["tags"].as_str().and_then(|tags| {
         tags.split(',')
             .find_map(|tag| tag.strip_prefix("fbt-origin:"))
     }) {
         value["origin"] = json!(origin);
+    } else { value["origin"]=json!("manual"); }
     }
     serde_json::from_value(value)
         .map_err(|_| error(ErrorCode::Internal, "invalid normalized torrent", None))
@@ -55,7 +59,9 @@ pub fn list(daemon: &Daemon) -> ApiResult<Vec<Torrent>> {
     let EngineResult::Torrents(rows) = execute(daemon, EngineOp::Info)? else {
         unreachable!("typed info result")
     };
-    rows.into_iter().map(torrent).collect()
+    let mut rows=rows.into_iter().map(torrent).collect::<ApiResult<Vec<_>>>()?;
+    daemon.watch.lock().unwrap().decorate(&mut rows);
+    Ok(rows)
 }
 fn files(daemon: &Daemon, hash: &Hash) -> ApiResult<Vec<File>> {
     let EngineResult::Files(rows) = execute(
@@ -76,7 +82,7 @@ fn files(daemon: &Daemon, hash: &Hash) -> ApiResult<Vec<File>> {
             progress: file.progress,
             included: file.priority != 0,
             sort_key: sort_key(&file.name),
-            ready: None,
+            ready: daemon.watch.lock().unwrap().file_ready(hash.as_str(),file.index as u64),
         })
         .collect())
 }
@@ -160,6 +166,23 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     use ErrorCode::*;
     Ok(match call {
+        Call::TorrentsCommit {args} => {
+            if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
+                return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
+            }
+            if let Some(indices)=&args.files {
+                let entries=files(daemon,&args.hash)?;
+                if indices.iter().any(|index|*index>=entries.len() as u64) {return Err(error(InvalidArgs,"file index is out of range",Some("files")));}
+            }
+            execute(daemon,EngineOp::Commit {hash:args.hash.to_string(),
+                files:args.files.as_ref().map(|values|values.iter().map(|v|*v as usize).collect()),
+                seed:args.seed,save_path:args.save_path.as_ref().map(Into::into)})?;
+            Reply::TorrentsCommit(DoneResult {state:DoneState::Done})
+        }
+        Call::TorrentsDiscard {args} => {
+            execute(daemon,EngineOp::Discard {hash:args.hash.to_string()})?;
+            Reply::TorrentsDiscard(DoneResult {state:DoneState::Done})
+        }
         Call::ImdbLookup { args } => return super::imdb::lookup(&daemon.imdb, args),
         Call::TorrentsList { args } => {
             let mut rows = list(daemon)?;
@@ -170,7 +193,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                     && args.origin.as_ref().is_none_or(|origins| {
                         row.origin
                             .as_ref()
-                            .is_some_and(|origin| origins.contains(origin))
+                            .is_some_and(|origin| origins.iter().any(|wanted| wanted==origin || (wanted=="manual" && !matches!(origin.as_str(),"search"|"rss"|"shows"))))
                     })
             });
             Reply::TorrentsList(ListResult { torrents: rows })
@@ -185,9 +208,11 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             else {
                 unreachable!("typed detail result")
             };
+            let mut rows=vec![torrent(detail.torrent)?];
+            daemon.watch.lock().unwrap().decorate(&mut rows);
             Reply::TorrentsGet(GetResult {
                 torrent: TorrentDetail {
-                    torrent: torrent(detail.torrent)?,
+                    torrent: rows.remove(0),
                     private: detail.private,
                     file_count: detail.file_count,
                     piece_count: detail.piece_count,
@@ -209,15 +234,19 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             files: files(daemon, &args.hash)?,
         }),
         Call::TorrentsAdd { args } => {
-            if args.stage.is_some() {
-                return Err(error(
-                    InvalidArgs,
-                    "staging is not implemented",
-                    Some("stage"),
-                ));
+            if args.stage==Some(true) && matches!(&args.source,AddSource::Restore(_)) {
+                return Err(error(InvalidArgs,"restore cannot be staged",Some("stage")));
+            }
+            if let AddSource::Restore(source)=&args.source {
+                let EngineResult::Added(mut added)=execute(daemon,EngineOp::RestoreUndo {hash:source.as_str().into()})? else {unreachable!("restore result")};
+                let added=added.pop().ok_or_else(||error(Internal,"engine returned no restore result",None))?;
+                return Ok(Reply::TorrentsAdd(AddResult {
+                    status:MutationResult::Done,hash:Some(Hash::new(added.hash).unwrap()),name:Some(added.name),
+                    duplicate:Some(added.duplicate),deferred:added.deferred.then_some(true),disk:None,
+                }));
             }
             let origin = args.origin.as_deref().unwrap_or("manual");
-            if !matches!(origin, "manual" | "handler" | "agent" | "clipboard" | "rss" | "shows") {
+            if origin.is_empty() || origin.len()>128 || origin.chars().any(char::is_control) {
                 return Err(error(InvalidArgs, "unsupported origin", Some("origin")));
             }
             let cfg = crate::config::Config::load().map_err(engine_error)?;
@@ -230,16 +259,10 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 ratio_limit: if seed { -2.0 } else { 0.0 },
                 stopped: args.stopped.unwrap_or(false),
                 category: args.category.clone().unwrap_or_default(),
-                tags: format!("fbt-origin:{origin}"),
+                tags: format!("fbt-origin:{origin}"), origin: Some(origin.into()),
             };
             let magnet = match &args.source {
-                AddSource::Restore(_) => {
-                    return Err(error(
-                        InvalidArgs,
-                        "restore is not implemented",
-                        Some("source.restore"),
-                    ))
-                }
+                AddSource::Restore(_) => unreachable!("handled before ordinary admission"),
                 AddSource::Path(path) => {
                     add.torrent = Some(read_torrent(path)?);
                     false
@@ -357,7 +380,9 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             let disk = add.torrent.as_ref().and_then(|(_,bytes)| crate::daemon::supervisor::add_warning(Path::new(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)),bytes,selected.as_deref()));
             let EngineResult::Added(mut added) = execute(
                 daemon,
-                if magnet {
+                if args.stage==Some(true) {
+                    EngineOp::Stage {options:add,files:selected}
+                } else if magnet {
                     EngineOp::AddMagnet(add)
                 } else if let Some(files) = selected {
                     EngineOp::AddSelected {
@@ -384,12 +409,8 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             })
         }
         Call::TorrentsStart { args } => {
-            if args.force.is_some() {
-                return Err(error(
-                    InvalidArgs,
-                    "force is not implemented",
-                    Some("force"),
-                ));
+            if args.force==Some(true) {
+                return super::queue::start_forced(daemon,args);
             }
             // A read of already-durable run intent is a no-op. Do not claim
             // that another start changed it; failed restores still retry.
@@ -480,6 +501,10 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             })
         }
         Call::TorrentsRemove { args } => {
+            if !args.delete_files {
+                let EngineResult::RemovedUndo {undo_until}=execute(daemon,EngineOp::RemoveKeep {hashes:hashes(&args.hashes)})? else {unreachable!("remove result")};
+                return Ok(Reply::TorrentsRemove(RemoveResult {status:MutationResult::Done,undo_until:Some(undo_until)}));
+            }
             execute(
                 daemon,
                 EngineOp::Delete {
@@ -595,6 +620,9 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             else {
                 unreachable!("typed target result")
             };
+            if args.file.is_none() {
+                if let Some(video)=daemon.watch.lock().unwrap().target(args.hash.as_str()) {path=video;}
+            }
             if let Some(index) = args.file {
                 let entries = files(daemon, &args.hash)?;
                 let entry = entries.get(index as usize).ok_or_else(|| {
@@ -614,6 +642,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             } else {
                 TargetKind::File
             };
+            daemon.watch.lock().unwrap().acknowledge(Some(args.hash.as_str()));
             Reply::TorrentsOpenTarget(OpenTargetResult {
                 path: path.to_string_lossy().into(),
                 kind,
@@ -632,17 +661,10 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
 /// Validate before acknowledging a URL task. The actual download stays in the
 /// bounded dispatch pool and uses the engine's interface-bound HTTP client.
 pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
-    if args.stage.is_some() {
-        return Err(error(
-            ErrorCode::InvalidArgs,
-            "staging is not implemented",
-            Some("stage"),
-        ));
-    }
     if args
         .origin
         .as_deref()
-        .is_some_and(|value| !matches!(value, "manual" | "handler" | "agent" | "clipboard" | "rss" | "shows"))
+        .is_some_and(|value| value.is_empty() || value.len()>128 || value.chars().any(char::is_control))
     {
         return Err(error(
             ErrorCode::InvalidArgs,
@@ -674,4 +696,15 @@ pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
 fn deferred_add_fixture_roundtrips() {
     crate::api::fixtures::check_group("deferred-add", include_str!("../../../contracts/ipc/v1/deferred-add.ndjson")).unwrap();
     println!("deferred-add fixture: parked hello, done/deferred add and waiting_vpn detail pass the frozen v1 types and bounds");
+}
+
+#[cfg(test)]
+#[test]
+fn expired_undo_maps_to_nonretryable_exit_one() {
+    let failure=engine_error(engine::InvalidTorrentState {hash:"a".repeat(40),reason:"undo_expired"}.into());
+    assert_eq!(failure.code,ErrorCode::InvalidState);
+    assert!(!failure.retryable);
+    assert_eq!(failure.details.as_ref().unwrap()["reason"],"undo_expired");
+    let error=crate::api::errors::app_error(failure);
+    assert_eq!(crate::agent::classify(&error).0 as u8,1);
 }

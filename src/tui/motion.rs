@@ -8,6 +8,7 @@ pub(super) struct MarqueeTarget { list: MouseList, index: usize, revision: u64 }
 impl TuiApp {
     /// Title under the cursor on the current screen: (lookup key, IMDb id if known).
     pub(super) fn hovered_title(&self) -> Option<(String, Option<String>)> {
+        if self.poster_open {return self.poster_target.clone();}
         if self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.prompt.is_some() || self.show_help { return None; }
         if let Some((list, index)) = self.pointer_row() {
             let preview = match list {
@@ -33,7 +34,7 @@ impl TuiApp {
         }
     }
 
-    /// Debounced auto-lookup: fire once the cursor has rested ~350 ms on a title.
+    /// Debounced auto-lookup: fire once the cursor has rested ~300 ms on a title.
     pub(super) fn on_hover(&mut self) -> Cmd<Msg> {
         self.sync_marquee();
         let Some((key, id)) = self.hovered_title() else { self.hover_key = None; return Cmd::none() };
@@ -42,13 +43,13 @@ impl TuiApp {
             self.hover_since = std::time::Instant::now();
             return Cmd::none();
         }
-        if self.hover_since.elapsed() < Duration::from_millis(350) || self.imdb.contains_key(&key) { return Cmd::none(); }
+        if self.hover_since.elapsed() < Duration::from_millis(300) || self.imdb_state(&key).is_some() { return Cmd::none(); }
         self.lookup_imdb(key, id)
     }
 
     pub(super) fn marquee_target(&self) -> Option<MarqueeTarget> {
         use std::hash::{Hash, Hasher};
-        if self.cfg.reduce_motion || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
+        if self.poster_open || self.cfg.reduce_motion || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
         let (list,index)=self.pointer_row()?;
         if self.mouse_list_state(list).borrow().selected()==Some(index) { return None; }
         // Borrow stable identifiers instead of allocating a formatted target on
@@ -63,6 +64,7 @@ impl TuiApp {
             MouseList::Shows=>{ if index>0 { let row=self.show_at(index)?; (&row.imdb,&row.title).hash(&mut hash); } }
             MouseList::Episodes=>{ let (show,row)=self.episode_at(index)?; (&show.imdb,&row.key,&row.title).hash(&mut hash); }
             MouseList::Files=>{ let modal=self.files.as_ref()?; let row=modal.files.get(index)?; (&modal.hash,row.index,&row.name).hash(&mut hash); }
+            MouseList::Settings=>return None,
             MouseList::Providers=>{ let row=self.providers.as_ref()?.plugins.get(index)?; (&row.name,&row.full_name).hash(&mut hash); }
         }
         Some(MarqueeTarget { list,index,revision:hash.finish() })

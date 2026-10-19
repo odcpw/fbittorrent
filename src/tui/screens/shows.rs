@@ -72,11 +72,13 @@ impl TuiApp {
     }
 
     pub(super) fn save_shows(&mut self) -> bool {
+        if self.cfg.native(){return true;}
         if let Err(e) = self.shows.save() { self.set_status(format!("saving shows: {e:#}"), true); false } else { true }
     }
 
     /// Fetch the episode list of one followed show in the background.
     pub(super) fn refresh_show(&mut self, imdb: String) -> Cmd<Msg> {
+        if self.cfg.native(){return self.service_action("shows.check",serde_json::json!({"imdb":imdb}),"shows checked");}
         let Some(show) = self.shows.get(&imdb).cloned() else { return Cmd::none() };
         if !self.shows_refreshing.insert(imdb.clone()) { return Cmd::none(); }
         let quality = self.cfg.show_quality.clone();
@@ -88,6 +90,7 @@ impl TuiApp {
 
     /// On launch and on `r`: refresh what is stale (or everything when forced).
     pub(super) fn refresh_shows(&mut self, force: bool) -> Cmd<Msg> {
+        if self.cfg.native(){return if force {self.service_action("shows.check",serde_json::json!({}),"shows checked")}else{Cmd::none()};}
         let now = shows::now();
         let ids: Vec<String> = self.shows.shows.iter().filter(|s| force || s.is_stale(now)).map(|s| s.imdb.clone()).collect();
         if ids.is_empty() { return Cmd::none(); }
@@ -97,6 +100,7 @@ impl TuiApp {
 
     /// Follow the show behind a release name (or a known IMDb id); resolved off-thread.
     pub(super) fn follow(&mut self, query: String, id: Option<String>) -> Cmd<Msg> {
+        if self.cfg.native(){let id=id.or_else(||crate::imdb::service::valid_id(&query).then(||query.clone()));let args=if let Some(id)=id{serde_json::json!({"imdb":id})}else{serde_json::json!({"query":query})};return self.service_action("shows.follow",args,"show followed");}
         self.set_status(format!("looking up {}…", short(&query, 40)), false);
         Cmd::task(move || {
             let r = match id.filter(|i| i.starts_with("tt")) {
@@ -152,22 +156,25 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
+                } else if self.cfg.native(){
+                    if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
                 } else if let Some(label) = self.mark_selected_release() {
-                    if self.save_shows() { self.set_status(label, false); }
+                    if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::Undo if self.shows_inbox() => {
+                if self.cfg.native(){return self.service_action("shows.undo_read",serde_json::json!({}),"release restored to unread");}
                 if let Some(label) = self.undo_inbox_read() {
-                    if self.save_shows() { self.set_status(label, false); }
+                    if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::MarkAll => {
                 if let Some(s) = self.selected_show() {
                     let (imdb, title) = (s.imdb.clone(), s.title.clone());
+                    if self.cfg.native(){return self.service_action("shows.mark_show_read",serde_json::json!({"imdb":imdb}),format!("{title}: releases marked read"));}
                     let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
                     self.rebuild_inbox();
-                    self.save_shows();
-                    self.set_status(format!("{title}: {n} release(s) marked read"), false);
+                    if self.save_shows() { self.set_success(format!("{title}: {n} release(s) marked read")); }
                 } else {
                     self.set_status("Shift+M applies to one show. Select a followed show on the left first.", false);
                 }
@@ -181,11 +188,14 @@ impl TuiApp {
                 let picked = self.selected_episode().map(|(s, e)| (s.imdb.clone(), e.clone()));
                 if let Some((imdb, e)) = picked {
                     let token = format!("{imdb}:{}", e.key);
+                    if self.service_busy{return Cmd::none();}
                     if !self.show_grabbing.insert(token) { return Cmd::none(); }
+                    if self.cfg.native(){return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":self.cfg.seed_by_default}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));}
                     let cfg = self.cfg.clone();
+                    let presence = self.presence.clone();
                     let opts = self.add_opts();
                     return Cmd::task(move || {
-                        let c = Client::from_config(&cfg);
+                        let c = Client::from_config(&cfg, presence.clone());
                         let result = c.login().and_then(|_| c.add_url(&e.magnet, &opts)).map_err(|err| err.to_string());
                         Msg::ShowGrab { imdb, episode: e, result }
                     });
@@ -230,130 +240,372 @@ impl TuiApp {
 
     pub(super) fn view_shows(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
-        let cols = Flex::horizontal().constraints([Constraint::Percentage(if area.width < 100 { 28.0 } else { 32.0 }), Constraint::Fill]).split(area);
-        let card_h = if cols[0].height >= 24 { 11 } else { 0 };
-        let left = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(card_h)]).split(cols[0]);
+        let tier = layout::Tier::at(area.width);
+        let cols = match tier {
+            layout::Tier::Narrow => {
+                if self.shows_focus_eps {
+                    [Rect::default(), area, Rect::default()]
+                } else {
+                    [area, Rect::default(), Rect::default()]
+                }
+            }
+            layout::Tier::Medium => {
+                let c = Flex::horizontal()
+                    .constraints([Constraint::Percentage(32.0), Constraint::Fill])
+                    .split(area);
+                [c[0], c[1], Rect::default()]
+            }
+            layout::Tier::Wide => {
+                let c = Flex::horizontal()
+                    .constraints([
+                        Constraint::Percentage(22.0),
+                        Constraint::Fill,
+                        Constraint::Fixed(52),
+                    ])
+                    .split(area);
+                [c[0], c[1], c[2]]
+            }
+        };
+        let card_h = if tier == layout::Tier::Medium && cols[0].height >= 24 {
+            11
+        } else {
+            0
+        };
+        let left = Flex::vertical()
+            .constraints([Constraint::Fill, Constraint::Fixed(card_h)])
+            .split(cols[0]);
         let unread = self.inbox_rows.len();
-        let title = format!(" Shows ({}) ", self.shows.shows.len());
-        let block = Block::bordered().border_type(BorderType::Rounded)
-            .border_style(if self.shows_focus_eps { th.border() } else { th.border_focused() }).title(&title);
+        let title = format!(" Shows › Followed ({}) ", self.shows.shows.len());
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .padding(Sides::all(0))
+            .border_style(if self.shows_focus_eps {
+                th.border()
+            } else {
+                th.border_focused()
+            })
+            .title(&title);
         let inner = block.inner(left[0]);
         block.render(left[0], frame);
         let w = inner.width.saturating_sub(2) as usize;
         let elapsed = self.marquee_elapsed();
-        let mut parents = vec![li(Line::from_spans([
-            Span::styled(cell("All unread", w.saturating_sub(dw(&unread.to_string()) + 1)), th.text().bold()),
-            Span::styled(format!(" {unread}"), th.accented()),
-        ]))];
-        parents.extend(self.shows.shows.iter().enumerate().map(|(i, show)| {
-            let n = show.new_count();
-            let busy = self.shows_refreshing.contains(&show.imdb);
-            let warning = show.error.is_some() || (show.last_checked > 0 && !show.catalogue_complete);
-            let tail = if busy { format!(" {}", SPINNER[self.tick % 4]) } else if warning { " !".into() } else if n > 0 { format!(" {n}") } else { String::new() };
-            let name = readable_cell(&show.label(), w.saturating_sub(dw(&tail)), hovered_for(&self.show_list,i+1,elapsed));
-            li(Line::from_spans([
-                Span::styled(name, if n > 0 { th.text().bold() } else { th.text() }),
-                Span::styled(tail, if warning && !busy { th.err() } else { th.accented() }),
-            ]))
-        }));
-        StatefulWidget::render(&List::new(parents).highlight_style(th.selected()).highlight_symbol("▌"), inner, frame, &mut self.show_list.borrow_mut());
+        self.view_rows(
+            MouseList::Shows,
+            inner,
+            self.shows.shows.len() + 1,
+            |i| {
+                if i == 0 {
+                    layout::fingerprint(&unread)
+                } else {
+                    let show = &self.shows.shows[i - 1];
+                    layout::fingerprint(&(
+                        &show.title,
+                        show.year,
+                        self.show_unread(show),
+                        self.shows_refreshing
+                            .contains(&show.imdb)
+                            .then_some(self.tick % 4),
+                        &show.error,
+                        show.catalogue_complete,
+                    ))
+                }
+            },
+            |i| {
+                if i == 0 {
+                    return Line::from_spans([
+                        Span::styled(
+                            cell("All unread", w.saturating_sub(dw(&unread.to_string()) + 1)),
+                            th.text().bold(),
+                        ),
+                        Span::styled(format!(" {unread}"), th.accented()),
+                    ]);
+                }
+                let show = &self.shows.shows[i - 1];
+                let n = self.show_unread(show);
+                let busy = self.shows_refreshing.contains(&show.imdb);
+                let warning =
+                    show.error.is_some() || (show.last_checked > 0 && !show.catalogue_complete);
+                let tail = if busy {
+                    format!(" {}", SPINNER[self.tick % 4])
+                } else if warning {
+                    " !".into()
+                } else if n > 0 {
+                    format!(" {n}")
+                } else {
+                    String::new()
+                };
+                Line::from_spans([
+                    Span::styled(
+                        readable_cell(
+                            &show.label(),
+                            w.saturating_sub(dw(&tail)),
+                            hovered_for(&self.show_list, i, elapsed),
+                        ),
+                        if n > 0 { th.text().bold() } else { th.text() },
+                    ),
+                    Span::styled(
+                        tail,
+                        if warning && !busy {
+                            th.err()
+                        } else {
+                            th.accented()
+                        },
+                    ),
+                ])
+            },
+            frame,
+        );
         if card_h > 0 {
-            let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border()).title(" IMDb ");
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .border_style(th.border())
+                .title(" IMDb ");
             let inner = block.inner(left[1]);
             block.render(left[1], frame);
-            if let Some(show) = self.release_show() { self.view_imdb_card(&show.label(), pad(inner), frame); }
+            if let Some(show) = self.release_show() {
+                self.view_imdb_card(&show.label(), pad(inner), frame);
+            }
         }
 
+        if !cols[2].is_empty() {
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .border_style(th.border())
+                .title(" IMDb ");
+            let card = block.inner(cols[2]);
+            block.render(cols[2], frame);
+            if let Some(show) = self.release_show() {
+                self.view_imdb_card(&show.label(), card, frame);
+            }
+        }
+        self.shows_rects.set([inner, Rect::default()]);
+        if cols[1].is_empty() {
+            return;
+        }
         let inbox = self.shows_inbox();
-        let title = if inbox { format!(" All unread · {unread} releases · newest first ") }
-            else if let Some(show) = self.selected_show() { format!(" {} · {} releases ", show.label(), show.episodes.len()) }
-            else { " Releases ".into() };
-        let block = Block::bordered().border_type(BorderType::Rounded)
-            .border_style(if self.shows_focus_eps { th.border_focused() } else { th.border() }).title(&title);
+        let title = if inbox {
+            format!(" Shows › All unread · {unread} releases · newest first ")
+        } else if let Some(show) = self.selected_show() {
+            format!(
+                " Shows › {} · {} releases ",
+                show.label(),
+                show.episodes.len()
+            )
+        } else {
+            " Releases ".into()
+        };
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .padding(Sides::all(0))
+            .border_style(if self.shows_focus_eps {
+                th.border_focused()
+            } else {
+                th.border()
+            })
+            .title(&title);
         let right = block.inner(cols[1]);
         block.render(cols[1], frame);
         let summary = Rect::new(right.x, right.y, right.width, right.height.min(1));
-        let releases_inner = Rect::new(right.x, right.y.saturating_add(summary.height), right.width, right.height.saturating_sub(summary.height));
+        let releases_inner = Rect::new(
+            right.x,
+            right.y.saturating_add(summary.height),
+            right.width,
+            right.height.saturating_sub(summary.height),
+        );
         let warning = if inbox {
-            let warnings: Vec<String> = self.shows.shows.iter().filter_map(|show| {
-                if let Some(error) = &show.error { Some(format!("{}: {error}", show.title)) }
-                else if show.last_checked > 0 && !show.catalogue_complete { Some(format!("{}: history incomplete", show.title)) }
-                else { None }
-            }).collect();
-            (!warnings.is_empty()).then(|| format!("Source warnings · {} · (R) retry", warnings.join("; ")))
-        } else { self.selected_show().and_then(|show| show.error.clone().or_else(|| (show.last_checked > 0 && !show.catalogue_complete).then(|| "History incomplete".into()))).map(|error| format!("Check: {error} · (Shift+R) retry")) };
+            let warnings: Vec<String> = self
+                .shows
+                .shows
+                .iter()
+                .filter_map(|show| {
+                    if let Some(error) = &show.error {
+                        Some(format!("{}: {error}", show.title))
+                    } else if show.last_checked > 0 && !show.catalogue_complete {
+                        Some(format!("{}: history incomplete", show.title))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            (!warnings.is_empty())
+                .then(|| format!("Source warnings · {} · (R) retry", warnings.join("; ")))
+        } else {
+            self.selected_show()
+                .and_then(|show| {
+                    show.error.clone().or_else(|| {
+                        (show.last_checked > 0 && !show.catalogue_complete)
+                            .then(|| "History incomplete".into())
+                    })
+                })
+                .map(|error| format!("Check: {error} · (Shift+R) retry"))
+        };
         let summary_text = if inbox {
             let checking = self.shows_refreshing.len();
-            let unchecked = self.shows.shows.iter().filter(|show| show.last_checked == 0).count();
-            if checking > 0 { format!("Checking {checking} show(s)… · cached releases") }
-            else if unchecked > 0 { format!("{unchecked} show(s) unchecked · (R) Check all") }
-            else { format!("Cached releases · (R) Check all · (←) Browse shows") }
-        } else if let Some(show) = self.selected_show() {
-            if self.shows_refreshing.contains(&show.imdb) { "Checking EZTV… · cached releases".into() }
-            else {
-                let checked = if show.last_checked > 0 { format!("checked {}", ago(show.last_checked)) } else { "never checked".into() };
-                format!("{checked} · prefers {}", show.quality.as_deref().unwrap_or(&self.cfg.show_quality))
+            let unchecked = self
+                .shows
+                .shows
+                .iter()
+                .filter(|show| show.last_checked == 0)
+                .count();
+            if checking > 0 {
+                format!("Checking {checking} show(s)… · cached releases")
+            } else if unchecked > 0 {
+                format!("{unchecked} show(s) unchecked · (R) Check all")
+            } else {
+                format!("Cached releases · (R) Check all · (←) Browse shows")
             }
-        } else { String::new() };
-        Paragraph::new(summary_text).style(th.dimmed()).wrap(WrapMode::None).render(summary, frame);
+        } else if let Some(show) = self.selected_show() {
+            if self.shows_refreshing.contains(&show.imdb) {
+                "Checking EZTV… · cached releases".into()
+            } else {
+                let checked = if show.last_checked > 0 {
+                    format!("checked {}", ago(show.last_checked))
+                } else {
+                    "never checked".into()
+                };
+                format!(
+                    "{checked} · prefers {}",
+                    show.quality.as_deref().unwrap_or(&self.cfg.show_quality)
+                )
+            }
+        } else {
+            String::new()
+        };
+        Paragraph::new(summary_text)
+            .style(th.dimmed())
+            .wrap(WrapMode::None)
+            .render(summary, frame);
         let rows = episode_rows(releases_inner, warning.is_some());
         self.shows_rects.set([inner, rows[1]]);
-        if let Some(warning) = &warning { Paragraph::new(warning.clone()).style(th.err()).wrap(WrapMode::Word).render(rows[2], frame); }
+        if let Some(warning) = &warning {
+            Paragraph::new(warning.clone())
+                .style(th.err())
+                .wrap(WrapMode::Word)
+                .render(rows[2], frame);
+        }
         if self.episode_count() == 0 {
             let message = if self.shows.shows.is_empty() {
                 "No shows followed yet.\n\n(N) Follow a title or IMDb id\n(F)ollow a Search or RSS item\n(Shift+F) Follow a torrent\n\nChecks find releases. Enter downloads your choice."
             } else if inbox {
-                if !self.shows_refreshing.is_empty() { "Checking for releases…\n\nNo unread cached releases." }
-                else if self.shows.shows.iter().any(|show| show.last_checked == 0) { "Not checked yet.\n\n(R) Check all shows." }
-                else if warning.is_some() { "No unread cached releases.\n\nSource warnings remain below.\n(←) Browse a show's full release history." }
-                else { "All caught up.\n\n(←) Browse a show's full release history.\n(R) Check for releases." }
-            } else if self.selected_show().is_some_and(|show| show.last_checked == 0) { "Not checked yet.\n(Shift+R) Check this show" }
-            else { "No cached releases for this show.\n(Shift+R) Check · (2) Search · (Shift+O) EZTV" };
-            Paragraph::new(message).style(th.dimmed()).wrap(WrapMode::Word).render(pad(rows[1]), frame);
+                if !self.shows_refreshing.is_empty() {
+                    "Checking for releases…\n\nNo unread cached releases."
+                } else if self.shows.shows.iter().any(|show| show.last_checked == 0) {
+                    "Not checked yet.\n\n(R) Check all shows."
+                } else if warning.is_some() {
+                    "No unread cached releases.\n\nSource warnings remain below.\n(←) Browse a show's full release history."
+                } else {
+                    "All caught up.\n\n(←) Browse a show's full release history.\n(R) Check for releases."
+                }
+            } else if self
+                .selected_show()
+                .is_some_and(|show| show.last_checked == 0)
+            {
+                "Not checked yet.\n(Shift+R) Check this show"
+            } else {
+                "No cached releases for this show.\n(Shift+R) Check · (2) Search · (Shift+O) EZTV"
+            };
+            Paragraph::new(message)
+                .style(th.dimmed())
+                .wrap(WrapMode::Word)
+                .render(pad(rows[1]), frame);
             return;
         }
-        let w = rows[1].width.saturating_sub(2) as usize;
-        // At 80 columns the show name and release key carry the task; metadata is optional.
-        let metadata = if inbox && w < 80 { 0 } else { episode_metadata_width(w) };
-        let name_w = w.saturating_sub(11 + metadata);
-        let header = format!("   {:<7} {}{}", "RELEASE", cell(if inbox { "SHOW" } else { "TITLE" }, name_w), if metadata > 0 { episode_metadata(None, w) } else { String::new() });
-        Paragraph::new(header).style(th.dimmed()).wrap(WrapMode::None).render(Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), rows[0].height), frame);
-        let have: HashMap<(String, String), &Torrent> = self.torrents.iter().filter_map(|torrent| {
-            let parsed = crate::release::parse(&torrent.name);
-            Some(((parsed.title.to_ascii_lowercase(), parsed.episode?), torrent))
-        }).collect();
-        let releases: Vec<(&Show, &Episode)> = if inbox {
-            let catalogue: HashMap<(&str, &str), (&Show, &Episode)> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
-                .map(move |episode| ((show.imdb.as_str(), episode.key.as_str()), (show, episode)))).collect();
-            self.inbox_rows.iter().filter_map(|target| catalogue.get(&(target.imdb.as_str(), target.key.as_str())).copied()).collect()
-        } else { self.selected_show().map(|show| show.episodes.iter().map(|episode| (show, episode)).collect()).unwrap_or_default() };
-        let items: Vec<ListItem> = releases.into_iter().enumerate().map(|(index, (show, episode))| {
-            let unread = show.is_new(&episode.key);
-            let torrent = have.get(&(show.title.to_ascii_lowercase(), episode.key.clone()));
-            let (mark, style) = match torrent {
-                Some(t) if t.progress_known && t.progress >= 1.0 => ("✓", th.ok()),
-                Some(t) if matches!(t.state.as_str(), "queuedDL" | "waitingVPN") || !t.progress_known => ("…", th.dimmed()),
-                Some(t) if matches!(t.state.as_str(), "stoppedDL" | "pausedDL") => ("‖", th.dimmed()),
-                Some(_) => ("↓", th.accented()),
-                None if show.grabbed.contains_key(&episode.key) => ("+", th.dimmed()),
-                None => (" ", th.dimmed()),
-            };
-            let name = if inbox {
-                if w >= 80 { format!("{} · {}", show.label(), episode.title) } else { show.label() }
-            } else { episode.title.clone() };
-            let text_style = if unread { th.text().bold() } else { th.dimmed() };
-            li(Line::from_spans([
-                Span::styled(if unread { "●" } else { " " }, th.accented()),
-                Span::styled(format!("{mark} "), style),
-                Span::styled(format!("{:<7} ", episode.key), text_style),
-                Span::styled(readable_cell(&name, name_w, hovered_for(&self.ep_list,index,elapsed)), text_style),
-                Span::styled(if metadata > 0 { episode_metadata(Some(episode), w) } else { String::new() }, th.dimmed()),
-            ]))
-        }).collect();
-        StatefulWidget::render(&List::new(items).highlight_style(th.selected()).highlight_symbol("▌"), rows[1], frame, &mut self.ep_list.borrow_mut());
+        let width = rows[1].width.saturating_sub(2) as usize;
+        let metadata = if width >= 60 {
+            episode_metadata_width(width)
+        } else {
+            0
+        };
+        let header = format!(
+            "{} {:<7} {}{}",
+            cell("STATE", 9),
+            "RELEASE",
+            cell(
+                if inbox { "SHOW" } else { "TITLE" },
+                width.saturating_sub(18 + metadata)
+            ),
+            if metadata > 0 {
+                episode_metadata(None, width)
+            } else {
+                String::new()
+            }
+        );
+        Paragraph::new(header)
+            .style(th.dimmed())
+            .wrap(WrapMode::None)
+            .render(
+                Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), 1),
+                frame,
+            );
+        self.view_rows(
+            MouseList::Episodes,
+            rows[1],
+            self.episode_count(),
+            |i| {
+                let (show, episode) = self.episode_at(i).expect("displayed release exists");
+                layout::fingerprint(&(
+                    episode,
+                    &show.title,
+                    show.year,
+                    show.is_new(&episode.key),
+                    show.grabbed.contains_key(&episode.key),
+                    self.torrent_revision,
+                ))
+            },
+            |i| {
+                let (show, episode) = self.episode_at(i).expect("displayed release exists");
+                let torrent = self.torrents.iter().find(|t| {
+                    let r = crate::release::parse(&t.name);
+                    r.title.eq_ignore_ascii_case(&show.title)
+                        && r.episode.as_deref() == Some(&episode.key)
+                });
+                let unread = show.is_new(&episode.key);
+                let state = if let Some(t) = torrent {
+                    format::state_cell(t, self.store.torrents.get(&t.hash))
+                } else if show.grabbed.contains_key(&episode.key) {
+                    "+ Added  "
+                } else if unread {
+                    "● Unread "
+                } else {
+                    "✓ Read   "
+                };
+                let name = if inbox {
+                    format!("{} · {}", show.label(), episode.title)
+                } else {
+                    episode.title.clone()
+                };
+                let key = format!("{:<7} ", episode.key);
+                let style = if unread {
+                    th.text().bold()
+                } else {
+                    th.dimmed()
+                };
+                Line::from_spans([
+                    Span::styled(state, style),
+                    Span::raw(" "),
+                    Span::styled(key.clone(), style),
+                    Span::styled(
+                        readable_cell(
+                            &name,
+                            width.saturating_sub(10 + dw(&key) + metadata),
+                            hovered_for(&self.ep_list, i, elapsed),
+                        ),
+                        style,
+                    ),
+                    Span::styled(
+                        if metadata > 0 {
+                            self.release_metadata(show,episode,width)
+                        } else {
+                            String::new()
+                        },
+                        th.dimmed(),
+                    ),
+                ])
+            },
+            frame,
+        );
     }
 }
-
 
 pub(super) fn episode_metadata_width(width: usize) -> usize {
     if width >= 80 { 1 + 5 + 2 + 9 + 2 + 5 + 2 + 10 }

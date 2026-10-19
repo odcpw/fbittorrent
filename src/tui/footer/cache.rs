@@ -17,19 +17,25 @@ impl TuiApp {
     pub(in crate::tui) fn footer_signature(&self, width: u16) -> u64 {
         let mut hash = std::collections::hash_map::DefaultHasher::new();
         width.hash(&mut hash);
+        self.recovery.notice(std::time::Instant::now()).hash(&mut hash);
         self.screen.index().hash(&mut hash);
         self.footer_context().hash(&mut hash);
         self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
+        self.status_success.hash(&mut hash);
+        self.poster_open.hash(&mut hash);
+        self.poster_target.hash(&mut hash);
         self.search_input.value().trim().is_empty().hash(&mut hash);
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
         if let Some(torrent) = self.selected_torrent() {
+            self.store.pending_for_key(&torrent.hash).hash(&mut hash);
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
+            self.torrent_paused(torrent).hash(&mut hash);
             self.seed_allowed(torrent).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
@@ -96,11 +102,11 @@ impl TuiApp {
         let context_width = dw(&context).min(available);
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
-        let feedback = if self.daemon_stopped || self.status.is_empty() {
-            self.footer_selection().unwrap_or_default()
-        } else {
-            self.status.clone()
-        };
+        let show_status=self.recovery.notice(std::time::Instant::now()).is_none() && !self.daemon_stopped && !self.status.is_empty();
+        let feedback=if !show_status {self.footer_selection().unwrap_or_default()}
+            else if th.low_chroma && self.status_is_error && !self.status.starts_with('!'){format!("! {}",self.status)}
+            else if th.low_chroma && self.status_success && !self.status.starts_with('✓'){format!("✓ {}",self.status)}
+            else{self.status.clone()};
         FooterCache {
             signature,
             context_width: context_width as u16,
@@ -110,7 +116,7 @@ impl TuiApp {
             legend: Paragraph::new(Text::from_line(shortcut_line(&[&legend], th))).wrap(WrapMode::None),
             help: Paragraph::new(Text::from_line(shortcut_line(&[&help], th))).wrap(WrapMode::None),
             feedback: Paragraph::new(feedback)
-                .style(if self.status_is_error { th.err() } else { th.dimmed() })
+                .style(if show_status && self.status_is_error { th.err() } else if show_status && self.status_success {th.ok()}else { th.dimmed() })
                 .wrap(WrapMode::None),
         }
     }

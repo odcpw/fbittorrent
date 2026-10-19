@@ -11,7 +11,7 @@ impl EngineDispatcher {
     pub(crate) fn bus_sample(
         &self,
         files: &[String],
-    ) -> Result<(Vec<view::TorrentView>, HashMap<String, Vec<TorrentFile>>)> {
+    ) -> Result<(Vec<view::TorrentView>, HashMap<String, Vec<TorrentFile>>, bool)> {
         self.runtime.block_on(async {
             let ledger =
                 OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
@@ -53,7 +53,8 @@ impl EngineDispatcher {
                 };
                 details.insert(hash.clone(), rows);
             }
-            Ok((rows, details))
+            let restoring = self.has_pending_restore(&ledger);
+            Ok((rows, details, restoring))
         })
     }
 

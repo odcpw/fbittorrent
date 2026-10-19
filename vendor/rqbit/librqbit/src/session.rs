@@ -82,10 +82,8 @@ struct ParsedTorrentFile {
 }
 
 fn torrent_from_bytes(bytes: Bytes) -> anyhow::Result<ParsedTorrentFile> {
-    trace!(
-        "all fields in torrent: {:#?}",
-        bencode::dyn_from_bytes::<ByteBuf>(&bytes)
-    );
+    // Metainfo carries tracker passkeys. Never dump its raw announce fields.
+    trace!(bytes = bytes.len(), "parsing torrent metadata");
     let parsed = librqbit_core::torrent_metainfo::torrent_from_bytes(&bytes)?;
     Ok(ParsedTorrentFile {
         meta: parsed.clone_to_owned(Some(&bytes)),
@@ -276,6 +274,15 @@ pub struct AddTorrentOptions {
 
     #[serde(skip)]
     pub storage_factory: Option<BoxStorageFactory>,
+
+    /// App-validated have snapshot. Never accepted from the upstream wire or
+    /// persistence format: the embedding owner must validate its clean marker
+    /// and every relevant payload file's identity before supplying these bytes.
+    #[serde(skip)]
+    pub trusted_have_pieces: Option<Vec<u8>>,
+    /// App-owned handle replacement retains observations and force throttling.
+    #[serde(skip)]
+    pub tracker_stats: Option<Arc<tracker_comms::TrackerStats>>,
 
     /// Additional trackers for public torrents. Ignored for private metainfo.
     pub trackers: Option<Vec<String>>,
@@ -1128,7 +1135,7 @@ impl Session {
                 let metadata_cx = region.cx().clone();
                 let result = async {
                     let peer_rx = self.make_peer_rx(&metadata_cx, info_hash, trackers.clone(), false,
-                        opts.force_tracker_interval, opts.initial_peers.clone().unwrap_or_default(), private, None)
+                        opts.force_tracker_interval, opts.initial_peers.clone().unwrap_or_default(), private, None, Arc::new(tracker_comms::TrackerStats::default()))
                         .context("no known way to resolve metadata peers")?;
                     self.resolve_magnet(&metadata_cx, info_hash, peer_rx, &trackers, opts.peer_opts).await
                 }.await;
@@ -1222,16 +1229,27 @@ impl Session {
                 if !trackers.contains(&url) {trackers.push(url);}
             }
             trackers.retain(|url| !opts.tracker_removals.iter().any(|v| v == url.as_str()));
+            let tracker_stats = opts.tracker_stats.take().unwrap_or_else(||Arc::new(tracker_comms::TrackerStats::default()));
+            tracker_stats.register(trackers.iter().cloned());
+            for (index,url) in trackers.iter().enumerate() {
+                if !matches!(url.scheme(), "http"|"https"|"udp") {
+                    tracker_stats.not_contacted(url,"unsupported scheme");
+                } else if metadata.info.info().private && index > 0 {
+                    tracker_stats.not_contacted(url,"private torrent: only the first tracker is announced");
+                }
+            }
             let minfo = Arc::new(ManagedTorrentShared {
                 cx: self.cx.clone(),
                 id,
                 span,
                 info_hash,
-                trackers: tracker_comms::TrackerSet::new(trackers),
+                trackers: tracker_comms::TrackerSet::with_stats(trackers, tracker_stats.clone()),
+                tracker_stats,
                 spawner: self.spawner.clone(),
                 peer_id: self.peer_id,
                 storage_factory,
                 options: ManagedTorrentOptions {
+                    trusted_have_pieces: parking_lot::Mutex::new(opts.trusted_have_pieces.take()),
                     force_tracker_interval: opts.force_tracker_interval,
                     peer_connect_timeout: peer_opts.connect_timeout,
                     peer_encryption: peer_opts.encryption.unwrap_or_default(),
@@ -1393,6 +1411,7 @@ impl Session {
             t.shared().options.initial_peers.clone(),
             is_private,
             Some(t.shared().trackers.clone()),
+            t.shared().tracker_stats.clone(),
         )
     }
 
@@ -1407,6 +1426,7 @@ impl Session {
         initial_peers: Vec<SocketAddr>,
         is_private: bool,
         mutable_trackers: Option<Arc<tracker_comms::TrackerSet>>,
+        tracker_state: Arc<tracker_comms::TrackerStats>,
     ) -> Option<PeerStream> {
         let dht_rx = if is_private {
             None
@@ -1424,6 +1444,14 @@ impl Session {
             })
         };
 
+        tracker_state.register(trackers.iter().cloned());
+        for url in &trackers {
+            if !matches!(url.scheme(), "http" | "https" | "udp") {
+                tracker_state.not_contacted(url, "unsupported scheme");
+            } else if self.disable_trackers {
+                tracker_state.not_contacted(url, "trackers disabled");
+            }
+        }
         if self.disable_trackers {
             trackers.clear();
         }
@@ -1437,6 +1465,11 @@ impl Session {
             }
             // BEP 27: never add public/session trackers, including when the
             // private metainfo has only one tracker (or none).
+            for url in trackers.iter().skip(1) {
+                if matches!(url.scheme(), "http" | "https" | "udp") {
+                    tracker_state.not_contacted(url, "private torrent: only the first tracker is announced");
+                }
+            }
             trackers.truncate(1);
         } else if !self.disable_trackers {
             trackers.extend(self.trackers.iter().cloned());
@@ -1446,19 +1479,20 @@ impl Session {
             info_hash,
             session: self.clone(),
         };
-        let tracker_rx = TrackerComms::start(
+        let tracker_rx = TrackerComms::start_with_stats(
             cx,
             info_hash,
             self.peer_id,
-            if self.disable_trackers { tracker_comms::TrackerSet::new(Vec::new()) }
-                else { mutable_trackers.unwrap_or_else(|| tracker_comms::TrackerSet::new(trackers)) },
+            mutable_trackers.unwrap_or_else(|| tracker_comms::TrackerSet::with_stats(trackers, tracker_state.clone())),
             is_private,
             if !is_private && !self.disable_trackers { self.trackers.iter().cloned().collect() } else { Vec::new() },
+            !self.disable_trackers,
             Box::new(tracker_rx_stats),
             force_tracker_interval,
             self.announce_port().unwrap_or(4240),
             self.http_client.clone(),
             self.udp_tracker_client.clone(),
+            tracker_state,
         );
 
         let initial_peers_rx = if is_private || initial_peers.is_empty() {

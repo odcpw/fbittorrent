@@ -1,0 +1,30 @@
+{"dir":"volatile","paths":["result.instance","result.server.pid","result.server.build","result.uptime_s","ts","result.torrent.added_at","result.torrent.completed_at"]}
+{"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["search","subscribe","mutations"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"c2s","frame":{"id":2,"op":"search.providers"}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"providers":[{"name":"alpha","kind":"nova","enabled":true,"full_name":"Local Alpha","url":"https://alpha.invalid"}]}}}
+{"dir":"c2s","frame":{"id":3,"op":"search.set_provider","args":{"name":"alpha","enabled":true}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":4,"op":"search.start","args":{"query":"Sintel","providers":["alpha","beta"],"limit":5000}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"search_id":1}}}
+{"dir":"c2s","frame":{"id":5,"op":"subscribe","args":{"topics":["search:1"],"interval_ms":500}}}
+{"dir":"s2c","frame":{"id":5,"ok":true,"result":{"sub":1,"topics":["search:1"]}}}
+{"dir":"s2c","frame":{"ev":"snapshot.begin","sub":1,"topic":"search:1","rev":1,"count":1,"reason":"subscribe"}}
+{"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"search:1","rev":2,"items":[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"辛特尔","size":1234,"seeds":9,"providers":["alpha","beta"],"magnet":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider_url":"https://beta.invalid"}]}}
+{"dir":"s2c","frame":{"ev":"snapshot.end","sub":1,"topic":"search:1","rev":3}}
+{"dir":"s2c","frame":{"ev":"search.done","seq":1,"ts":1792396800,"search_id":1,"total":1,"warnings":[]}}
+{"dir":"c2s","frame":{"id":6,"op":"search.grab","args":{"search_id":1,"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"ref":"grab-sintel"}}
+{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"state":"pending","ref":"grab-sintel"}}}
+{"dir":"s2c","frame":{"ev":"mutation.result","seq":2,"ts":1792396800,"ref":"grab-sintel","op":"search.grab","outcome":"done","result":{"state":"done","hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"辛特尔","duplicate":false}}}
+{"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"search:1","rev":4,"changed":{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":{"added":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
+{"dir":"c2s","frame":{"id":7,"op":"search.stop","args":{"search_id":1}}}
+{"dir":"s2c","frame":{"id":7,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":8,"op":"search.install","args":{"sources":["https://fixture.invalid/alpha.py"]},"ref":"install-alpha"}}
+{"dir":"s2c","frame":{"id":8,"ok":true,"result":{"state":"pending","ref":"install-alpha"}}}
+{"dir":"s2c","frame":{"ev":"mutation.result","seq":3,"ts":1792396800,"ref":"install-alpha","op":"search.install","outcome":"done","result":{"installed":["https://fixture.invalid/alpha.py"],"failed":[]}}}
+{"dir":"c2s","frame":{"id":9,"op":"search.browse_sources"}}
+{"dir":"s2c","frame":{"id":9,"ok":true,"result":{"sources":[{"id":"0","label":"Trending","provider":"1337x","in_app":false,"url":"https://1337x.to/trending"}]}}}
+{"dir":"c2s","frame":{"id":10,"op":"search.browse","args":{"source":"3"}}}
+{"dir":"s2c","frame":{"id":10,"ok":true,"result":{"items":[{"key":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"辛特尔","size":1234,"seeds":9,"providers":["alpha","beta"],"magnet":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider_url":"https://beta.invalid"}]}}}
+{"dir":"c2s","frame":{"id":11,"op":"search.start","args":{"query":"fifth"}}}
+{"dir":"s2c","frame":{"id":11,"ok":false,"error":{"code":"busy","message":"busy","retryable":true,"details":{"limit":"sessions"}}}}

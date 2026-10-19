@@ -12,6 +12,7 @@ mod api;
 mod backend;
 mod browse;
 mod config;
+mod free_space;
 mod daemon;
 mod engine;
 mod native_runtime;
@@ -39,6 +40,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn main() {
+    if let Some(code)=search::torznab::run_worker(){std::process::exit(code);}
+
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
@@ -115,7 +118,7 @@ fn run(cli: Cli) -> Result<Code> {
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if !cfg.native() { agent::warning("deprecated_engine", "engine = \"qbittorrent\" is deprecated and is removed in v0.4.0; see the README".into(), true); }
-    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
+    if cfg.native() && cli::native_handles(&cmd) && !(matches!(&cmd,Cmd::Status{..}|Cmd::List{..}|Cmd::Show{..}|Cmd::Triage|Cmd::Wait{..}) && !ipc::socket_path(&cfg).with_file_name("api.sock").exists() && ipc::is_running(&cfg)) { return cli::run_native(&cfg, &cmd, json, no_start); }
     if cfg.native() && matches!(&cmd, Cmd::Seq { .. } | Cmd::FirstLast { .. }) {
         return Err(AppError::new(Code::Usage, "native sequential and first/last scheduling are intrinsic; toggle commands require legacy mode")
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());
@@ -124,7 +127,14 @@ fn run(cli: Cli) -> Result<Code> {
     // Commands that never touch the backend.
     match cmd {
         Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
-        Cmd::Setup { port, save, magnet, uninstall } => {
+        Cmd::Setup { port, save, magnet, plugin, dry_run, uninstall, purge, yes } => {
+            if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
+            if cfg.native() {
+                let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,dry_run,uninstall,purge})?;
+                emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
+                return Ok(Code::Ok);
+            }
+            if dry_run || plugin.is_some() || purge { return Err(AppError::new(Code::Usage,"extended desktop setup requires the native engine").into()); }
             if uninstall {
                 setup::uninstall()?;
                 emit(json, serde_json::json!({"ok":true,"action":"setup-uninstall"}), || {});
@@ -145,31 +155,7 @@ fn run(cli: Cli) -> Result<Code> {
             return Ok(Code::Ok);
         }
         Cmd::Imdb { name, refresh } => {
-            if refresh || imdb::ratings_stale() {
-                eprintln!("fetching IMDb ratings dataset…");
-                imdb::refresh_ratings()?;
-            }
-            let n = name.join(" ");
-            let Some(t) = imdb::lookup(&n)? else {
-                emit(json, serde_json::json!({"ok": true, "found": false, "query": n}), || println!("no match"));
-                return Ok(Code::Ok);
-            };
-            let poster = if t.poster_url.is_empty() { None } else { imdb::fetch_poster(&t.poster_url, 300).ok().map(|p| p.display().to_string()) };
-            if json {
-                let mut v = serde_json::to_value(&t)?;
-                v["ok"] = serde_json::json!(true);
-                v["found"] = serde_json::json!(true);
-                v["url"] = serde_json::json!(t.url());
-                v["poster_path"] = serde_json::json!(poster);
-                println!("{}", agent::with_warnings(v));
-                return Ok(Code::Ok);
-            }
-            println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
-            match (t.rating, t.votes) { (Some(r), Some(v)) => println!("★ {r:.1}  ({v} votes)"), _ => println!("★ n/a") }
-            if !t.stars.is_empty() { println!("{}", t.stars); }
-            if !t.blurb.is_empty() { println!("\n{}\n{}", t.blurb, t.wiki_url); }
-            if let Some(p) = poster { println!("poster: {p}"); }
-            return Ok(Code::Ok);
+            return cli::catalog_imdb::run(&cfg,name.join(" "),refresh,json);
         }
         Cmd::Config => {
             emit(json, serde_json::json!({"ok": true, "path": config::config_path().display().to_string(), "config": serde_json::to_value(&cfg)?}), || {
@@ -229,11 +215,12 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
         }
-        Cmd::Dashboard { view, query } => {
+        Cmd::Dashboard { view, query, hash } => {
+            if let Some(hash)=&hash {api::Hash::new(hash.clone()).map_err(|message|AppError::new(Code::Usage,message))?;}
             let mut explicit = cfg.clone();
             explicit.autostart = !no_start;
             backend::ensure_running(&explicit, &c)?;
-            backend::dashboard(view.as_deref(), query.as_deref())?;
+            backend::dashboard_hash(view.as_deref(), query.as_deref(), hash.as_deref())?;
             emit(json, serde_json::json!({"ok":true,"action":"dashboard","count":0,"hashes":[]}), || {});
             Ok(Code::Ok)
         }
@@ -382,7 +369,8 @@ fn run(cli: Cli) -> Result<Code> {
                 || println!("added: {label}{}", hash.as_deref().map(|h| format!("  ({})", &h[..8.min(h.len())])).unwrap_or_default()));
             Ok(Code::Ok)
         }
-        Cmd::Wait { selectors, timeout, interval } => {
+        Cmd::Wait { selectors, timeout, interval, until } => {
+            if until!=cli::Until::Complete {return Err(AppError::new(Code::Usage,"watch readiness requires the native API").into());}
             connect(&cfg, &c)?;
             let hs = resolve(&c, &selectors)?;
             wait_for(&c, hs, timeout, interval.max(1), json)
@@ -449,6 +437,8 @@ fn run(cli: Cli) -> Result<Code> {
             emit(json, serde_json::json!({"ok": true, "action": "add", "hash": magnet_hash(&text), "name": label}), || println!("added: {label}"));
             Ok(Code::Ok)
         }
+        Cmd::Move {..} => Err(AppError::new(Code::Usage,"move requires the native API daemon").into()),
+        Cmd::Reannounce {..} => Err(AppError::new(Code::Usage,"reannounce requires the native API daemon").into()),
         Cmd::Reconcile { recent } => {
             let result = reconcile_result(&cfg, || {
                 connect(&cfg, &c)?;
@@ -475,7 +465,14 @@ fn run(cli: Cli) -> Result<Code> {
             rss(&c, sub, json, &cfg)
         }
         Cmd::Shows(sub) => shows_cmd(&cfg, &c, sub, json),
-        Cmd::Search { query, wait, limit, install, install_url, plugins } => {
+        Cmd::Search { query, wait, limit, install, install_url, plugins, install_torznab,key_file } => {
+            if let Some(url)=install_torznab {
+                let key_file=key_file.map(|p|if p.is_absolute(){Ok(p)}else{std::env::current_dir().map(|dir|dir.join(p))}).transpose()?;
+                let name=search::torznab::install(&url,key_file)?;
+                emit(json,serde_json::json!({"ok":true,"action":"install-torznab","name":name,"url":url,"kind":"torznab"}),||println!("Torznab indexer installed: {name}"));
+                return Ok(Code::Ok);
+            }
+            if cfg.native() {return cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json);}
             if !cfg.native() { connect(&cfg, &c)?; }
             if plugins {
                 let ps = c.search_plugins()?;
@@ -608,7 +605,7 @@ fn connect(cfg: &Config, c: &Client) -> Result<()> {
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Limit { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+    matches!(cmd, Cmd::Limit { .. } | Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
         | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))

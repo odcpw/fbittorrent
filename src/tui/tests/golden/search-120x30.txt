@@ -1,30 +1,30 @@
-  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                     ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+  1 Torrents  [ 2 Search ]  3 Shows (2)    4 RSS                                               ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
 ╭ Search ──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Sintel                                                                                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ Results (10) · 2/3 providers ──────────────────────────────────────╮╭ Details ───────────────────────────────────────╮
-│                                                                    ││                                                │
-│   NAME                                       IMDB  SEEDS      SIZE ││  Sintel                                        │
-│ ▌ Sintel                                             124 512.0 MiB ││                                                │
-│   Sintel - 2010 - Multisubs mkv                      123 512.0 MiB ││  size      512.0 MiB                           │
-│   Sintel.2010.1080p.WEB.H264-CLASSiCALHD             122 512.0 MiB ││  peers     124 seeds, 3 leechers               │
-│   Sintel (2010) [720p] [x264…[bluray] [YTS]          121 512.0 MiB ││  uploaded  2026-10-18                          │
-│   Sintel 2010 x264 DMRip 1080p mkv                   120 512.0 MiB ││  source    fixture                             │
-│   Sintel 2010 820p H264                              119 512.0 MiB ││                                                │
-│   Sintel (2010) BR2Mini-DVD DD5 1 NL Subs            118 512.0 MiB ││  IMDb card appears when the cursor rests here  │
-│   Sintel.2010.720p.WEB.H264-CLASSiCALHD              117 512.0 MiB ││                                                │
-│   Sintel [辛特尔] Cafe                               116 512.0 MiB ││                                                │
-│   [philosophy-raws][è¾›ç‰¹å°…tåŽ‹åˆ¶][2Kç..          115 512.0 MiB ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
-[Results] (Enter) Download  (P) Providers  (a) Add  (i) IMDb  (w) Wikipedia  (O) Source page  (j) Next …        (?) Help
+╭ Results (10) · 2/3 providers ────────────────────────────────────────────────────────────────────────────────────────╮
+│  NAME                                                              SIZE SEEDS↓     ★   UPLOADED PROVIDER        PEERS│
+│▌ Sintel                                                       512.0 MiB    124     — 2026-10-18 fixture             3│
+│  Sintel - 2010 - Multisubs mkv                                512.0 MiB    123     — 2026-10-18 fixture             3│
+│  Sintel.2010.1080p.WEB.H264-CLASSiCALHD                       512.0 MiB    122     — 2026-10-18 fixture             3│
+│  Sintel (2010) [720p] [x264] [bluray] [YTS]                   512.0 MiB    121     — 2026-10-18 fixture             3│
+│  Sintel 2010 x264 DMRip 1080p mkv                             512.0 MiB    120     — 2026-10-18 fixture             3│
+│  Sintel 2010 820p H264                                        512.0 MiB    119     — 2026-10-18 fixture             3│
+│  Sintel (2010) BR2Mini-DVD DD5 1 NL Subs                      512.0 MiB    118     — 2026-10-18 fixture             3│
+│  Sintel.2010.720p.WEB.H264-CLASSiCALHD                        512.0 MiB    117     — 2026-10-18 fixture             3│
+│  Sintel [辛特尔] Cafe                                         512.0 MiB    116     — 2026-10-18 fixture             3│
+│  [philosophy-raws][è¾›ç‰¹å°”][sintel][BD…][10bitåŽ‹åˆ¶][2Kç.. 512.0 MiB    115     — 2026-10-18 fixture             3│
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[Results] (Enter) Download  (v) Card  (P) Providers  (a) Add  (i) IMDb  (w) Wikipedia  (O) Source page …        (?) Help
 Sintel

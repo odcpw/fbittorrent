@@ -250,6 +250,22 @@ def torrent_fixture(directory, files, name="fixture", tracker=None, piece_length
     return TorrentFixture(paths, torrent, info, magnet, info_hash)
 
 
+def multi_file_fixture(names, directory=None, name="Local Fixture"):
+    """Real metainfo preserves the caller's deliberately scrambled file indices."""
+    parent = directory if directory is not None else _sandbox_root.get()
+    if parent is None:
+        raise ValueError("multi_file_fixture requires an isolated Sandbox or directory")
+    directory = Path(tempfile.mkdtemp(prefix="files-natural-", dir=parent))
+    paths = []
+    for filename in names:
+        if Path(filename).name != filename:
+            raise ValueError("fixture file names must be leaf paths")
+        path = directory / filename
+        path.write_bytes((filename.encode() + b" local payload\n") * 1024)
+        paths.append(path)
+    return torrent_fixture(directory, paths, name=name)
+
+
 class magnet_fixture:
     """256 KiB random bytes, private torrent, local tracker and HTTP exact source.
 
@@ -348,3 +364,67 @@ def daemon_pair(case, binary, systemd=False, throttle=32768, state="downloading"
     """Owned seed/leech fixture, imported lazily to keep payload helpers independent."""
     from fixture_serving import Pair
     return Pair(case, binary, systemd, throttle, state)
+
+class tracker_server:
+    """A bounded local announce fixture; logs no URL or query-string secrets."""
+    def __init__(self, fail_first=2, interval_s=5, peers=(), directory=None, echo_failure=False):
+        import time
+        self.root = _directory(directory)
+        self.log = self.root / "tracker.log"
+        self.records, self.lock = [], threading.Lock()
+        self.echo_failure = echo_failure
+        fixture = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_GET(self):
+                self.connection.settimeout(2)
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                # parse_qs decodes arbitrary hash bytes as Unicode; preserve the
+                # raw percent-encoded value for a lossless v1 hash in the log.
+                raw = next((part.split("=", 1)[1] for part in urllib.parse.urlsplit(self.path).query.split("&") if part.startswith("info_hash=")), "")
+                info_hash = urllib.parse.unquote_to_bytes(raw).hex()
+                row = dict(ts=time.time(), info_hash=info_hash,
+                           event=query.get("event", ["none"])[0], port=int(query.get("port", [0])[0]))
+                with fixture.lock:
+                    count = sum(item["info_hash"] == info_hash for item in fixture.records)
+                    fixture.records.append(row)
+                    with fixture.log.open("a") as log:
+                        log.write(json.dumps(row, sort_keys=True) + "\n")
+                if count < fail_first:
+                    reason = "fixture: not yet"
+                    if echo_failure:
+                        reason += " " + fixture.url + "?passkey=fixture-private-token"
+                    body = bencode({"failure reason": reason})
+                else:
+                    compact = b"".join(socket.inet_aton(host) + struct.pack(">H", port) for host, port in peers)
+                    body = bencode(dict(interval=interval_s, peers=compact))
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = False
+        self.url = f"http://127.0.0.1:{self.server.server_port}/announce"
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs=dict(poll_interval=.05), daemon=True)
+        self.thread.start()
+
+    def snapshot(self):
+        with self.lock:
+            return list(self.records)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        if self.thread.is_alive():
+            raise TimeoutError("tracker fixture did not stop")

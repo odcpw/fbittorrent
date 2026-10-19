@@ -128,6 +128,7 @@ impl Inner {
         // before admitting any storage, then apply the saved cap at admission.
         let mut options = record.options(paused)?;
         options.initial_peers = Some(metadata.seen_peers);
+        options.trusted_have_pieces = self.resume_prepared.take(&record.hash);
         let handle = self
             .session
             .add_torrent(
@@ -150,6 +151,7 @@ impl Inner {
     }
 
     pub(super) fn cancel_restore(&self, hash: &str, remove: bool) {
+        self.resume_prepared.remove(hash);
         let mut restores = self.restores.lock().unwrap();
         if let Some(restore) = restores.get_mut(hash) {
             if matches!(restore.outcome, RestoreOutcome::Dormant) && !remove {
@@ -232,6 +234,14 @@ impl Inner {
                 let current_generation = inner.restores.lock().unwrap().get(&record.hash)
                     .map(|restore| restore.generation);
                 if current_generation != Some(generation) { return Ok(()); }
+                if current.staged {
+                    inner.write_store(&cx, &format!("{}.torrent", record.hash), &metadata.torrent_bytes).await?;
+                    if let Some(saved)=ledger.records.iter_mut().find(|r|r.hash==record.hash) {
+                        saved.name=metadata.info.name().map(|s|s.into_owned()).unwrap_or_else(||record.hash.clone());
+                    }
+                    inner.save(&cx,&ledger).await?;
+                    return Ok(());
+                }
                 inner.admit_record(&cx, current, true, metadata).await?;
                 if let Some(saved) = ledger.records.iter_mut().find(|saved| saved.hash == record.hash) {
                     if saved.deferred {
@@ -241,6 +251,7 @@ impl Inner {
                 }
                 inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await
             }.await;
+            if result.is_err() {inner.resume_prepared.finish(&record.hash);}
             let mut restores = inner.restores.lock().unwrap();
             let mut changed = false;
             if let Some(restore) = restores.get_mut(&record.hash) {
@@ -249,7 +260,7 @@ impl Inner {
                     restore.outcome = match result {
                         Ok(()) => {
                             restore.last_error = None;
-                            RestoreOutcome::Restored
+                            if record.staged { RestoreOutcome::Stopped } else { RestoreOutcome::Restored }
                         }
                         Err(error) => {
                             let message = format!("could not restore {}: {error:#}", record.name);
@@ -290,9 +301,9 @@ impl Inner {
             // Restore the previous record if changing the cap cannot be applied.
             let rollback = self.restore_record(cx, old, true).await;
             if let Err(rollback) = rollback {
-                bail!("changing upload cap failed: {error:#}; restoring previous torrent failed: {rollback:#}");
+                bail!("rebuilding torrent failed: {error:#}; restoring previous torrent failed: {rollback:#}");
             }
-            return Err(error).context("changing upload cap; previous torrent restored");
+            return Err(error).context("rebuilding torrent; previous torrent restored");
         }
         Ok(())
     }

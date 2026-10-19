@@ -155,6 +155,13 @@ fn validate_live_capture(text: &str) -> Result<(), String> {
                         revisions.unsubscribe(args.sub);
                         subscription_history.remove(&args.sub);
                     }
+                    if let (Call::TorrentsRemove { args }, Reply::TorrentsRemove(result)) = (call, &reply) {
+                        if matches!(result.status, MutationResult::Done) {
+                            for hash in args.hashes.as_slice() {
+                                geometry.removed(hash);
+                            }
+                        }
+                    }
                     let strip_measurement = |row: &mut Torrent| {
                         if checking.contains(row.hash.as_str()) {
                             row.completed_bytes = None;
@@ -473,4 +480,50 @@ fn tracker_url_failures_name_the_key_without_echoing_values() {
         assert!(!invalid.error.message.contains("private"));
         println!("{op}: invalid URL names url, query value absent");
     }
+}
+
+#[test]
+fn live_readded_completion_starts_after_confirmed_removal() {
+    let hash = "ab".repeat(20);
+    let initial = checking_capture();
+    let mut readded = initial[1]["frame"]["result"]["torrents"][0].clone();
+    readded["completed_bytes"] = json!(100);
+    readded["progress"] = json!(1.0);
+    readded["private"] = json!(false);
+    let rows = vec![
+        initial[0].clone(), initial[1].clone(),
+        json!({"dir":"c2s","frame":{"id":2,"op":"torrents.remove","args":{"hashes":[hash],"delete_files":false}}}),
+        json!({"dir":"s2c","frame":{"id":2,"ok":true,"result":{"state":"done"}}}),
+        json!({"dir":"c2s","frame":{"id":3,"op":"torrents.add","args":{"source":{"magnet":format!("magnet:?xt=urn:btih:{hash}")},"stopped":true}}}),
+        json!({"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done","hash":hash,"duplicate":false}}}),
+        json!({"dir":"c2s","frame":{"id":4,"op":"torrents.get","args":{"hash":hash}}}),
+        json!({"dir":"s2c","frame":{"id":4,"ok":true,"result":{"torrent":readded}}}),
+    ];
+    validate_live_capture(&capture_text(&rows)).unwrap();
+    assert!(crate::api::fixtures::check_group("fixture-P1-06", &capture_text(&rows))
+        .unwrap_err().contains("/completed_bytes"));
+    for response in [
+        json!({"id":2,"ok":false,"error":{"code":"internal","message":"remove failed","retryable":false}}),
+        json!({"id":2,"ok":true,"result":{"state":"pending","ref":"remove-pending"}}),
+    ] {
+        let mut unconfirmed = rows.clone();
+        unconfirmed[3]["frame"] = response;
+        assert!(validate_live_capture(&capture_text(&unconfirmed)).unwrap_err().contains("/completed_bytes"));
+    }
+    let mut geometry = rows.clone();
+    geometry[7]["frame"]["result"]["torrent"]["size"] = json!(200);
+    geometry[7]["frame"]["result"]["torrent"]["progress"] = json!(0.5);
+    assert!(validate_live_capture(&capture_text(&geometry)).unwrap_err().contains("/size"));
+    let mut unchanged_instance = rows.clone();
+    unchanged_instance[2]["frame"]["args"]["hashes"] = json!(["cd".repeat(20)]);
+    assert!(validate_live_capture(&capture_text(&unchanged_instance)).unwrap_err().contains("/completed_bytes"));
+    let mut later = rows;
+    later.push(json!({"dir":"c2s","frame":{"id":5,"op":"torrents.get","args":{"hash":hash}}}));
+    let mut changed = later[7]["frame"].clone();
+    changed["id"] = json!(5);
+    changed["result"]["torrent"]["completed_bytes"] = json!(50);
+    changed["result"]["torrent"]["progress"] = json!(0.5);
+    later.push(json!({"dir":"s2c","frame":changed}));
+    assert!(validate_live_capture(&capture_text(&later)).unwrap_err().contains("/completed_bytes"));
+    println!("confirmed removal resets only completion; pending/failed/unrelated removal, later drift and changed geometry still fail");
 }

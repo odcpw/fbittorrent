@@ -3,7 +3,7 @@
 // Transport-independent API 1 session; one instance per shell service.
 var IDEMPOTENT = ["torrents.start", "torrents.stop", "torrents.set_seed", "torrents.set_files",
   "torrents.set_upload_limit", "torrents.add", "torrents.commit", "torrents.discard",
-  "torrents.force_start", "app.settings.set", "transfer.set_limits", "transfer.set_alt",
+  "torrents.force_start", "app.settings.set", "app.clipboard.dismiss", "transfer.set_limits", "transfer.set_alt",
   "search.set_provider", "rss.set_read", "rss.mark_feed_read", "shows.set_quality",
   "shows.set_read", "shows.mark_show_read", "torrents.reannounce", "torrents.set_download_limit",
   "torrents.add_tracker", "torrents.remove_tracker"]
@@ -23,6 +23,7 @@ function utf8Bytes(s) {
 
 function create(io, options) {
   var o = options || {}, now = o.now || Date.now
+  var subscriptionGeneration=0
   var c = { online: false, instance: "", caps: [], hello: null, pending: Object.create(null), actions: Object.create(null),
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
@@ -31,9 +32,9 @@ function create(io, options) {
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
   function fail(entry, failure, status) {
-    if (entry.ref) c.actions[entry.ref] = { op: entry.op, status: status || "failed", error: failure }
+    if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
     if (entry.callback) entry.callback(null, failure)
-    c.lastError = failure
+    if(!entry.quiet)c.lastError = failure
   }
   function write(entry, resend) {
     var frame = { id: c.nextId++, op: entry.op }
@@ -64,7 +65,7 @@ function create(io, options) {
       if (settings.callback) settings.callback(null, unsupported)
       changed(); return false
     }
-    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance,
+    var entry = { op: op, args: args, callback: settings.callback, instance: c.instance, quiet:settings.quiet===true && !settings.mutating,
       ref: settings.mutating ? "qs-" + c.started + "-" + c.nextRef++ : undefined }
     if (entry.ref) {
       var refs = Object.keys(c.actions)
@@ -97,7 +98,7 @@ function create(io, options) {
   }
   c.disconnected = function() {
     var wasOnline = c.online
-    c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
+    subscriptionGeneration++; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (!c.graceful && wasOnline) c.reconnecting = true
     c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
     // Unsent actions have no unknown outcome and are never replayed.
@@ -145,20 +146,31 @@ function create(io, options) {
   function topics() {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
-    return wanted.concat(c.details).slice(0, 16)
+    if(c.dashboardVisible || c.caps.indexOf("clipboard")>=0)wanted.push("events")
+    if(c.dashboardVisible && c.caps.indexOf("settings")>=0)wanted.push("settings")
+    if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
+    if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")
+    return wanted
   }
   c.subscribeAll = function() {
+    subscriptionGeneration++
     Object.keys(c.subs).forEach(function(sub) { c.request("unsubscribe", { sub: Number(sub) }) })
     c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (c.caps.indexOf("subscribe") < 0 || c.mode === "poll") { c.mode = "poll"; c.pollAt = 0; c.poll(); return }
-    c.request("subscribe", { topics: topics(), interval_ms: c.popupOpen || c.dashboardVisible ? 1000 : 5000 }, {
-      callback: function(result, failure) {
-        if (failure && failure.code === "unknown_op") { c.mode = "poll"; c.pollAt = 0; c.poll() }
-        else if (result) c.subs[result.sub] = { topics: result.topics, rev: 0, resync: false }
-        changed()
-      }
+    var generation=++subscriptionGeneration
+    var groups=[topics()].concat(c.details.slice(0,12).map(function(topic){return [topic]}))
+    groups.forEach(function(group){
+      c.request("subscribe", {topics:group,interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000}, {
+        callback:function(result,failure){
+          if(result && generation!==subscriptionGeneration){c.request("unsubscribe",{sub:result.sub});return}
+          if(failure && failure.code==="unknown_op"){c.mode="poll";c.pollAt=0;c.poll()}
+          else if(result)c.subs[result.sub]={topics:result.topics,rev:0,resync:false}
+          changed()
+        }
+      })
     })
   }
+
   c.resubscribe = function(topic) {
     // A subscription shares one revision counter across its topics.
     // Rebuild its entire atomic group, never retain a partially ordered group.
@@ -171,6 +183,9 @@ function create(io, options) {
     var active = Object.keys(c.pending).map(function(id) { return c.pending[id].op })
     if (active.indexOf("app.info") < 0) c.request("app.info")
     if (c.caps.indexOf("torrents") >= 0 && active.indexOf("torrents.list") < 0) c.request("torrents.list", {})
+    if(c.dashboardVisible && c.caps.indexOf("shows")>=0 && active.indexOf("shows.list")<0)c.request("shows.list")
+    if(c.dashboardVisible && c.caps.indexOf("rss")>=0 && active.indexOf("rss.feeds")<0)c.request("rss.feeds")
+    if (active.indexOf("app.network") < 0) c.request("app.network")
     if (active.indexOf("transfer.info") < 0) c.request("transfer.info")
   }
   c.tick = function() {
@@ -192,6 +207,13 @@ function create(io, options) {
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) { c.reset("expected an API object"); return }
     c.lastFrame = now()
     if (frame.ev) {
+      if(frame.ev==="bye" && frame.reason==="shutdown") {
+        Object.keys(c.pending).forEach(function(id){
+          var entry=c.pending[id]
+          if(entry.op==="app.shutdown"){if(entry.ref)c.actions[entry.ref].status="confirmed";delete c.pending[id]}
+        })
+        Object.keys(c.awaiting).forEach(function(ref){if(c.awaiting[ref].op==="app.shutdown"){c.actions[ref].status="confirmed";delete c.awaiting[ref]}})
+      }
       if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false }
       if (frame.ev === "error") c.lastError = frame.error
       if (frame.ev === "mutation.result") {

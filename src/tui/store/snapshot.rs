@@ -6,6 +6,7 @@ pub(super) struct Snapshot {
     pub bytes: usize,
     pub torrents: BTreeMap<String, api::Torrent>,
     pub files: BTreeMap<String, api::File>,
+    pub searches: BTreeMap<String, api::SearchItem>,
     pub peers: BTreeMap<String, api::Peer>,
     pub events: Vec<api::Event>,
     pub logs: BTreeMap<u64, api::LogEntry>,
@@ -20,6 +21,7 @@ impl Snapshot {
             bytes: 0,
             torrents: BTreeMap::new(),
             files: BTreeMap::new(),
+            searches: BTreeMap::new(),
             peers: BTreeMap::new(),
             events: Vec::new(),
             logs: BTreeMap::new(),
@@ -28,7 +30,7 @@ impl Snapshot {
         }
     }
     pub fn len(&self) -> usize {
-        self.peers.len() + self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
+        self.peers.len() + self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.searches.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
     }
     pub fn append(
         &mut self,
@@ -57,6 +59,9 @@ impl Snapshot {
                 (api::Topic::Files(_), api::Item::File(row)) => {
                     keys.insert(row.index.to_string())
                         && !self.files.contains_key(&row.index.to_string())
+                }
+                (api::Topic::Search(_), api::Item::Search(row)) => {
+                    keys.insert(row.key.clone()) && !self.searches.contains_key(&row.key)
                 }
                 (api::Topic::Events, api::Item::Event(_)) => {
                     self.events.len() + items.len() <= MAX_EVENTS
@@ -87,6 +92,7 @@ impl Snapshot {
                 api::Item::Log(entry) => {
                     self.logs.insert(entry.seq, entry.clone());
                 }
+                api::Item::Search(row) => { self.searches.insert(row.key.clone(),row.clone()); },
                 api::Item::Feed(row)=>{self.feeds.insert(row.id.clone(),row.clone());},
                 api::Item::FeedItem(row)=>{self.feed_items.insert(row.id.clone(),row.clone());},
             }

@@ -111,6 +111,9 @@ pub(crate) struct ManagedTorrentLocked {
 
 #[derive(Default)]
 pub(crate) struct ManagedTorrentOptions {
+    // Consumed once. A later error, recheck or rebuilt initializer must never
+    // re-use an admission-time trusted snapshot.
+    pub trusted_have_pieces: parking_lot::Mutex<Option<Vec<u8>>>,
     pub force_tracker_interval: Option<Duration>,
     pub peer_connect_timeout: Option<Duration>,
     pub peer_encryption: crate::PeerEncryption,
@@ -190,6 +193,7 @@ pub struct ManagedTorrentShared {
     /// Metainfo order (tiers first, then URLs within each tier). In particular,
     /// private first-tracker selection must happen before any set conversion.
     pub trackers: Arc<tracker_comms::TrackerSet>,
+    pub tracker_stats: Arc<tracker_comms::TrackerStats>,
     pub peer_id: Id20,
     pub span: tracing::Span,
     pub(crate) options: ManagedTorrentOptions,
@@ -257,6 +261,14 @@ impl ManagedTorrent {
     pub fn add_tracker(&self, url: url::Url) -> anyhow::Result<bool> { self.shared.trackers.add(url) }
 
     pub fn remove_tracker(&self, url: &url::Url) -> bool { self.shared.trackers.remove(url) }
+
+    /// Ordered observations survive pause/run-region replacement.
+    pub fn tracker_stats(&self) -> Vec<tracker_comms::TrackerStat> {
+        self.shared.tracker_stats.snapshot()
+    }
+
+    /// Wake tracker interval/backoff sleeps; repeated requests within 60 s coalesce.
+    pub fn announce_now(&self) { self.shared.tracker_stats.announce_now(); }
 
     pub fn shared(&self) -> &ManagedTorrentShared {
         &self.shared

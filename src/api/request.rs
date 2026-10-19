@@ -1,6 +1,6 @@
 //! Strict client input. Runtime policies (in-flight IDs, hello deadlines,
 //! capabilities, path opening and mutation refs) belong to the server.
-use super::scalar::*;
+use super::{scalar::*, search::*};
 use super::rss::*;
 use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -301,6 +301,57 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.commit")]
+    TorrentsCommit { args: CommitArgs },
+    #[serde(rename="torrents.discard")]
+    TorrentsDiscard { args: HashArgs },
+    #[serde(rename="torrents.move")]
+    TorrentsMove {args: MoveArgs},
+    #[serde(rename="torrents.trackers")]
+    TorrentsTrackers { args: HashArgs },
+    #[serde(rename="torrents.reannounce")]
+    TorrentsReannounce { args: HashesArgs },
+    #[serde(rename="torrents.force_start")]
+    TorrentsForceStart { args: SetSeedArgs },
+    #[serde(rename="torrents.queue_move")]
+    TorrentsQueueMove { args: QueueMoveArgs },
+    #[serde(rename = "search.start")]
+    SearchStart {
+        args: SearchStartArgs,
+    },
+    #[serde(rename = "search.stop")]
+    SearchStop {
+        args: SearchIdArgs,
+    },
+    #[serde(rename = "search.providers")]
+    SearchProviders {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.set_provider")]
+    SearchSetProvider {
+        args: SetProviderArgs,
+    },
+    #[serde(rename = "search.install")]
+    SearchInstall {
+        args: SearchInstallArgs,
+    },
+    #[serde(rename = "search.browse_sources")]
+    SearchBrowseSources {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.browse")]
+    SearchBrowse {
+        args: SearchBrowseArgs,
+    },
+    #[serde(rename = "search.grab")]
+    SearchGrab {
+        args: SearchGrabArgs,
+    },
+
+    #[serde(rename = "torrents.recheck")]
+    TorrentsRecheck { args: HashesArgs },
     #[serde(rename="shows.list")] ShowsList {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
     #[serde(rename="shows.follow")] ShowsFollow {args:ShowFollowArgs},
     #[serde(rename="shows.unfollow")] ShowsUnfollow {args:ShowArgs},
@@ -325,6 +376,8 @@ pub enum Call {
     AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
     #[serde(rename = "app.stats")]
     AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
+    #[serde(rename = "app.free_space")]
+    AppFreeSpace { args: super::FreeSpaceArgs },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -402,6 +455,23 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsCommit {..}=>"torrents.commit",
+            Self::TorrentsDiscard {..}=>"torrents.discard",
+            Self::TorrentsMove {..}=>"torrents.move",
+            Self::TorrentsTrackers {..} => "torrents.trackers",
+            Self::TorrentsReannounce {..} => "torrents.reannounce",
+            Self::TorrentsForceStart {..} => "torrents.force_start",
+            Self::TorrentsQueueMove {..} => "torrents.queue_move",
+            Self::SearchStart { .. } => "search.start",
+            Self::SearchStop { .. } => "search.stop",
+            Self::SearchProviders { .. } => "search.providers",
+            Self::SearchSetProvider { .. } => "search.set_provider",
+            Self::SearchInstall { .. } => "search.install",
+            Self::SearchBrowseSources { .. } => "search.browse_sources",
+            Self::SearchBrowse { .. } => "search.browse",
+            Self::SearchGrab { .. } => "search.grab",
+
+            Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
             Self::ShowsReleases {..}=>"shows.releases",Self::ShowsSetRead {..}=>"shows.set_read",Self::ShowsMarkShowRead {..}=>"shows.mark_show_read",Self::ShowsUndoRead {..}=>"shows.undo_read",Self::ShowsGrab {..}=>"shows.grab",
             Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
@@ -409,6 +479,7 @@ impl Call {
             Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",
+            Self::AppFreeSpace { .. } => "app.free_space",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",
@@ -458,4 +529,27 @@ fn deserialize_settings_patch<'de, D: Deserializer<'de>>(d: D) -> Result<serde_j
         }
     }
     Ok(patch)
+}
+
+#[derive(Debug,Clone,Copy,PartialEq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum QueueTo { Top, Up, Down, Bottom }
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueMoveArgs { pub hash: Hash, pub to: QueueTo }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveArgs {pub hashes:Hashes,pub save_path:String}
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitArgs {
+    pub hash: Hash,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub files: Option<Vec<u64>>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub seed: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub save_path: Option<String>,
 }

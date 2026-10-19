@@ -90,11 +90,12 @@ impl EngineDispatcher {
                     },
                     ratio_limit: if seed_allowed { -2.0 } else { 0.0 },
                     category: torrent.category,
+                    origin: ledger::origin_from_tags(&torrent.tags),
                     tags: torrent.tags,
                     added_on: torrent.added_on,
                     completion_on: torrent.completion_on,
                     paused: true,
-                    resume_after_migration: was_running, deferred: false,
+                    resume_after_migration: was_running, deferred: false, staged: false, force: false,
                 };
                 record.options(true)?;
                 staged.push((record, bytes));

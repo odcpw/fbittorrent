@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss","shows","peers","dashboard_presence","download_limit","tracker_edit"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","tracker_edit"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -40,6 +40,7 @@ pub fn dispatch(
             connections: serde_json::from_value(counts).unwrap(),
             active_clients: serde_json::from_value(active_counts).unwrap(),
         }),
+        Call::AppFreeSpace { args } => Reply::AppFreeSpace(crate::free_space::inspect(std::path::Path::new(&args.path))),
         Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),
         Call::AppSettingsSet { args } => Reply::AppSettingsSet(super::settings::set(daemon, args)?),
         Call::AppInfo { .. } => {

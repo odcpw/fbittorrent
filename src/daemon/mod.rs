@@ -10,6 +10,7 @@ mod inhibit;
 mod clipboard;
 pub(crate) mod rss;
 pub(crate) mod shows;
+pub(crate) mod watch;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -42,14 +43,18 @@ pub struct Daemon {
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
+    pub(crate) undo: Arc<engine::undo::History>,
+    pub(crate) logs: Arc<log::Ring>,
+    resume: Arc<engine::resume::Store>,
     pub(crate) inhibitor: inhibit::Inhibitor,
     pub(crate) clipboard: clipboard::Watcher,
     pub(crate) rss: rss::Service,
     pub(crate) shows: shows::Service,
     pub(crate) peers: crate::api::peers::Sampler,
-    pub(crate) logs: Arc<log::Ring>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
+    pub(crate) search: crate::search::service::Service,
+    pub(crate) watch: Mutex<watch::Watch>,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -253,19 +258,20 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         daemon.replace(Slot::Parked(engine::ParkedLedger::new(
             crate::config::data_dir().join("engine"),
             daemon.lifecycle.clone(),
-        )))?;
+        ).with_undo(daemon.undo.clone())))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface.clone();
         eprintln!("INFO engine starting session");
         let engine =
-            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone()) {
+            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone(), Some(daemon.resume.clone())) {
                 Ok(engine) => engine,
                 Err(_) if cfg.network_interface.is_some() && !network_state(cfg).ready => {
                     return open_slot(daemon, cfg, lock);
                 }
                 Err(error) => return Err(error),
             };
+        engine.dispatcher().attach_undo(daemon.undo.clone());
         eprintln!(
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
@@ -326,6 +332,7 @@ fn supervise(
             timeout.min(Duration::from_secs(1))
         } else { timeout };
         let request = daemon.lifecycle.wait(timeout.min(Duration::from_secs(5)).min(upgrade.wait(Instant::now())));
+        daemon.undo.expire(&crate::config::data_dir().join("engine"));
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -367,6 +374,11 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         directory.clone(),
         Duration::from_secs(5),
     )?);
+    engine::staging::discard_at_start(&crate::config::data_dir().join("engine"))?;
+    crate::search::begin_session()?;
+    struct SearchDrain;
+    impl Drop for SearchDrain { fn drop(&mut self) { crate::search::shutdown_all(); } }
+    let _search_drain = SearchDrain;
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
     let log_capture = log_capture::Capture::install()?;
@@ -393,10 +405,14 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         clipboard: clipboard::Watcher::new()?,
         rss: rss::Service::new()?,
         shows: shows::Service::new()?,
-            peers: Default::default(),
+        peers: Default::default(),
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),
+        undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
+        search: Default::default(),
+        watch: Mutex::new(watch::Watch::open(crate::config::data_dir().join("watch.json"))),
+        resume: Arc::new(engine::resume::Store::open(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
@@ -443,6 +459,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();
     api.stop_accepting();
+    daemon.search.shutdown();
     let began = Instant::now();
     if daemon
         .slot
@@ -468,6 +485,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
             .copied()
             .unwrap_or(StopReason::Panic)
     };
+    if drain_reason==StopReason::Panic {daemon.resume.abandon_clean();}
+    else if let Err(error)=daemon.resume.preserve_parked_clean() {eprintln!("WARN resume parked clean marker unavailable error={error:?}");}
     api.drain(drain_reason);
     drop(api);
     drop(server);

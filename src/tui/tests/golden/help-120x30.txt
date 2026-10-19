@@ -1,10 +1,11 @@
-[ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮0 KiB/s  default
+[ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮iB/s  ↑ 1.0 KiB/s
 ╭ Torrents (3) ───│                                                                                  │─────────────────╮
-│                 │ GLOBAL                                                                           │                 │
-│   NAME          │   (1) Torrents                                                                   │PEED     ETA SFU │
-│ ▌ The Diplomat S│   (2) Search                                                                     │B/s   4m57s SF·  │
-│   Sintel.2010.10│   (3) Shows                                                                      │GiB         SF·  │
-│   Other.Movie.20│   (4) RSS                                                                        │s      0s SF·    │
+│  STATE     NAME │ GLOBAL                                                                           │   ↓    ETA PEERS│
+│▌ ↓ Down    The D│   (z) Turtle limits                                                              │2.1M     4m     3│
+│  ✓ Done    Sinte│   (1) Torrents                                                                   │                 │
+│  ◌ Meta    Other│   (2) Search                                                                     │                3│
+│                 │   (3) Shows                                                                      │                 │
+│                 │   (4) RSS                                                                        │                 │
 │                 │   (Tab) Next screen                                                              │                 │
 │                 │   (Shift+Tab) Previous screen                                                    │                 │
 │                 │   (?) Help                                                                       │                 │
@@ -13,7 +14,9 @@
 │                 │   (Q) Stop fbittorrent                                                           │                 │
 │                 │   (c) Clipboard                                                                  │                 │
 │                 │   (r) Refresh                                                                    │                 │
+│                 │   (L) Log                                                                        │                 │
 │                 │   (a) Add                                                                        │                 │
+│                 │   (v) Card                                                                       │                 │
 │                 │                                                                                  │                 │
 │                 │ SCREEN:TORRENTS                                                                  │                 │
 │                 │   (j/↓) Next                                                                     │                 │
@@ -21,10 +24,7 @@
 │                 │   (g/Home) First                                                                 │                 │
 │                 │   (G/End) Last                                                                   │                 │
 │                 │   (PgDn) Page down                                                               │                 │
-│                 │   (PgUp) Page up                                                                 │                 │
-│                 │   (Enter) Files                                                                  │                 │
-│                 │   (o) Open                                                                       │                 │
-│                 │   (p/Space) Pause/resume                                                         │                 │
-╰─────────────────│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │─────────────────╯
+╰─────────────────│   (PgUp) Page up                                                                 │─────────────────╯
+↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

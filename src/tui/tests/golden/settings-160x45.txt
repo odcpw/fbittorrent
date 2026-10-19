@@ -1,10 +1,10 @@
 [ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
 ╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
-│                                                                                           ││                                                                 │
-│   NAME                                                       DONE       SPEED     ETA SFU ││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
-│ ▌ The Diplomat S04E01 1080p WEB-DL H264-GROUP ████░░░░░░   42.0%   2.0 MiB/s   4m57s SF·  ││                                                                 │
-│   Sintel.2010.1080p                           ██████████  100.0%     1.0 GiB         SF·  ││  state     downloading                                          │
-│   Other.Movie.2026.1080p                    ░░░░░░░░░░       —       0 B/s      0s SF·    ││  progress  42.0%  430.1 MiB of 1.0 GiB                          │
+│  STATE     NAME                                             SIZE     %      ↓    ETA PEERS││                                                                 │
+│▌ ↓ Down    The Diplomat S04E01 1080p WEB-DL H264-GROUP   1.0 GiB   42%   2.1M     4m     3││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
+│  ✓ Done    Sintel.2010.1080p                             1.0 GiB  100%                    ││                                                                 │
+│  ◌ Meta    Other.Movie.2026.1080p                              —     —                   3││  state     ↓ Down · downloading                                 │
+│                                                                                           ││  progress  42.0%  430.1 MiB of 1.0 GiB                          │
 │                                                                                           ││  speed     ↓ 2.0 MiB/s   ↑ 1.0 KiB/s                            │
 │                                                                                           ││  eta       4m57s                                                │
 │                                                                                           ││  peers     3 peers connected                                    │
@@ -16,18 +16,18 @@
 │                                        │   Peer encryption          Prefer encryption                               │                                        │
 │                                        │   VPN connection           Off · ordinary connection                       │the cursor rests here                   │
 │                                        │   Reduce motion            Off                                             │                                        │
-│                                        │ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          │                                        │
+│                                        │   Download limit           Unlimited                                       │                                        │
+│                                        │   Upload limit             Unlimited                                       │                                        │
+│                                        │   Turtle download limit    Unlimited                                       │                                        │
+│                                        │   Turtle upload limit      Unlimited                                       │                                        │
+│                                        │   Peer port                6882                                            │                                        │
+│                                        │ ↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel                     │                                        │
+│                                        │ Limits: bytes/s; K/M suffixes; empty = unlimited.                          │                                        │
 │                                        │                                                                            │                                        │
-│                                        │ Extra downloads wait their turn. Encryption protects peer traffic; your IP │                                        │
-│                                        │ remains visible.                                                           │                                        │
-│                                        │                                                                            │                                        │
-│                                        │ A required VPN blocks torrent transfers when disconnected. Feed and search │                                        │
-│                                        │ websites use your usual connection.                                        │                                        │
-│                                        │                                                                            │                                        │
-│                                        │ VPN binding off                                                            │                                        │
-│                                        │ Changing encryption or VPN reopens the app's engine.                       │                                        │
-│                                        │                                                                            │                                        │
-│                                        │                                                                            │                                        │
+│                                        │ Extra downloads wait. Encryption leaves your IP visible.                   │                                        │
+│                                        │ A required VPN blocks transfers while disconnected.                        │                                        │
+│                                        │ Save to apply draft settings.                                              │                                        │
+│                                        │ Changing encryption, VPN or port reopens the engine.                       │                                        │
 │                                        ╰────────────────────────────────────────────────────────────────────────────╯                                        │
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │

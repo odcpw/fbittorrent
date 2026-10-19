@@ -12,6 +12,46 @@ pub const TABLE: &[Operation] = &[
     Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
 
+    Operation {
+        name: "app.free_space",
+        mutating: false,
+        idempotent: false,
+        since: "P6-11",
+        args: "`path: str` (absolute local directory, ≤4096 bytes, no controls)",
+        result: "`{free_bytes: bytes?, writable: bool}`",
+    },
+    Operation {name:"torrents.commit",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`, `files?`, `seed?`, `save_path?`",result:"`{state: \"done\"}`"},
+    Operation {name:"torrents.discard",mutating:true,idempotent:true,since:"P3-06",
+        args:"`hash`",result:"`{state: \"done\"}`; payload files never deleted"},
+    Operation {name:"torrents.move",mutating:true,idempotent:false,since:"P7-02",
+        args:"`hashes: [hash]` (1..256), `save_path`",result:"`{state: \"pending\", ref}`, then mutation.result"},
+    Operation { name: "torrents.trackers", mutating: false, idempotent: false, since: "P6-01",
+        args: "`hash: hash`", result: "`{trackers: [Tracker]}`" },
+    Operation { name: "torrents.reannounce", mutating: true, idempotent: true, since: "P6-01",
+        args: "`hashes: [hash]` (1..256)", result: "`{state: \"done\"}`" },
+    Operation { name: "search.start", mutating: true, idempotent: false, since: "P3-01",
+        args: "`query`, `providers?`, `limit?`", result: "`{search_id}`" },
+    Operation { name: "search.stop", mutating: true, idempotent: false, since: "P3-01",
+        args: "`search_id`", result: "`{state: \"done\"}`" },
+    Operation { name: "search.providers", mutating: false, idempotent: false, since: "P3-01",
+        args: "none", result: "`{providers: [Provider]}`" },
+    Operation { name: "search.set_provider", mutating: true, idempotent: true, since: "P3-01",
+        args: "`name`, `enabled`", result: "`{state: \"done\"}`" },
+    Operation { name: "search.install", mutating: true, idempotent: false, since: "P3-01",
+        args: "`curated?` or `sources?`", result: "pending ref, then `{installed, failed}`" },
+    Operation { name: "search.browse_sources", mutating: false, idempotent: false, since: "P3-01",
+        args: "none", result: "`{sources: [BrowseSource]}`" },
+    Operation { name: "search.browse", mutating: false, idempotent: false, since: "P3-01",
+        args: "`source`", result: "`{items: [SearchResult]}`" },
+    Operation { name: "search.grab", mutating: true, idempotent: false, since: "P3-01",
+        args: "`search_id` and `key`, or `result`; add options", result: "as `torrents.add`" },
+    Operation { name: "torrents.force_start", mutating: true, idempotent: true, since: "P6-05",
+        args: "`hashes: [hash]` (1..256), `on: bool`", result: "`{state: \"done\"}`" },
+    Operation { name: "torrents.queue_move", mutating: true, idempotent: false, since: "P6-05",
+        args: "`hash: hash`, `to: enum(top|up|down|bottom)`", result: "`{state: \"done\", queue_pos: u64}`" },
+    Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03",
+        args: "`hashes: [hash]` (1..256)", result: "`{state: \"pending\", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}`" },
     Operation{name:"torrents.set_download_limit",mutating:true,idempotent:true,since:"P7-06",args:"`hashes: [hash]`, `bps?: bps|null` (16384..4294967295; omission retains)",result:"`{state: \"done\"}`"},
     Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
@@ -90,8 +130,13 @@ pub const TABLE: &[Operation] = &[
 ];
 
 pub mod app;
+pub mod search;
+pub mod recheck;
+pub mod queue;
+pub mod trackers;
 pub mod rss;
 pub mod shows;
+pub mod moving;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;
@@ -129,6 +174,11 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
             ("hash".into(), state.hash.clone().into()),
             ("reason".into(), state.reason.into()),
         ]));
+        return failure;
+    }
+    if value.downcast_ref::<crate::engine::moving::Busy>().is_some() {
+        let mut failure=error(Busy,"busy",None);
+        failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));
         return failure;
     }
     let text = format!("{value:#}");

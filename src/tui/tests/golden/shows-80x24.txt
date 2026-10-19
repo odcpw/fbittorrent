@@ -1,24 +1,24 @@
-  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS  ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  defa
-╭ Shows (2) ─────────╮╭ All unread · 2 releases · newest first ────────────────╮
-│                    ││                                                        │
-│ ▌ All unread     2 ││ Cached releases · (R) Check all · (←) Browse shows     │
-│   The Diplomat   1 ││      RELEASE SHOW                                      │
-│   Breaking Bad   1 ││ ▌ ●  S05E16  Breaking Bad                              │
-│                    ││   ●↓ S04E01  The Diplomat                              │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-│                    ││                                                        │
-╰────────────────────╯╰────────────────────────────────────────────────────────╯
-[Unread] (Enter) Download  (m) Mark read  (n) Follow show  (a) Add …    (?) Help
+  1 Torrents    2 Search  [ 3 Shows (2) ]  4 RSS       ↓ 2.0 MiB/s  ↑ 1.0 KiB/s
+╭ Shows › All unread · 2 releases · newest first ──────────────────────────────╮
+│Cached releases · (R) Check all · (←) Browse shows                            │
+│  STATE     RELEASE SHOW                                QUAL       SIZE  SEEDS│
+│▌ ● Unread  S05E16  Breaking Bad · Breakin…080p.WEB-DL 1080p  768.0 MiB     42│
+│  ↓ Down    S04E01  The Diplomat · The Dip…080p.WEB-DL 1080p  768.0 MiB     42│
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[Unread] (Enter) Download  (m) Mark read  (v) Card  (n) Follow show …   (?) Help
 Breaking Bad.S05E16.1080p.WEB-DL · Breaking Bad

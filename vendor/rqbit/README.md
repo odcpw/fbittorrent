@@ -28,6 +28,26 @@ verified bitfield. Snapshots can be mutated or dropped independently and never
 flush or modify the source tracker. Native unit tests cover verified live bits,
 paused/absent trackers, clone independence and a 10,000-piece clone below 1 ms.
 
+P6-01 keeps `TrackerStats` on `ManagedTorrentShared`, outside run regions.
+`tracker_stats()` returns URL-sorted owned observations through pause;
+`announce_now()` wakes HTTP/UDP interval and retry timers with event=none,
+coalescing forced announces for sixty seconds. Unsupported schemes and private
+secondary URLs remain visible as not_contacted. Tracker diagnostics strip URL
+queries, including remote error text, before logging or surfacing messages.
+Handle replacement during P7-02 moves transfers the serde-skipped, app-only
+`AddTorrentOptions::tracker_stats` Arc, preserving observation history and the
+monotonic forced-announcement limit across relocation.
+Real local HTTP/UDP tracker tests cover failure, forced success, rate limiting
+and pause retention; the existing private-torrent discovery rules stay intact.
+
+P6-06 adds a serde-skipped, app-only `AddTorrentOptions::trusted_have_pieces`.
+The initializer consumes it once, validates byte-rounded length and zero
+padding, and builds the normal chunk tracker without checksum reads. The app
+owns the clean marker, file-stamp/selection/checksum checks and cache invalidation;
+upstream persistence and fastresume remain rejected. Later error recovery never
+reuses admission-time trusted bits. See the fast-resume section in the engine
+evaluation for the trust boundary and physical-read regression evidence.
+
 The app uses TCP peer transport, DHT, HTTP/HTTPS and UDP trackers, local peer
 discovery, file inclusion, sequential piece scheduling, and upload limits.
 P6-07 adds `ManagedTorrent::set_upload_bps(Option<u64>)` for synchronous

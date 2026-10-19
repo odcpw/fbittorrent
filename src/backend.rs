@@ -176,16 +176,27 @@ pub fn start_for_legacy_migration(cfg: &Config, client: &Client) -> Result<bool>
 
 /// Open the shell panel when installed, otherwise open an attached TUI terminal.
 pub fn dashboard(view: Option<&str>, query: Option<&str>) -> Result<()> {
-    let manifest = dirs::config_dir().context("no config directory")?.join("omarchy/plugins/oliver.torrents/manifest.json");
-    let panel = std::fs::read(&manifest).ok().and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|value| value["kinds"].as_array().is_some_and(|kinds| kinds.iter().any(|kind| kind == "panel")));
-    if panel {
-        let payload = serde_json::json!({"view": view.unwrap_or("torrents"), "query": query.unwrap_or("")}).to_string();
-        match Command::new("omarchy-shell").args(["shell", "summon", "oliver.torrents", &payload]).status() {
-            Ok(status) if status.success() => return Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-            result => return Err(crate::agent::AppError::new(crate::agent::Code::Upstream, format!("could not summon torrent dashboard: {result:?}")).into()),
-        }
-    }
+    dashboard_hash(view,query,None)
+}
+
+pub fn dashboard_hash(view: Option<&str>,query: Option<&str>,hash: Option<&str>) -> Result<()> {
+    let mut payload=serde_json::json!({"view":view.unwrap_or("torrents"),"query":query.unwrap_or("")});
+    if let Some(hash)=hash {payload["hash"]=serde_json::json!(hash);}
+    if summon_dashboard(&payload)? {return Ok(())}
     open_app()
+}
+
+/// Structured argv only; callers can route a confirmation without adding first.
+pub fn summon_dashboard(payload: &serde_json::Value) -> Result<bool> {
+    let manifest=dirs::config_dir().context("no config directory")?.join("omarchy/plugins/oliver.torrents/manifest.json");
+    let panel=std::fs::read(&manifest).ok().and_then(|bytes|serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|value|value["kinds"].as_array().is_some_and(|kinds|kinds.iter().any(|kind|kind=="panel")));
+    if !panel {return Ok(false)}
+    let payload=serde_json::to_string(payload)?;
+    if payload.len()>65536 {return Err(crate::agent::AppError::new(crate::agent::Code::Usage,"dashboard request exceeds 65536 bytes").into())}
+    match Command::new("omarchy-shell").args(["shell","summon","oliver.torrents",&payload]).stdout(Stdio::null()).status() {
+        Ok(status) if status.success()=>Ok(true),
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok(false),
+        result=>Err(crate::agent::AppError::new(crate::agent::Code::Upstream,format!("could not summon torrent dashboard: {result:?}")).into()),
+    }
 }

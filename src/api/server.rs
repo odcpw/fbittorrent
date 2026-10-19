@@ -76,6 +76,8 @@ type Frame = Value;
 #[derive(Clone)]
 enum Confirmation {
     Worker,
+    Recheck(Arc<crate::engine::recheck::Batch>),
+    Move(Arc<crate::engine::moving::Batch>),
     Metadata(Reply),
     Engine(u64),
 }
@@ -387,6 +389,9 @@ impl Server {
             StopReason::Upgrade => ByeReason::Upgrade,
             _ => ByeReason::Shutdown,
         };
+        // Engine-slot drain joins rechecks before API drain. Publish their
+        // terminal receipts before bye, even though the observer has stopped.
+        self.shared.observe_mutations();
         for client in self.shared.clients.lock().unwrap().values() {
             let mut pending = client.pending.lock().unwrap();
             for id in pending.keys() {

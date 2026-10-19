@@ -1,6 +1,7 @@
 .pragma library
 .import "Glyphs.js" as Glyphs
 .import "Model.js" as Model
+.import "PopupState.js" as PopupState
 
 function describe(svc) {
   svc=svc || {}
@@ -22,7 +23,9 @@ function describe(svc) {
   if (!ready && svc.client && svc.client.caps.indexOf("watch")>=0 && svc.store && svc.store.firstReady) ready=svc.store.firstReady()
   var dl=summary.dl_bps===undefined ? status.dl : summary.dl_bps
   var ul=summary.ul_bps===undefined ? status.up : summary.ul_bps
-  if (counts.error>0 || svc.backendState==="error") {
+  if (summary.disk && summary.disk.low) {
+    result.state="disk_low"; result.glyph=Glyphs.error; result.tone="urgent"; result.tooltip=PopupState.diskBanner(summary.disk)
+  } else if (counts.error>0 || svc.backendState==="error") {
     result.state="error"; result.glyph=Glyphs.error; result.tone="urgent"
     result.tooltip=error && error.error ? error.error : counts.error>0 ? "Torrent error · " + counts.error + " needs attention" : svc.lastError || "Engine error"
   } else if (svc.backendState==="parked" || (summary.network && summary.network.state==="waiting")) {

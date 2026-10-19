@@ -5,7 +5,7 @@
       null,
       false
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "size",
@@ -69,7 +69,7 @@
       -1,
       false
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "rate",
@@ -77,7 +77,7 @@
       null,
       false
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "rate",
@@ -85,7 +85,7 @@
       null,
       true
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "rate",
@@ -149,7 +149,7 @@
       null,
       false
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "eta",
@@ -157,7 +157,7 @@
       -1,
       true
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "eta",
@@ -236,21 +236,21 @@
     "args": [
       null
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "percent",
     "args": [
       -0.1
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "percent",
     "args": [
       1.1
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "percent",
@@ -321,7 +321,7 @@
     "args": [
       null
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "count",
@@ -342,21 +342,21 @@
     "args": [
       10000
     ],
-    "expect": "10\u2009000"
+    "expect": "10 000"
   },
   {
     "fn": "count",
     "args": [
       1234567
     ],
-    "expect": "1\u2009234\u2009567"
+    "expect": "1 234 567"
   },
   {
     "fn": "count",
     "args": [
       1.2
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "when",
@@ -388,7 +388,7 @@
       null,
       "2026-10-19T13:00:00Z"
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "when",
@@ -396,7 +396,7 @@
       "bad",
       "2026-10-19T13:00:00Z"
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "ago",
@@ -428,7 +428,7 @@
       null,
       "2026-10-19T13:00:00Z"
     ],
-    "expect": "\u2014"
+    "expect": "—"
   },
   {
     "fn": "when",
@@ -445,5 +445,61 @@
       1792414800
     ],
     "expect": "12 s ago"
+  },
+  {
+    "fn": "stateLabel",
+    "args": [
+      {
+        "state": "downloading",
+        "playable": {
+          "file": 0,
+          "ready": true,
+          "prefix_bytes": 33554432,
+          "acked": false,
+          "stall_free": true,
+          "buffered_s": 32
+        }
+      }
+    ],
+    "expect": "Ready to watch"
+  },
+  {
+    "fn": "stateLabel",
+    "args": [
+      {
+        "state": "downloading",
+        "playable": {
+          "ready": true,
+          "stall_free": false,
+          "buffered_s": 32
+        }
+      }
+    ],
+    "expect": "Playable · may stall"
+  },
+  {
+    "fn": "stateLabel",
+    "args": [
+      {
+        "state": "downloading",
+        "playable": {
+          "ready": true,
+          "buffered_s": 120
+        }
+      }
+    ],
+    "expect": "Ready to watch"
+  },
+  {
+    "fn": "stateLabel",
+    "args": [
+      {
+        "state": "downloading",
+        "playable": {
+          "ready": true
+        }
+      }
+    ],
+    "expect": "Playable · may stall"
   }
 ]

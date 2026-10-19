@@ -20,6 +20,8 @@ pub(super) struct Record {
     pub(super) ratio_limit: f64,
     pub(super) category: String,
     pub(super) tags: String,
+    #[serde(default = "manual_origin")]
+    pub(super) origin: String,
     pub(super) added_on: i64,
     pub(super) completion_on: i64,
     // Durable user intent. Queue and completion suspension never rewrite this.
@@ -28,7 +30,12 @@ pub(super) struct Record {
     pub(super) resume_after_migration: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub(super) deferred: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) staged: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) force: bool,
 }
+fn manual_origin() -> String { "manual".into() }
 fn is_false(value: &bool) -> bool { !value }
 
 impl Record {
@@ -63,9 +70,9 @@ impl Record {
             hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
-            category: options.category.clone(), tags: options.tags.clone(),
+            category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||origin_from_tags(&options.tags)),
             added_on: now(), completion_on: 0, paused: options.stopped,
-            resume_after_migration: false, deferred: true,
+            resume_after_migration: false, deferred: true, staged: false, force: false,
         };
         record.options(true)?; // Physical transfer is paused; saved intent stays explicit.
         Ok(record)
@@ -137,7 +144,7 @@ pub(super) struct Ledger {
     pub(super) records: Vec<Record>,
 }
 
-fn validate_info_hash(hash: &str) -> Result<()> {
+pub(super) fn validate_info_hash(hash: &str) -> Result<()> {
     if hash.len() != 40
         || !hash
             .bytes()
@@ -154,12 +161,22 @@ pub(super) fn read_ledger(path: &Path) -> Result<Ledger> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Ledger::default()),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    let ledger: Ledger = serde_json::from_slice(&bytes).with_context(|| {
+    let mut ledger: Ledger = serde_json::from_slice(&bytes).with_context(|| {
         format!(
             "reading saved torrent records {}; the file has been preserved",
             path.display()
         )
     })?;
+    // Pre-P6-08 records encoded attribution only as a legacy tag. Keep it when
+    // the new field was absent; an explicit manual value is authoritative.
+    #[derive(Deserialize)] struct OriginField { origin: Option<String> }
+    #[derive(Deserialize)] struct OriginFields { records: Vec<OriginField> }
+    if ledger.records.iter().any(|r|r.origin=="manual" && origin_from_tags(&r.tags)!="manual") {
+        let fields:OriginFields=serde_json::from_slice(&bytes)?;
+        for (record, field) in ledger.records.iter_mut().zip(fields.records) {
+            if field.origin.is_none() {record.origin=origin_from_tags(&record.tags);}
+        }
+    }
     let mut hashes = HashSet::new();
     for record in &ledger.records {
         validate_info_hash(&record.hash).with_context(|| {
@@ -207,6 +224,7 @@ impl Inner {
             .create(true)
             .truncate(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(&temporary)
             .await?;
         // mode() only applies to creation; a pre-upgrade temporary may be 0644.
@@ -248,6 +266,7 @@ pub(super) fn save_parked_ledger(directory: &Path, ledger: &Ledger) -> Result<()
         .create(true)
         .truncate(true)
         .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&temporary)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(&serde_json::to_vec_pretty(ledger)?)?;
@@ -305,6 +324,11 @@ impl EngineDispatcher {
 #[path = "tests/ledger.rs"]
 mod tests;
 
+
+pub(super) fn origin_from_tags(tags:&str)->String {
+    tags.split(',').find_map(|tag|tag.strip_prefix("fbt-origin:")).unwrap_or("manual").into()
+}
+
 #[cfg(test)]mod download_cap_tests {
     use super::*;
     #[test]fn current_record_load_and_cap_persistence(){
@@ -323,7 +347,7 @@ mod tracker_edit_tests {
     use super::*;
     #[test]
     fn tracker_record_preserves_edits_and_loads_today_fields() {
-        let mut record=Record::deferred_intent(&ops::AddRequest{sources:Vec::new(),torrent:None,save_path:None,upload_limit:32768,ratio_limit:0.0,stopped:true,category:String::new(),tags:String::new()},Path::new("/tmp"),"56".repeat(20),"fixture".into(),String::new(),None).unwrap();
+        let mut record=Record::deferred_intent(&ops::AddRequest{sources:Vec::new(),torrent:None,save_path:None,upload_limit:32768,ratio_limit:0.0,stopped:true,category:String::new(),tags:String::new(),origin:None},Path::new("/tmp"),"56".repeat(20),"fixture".into(),String::new(),None).unwrap();
         let today=serde_json::to_value(&record).unwrap();
         assert!(today.get("trackers").is_none());assert!(today.get("removed_trackers").is_none());
         assert!(serde_json::from_value::<Record>(today).unwrap().trackers.is_empty());

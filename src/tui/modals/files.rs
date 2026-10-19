@@ -21,10 +21,11 @@ impl TuiApp {
         let presence = self.presence.clone();
         Cmd::task(move || {
             if cfg.native() {
+                let id=presence.as_ref().map(|connection|connection.id);
                 let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::files(&connection,&hash));
-                return Msg::Files(hash,result.map_err(|error|error.to_string()));
+                return Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())};
             }
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let r = c.login().and_then(|_| c.files(&hash)).map_err(|e| e.to_string());
             Msg::Files(hash, r)
         })
@@ -36,10 +37,11 @@ impl TuiApp {
         let h = hash.clone();
         Cmd::task(move || {
             if cfg.native() {
+                let id=presence.as_ref().map(|connection|connection.id);
                 let result=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped")).and_then(|connection|remote::set_files(&connection,&h,&ids,prio));
-                return Msg::Files(hash,result.map_err(|error|error.to_string()));
+                return Msg::ApiFiles {connection:id,hash,result:result.map_err(|error|error.to_string())};
             }
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let r = c.login().and_then(|_| c.set_file_priority(&h, &ids, prio)).and_then(|_| c.files(&h)).map_err(|e| e.to_string());
             Msg::Files(hash, r)
         })
@@ -58,7 +60,7 @@ impl TuiApp {
         let cur = sel.and_then(|i| m.files.get(i)).cloned();
         let all_ids: Vec<i64> = m.files.iter().map(|f| f.index).collect();
         match intent {
-            actions::Intent::Cancel => { self.files = None; }
+            actions::Intent::Cancel => { self.files = None; self.details = None; }
             actions::Intent::Down => { if n > 0 { m.list.borrow_mut().select_next(n); } }
             actions::Intent::Up => m.list.borrow_mut().select_previous(),
             actions::Intent::First => m.list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
@@ -81,6 +83,7 @@ impl TuiApp {
     pub(super) fn view_files(&self, frame: &mut Frame) {
         let th = &self.theme;
         let Some(m) = &self.files else { return };
+        self.rects.borrow_mut().overlay();
         let area = files_area(frame.bounds());
         let w = area.width;
         let blank = Text::from_lines((0..area.height).map(|_| Line::styled(" ".repeat(area.width as usize), Style::new().bg(th.selection))));
@@ -89,13 +92,19 @@ impl TuiApp {
         let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title).padding(Sides::horizontal(1));
         let inner = block.inner(area);
         block.render(area, frame);
+        self.view_file_contents(inner,frame);
+    }
+
+    pub(super) fn view_file_contents(&self, inner: Rect, frame: &mut Frame) {
+        let Some(m) = &self.files else { return };
+        let th = &self.theme;
         let bg = Style::new().bg(th.selection);
         if m.loading {
             Paragraph::new(format!("{} loading file list…", SPINNER[self.tick % 4])).style(bg.fg(th.dim)).render(inner, frame);
             return;
         }
         if !m.error.is_empty() {
-            Paragraph::new(m.error.clone()).style(bg.fg(th.red)).wrap(WrapMode::Word).render(inner, frame);
+            Paragraph::new(th.error_message(&m.error)).style(th.err().bg(th.selection)).wrap(WrapMode::Word).render(inner, frame);
             return;
         }
         if m.files.is_empty() {
@@ -103,30 +112,31 @@ impl TuiApp {
             return;
         }
         let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(1)]).split(inner);
+        self.rects.borrow_mut().files=Some(rows[1]);
         let iw = inner.width.saturating_sub(2) as usize;
         let tail_w = 1 + 9 + 1 + 6 + 1 + 7;
         let name_w = iw.saturating_sub(4 + tail_w);
         let header = Line::from_spans([Span::styled(format!("      {}", cell("FILE", name_w)), bg.fg(th.dim).bold()), Span::styled(format!(" {:>9} {:>6} {:>7}", "SIZE", "DONE", "PRIO"), bg.fg(th.dim).bold())]);
         Paragraph::new(Text::from_line(header)).wrap(WrapMode::None).render(rows[0], frame);
         let elapsed = self.marquee_elapsed();
-        let items: Vec<ListItem> = m.files.iter().enumerate().map(|(i, f)| {
+        self.view_rows(MouseList::Files,rows[1],m.files.len(),
+            |i|layout::fingerprint(&(&m.files[i],self.cfg.native())),
+            |i|{let f=&m.files[i];
             let (mark, prio, pst) = match f.priority {
                 0 => ("[ ]", "skip", bg.fg(th.dim)),
-                6 => ("[x]", "high", bg.fg(th.yellow)),
-                7 => ("[x]", "max", bg.fg(th.green)),
+                6 => ("[x]", "high", th.warn().bg(th.selection)),
+                7 => ("[x]", "max", th.ok().bg(th.selection)),
                 _ => ("[x]", if self.cfg.native() { "include" } else { "normal" }, bg.fg(th.fg)),
             };
             let name_style = if f.priority == 0 { bg.fg(th.dim) } else { bg.fg(th.fg) };
-            li(Line::from_spans([
+            Line::from_spans([
                 Span::styled(format!("{mark} "), name_style),
                 Span::styled(readable_cell(&f.name, name_w, hovered_for(&m.list,i,elapsed)), name_style),
                 Span::styled(format!(" {:>9} {:>6}", human_bytes(f.size), if f.progress_known { format!("{:.0}%", f.progress * 100.0) } else { "—".into() }), bg.fg(th.dim)),
                 Span::styled(format!(" {prio:>7}"), pst),
-            ]))
-        }).collect();
-        let selected: i64 = m.files.iter().filter(|f| f.priority > 0).map(|f| f.size).sum();
-        let list = List::new(items).style(bg).highlight_style(th.selected().bg(th.accent).fg(th.selection)).highlight_symbol("▌");
-        StatefulWidget::render(&list, rows[1], frame, &mut m.list.borrow_mut());
+            ])
+            },frame);
+        let selected:i64=m.files.iter().filter(|f|f.priority>0).map(|f|f.size).sum();
         let controls = if self.cfg.native() { "Space include/skip · a/n all/none · Esc close" }
             else { "Space toggle · 1 normal · 2 high · 3 max · a/n all/none · Esc close" };
         let foot = format!("{}/{} · {} · {controls}",

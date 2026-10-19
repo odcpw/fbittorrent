@@ -21,7 +21,9 @@ def config(box, **values):
     text = path.read_text()
     for key, value in values.items():
         import re
-        text = re.sub(r'^'+key+r' = .*$', key+' = '+json.dumps(value), text, flags=re.M)
+        line = key+' = '+json.dumps(value)
+        text, count = re.subn(r'^'+key+r' = .*$', line, text, flags=re.M)
+        if not count: text += line+'\n'
     path.write_text(text)
 
 
@@ -218,6 +220,8 @@ def notify_killed_handler(binary,systemd):
 
 def notify_handler_cli_once(binary,systemd):
     with owned('notify_handler_cli_once',binary,systemd) as (case,box,h,p,client):
+        # This case tests immediate-add notifications, not handler confirmation.
+        config(box,handler='add')
         for index,extra in enumerate([[],['--json'],['--quiet']]):
             root=box.root/f'click-{index}';root.mkdir();payload=root/'clicked.bin';payload.write_bytes(os.urandom(16384))
             item=fixtures.torrent_fixture(root,[payload]);fixtures.corrupt_byte(payload,0)

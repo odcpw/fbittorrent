@@ -15,6 +15,7 @@ fn key_field(topic:&Topic)->&'static str {
         Topic::Shows=>"imdb",Topic::ShowReleases(_)=>"key",
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
+        Topic::Search(_) => "key",
         Topic::Peers(_) => "addr",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),

@@ -12,13 +12,17 @@ function equal(a, b) {
 }
 function safeField(key) { return key !== "__proto__" && key !== "constructor" && key !== "prototype" }
 function ready(row) { return !!(row && row.playable && row.playable.ready) }
+// Name comparisons dominate cold UI sorts; avoid dynamic field lookup and
+// comparing 40-byte hashes unless the case-folded names actually tie.
+function compareNames(a,b) {return a.name<b.name ? -1 : a.name>b.name ? 1 : a.hash<b.hash ? -1 : a.hash>b.hash ? 1 : 0}
+function compareNamesReverse(a,b) {return a.name<b.name ? 1 : a.name>b.name ? -1 : a.hash<b.hash ? -1 : a.hash>b.hash ? 1 : 0}
 function create(options) {
   var o = options || {}, clock = o.now || Date.now
   var s = { torrents: dictionary(), summary: {}, network: {}, settings: {}, info: {}, transfer: {},
-    topics: dictionary(), subscriptions: dictionary(), snapshots: dictionary(), calls: dictionary(),
+    badges: {}, topics: dictionary(), subscriptions: dictionary(), snapshots: dictionary(), calls: dictionary(),
     mutations: dictionary(), events: [], eventSeen: dictionary(), cards: dictionary(), counts: {total:0, ready:0, staged:0},
     changes: [], hasTorrents: false, membershipChanged: false, proto: undefined, compatible: false, instance: "",
-    generation: 0, membershipVersion: 0, sortVersions: {added:0,name:0,progress:0,rate:0,size:0,state:0,eta:0}, sortNames: dictionary(), sortValues: dictionary(), keys: [], keysDirty: true, sortCache: dictionary(), lastError: null }
+    generation: 0, membershipVersion: 0, sortVersions: {added:0,name:0,progress:0,rate:0,size:0,state:0,eta:0,up:0,peers:0,ratio:0}, sortNames: dictionary(), sortValues: dictionary(), keys: [], keysDirty: true, sortCache: dictionary(), lastError: null }
   STATES.forEach(function(state) { s.counts[state] = 0 })
   var errors=dictionary(), unacknowledged=dictionary()
   s.firstError=function() {for (var hash in errors) return s.torrents[hash]; return null}
@@ -34,7 +38,7 @@ function create(options) {
     s.changes.push({hash:hash, fields:fields})
     s.membershipChanged = s.membershipChanged || membership
     if (membership) s.membershipVersion++
-    var sortFields = {added_at:"added", name:"name", progress:"progress", dl_bps:"rate", size:"size", state:"state", eta_s:"eta"}
+    var sortFields = {added_at:"added", name:"name", progress:"progress", dl_bps:"rate", size:"size", state:"state", eta_s:"eta",ul_bps:"up",peers:"peers",ratio:"ratio"}
     ;(fields || []).forEach(function(field) { if (sortFields[field]) s.sortVersions[sortFields[field]]++ })
     s.generation++
   }
@@ -68,7 +72,7 @@ function create(options) {
     var rank = STATES.indexOf(next.state)
     var values = s.sortValues[hash] || {hash:hash}
     values.added_at = next.added_at; values.name = s.sortNames[hash]; values.progress = next.progress
-    values.dl_bps = next.dl_bps; values.size = next.size; values.state = rank < 0 ? STATES.length : rank; values.eta_s = next.eta_s
+    values.dl_bps = next.dl_bps; values.size = next.size; values.state = rank < 0 ? STATES.length : rank; values.eta_s = next.eta_s; values.ul_bps=next.ul_bps;values.peers=next.peers;values.ratio=next.ratio
     s.sortValues[hash] = values
     touched(hash, fields, added)
   }
@@ -85,15 +89,34 @@ function create(options) {
   }
   function topicKey(topic, row) {
     if (topic === "torrents") return row.hash
+    if (/^search:/.test(topic)) return row.key
+    if (/^torrent:.*\.trackers$/.test(topic)) return row.url
     if (/^torrent:.*\.peers$/.test(topic)) return row.addr
     if (/^torrent:.*\.files$/.test(topic)) return String(row.index)
-    if (topic === "events") return String(row.seq)
+    if (topic === "events" || topic === "log") return String(row.seq)
     return String(row.hash !== undefined ? row.hash : row.id !== undefined ? row.id : row.imdb)
   }
+  function trimLog(){
+    var target=s.topics.log || dictionary(),keys=Object.keys(target)
+    if(keys.length>1000){keys.sort(function(a,b){return Number(a)-Number(b)});keys.slice(0,keys.length-1000).forEach(function(k){delete target[k]})}
+  }
+  s.releaseTopics=function(topics){topics.forEach(function(topic){if(/^(torrent:|search:)/.test(topic))delete s.topics[topic]})}
+  s.logEntries=function(hash){var rows=s.topics.log || {};return Object.keys(rows).map(function(k){return rows[k]}).filter(function(r){return !hash || r.hash===hash}).sort(function(a,b){return a.seq-b.seq})}
   function keepMutation(reference, value) {
     var refs = Object.keys(s.mutations)
     if (!s.mutations[reference] && refs.length >= 256) delete s.mutations[refs[0]]
     s.mutations[reference] = value
+  }
+  function badge(topic) {
+    if(topic!=="shows" && topic!=="rss.feeds")return
+    var total=0
+    Object.keys(s.topics[topic] || {}).forEach(function(key){total+=Number(s.topics[topic][key].unread || 0)})
+    var next=Object.assign({},s.badges);next[topic==="shows" ? "shows" : "rss"]=total;s.badges=next
+  }
+  function domainList(topic,rows) {
+    var keyed=dictionary()
+    rows.forEach(function(row){keyed[topicKey(topic,row)]=row})
+    s.topics[topic]=keyed;badge(topic)
   }
   function event(frame) {
     if (frame.ev === "mutation.result") keepMutation(frame.ref, {op:frame.op, status:frame.outcome, error:frame.error, result:frame.result})
@@ -150,6 +173,7 @@ function create(options) {
         if (topic === "summary" || topic === "network" || topic === "settings") s[topic] = frame.data
       } else if (frame.ev === "delta") {
         if (s.snapshots[snapshotKey]) throw Error("delta interleaves snapshot")
+        if(topic==="log" && ((frame.removed || []).length || Object.keys(frame.changed || {}).length))throw Error("log topic is append-only")
         if (topic === "torrents") {
           ;(frame.added || []).forEach(function(row) { upsert(row, false) })
           ;(frame.removed || []).forEach(remove)
@@ -178,6 +202,8 @@ function create(options) {
           s.topics[topic] = target
         }
       }
+      if(topic==="log")trimLog()
+      badge(topic)
       return s.changes.length > 0
     }
     var call = request || s.calls[frame.id]
@@ -193,16 +219,23 @@ function create(options) {
       s.proto = result.proto; s.compatible = result.proto === 1
       if (s.instance && s.instance !== result.instance) {
         replaceTorrents([]); s.subscriptions = dictionary(); s.snapshots = dictionary(); s.topics = dictionary()
-        s.hasTorrents = false
+        s.hasTorrents = false; s.badges={}
         s.events = []; s.eventSeen = dictionary(); s.summary = {}; s.network = {}; s.settings = {}
       }
       s.subscriptions = dictionary(); s.snapshots = dictionary()
       s.instance = result.instance; s.info = result
     } else if (call.op === "app.info") s.info = result
     else if (call.op === "app.network") s.network = result.state
+    else if(call.op==="app.settings.get" || call.op==="app.settings.set")s.settings=result.settings || result
     else if (call.op === "transfer.info") s.transfer = result
+    else if(call.op==="app.log"){
+      var log=s.topics.log || dictionary();result.entries.forEach(function(r){log[String(r.seq)]=r});s.topics.log=log;trimLog()
+    }
+    else if(call.op==="shows.list")domainList("shows",result.shows)
+    else if(call.op==="rss.feeds")domainList("rss.feeds",result.feeds)
     else if (call.op === "torrents.list") replaceTorrents(result.torrents)
     else if (call.op === "torrents.get") upsert(result.torrent, false)
+    else if(call.op==="torrents.trackers")domainList("torrent:"+call.args.hash+".trackers",result.trackers)
     else if (call.op === "torrents.peers") {
       var peers = dictionary()
       result.peers.forEach(function(peer) { peers[peer.addr] = peer })
@@ -237,19 +270,24 @@ function create(options) {
   s.sort = function(key, reverse) {
     key = String(key || "added").toLowerCase(); reverse = !!reverse
     if (key === "↓" || key === "dl_bps") key = "rate"
-    if (["added","name","progress","rate","size","state","eta"].indexOf(key) < 0) key = "added"
+    if (["added","name","progress","rate","size","state","eta","up","peers","ratio"].indexOf(key) < 0) key = "added"
     var cached = s.sortCache[key + reverse], current = clock()
     if (cached && cached.membership === s.membershipVersion &&
-        (cached.version === s.sortVersions[key] || (key === "rate" && current - cached.at < 1000))) return cached.keys
-    var property = {added:"added_at", name:"name", progress:"progress", rate:"dl_bps", size:"size", state:"state", eta:"eta_s"}[key] || "added_at"
-    var descending = ["added", "progress", "rate", "size"].indexOf(key) >= 0
+        (cached.version === s.sortVersions[key] || ((key === "rate" || key === "up") && current - cached.at < 1000))) return cached.keys
+    var property = {added:"added_at", name:"name", progress:"progress", rate:"dl_bps", size:"size", state:"state", eta:"eta_s",up:"ul_bps",peers:"peers",ratio:"ratio"}[key] || "added_at"
+    var descending = ["added", "progress", "rate", "size", "up", "peers", "ratio"].indexOf(key) >= 0
     var entries = s.filter("all").map(function(hash) { return s.sortValues[hash] })
-    entries.sort(function(a,b) {
+    var direction=descending!==reverse ? -1 : 1
+    entries.sort(key==="name" ? (reverse ? compareNamesReverse : compareNames) : function(a,b) {
       var left = a[property], right = b[property]
-      var tie = a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0
-      if (left === undefined || right === undefined) return left === undefined ? (right === undefined ? tie : 1) : -1
-      var compared = left < right ? -1 : left > right ? 1 : 0
-      return compared ? compared * (descending !== !!reverse ? -1 : 1) : tie
+      if (left === undefined || right === undefined) {
+        if(left!==undefined)return -1
+        if(right!==undefined)return 1
+      } else {
+        var compared = left < right ? -1 : left > right ? 1 : 0
+        if(compared)return compared*direction
+      }
+      return a.hash<b.hash ? -1 : a.hash>b.hash ? 1 : 0
     })
     var hashes = entries.map(function(entry) { return entry.hash })
     s.sortCache[key + reverse] = {keys:hashes, membership:s.membershipVersion, version:s.sortVersions[key], at:current}
@@ -257,7 +295,7 @@ function create(options) {
   }
   // Qt's model owns stable delegates. Only changed roles emit row updates.
   var mirror = {model:null, indexes:dictionary(), order:[], generation:-1, sorted:null}
-  s.syncModel = function(model, key, reverse) {
+  s.syncModel = function(model, key, reverse, reorder) {
     var structural = false
     if (mirror.model !== model) {
       mirror = {model:model, indexes:dictionary(), order:[], generation:-1, sorted:null}
@@ -276,9 +314,12 @@ function create(options) {
           }
         } else if (index === undefined) {
           mirror.indexes[change.hash] = mirror.order.length; mirror.order.push(change.hash)
-          model.append(row); structural = true
+          model.append(Object.assign({},row,{uiReady:ready(row),uiName:s.sortNames[change.hash],uiVisible:s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText)})); structural = true
         } else {
           change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? null : row[field]) })
+          if(change.fields.some(function(field){return ["playable","name","state"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(row.state,ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
+          if(change.fields.indexOf("playable")>=0)model.setProperty(index,"uiReady",ready(row))
+          if(change.fields.indexOf("name")>=0)model.setProperty(index,"uiName",s.sortNames[change.hash])
           if (change.fields.indexOf("state") >= 0 || change.fields.indexOf("staged") >= 0) structural = true
         }
       })
@@ -286,16 +327,58 @@ function create(options) {
     }
     var ordered = s.sort(key, reverse)
     if (mirror.sorted !== ordered) {
+      var moving=false
       for (var i=0; i<ordered.length; ++i) {
         var from = mirror.indexes[ordered[i]]
         if (from !== i) {
+          if(!moving){moving=true;if(reorder)reorder(true)}
           model.move(from,i,1); mirror.order.splice(i,0,mirror.order.splice(from,1)[0]); reindex(i)
           structural = true
         }
       }
       mirror.sorted = ordered
+      if(moving && reorder)reorder(false)
     }
     return structural
+  }
+  s.filterState="all";s.filterText=""
+  s.setFilter=function(state,text) {
+    text=String(text || "").toLocaleLowerCase()
+    if(state===s.filterState && text===s.filterText)return
+    s.filterState=state;s.filterText=text
+    if(!mirror.model)return
+    mirror.order.forEach(function(hash,index){var row=s.torrents[hash];mirror.model.setProperty(index,"uiVisible",s.matches(row.state,ready(row),s.sortNames[hash],state,text))})
+  }
+  s.pendingByHash=dictionary();s.failedByHash=dictionary()
+  s.syncActions=function(actions) {
+    var pending=dictionary(),failed=dictionary()
+    Object.keys(actions).forEach(function(ref) {
+      var action=actions[ref],args=action.args || {},hashes=args.hashes || (args.hash ? [args.hash] : [])
+      hashes.forEach(function(hash) {
+        if(action.status==="pending")pending[hash]=true
+        else if(action.status==="failed" || action.status==="error" || action.status==="no answer")failed[hash]=action.error || {message:"no answer"}
+      })
+    })
+    s.pendingByHash=pending;s.failedByHash=failed
+  }
+  s.clearFailures=function(actions) {
+    Object.keys(actions).forEach(function(ref) {if(actions[ref].status!=="pending")delete actions[ref]})
+    s.failedByHash=dictionary()
+  }
+  s.visibleKeys=function(filter,text,key,reverse) {
+    text=String(text || "").toLocaleLowerCase()
+    return s.sort(key,reverse).filter(function(hash){var row=s.torrents[hash];return s.matches(row.state,ready(row),s.sortNames[hash],filter,text)})
+  }
+  s.selectRange=function(order,anchor,target,selected) {
+    var result=Object.assign({},selected),from=order.indexOf(anchor),to=order.indexOf(target)
+    if(from<0)from=to
+    for(var i=Math.min(from,to);i<=Math.max(from,to);i++)if(i>=0)result[order[i]]=true
+    return result
+  }
+  s.modelIndex = function(hash) {return mirror.indexes[hash]===undefined ? -1 : mirror.indexes[hash]}
+  s.matches = function(state,ready,name,filter,text) {
+    var include=filter==="all" || filter===state || (filter==="downloading" && ["downloading","stalled","metadata","checking"].indexOf(state)>=0) || (filter==="ready" && ready)
+    return include && (!text || name.indexOf(text)>=0)
   }
   s.modelOrder = function() { return mirror.order }
   s.model = function(keys) {

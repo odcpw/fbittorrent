@@ -1,6 +1,6 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
-use super::{objects::*, scalar::*};
+use super::{objects::*, scalar::*, search::*};
 use super::rss::*;
 use super::shows::*;
 use super::peers::*;
@@ -212,12 +212,30 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsCommit(DoneResult),
+    TorrentsDiscard(DoneResult),
+    TorrentsMove(MutationResult),
+    TorrentsTrackers(TrackersResult),
+    TorrentsReannounce(DoneResult),
+    TorrentsForceStart(DoneResult),
+    TorrentsQueueMove(QueueMoveResult),
+    SearchStart(SearchStarted),
+    SearchStop(DoneResult),
+    SearchProviders(ProvidersResult),
+    SearchSetProvider(DoneResult),
+    SearchInstall(InstallReply),
+    SearchBrowseSources(BrowseSourcesResult),
+    SearchBrowse(SearchItemsResult),
+    SearchGrab(AddResult),
+
+    TorrentsRecheck(RecheckReply),
     ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
     RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
     RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
+    AppFreeSpace(super::FreeSpaceResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -251,6 +269,23 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.commit"=>serde_json::from_value(result).map(Self::TorrentsCommit),
+            "torrents.discard"=>serde_json::from_value(result).map(Self::TorrentsDiscard),
+            "torrents.move"=>serde_json::from_value(result).map(Self::TorrentsMove),
+            "torrents.trackers" => serde_json::from_value(result).map(Self::TorrentsTrackers),
+            "torrents.reannounce" => serde_json::from_value(result).map(Self::TorrentsReannounce),
+            "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
+            "torrents.queue_move" => serde_json::from_value(result).map(Self::TorrentsQueueMove),
+            "search.start" => serde_json::from_value(result).map(Self::SearchStart),
+            "search.stop" => serde_json::from_value(result).map(Self::SearchStop),
+            "search.providers" => serde_json::from_value(result).map(Self::SearchProviders),
+            "search.set_provider" => serde_json::from_value(result).map(Self::SearchSetProvider),
+            "search.install" => serde_json::from_value(result).map(Self::SearchInstall),
+            "search.browse_sources" => serde_json::from_value(result).map(Self::SearchBrowseSources),
+            "search.browse" => serde_json::from_value(result).map(Self::SearchBrowse),
+            "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
+
+            "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
             "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
             "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
             "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
@@ -261,6 +296,7 @@ impl Reply {
             "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),
+            "app.free_space" => serde_json::from_value(result).map(Self::AppFreeSpace),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
@@ -318,7 +354,28 @@ pub struct SettingsSetResult {
     pub restart: bool,
 }
 
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RecheckReply {
+    Pending(PendingResult),
+    Complete(RecheckResult),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckResult {
+    pub rechecked: Vec<Hash>,
+    pub failed: Vec<RecheckFailure>,
+    pub have_bytes: std::collections::BTreeMap<Hash, u64>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecheckFailure { pub hash: Hash, pub message: String }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StatsResult { pub active_clients: ClientCounts, pub connections: ClientCounts }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackersResult { pub trackers:Vec<Tracker> }

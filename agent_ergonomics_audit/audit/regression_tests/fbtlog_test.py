@@ -40,11 +40,13 @@ if verb == "status":
     n = count("status")
     sock.unlink(missing_ok=True)
     if mode == "timeout" or n == 1:
-        value = dict(ok=False, app_open=False)
+        value = dict(ok=False, running=False, app_open=False)
     else:
-        value = dict(ok=True, app_open=True)
-        if n != 2: value["connection"] = "connected"
-        if n != 3: sock.touch()
+        # A live daemon can serve this fixture without any attached UI.
+        value = dict(ok=True, running=True, app_open=False,
+                     daemon=dict(state="starting" if n == 2 else "parked" if n == 3 else "running"))
+        if n != 4: value["connection"] = "api"
+        if n != 5: sock.touch()
 else:
     n = count("show")
     code = (1 if mode == "unexpected" else 4) if n == 1 else 0
@@ -79,10 +81,10 @@ sys.exit(code)
                 actual = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
                 shows = [row for row in actual if row["verb"] == "show"]
                 test.check(rows[-1]["ok"] and [r["code"] for r in shows] == [4, 0]
-                           and all(r["status"] >= 4 for r in shows)
+                           and all(r["status"] >= 6 for r in shows)
                            and len(waits) == 1 and waits[0]["ok"]
                            and "show exit 0" in waits[0]["observed"] and "socket=True" in waits[0]["observed"],
-                           "readiness rejects closed, incomplete and socket-less status before retrying show 4 then 0")
+                           "readiness rejects closed, starting, parked, incomplete and socket-less daemon status before retrying show 4 then 0")
                 test.check(len(calls) == len(actual) and all(r["ok"] for r in calls),
                            "every readiness CLI result is logged, including explicitly expected transient exit 4")
             elif mode == "unexpected":

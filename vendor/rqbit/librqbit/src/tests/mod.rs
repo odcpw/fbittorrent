@@ -3,5 +3,6 @@
 
 mod private_torrent;
 mod have_pieces;
+mod tracker_stats;
 
 mod peer_stats;

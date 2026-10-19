@@ -1,0 +1,45 @@
+[ 1 Torrents ]  2 Search    3 Shows (2)    4 RSS                                                                             ↓ 2.0 MiB/s  ↑ 1.0 KiB/s  default
+╭ Torrents (3) ─────────────────────────────────────────────────────────────────────────────╮╭ Details ────────────────────────────────────────────────────────╮
+│  STATE     NAME                                             SIZE     %      ↓    ETA PEERS││                                                                 │
+│▌ ! Disk    The Diplomat S04E01 1080p WEB-DL H264-GROUP   4.0 KiB   25%                    ││  The Diplomat S04E01 1080p WEB-DL H264-GROUP                    │
+│  ✓ Done    Sintel.2010.1080p                             1.0 GiB  100%                    ││                                                                 │
+│  ◌ Meta    Other.Movie.2026.1080p                              —     —                   3││  state     ! Disk · disk full                                   │
+│                                                                                           ││  error     Disk full; free space to resume downloads            │
+│                                                                                           ││  progress  25.0%  1.0 KiB of 4.0 KiB                            │
+│                                                                                           ││  speed     ↓ —   ↑ —                                            │
+│                                                                                           ││  eta       —                                                    │
+│                                                                                           ││  peers     unknown                                              │
+│                                                                                           ││  ratio     0.50                                                 │
+│                                                                                           ││  flags     streaming priority automatic                         │
+│                                                                                           ││  upload    32.0 KiB/s cap · stops when complete  (u to seed)    │
+│                                                                                           ││  path      /tmp/fbt-fixture/downloads                           │
+│                                                                                           ││  added     1d ago                                               │
+│                                                                                           ││                                                                 │
+│                                                                                           ││  IMDb card appears when the cursor rests here                   │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+│                                                                                           ││                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
+! Not enough space for the running downloads: 3.1 GiB needed, 1.2 GiB free
+[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (g) First …   (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

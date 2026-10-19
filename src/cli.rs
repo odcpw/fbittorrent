@@ -1,11 +1,15 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
 pub mod shapes;
+pub(super) mod catalog_search;
+pub(super) mod catalog_imdb;
+mod fallback;
 pub(super) mod logs;
 pub(super) mod stream;
 pub(super) mod raw;
 pub(super) mod restart;
 mod native;
+mod handler;
 mod download_limit;
 mod offline;
 pub(super) mod settings;
@@ -92,7 +96,7 @@ pub(super) enum Cmd {
     /// Start the daemon; --ui also opens the dashboard or TUI
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
-    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
+    Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String>, #[arg(long)] hash: Option<String> },
     /// Read or persist primary and turtle limits; zero means unlimited
     Limits {
         #[arg(long)] down: Option<String>,
@@ -159,6 +163,9 @@ pub(super) enum Cmd {
     /// Block until torrents complete. Progress on stderr, result on stdout. Exit 8 on timeout.
     Wait {
         selectors: Vec<String>,
+        /// Wait for completion, the verified playback threshold or stall-free playback
+        #[arg(long, value_enum, default_value_t = Until::Complete)]
+        until: Until,
         /// Give up after N seconds (0 = forever)
         #[arg(long, default_value_t = 0)]
         timeout: u64,
@@ -169,6 +176,10 @@ pub(super) enum Cmd {
     /// Start (resume) torrents
     #[command(alias = "resume")]
     Start { selectors: Vec<String> },
+    /// Move a torrent (or all) to another directory, waiting for the move receipt
+    Move { selector:String, save_path:String },
+    /// Ask live torrents to announce now (at most once per tracker per minute)
+    Reannounce { selectors: Vec<String> },
     /// Stop (pause) torrents
     #[command(alias = "pause")]
     Stop { selectors: Vec<String> },
@@ -221,6 +232,12 @@ pub(super) enum Cmd {
         /// Install a search plugin from a URL (repeatable), then exit
         #[arg(long = "install-url")]
         install_url: Vec<String>,
+        /// Install a native Jackett/Prowlarr endpoint (credentials stay in a private file)
+        #[arg(long, value_name="URL",conflicts_with_all=["install","install_url","plugins"])]
+        install_torznab:Option<String>,
+        /// Existing 0600 API-key file; the key itself never belongs on argv
+        #[arg(long,value_name="PATH",requires="install_torznab")]
+        key_file:Option<std::path::PathBuf>,
         /// List installed providers, then exit
         #[arg(long)]
         plugins: bool,
@@ -240,9 +257,21 @@ pub(super) enum Cmd {
         /// Also register fbittorrent as the magnet: handler
         #[arg(long)]
         magnet: bool,
-        /// Remove the static native systemd user unit; saved data is kept
-        #[arg(long, conflicts_with_all = ["magnet", "save"])]
+        /// Link the checkout's plugin or copy it for a stable installation
+        #[arg(long, value_parser=["link", "copy"])]
+        plugin: Option<String>,
+        /// List exact planned actions without writing files or running commands
+        #[arg(long)]
+        dry_run: bool,
+        /// Remove desktop integration while keeping saved data
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
         uninstall: bool,
+        /// Remove integration and application data (never downloaded payloads)
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        purge: bool,
+        /// Confirm application-data removal with --purge
+        #[arg(long)]
+        yes: bool,
     },
     /// Register fbittorrent as the magnet: / .torrent handler
     RegisterMagnet,
@@ -385,3 +414,7 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
     }
     Ok(Code::Ok)
 }
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Until { Complete, Playable, StallFree }

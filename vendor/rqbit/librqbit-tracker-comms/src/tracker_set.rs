@@ -7,19 +7,26 @@ use url::Url;
 pub struct TrackerSet {
     urls: Mutex<Vec<Url>>,
     changed: watch::Sender<u64>,
+    stats: Arc<crate::TrackerStats>,
 }
 impl TrackerSet {
     pub fn new(urls: Vec<Url>) -> Arc<Self> {
+        Self::with_stats(urls, Arc::new(crate::TrackerStats::default()))
+    }
+    pub fn with_stats(urls: Vec<Url>, stats: Arc<crate::TrackerStats>) -> Arc<Self> {
         let mut unique = Vec::new();
         for url in urls {
             if !unique.contains(&url) {
                 unique.push(url);
             }
         }
+        stats.retain(&unique);
+        stats.register(unique.iter().cloned());
         let (changed, _) = watch::channel(0);
         Arc::new(Self {
             urls: Mutex::new(unique),
             changed,
+            stats,
         })
     }
     pub fn snapshot(&self) -> Vec<Url> {
@@ -35,6 +42,7 @@ impl TrackerSet {
             return Ok(false);
         }
         anyhow::ensure!(urls.len() < 256, "tracker set limit reached");
+        self.stats.register([url.clone()]);
         urls.push(url);
         self.changed
             .send_modify(|v| *v = v.wrapping_add(1))
@@ -48,6 +56,7 @@ impl TrackerSet {
         if urls.len() == before {
             return false;
         }
+        self.stats.remove(url);
         self.changed
             .send_modify(|v| *v = v.wrapping_add(1))
             .expect("owned watch sender");
@@ -67,6 +76,7 @@ pub fn validate_tracker(url: &Url) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{redact_url, sanitize};
     #[test]
     fn tracker_set_mutation() {
         let a = Url::parse("http://127.0.0.1:1234/a?passkey=secret").unwrap();
@@ -94,37 +104,4 @@ mod tests {
             "tracker_set_mutation: ordered dedup, idempotent add/remove, wake and scheme validation passed (URL queries redacted)"
         );
     }
-}
-
-// Queries can contain passkeys; diagnostics never include their values.
-pub fn redact_url(url: &Url) -> String {
-    match url.as_str().find('?') {
-        Some(end) => format!("{}?…", &url.as_str()[..end]),
-        None => url.to_string(),
-    }
-}
-pub fn sanitize(url: &Url, text: &str) -> String {
-    let mut text = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect::<String>();
-    for (_, value) in url.query_pairs() {
-        if !value.is_empty() {
-            text = text.replace(value.as_ref(), "…");
-        }
-    }
-    text.split_whitespace()
-        .map(|word| {
-            if let Some(scheme) = word.find("://") {
-                if let Some(query) = word[scheme + 3..].find('?') {
-                    return format!("{}?…", &word[..scheme + 3 + query]);
-                }
-            }
-            word.to_owned()
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(200)
-        .collect()
 }

@@ -249,7 +249,7 @@ impl EngineOp {
                     stopped: body.arg("stopped") == Some("true")
                         || body.arg("paused") == Some("true"),
                     category: body.arg("category").unwrap_or("").into(),
-                    tags: body.arg("tags").unwrap_or("").into(),
+                    tags: body.arg("tags").unwrap_or("").into(), origin: None,
                 })
             }
         }))

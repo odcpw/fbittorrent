@@ -1,0 +1,14 @@
+{"dir":"c2s","frame":{"id":1,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Staged%20fixture"},"stage":true}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"done","hash":"0123456789abcdef0123456789abcdef01234567","name":"Staged fixture","duplicate":false}}}
+{"dir":"c2s","frame":{"id":2,"op":"torrents.get","args":{"hash":"0123456789abcdef0123456789abcdef01234567"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"torrent":{"hash":"0123456789abcdef0123456789abcdef01234567","name":"Staged fixture","state":"paused","reason":"user","intent":"pause","staged":true,"checked":false,"seed":false,"upload_policy":"default_cap","upload_limit_bps":32768,"save_path":"/tmp/fixture","added_at":1,"force":false,"private":false}}}}
+{"dir":"c2s","frame":{"id":6,"op":"subscribe","args":{"topics":["summary"]}}}
+{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"sub":1,"topics":["summary"]}}}
+{"dir":"s2c","frame":{"ev":"state","sub":1,"topic":"summary","rev":1,"data":{"alt":false,"counts":{"checking":0,"done":0,"downloading":0,"error":0,"metadata":0,"paused":0,"queued":0,"ready":0,"seeding":0,"staged":1,"stalled":0,"total":0,"waiting_vpn":0},"daemon":{"busy_reasons":[],"idle_exit_in_s":300,"state":"running","upgrade_pending":false},"disk":{"free_bytes":1048576,"low":false,"needed_bytes":0},"dl_bps":0,"limits":{},"network":{"interface":"fixture0","message":"ready","state":"ready"},"top":[],"ul_bps":0}}}
+{"dir":"expect","model":{"summary":{"alt":false,"counts":{"checking":0,"done":0,"downloading":0,"error":0,"metadata":0,"paused":0,"queued":0,"ready":0,"seeding":0,"staged":1,"stalled":0,"total":0,"waiting_vpn":0},"daemon":{"busy_reasons":[],"idle_exit_in_s":300,"state":"running","upgrade_pending":false},"disk":{"free_bytes":1048576,"low":false,"needed_bytes":0},"dl_bps":0,"limits":{},"network":{"interface":"fixture0","message":"ready","state":"ready"},"top":[],"ul_bps":0}}}
+{"dir":"c2s","frame":{"id":3,"op":"torrents.commit","args":{"hash":"0123456789abcdef0123456789abcdef01234567","files":[0],"seed":false,"save_path":"/tmp/fixture"}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}
+{"dir":"c2s","frame":{"id":4,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234568&dn=Staged%20fixture"},"stage":true}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"state":"done","hash":"0123456789abcdef0123456789abcdef01234568","name":"Staged fixture","duplicate":false}}}
+{"dir":"c2s","frame":{"id":5,"op":"torrents.discard","args":{"hash":"0123456789abcdef0123456789abcdef01234568"}}}
+{"dir":"s2c","frame":{"id":5,"ok":true,"result":{"state":"done"}}}

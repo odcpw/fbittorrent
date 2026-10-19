@@ -68,7 +68,7 @@ def contract(binary,systemd):
             value,r1=cli(case,sandbox,binary,'capabilities','--json')
             _,r2=cli(case,sandbox,binary,'capabilities','--json')
             case.check(r1.stdout==r2.stdout,'R-008 capabilities is byte-identical',hashlib.sha256(r1.stdout.encode()).hexdigest())
-            case.check(value.get('contract_version')=='1.2.2' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.2 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
+            case.check(value.get('contract_version')=='1.2.28' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.28 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
             cli(case,sandbox,binary,'triage','--json') # R-002
             added,_=cli(case,sandbox,binary,'add',fixture.torrent,'--stopped','--origin','agent','--json') # R-003
             digest=added['hash']
@@ -209,12 +209,132 @@ def exit_code_dictionary_total(binary,systemd):
         finally:
             if process.child.poll() is None:h.stop_serve(process)
 
+def add_save_unwritable(binary, systemd):
+    sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'plugin/tests'))
+    import private_net
+    private_net.enter()
+    from destination import cli_unwritable
+    cli_unwritable(binary,systemd)
+
+
+def reannounce_verb(binary,systemd):
+    from daemon import tracker_live_fixture,tracker_rows
+    with Case('agent_contract','reannounce_verb') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h,fixtures.tracker_server(fail_first=1,interval_s=600,peers=[('127.0.0.1',9)],directory=sandbox.root) as tracker:
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine()
+            fixture=tracker_live_fixture(sandbox,tracker.url)
+            with ApiConn(h) as client:
+                client.hello();client.call('torrents.add',dict(source=dict(path=str(fixture.torrent))))
+                h.wait_for(lambda:((rows:=tracker_rows(client,fixture.info_hash))[0]['status']=='error',json.dumps(rows)),'first announce fails')
+                result,_=cli(case,sandbox,binary,'reannounce',fixture.info_hash,'--json')
+                case.check(result==dict(ok=True,action='reannounce',count=1,hashes=[fixture.info_hash]),'reannounce uses the stable act envelope',json.dumps(result))
+                h.wait_for(lambda:((rows:=tracker_rows(client,fixture.info_hash))[0]['status']=='ok',json.dumps(rows)),'CLI force wakes backoff')
+                detail,_=cli(case,sandbox,binary,'show',fixture.info_hash,'--json')
+                case.check(detail.get('tracker_count')==1 and len(detail.get('trackers',[]))==1 and detail['trackers'][0].get('peers')==1,'show adds truthful tracker_count and tracker rows',json.dumps(detail))
+                cli(case,sandbox,binary,'stop',fixture.info_hash,'--json')
+                failure,_=cli(case,sandbox,binary,'reannounce',fixture.info_hash,'--json',code=1)
+                case.check(failure.get('code')==1 and failure.get('ok') is False,'paused invalid_state keeps CLI exit 1',json.dumps(failure))
+                cli(case,sandbox,binary,'reannounce','unknown-zz','--json',code=6)
+                cli(case,sandbox,binary,'reannounce','--json',code=2)
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+
+
+
+def move_disconnect_proxy(h):
+    """Forward the real daemon wire, then drop one client's pending move reply."""
+    from contextlib import contextmanager
+    import socket,threading
+    @contextmanager
+    def proxy():
+        path=Path(h.sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock'
+        origin=path.with_name('api-move-origin.sock');path.rename(origin)
+        listener=socket.socket(socket.AF_UNIX);listener.bind(str(path));os.chmod(path,0o600);listener.listen(1);listener.settimeout(5)
+        observed=dict(moves=0,pending=False,errors=[])
+        def worker():
+            try:
+                front,_=listener.accept()
+                with front,socket.socket(socket.AF_UNIX) as back:
+                    front.settimeout(5);back.settimeout(5);back.connect(str(origin))
+                    def requests():
+                        try:
+                            with front.makefile('rb') as stream:
+                                while line:=stream.readline(65537):
+                                    if len(line)>65536:raise ValueError('client frame cap')
+                                    frame=json.loads(line)
+                                    if frame.get('op')=='torrents.move':observed['moves']+=1
+                                    back.sendall(line)
+                        except OSError:pass
+                    sender=threading.Thread(target=requests);sender.start()
+                    try:
+                        with back.makefile('rb') as stream:
+                            while line:=stream.readline(1048577):
+                                if len(line)>1048576:raise ValueError('server frame cap')
+                                frame=json.loads(line);front.sendall(line)
+                                if frame.get('result',{}).get('state')=='pending':
+                                    observed['pending']=True
+                                    front.shutdown(socket.SHUT_RDWR);back.shutdown(socket.SHUT_RDWR);break
+                    finally:sender.join(timeout=2)
+                    if sender.is_alive():raise TimeoutError('proxy sender did not stop')
+            except Exception as error:observed['errors'].append(str(error))
+        thread=threading.Thread(target=worker);thread.start()
+        try:yield observed
+        finally:
+            listener.close();thread.join(timeout=7)
+            path.unlink(missing_ok=True);origin.rename(path)
+            h.case.check(not thread.is_alive() and not observed['errors'],'owned fault proxy stops and restores the original socket',json.dumps(observed))
+    return proxy()
+
+def move_verb(binary,systemd):
+    from daemon import recheck_local_fixture
+    with Case('agent_contract','move_verb') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        # Move verifies local private payloads and has no tracker/peer. Make its
+        # engine precondition explicit; interface safety is tested by vpn.py.
+        config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
+        select_replay_interface(config,None)
+        process=h.start_serve()
+        try:
+            h.receive_ready();h.wait_engine();fixture=recheck_local_fixture(sandbox)
+            with ApiConn(h) as client:
+                client.hello()
+                network=client.call('app.network')['result']['state']
+                owner=client.call('app.info')['result']
+                case.check(network['ready'] is True and network.get('selection') is None and owner['state']=='running',
+                           'local move fixture has binding off and a running engine before admission',json.dumps(dict(network=network,owner=owner)))
+                client.call('torrents.add',dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
+                h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=fixture.info_hash))['result']['torrent'])['state']=='done' and row.get('completed_at',0)>0,json.dumps(row)),'fixture is durably done')
+                original=hashlib.sha256(fixture.files[0].read_bytes()).hexdigest();destination=sandbox.root/'cli-move'
+                moved,_=cli(case,sandbox,binary,'move',fixture.info_hash,str(destination),'--json')
+                case.check(moved==dict(ok=True,action='move',count=1,hashes=[fixture.info_hash]),'move waits for the receipt and uses the exact act envelope',json.dumps(moved))
+                shown,_=cli(case,sandbox,binary,'show',fixture.info_hash,'--json')
+                case.check(shown.get('save_path')==str(destination) and hashlib.sha256((destination/fixture.files[0].name).read_bytes()).hexdigest()==original,'CLI show follows the new verified location',json.dumps(shown))
+                cli(case,sandbox,binary,'move',fixture.info_hash,'relative-destination','--json',code=2)
+                cli(case,sandbox,binary,'move','unknown-selector',str(destination),'--json',code=6)
+                second=recheck_local_fixture(sandbox,name='recheck-second.bin')
+                client.call('torrents.add',dict(source=dict(path=str(second.torrent)),save_path=str(second.files[0].parent)))
+                h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=second.info_hash))['result']['torrent'])['state']=='done' and row.get('completed_at',0)>0,json.dumps(row)),'second fixture is done')
+                cli(case,sandbox,binary,'move','recheck',str(destination),'--json',code=7)
+                combined=sandbox.root/'cli-all'
+                all_moved,_=cli(case,sandbox,binary,'move','all',str(combined),'--json')
+                case.check(all_moved.get('action')=='move' and all_moved.get('count')==2 and set(all_moved.get('hashes',[]))=={fixture.info_hash,second.info_hash},'all expands client-side and moves both distinct payloads',json.dumps(all_moved))
+                lost_target=sandbox.root/'cli-lost-reply'
+                with move_disconnect_proxy(h) as fault:
+                    lost,_=cli(case,sandbox,binary,'move',fixture.info_hash,str(lost_target),'--json',code=8)
+                    case.check(lost.get('code_name')=='timeout' and lost.get('hint')=='fbittorrent list --json' and fault['pending'] and fault['moves']==1,'pending connection loss is exit 8 and never resends a non-idempotent move',json.dumps(dict(result=lost,wire=fault)))
+                h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=fixture.info_hash))['result']['torrent'])['save_path']==str(lost_target) and row['state']=='done',json.dumps(row)),'move completes independently of its dropped client')
+                case.check(hashlib.sha256((lost_target/fixture.files[0].name).read_bytes()).hexdigest()==original and (combined/second.files[0].name).exists(),'a faulted single-torrent move keeps its shared-directory neighbour intact',str(lost_target))
+            h.stop_serve(process)
+            cli(case,sandbox,binary,'--no-start','move',fixture.info_hash,str(sandbox.root/'closed-move'),'--json',code=4)
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+
 from agent_stream import (events_follow_completion, events_since_seq_replay, events_resync_when_older, events_down_exit_4, api_list_matches, api_list_matches_ipc_md, api_unknown_op_hint, api_mutating_starts_daemon_read_does_not)
 
 from daemon_limits import limits_verb
 from daemon_download_limit import limit_verb
 
-CASES={f.__name__:f for f in [limit_verb,limits_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [limit_verb,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

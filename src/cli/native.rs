@@ -20,6 +20,8 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::AddClipboard
             | Cmd::Start { .. }
             | Cmd::Stop { .. }
+            | Cmd::Reannounce { .. }
+            | Cmd::Move { .. }
             | Cmd::Delete { .. }
             | Cmd::Seed { .. }
             | Cmd::Noseed { .. }
@@ -91,11 +93,10 @@ fn emit(json_mode: bool, value: Value) {
         } else if value["action"] == "wait" {
             println!(
                 "{}",
-                if value["complete"] == true {
-                    "complete"
-                } else {
-                    value["reason"].as_str().unwrap_or("waiting")
-                }
+                if value["complete"] == true { "complete" }
+                else if value["stall_free"] == true {"ready to watch"}
+                else if value["playable"] == true {"playable"}
+                else {value["reason"].as_str().unwrap_or("waiting")}
             );
         } else if value["dry_run"] == true {
             let rows = value["torrents"].as_array();
@@ -191,6 +192,15 @@ fn snapshot(cfg: &Config, json_mode: bool) -> Result<(Option<ApiClient>, Vec<api
 }
 pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> Result<Code> {
     match cmd {
+        Cmd::Move {selector,save_path}=>{
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            for batch in hashes.chunks(256) {
+                let pending=c.call("torrents.move",json!({"hashes":batch,"save_path":save_path}))?;
+                await_move(&c,pending)?;
+            }
+            emit(json_mode,json!({"ok":true,"action":"move","count":hashes.len(),"hashes":hashes}));
+        }
         Cmd::Add {
             source,
             stopped,
@@ -209,7 +219,12 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             if *no_seq || *no_first_last {
                 return Err(AppError::new(Code::Usage,"native sequential and first/last scheduling are intrinsic; these flags require legacy mode").into());
             }
+            if let Some(path) = save { crate::free_space::require_writable(path)?; }
             let client = connect(cfg, true, no_start, json_mode)?;
+            if origin=="handler" && cfg.handler=="confirm" {
+                let value=super::handler::confirm(&client,cfg,source,*stopped,*seed,save.clone(),category.clone())?;
+                crate::emit(json_mode,value,||println!("Review torrent in the dashboard; download has not started."));return Ok(Code::Ok);
+            }
             let added = add(
                 &client,
                 cfg,
@@ -219,6 +234,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 save.clone(),
                 category.clone(),
                 if origin == "handler" && (*quiet || json_mode) { "agent" } else { origin },
+                false,
             )?;
             if !quiet && cfg.notify && !json_mode && origin != "handler" && origin != "agent"
                 && (*explicit_notify || crate::agent::stdout_is_tty()) {
@@ -239,6 +255,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     vec![added["hash"].as_str().context("add omitted hash")?.into()],
                     *timeout,
                     2,
+                    Until::Complete,
                     json_mode,
                 );
             }
@@ -270,7 +287,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 .output()?;
             let source = String::from_utf8_lossy(&out.stdout).trim().to_owned();
             let client = connect(cfg, true, no_start, json_mode)?;
-            let mut value = add(&client, cfg, &source, false, false, None, None, "manual")?;
+            let mut value = add(&client, cfg, &source, false, false, None, None, "manual", false)?;
             value["ok"] = json!(true);
             value["action"] = json!("add");
             emit(json_mode, value);
@@ -316,6 +333,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     } else {
                         json!([])
                     };
+                    if let Some(c)=&client {
+                        let detail=c.call("torrents.get",json!({"hash":hashes[0]}))?;
+                        if let Some(count)=detail["torrent"].get("tracker_count") {value["tracker_count"]=count.clone();}
+                        value["trackers"]=if c.hello.caps.iter().any(|cap|cap=="trackers") {
+                            c.call("torrents.trackers",json!({"hash":hashes[0]}))?["trackers"].clone()
+                        } else {json!([])};
+                    } else { value["trackers"]=json!([]); }
                     emit(json_mode, value);
                 }
                 Cmd::Status { quiet } => {
@@ -372,6 +396,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             emit(json_mode,json!({"ok":true,"action":"limit","hashes":hashes,"download_limit_bps":bps}));
         },
         Cmd::Start { .. }
+        | Cmd::Reannounce { .. }
         | Cmd::Seed { .. }
         | Cmd::Noseed { .. }
         | Cmd::Delete { .. }
@@ -383,6 +408,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let selectors = match cmd {
                 Cmd::Open { selector } => vec![selector.clone()],
                 Cmd::Start { selectors }
+                | Cmd::Reannounce { selectors }
                 | Cmd::Seed { selectors }
                 | Cmd::Noseed { selectors }
                 | Cmd::Delete { selectors, .. }
@@ -391,9 +417,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             };
             let hashes = selected(&rows, &selectors)?;
             match cmd {
+                Cmd::Reannounce {..} => {
+                    for batch in hashes.chunks(256) { c.call("torrents.reannounce",json!({"hashes":batch}))?; }
+                    emit(json_mode,json!({"ok":true,"action":"reannounce","count":hashes.len(),"hashes":hashes}));
+                }
                 Cmd::Wait {
-                    timeout, interval, ..
-                } => return wait_for(cfg, c, hashes, *timeout, *interval, json_mode),
+                    timeout, interval, until, ..
+                } => return wait_for(cfg, c, hashes, *timeout, *interval, *until, json_mode),
                 Cmd::Open { .. } => {
                     let target = c.call("torrents.open_target", json!({"hash":hashes[0]}))?;
                     cfg.open_target(target["path"].as_str().context("open target omitted path")?)?;
@@ -507,6 +537,19 @@ fn bulk(c: &ApiClient, op: &str, hashes: &[String], extra: Value) -> Result<()> 
     }
     Ok(())
 }
+fn await_move(c:&ApiClient,result:Value)->Result<Value> {
+    let reference=result["ref"].as_str().context("move acknowledgement omitted ref")?;
+    loop {
+        let unknown=||AppError::new(Code::Timeout,"move outcome is unknown after the owner connection closed").hint("fbittorrent list --json");
+        if let Some(event)=c.event(Duration::from_millis(100)).map_err(|_|unknown())? {
+            if event["ev"]=="mutation.result" && event["ref"]==reference {
+                if event["outcome"]=="done" {return Ok(event.get("result").cloned().unwrap_or(json!({"state":"done"})));}
+                return Err(api::errors::app_error(serde_json::from_value(event["error"].clone())?));
+            }
+            if event["ev"]=="bye" || event["ev"]=="client.disconnected" {return Err(unknown().into());}
+        }
+    }
+}
 fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]
         .as_str()
@@ -539,7 +582,7 @@ fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     )
     .into())
 }
-fn add(
+pub(super) fn add(
     c: &ApiClient,
     cfg: &Config,
     source: &str,
@@ -548,15 +591,10 @@ fn add(
     save: Option<String>,
     category: Option<String>,
     origin: &str,
+    stage: bool,
 ) -> Result<Value> {
-    let local = crate::cli_sources::local_torrent_source(source)?;
-    let input = if source.starts_with("magnet:") {
-        json!({"magnet":source})
-    } else if source.starts_with("http://") || source.starts_with("https://") {
-        json!({"url":source})
-    } else {
-        json!({"path":std::fs::canonicalize(local).map_err(|_|AppError::new(Code::Usage,"torrent source must be an accessible local file, magnet or HTTP URL"))?.to_string_lossy()})
-    };
+    if let Some(path) = &save { crate::free_space::require_writable(path)?; }
+    let input=super::handler::source(source)?;
     let mut args =
         json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});
     if let Some(save) = save.or(cfg.save_path.clone()) {
@@ -565,6 +603,7 @@ fn add(
     if let Some(category) = category.or(cfg.category.clone()) {
         args["category"] = json!(category);
     }
+    if stage {args["stage"]=json!(true);}
     let result = c.call("torrents.add", args)?;
     if result["deferred"] == true || result["state"] != "pending" || result.get("hash").is_some() {
         return Ok(result);
@@ -572,7 +611,8 @@ fn add(
     await_mutation(c, result)
 }
 fn counts(rows: &[api::Torrent]) -> Value {
-    json!({"total":rows.len(),"active":rows.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
+    let visible:Vec<_>=rows.iter().filter(|r|!r.staged).collect();
+    json!({"total":visible.len(),"active":visible.iter().filter(|r|matches!(r.state,api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
 }
 fn status(
     c: Option<&ApiClient>,
@@ -617,12 +657,24 @@ fn wait_for(
     hashes: Vec<String>,
     timeout: u64,
     interval: u64,
+    until: Until,
     json_mode: bool,
 ) -> Result<Code> {
     let start = Instant::now();
+    anyhow::ensure!(until==Until::Complete || c.hello.caps.iter().any(|c|c=="watch"), AppError::new(Code::Usage,"the daemon does not advertise watch readiness"));
     c.limit_reconnects(1);
+    // Pushed changes wake the read immediately; a bounded poll remains the
+    // compatibility/reconnect fallback. The connection owns this subscription.
+    let subscription=c.hello.caps.iter().any(|cap|cap=="subscribe")
+        .then(||c.call("subscribe",json!({"topics":["torrents"],"interval_ms":1000})))
+        .and_then(Result::ok).and_then(|v|v["sub"].as_u64());
+    struct Release<'a>(&'a ApiClient,Option<u64>);
+    impl Drop for Release<'_> {fn drop(&mut self){if let Some(id)=self.1 {let _=self.0.unsubscribe(id);}}}
+    let _release=Release(&c,subscription);
+    let mut frames=api::client::Subscription::new(&c);
     loop {
         if let Some(event) = c.event(Duration::from_millis(1))? {
+            if event.get("sub").is_some(){frames.accept(event.clone())?;}
             match event["reason"].as_str() {
                 Some("idle") => {
                     emit(json_mode, timeout_value("every waited torrent is stopped"));
@@ -650,16 +702,27 @@ fn wait_for(
             )
             .into());
         }
-        if mine.iter().all(|r| r.progress.is_some_and(|v| v >= 1.0)) {
+        let complete=mine.iter().all(|r|r.progress.is_some_and(|v|v>=1.0));
+        let playable=mine.iter().all(|r|r.playable.as_ref().is_some_and(|p|p.ready));
+        let stall_free=mine.iter().all(|r|r.playable.as_ref().is_some_and(|p|p.ready && p.stall_free==Some(true)));
+        if match until {Until::Complete=>complete,Until::Playable=>playable,Until::StallFree=>stall_free} {
             let elapsed = if std::env::var_os("SOURCE_DATE_EPOCH").is_some() {
                 0
             } else {
                 start.elapsed().as_secs()
             };
-            emit(
-                json_mode,
-                json!({"ok":true,"action":"wait","complete":true,"elapsed_secs":elapsed,"torrents":mine.iter().map(|r|shapes::torrent(r)).collect::<Vec<_>>() }),
-            );
+            let mut torrents=Vec::new();
+            for row in &mine {
+                let mut value=shapes::torrent(row);
+                if let Some(play)=row.playable.as_ref().filter(|p|p.ready) {
+                    let files=c.call("torrents.files",json!({"hash":row.hash}))?;
+                    if let Some(file)=files["files"].as_array().and_then(|fs|fs.iter().find(|f|f["index"]==play.file)) {
+                        if let Some(path)=file["path"].as_str() {value["open_target"]=json!(std::path::Path::new(&row.save_path).join(path).to_string_lossy());}
+                    }
+                }
+                torrents.push(value);
+            }
+            emit(json_mode,json!({"ok":true,"action":"wait","complete":complete,"playable":playable,"stall_free":stall_free,"elapsed_secs":elapsed,"torrents":torrents}));
             return Ok(Code::Ok);
         }
         if (timeout > 0 && start.elapsed() >= Duration::from_secs(timeout))
@@ -675,9 +738,15 @@ fn wait_for(
             );
             return Ok(Code::Timeout);
         }
-        std::thread::sleep(
-            Duration::from_secs(interval.max(1)).min(Duration::from_secs(timeout.max(1))),
-        );
+        let deadline=Instant::now()+Duration::from_secs(interval.max(1)).min(if timeout==0 {Duration::MAX}else{Duration::from_secs(timeout).saturating_sub(start.elapsed())});
+        while Instant::now()<deadline {
+            let remaining=deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(100));
+            if let Some(frame)=c.event(remaining)? {
+                if frame["ev"]=="bye" || frame["ev"]=="client.disconnected" {break;}
+                let frame=frames.accept(frame)?;
+                if subscription.is_some_and(|sub|frame["sub"]==sub) && matches!(frame["ev"].as_str(),Some("delta"|"snapshot.end")) {break;}
+            }
+        }
     }
 }
 

@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import daemon
@@ -428,6 +429,13 @@ class NativeHarness:
                 return False
         self.wait_for(ready, "disposable daemon answers its legacy version request")
 
+    def api(self, op, args=None):
+        """Read real daemon state independently of the CLI's legacy/API shaper."""
+        adapter = SimpleNamespace(case=self.get_case(), sandbox=SimpleNamespace(env=self.env))
+        with daemon.ApiConn(adapter) as connection:
+            connection.hello()
+            return connection.call(op, {} if args is None else args)["result"]
+
     @property
     def engine_path(self):
         return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
@@ -518,9 +526,10 @@ class NativeHarness:
                 status = status if isinstance(status, dict) else {}
                 present = socket_path.exists()
                 observed = (f"socket={present}; status exit {status_exit}, ok={status.get('ok')}, "
-                            f"app_open={status.get('app_open')}, connection={status.get('connection')}")
-                if (status_exit == 0 and status.get("ok") is True and status.get("app_open") is True
-                        and status.get("connection") == "connected" and present and time.monotonic() < end):
+                            f"running={status.get('running')}, daemon={status.get('daemon')}, connection={status.get('connection')}")
+                if (status_exit == 0 and status.get("ok") is True and status.get("running") is True
+                        and status.get("daemon", {}).get("state") == "running"
+                        and status.get("connection") == "api" and present and time.monotonic() < end):
                     show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
@@ -535,7 +544,7 @@ class NativeHarness:
                 break
             time.sleep(max(0, min(.1, end-time.monotonic())))
         self.record("wait for settings safely reopen engine",
-                    f"Socket present, status ok/app_open/connected and show {hash_} exit 0 within {seconds} seconds",
+                    f"Socket present, status ok/running with daemon running over API and show {hash_} exit 0 within {seconds} seconds",
                     f"{'Ready' if ready else 'Timed out'} after {time.monotonic()-started:.3f} seconds; {observed}",
                     ready, started)
         return restored
@@ -676,7 +685,7 @@ class peer_labels:
 
 def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session):
     """P0-11: real TUI captures; local provider fixtures, never public swarms."""
-    artifacts = REPO / "target/test-logs/native"
+    artifacts = case.suite.directory
     def check_capture(filename, ready, extra=lambda pane: True):
         step = case.step("Capture " + filename,
                          "The populated pane has no fabricated seed count.")
@@ -698,7 +707,7 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
         cli("add", str(root / "fixture.torrent"), "--quiet")
     tmux("resize-window", "-t", session, "-x", "160", "-y", "45")
     keys("1", "Home")
-    check_capture("01-torrents-160x45.txt", lambda pane: "peers connected" in pane)
+    check_capture("01-torrents-160x45.txt", lambda pane: "peers     unknown" in pane or "peers connected" in pane)
     keys("2", "/", "C-a")
     tmux("send-keys", "-t", session, "-l", "known peers")
     keys("Enter")
@@ -812,9 +821,13 @@ def expected_daemon_stderr(stderr, complete=True):
     patterns = [r'INFO daemon listening \{.*\} no_notify=(?:false|true)',
                 r'INFO daemon ready state=starting', r'INFO engine starting session',
                 r'INFO engine session exists restores=[0-9]+',
+                r'DEBUG engine initial validation admitted source=engine hash=[0-9a-f]{40}',
                 r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
                 r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
-                r'INFO daemon restarting engine reason=Explicit', r'INFO network Waiting for fbmissing0',
+                r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
+                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
+                r'INFO imdb index loaded refresh=(?:true|false)',
+                r'INFO inhibit started pid=[0-9]+', r'INFO inhibit released',
                 r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
                 r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
                 r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
@@ -1091,6 +1104,11 @@ def stop_during_hashing(binary):
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
             # its fresh startup check before exercising the actual Resume key.
+            # A clean stop lets fast resume (P6-06) trust the saved state and
+            # skip the check, so consume the CLEAN marker as a crash would.
+            marker = store / "resume/CLEAN"
+            case.check(marker.is_file(), "A clean down leaves the fast-resume CLEAN marker.", str(marker))
+            marker.unlink(missing_ok=True)
             harness.start_tmux(tmux, session, launch)
             harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
@@ -1135,15 +1153,18 @@ ATTACH_CASES = ("tui_starts_daemon", "q_detaches", "q_confirms", "first_q_notice
 class AttachedTui:
     def __init__(self, case, binary, sandbox, harness, session="fbt-fbt-p1-15-h0l"):
         self.case, self.binary, self.sandbox, self.h = case, binary, sandbox, harness
-        self.socket = session + "-" + str(os.getpid())
+        self.socket = session + "-" + str(os.getpid()) + "-" + sandbox.root.name
         self.session, self.counter = session, 0
-        self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+        created = self.tmux("new-session", "-d", "-s", self.session, "-x", "120", "-y", "30", "sleep 600")
+        case.check(created.returncode == 0, "case owns a fresh private tmux server",
+                   f"socket={self.socket}; exit={created.returncode}; stderr={created.stderr}")
 
     def tmux(self, *args):
         return subprocess.run(["tmux", "-L", self.socket, "-f", "/dev/null", *args],
                               env=self.sandbox.env, capture_output=True, text=True, timeout=5)
 
     def start(self):
+        before = self.clients() if daemon.DaemonContract.socket_path(self.sandbox).exists() else 0
         self.counter += 1
         done = self.sandbox.root / f"ui-{self.counter}.exit"
         stderr = self.case.path.with_suffix(f".tui-{self.counter}.stderr")
@@ -1153,6 +1174,8 @@ class AttachedTui:
         target = result.stdout.strip()
         self.case.check(result.returncode == 0, "a new TUI starts in this terminal", f"target={target}; {result.stderr}")
         self.h.wait_for(lambda: ("Torrents" in self.capture(target), self.capture(target)), "attached TUI draws its first frame")
+        self.h.wait_for(lambda: ((count := self.clients()) == before + 1, f"tui clients={count}; before={before}"),
+                        "new terminal completes its interactive API hello")
         self.status()
         return target, done
 
@@ -1176,7 +1199,7 @@ class AttachedTui:
     def clients(self):
         with daemon.ApiConn(self.h) as connection:
             connection.hello()
-            return connection.call("app.info")["result"]["clients"]["tui"]
+            return connection.call("app.stats")["result"]["active_clients"]["tui"]
 
     def close(self):
         self.tmux("kill-server")
@@ -1304,7 +1327,11 @@ def main():
     parser.add_argument("--list", action="store_true", help="list case slugs without launching anything")
     parser.add_argument("--case", choices=CASES + ATTACH_CASES,
                         help="log one case, replaying its prerequisites in the isolated fixture")
+    parser.add_argument("--log-root",type=Path,help="retain this invocation below a private evidence root")
     options = parser.parse_args()
+    if options.log_root:
+        import fbtlog
+        fbtlog.LOG_ROOT=options.log_root.resolve()
     if options.list:
         print("\n".join(CASES + ATTACH_CASES))
         return 0
@@ -1440,8 +1467,14 @@ def main():
                 record("tmux send-keys " + repr(key), "key delivered to isolated TUI", f"exit={result.returncode}", result.returncode == 0)
 
         def mouse_text(text, button):
-            rows = capture(log=False).splitlines()
-            y, row = next((y, row) for y, row in enumerate(rows) if text in row)
+            # Pushed data and ten-second feedback may briefly obscure a target.
+            # Locate it in one observed frame before sending its real coordinates.
+            located=[None]
+            def visible():
+                located[0]=next(((y,row) for y,row in enumerate(capture(log=False).splitlines()) if text in row),None)
+                return located[0] is not None
+            wait_for(visible,"mouse target visible: "+text,seconds=12)
+            y,row=located[0]
             x = row.index(text) + len(text) // 2
             sequence = f"\x1b[<{button};{x+1};{y+1}M"
             if button == 0:
@@ -1459,13 +1492,23 @@ def main():
                 error_file = case.suite.stderr_path
                 engine_stderr_offset = error_file.stat().st_size
                 app_launch = f"exec {shlex.quote(binary)} tui 2>>{shlex.quote(str(error_file))}"
-                launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(terminal_bytes))}"
+                # Record the actual tmux PTY output, avoiding a second PTY whose
+                # window size can lag tmux during the responsive layout checks.
+                launch_ready=root/"tui-launch.ready"
+                launch=f"while [ ! -e {shlex.quote(str(launch_ready))} ]; do sleep .01; done; {app_launch}"
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
                 cli("rss", "add", base + "/rss", "--name", "Local feed")
                 case.check(not socket_path.exists(), 'Local RSS commands leave the torrent engine closed.')
                 case.check(len(cli("rss", "items", "Local feed")["items"]) == 1, 'The local feed initially contains one article.')
                 fixture["version"] = 2
+                # The daemon refreshes stale feeds on an interactive open; the TUI does not fetch.
+                feed_store=Path(env["XDG_DATA_HOME"])/"fbittorrent/rss.json"
+                cached=json.loads(feed_store.read_text())
+                for feed in cached["feeds"]:feed["last_checked"]=int(time.time())-1801
+                feed_store.write_text(json.dumps(cached))
                 harness.start_tmux(tmux, session, launch)
+                tmux("pipe-pane","-O","-t",session,"cat >"+shlex.quote(str(terminal_bytes)))
+                launch_ready.touch()
                 wait_for(lambda: socket_path.exists(), "native socket")
                 wait_for(lambda: cli("status").get("ok"), "native status")
                 wait_for(lambda: terminal_bytes.exists() and b"\x1b[?1003h" in terminal_bytes.read_bytes(),
@@ -1598,6 +1641,7 @@ def main():
                 wait_for(lambda: show_episodes("tt1234002")["S01E02"]["read"], "inbox read saves the selected show episode")
                 wait_for(lambda: "3 Shows (2)" in capture() and "S01E02" not in "\n".join(capture().splitlines()[1:-2]), "read removes the inbox row")
                 case.check(not show_episodes("tt1234002")["S01E01"]["read"], 'The unselected Beta Show episode remains unread.')
+                wait_for(lambda: "(u) Undo read" in capture(), "confirmed read enables Undo")
                 keys("u")
                 wait_for(lambda: not show_episodes("tt1234002")["S01E02"]["read"], "undo restores exact inbox release")
                 wait_for(lambda: "3 Shows (3)" in capture() and "S01E02" in capture(), "undo restores the visible row")
@@ -1607,6 +1651,7 @@ def main():
                 wait_for(lambda: show_episodes("tt1234002")["S01E01"]["read"], "hover keeps clicked inbox target")
                 case.check(not show_episodes("tt1234002")["S01E02"]["read"], 'The other Beta Show release remains unread.')
                 case.check(not show_episodes("tt1234001")["S01"]["read"], 'The Alpha Show season pack remains unread.')
+                wait_for(lambda: "(u) Undo read" in capture(), "confirmed read enables Undo")
                 keys("u")
                 wait_for(lambda: not show_episodes("tt1234002")["S01E01"]["read"], "undo restores clicked release")
                 wait_for(lambda: "3 Shows (3)" in capture(), "restored inbox count")
@@ -1638,6 +1683,8 @@ def main():
                 keys("Escape")
                 wait_for(lambda: "GLOBAL" not in capture(), "help closes")
                 tmux("resize-window", "-t", session, "-x", "80", "-y", "24")
+                geometry=tmux("display-message","-p","-t",session,"#{pane_pid} #{pane_tty} #{pane_width} #{pane_height}").stdout.strip()
+                record("observe resized owned terminal","tmux pane is 80 by 24",geometry,geometry.endswith("80 24"))
                 keys("1")
                 wait_for(lambda: "[Torrents]" in capture() and "…" in capture().splitlines()[-2], "small terminal footer overflow")
                 pane = capture()
@@ -1654,7 +1701,9 @@ def main():
                 keys("Left", "Enter")
                 wait_for(lambda: "Download settings" not in capture(), "settings save closes panel")
                 case.check(cli("settings").get("max_active_downloads") == 2, 'The settings panel persists a two-download limit.')
-                keys("F6", "Right", "Enter")
+                keys("F6")
+                wait_for(lambda: "Download settings" in capture(), "second settings dialog has its authoritative baseline")
+                keys("Right", "Enter")
                 wait_for(lambda: "Download settings" not in capture() and cli("settings").get("max_active_downloads") == 3,
                          "settings panel changes queue limit and persists it")
                 extra_hashes = []
@@ -1671,13 +1720,13 @@ def main():
                          "live queue limit changes admission")
                 import tomllib
                 case.check(tomllib.loads((config_dir / "config.toml").read_text())["max_active_downloads"] == 1, 'The one-download limit is durable in the isolated config file.')
-                cli("settings", "--max-downloads", "0", code=1)
+                cli("settings", "--max-downloads", "0", code=2)  # usage: value out of range (CLI exit-code dictionary)
                 case.check(cli("settings").get("max_active_downloads") == 1, 'Rejecting a zero limit preserves the previous one-download limit.')
                 for hash_ in extra_hashes:
                     cli("delete", hash_)
                 cli("settings", "--max-downloads", "3")
                 cli("settings", "--vpn", "fbmissing0")
-                wait_for(lambda: cli("status").get("connection") == "vpn_waiting", "required VPN blocks networking")
+                wait_for(lambda: cli("status").get("daemon", {}).get("state") == "parked", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
                 case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)
@@ -1689,12 +1738,24 @@ def main():
             if options.case == "settings_queue_vpn_restart":
                 return suite_status("native")
             with Case("native", "quit_restart_down", enabled=options.case in (None, "quit_restart_down")) as case:
+                owner_before = harness.api("app.info")
                 keys("q")
                 wait_for(lambda: tmux("has-session", "-t", session, check=False).returncode == 1, "q detaches TUI", seconds=6)
-                case.check(socket_path.exists() and cli("status")["app_open"], 'q leaves the daemon running.')
+                status = cli("status")
+                owner_after = harness.api("app.info")
+                reported_running = status["running"] if "running" in status else (
+                    status.get("engine") == "native" and status.get("connection") in ("connected", "vpn_waiting"))
+                case.check(socket_path.exists() and status["ok"] and reported_running is True and
+                           owner_after["instance"] == owner_before["instance"] and
+                           owner_after["server"]["pid"] == owner_before["server"]["pid"] and
+                           owner_after["state"] in ("starting", "running", "parked"),
+                           'q leaves the same daemon running.', json.dumps(dict(status=status, before=owner_before, after=owner_after)))
                 diagnostics = error_file.read_bytes()[engine_stderr_offset:].decode()
                 case.check(expected_daemon_stderr(diagnostics, complete=False),
                            'Daemon and CLI stderr contain only known success phases and legacy dispatch traces.', diagnostics)
+                case.check(not expected_daemon_stderr(diagnostics + "WARNING unexpected\n", complete=False) and
+                           not expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=Unknown\n", complete=False),
+                           "Daemon stderr allowlist still rejects unknown lines and restart reasons")
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
@@ -1749,17 +1810,37 @@ def main():
                 parked_harness.ensure_serve()
                 harness.start_tmux(tmux, session, parked_launch)
                 parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
-                wait_for(lambda: parked_socket.exists() and parked_cli("status").get("connection") == "vpn_waiting",
-                         "parked engine fixture opens without a network session")
+                def parked_without_session():
+                    if not parked_socket.exists(): return False
+                    owner = parked_harness.api("app.info")
+                    network = parked_harness.api("app.network")["state"]
+                    return owner["state"] == "parked" and network["ready"] is False and network["interface"] == "fbmissing0"
+                wait_for(parked_without_session, "parked engine fixture opens without a network session")
                 listed = {torrent["hash"]: torrent for torrent in parked_cli("list")["torrents"]}
                 unknown, zero, done = [item["hash"] for item in records]
-                case.check(listed[unknown]["completion_on"] == -1 and listed[unknown]["state"] == "stoppedDL",
+                normalized = {row["hash"]: row for row in parked_harness.api("torrents.list")["torrents"]}
+                case.check(normalized[unknown]["intent"] == "pause" and normalized[unknown]["state"] == "waiting_vpn" and
+                           "completed_at" not in normalized[unknown] and "progress" not in normalized[unknown] and
+                           normalized[done]["completed_at"] == 123,
+                           "API preserves pause intent, omits unknown completion, and keeps the known date", json.dumps(normalized))
+                # API omits an unknown date; contract-1.x shapes it as zero.
+                # The legacy adapter retains the disk sentinel. Both must stay incomplete.
+                expected_cli_unknown = 0 if "native_state" in listed[unknown] else -1
+                case.check(listed[unknown]["completion_on"] == expected_cli_unknown and listed[unknown]["state"] == "stoppedDL",
                            "A saved -1 record remains incomplete.", json.dumps(listed[unknown]))
                 keys("1")
                 wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
                 keys("Home")  # The -1 record has the newest added_on timestamp.
                 wait_for(lambda: "(p) Resume" in capture(),
                          "unknown-date selection keeps the incomplete-row Resume control")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "run",
+                         "Resume in the TUI changes the paused VPN-waiting record to run intent")
+                wait_for(lambda: "(p) Pause" in capture(), "VPN-waiting run intent offers Pause")
+                keys("p")
+                wait_for(lambda: parked_harness.api("torrents.get",dict(hash=unknown))["torrent"]["intent"] == "pause",
+                         "Pause in the TUI restores saved pause intent without opening a network session")
+                wait_for(lambda: "(p) Resume" in capture(), "VPN-waiting paused intent offers Resume again")
                 result = parked_cli("start", unknown)
                 case.check(result["hashes"] == [unknown] and result["skipped"] == [],
                            "Explicit start accepts the existing -1 record.", json.dumps(result))

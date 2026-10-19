@@ -15,6 +15,7 @@ pub enum Item {
     Log(LogEntry),
     Torrent(Torrent),
     File(File),
+    Search(super::SearchItem),
     Peer(super::Peer),
     Event(Box<Event>),
 }

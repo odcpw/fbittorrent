@@ -1,0 +1,3 @@
+{"dir":"c2s","frame":{"id":1,"op":"torrents.move","ref":"move-fixture","args":{"hashes":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"save_path":"/tmp/fixture-destination"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"pending","ref":"move-fixture"}}}
+{"dir":"s2c","frame":{"ev":"mutation.result","seq":1,"ts":1792348800,"ref":"move-fixture","op":"torrents.move","outcome":"done","result":{"state":"done"}}}

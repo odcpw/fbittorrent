@@ -3,12 +3,14 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn load_rss(&mut self) -> Cmd<Msg> {
+        if self.cfg.native(){return self.sync_topics();}
         if self.rss_busy || self.rss_loading { return Cmd::none(); }
         self.rss_loading = true;
         let revision = self.rss_revision;
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             Msg::Rss { revision, result: c.login().and_then(|_| c.rss_feeds()).map_err(|e| e.to_string()) }
         })
     }
@@ -23,9 +25,10 @@ impl TuiApp {
         self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45));
         let revision = self.rss_revision;
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         let label = label.into();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let (result, error) = match c.login() {
                 Ok(()) => {
                     let error = action(&c).err().map(|error| error.to_string());
@@ -38,6 +41,7 @@ impl TuiApp {
     }
 
     pub(super) fn refresh_rss(&mut self) -> Cmd<Msg> {
+        if self.cfg.native(){return self.service_action("rss.refresh",serde_json::json!({}),"feeds refreshed");}
         if self.rss_busy { return Cmd::none(); }
         let names: Vec<String> = self.feeds.iter().map(|f| f.name.clone()).collect();
         if names.is_empty() { return Cmd::none(); }
@@ -90,11 +94,13 @@ impl TuiApp {
                 if !self.rss_focus_items {
                     self.set_status("Enter opens items · Shift+M marks this feed's items read", false);
                 } else if let Some((feed, id, read)) = self.selected_feed().and_then(|f| self.item_list.borrow().selected().and_then(|i| f.articles.get(i)).map(|a| (f.name.clone(), a.id.clone(), !self.cfg.native() || !a.is_read))) {
+                    if self.cfg.native(){return self.native_feed_action("rss.set_read",&feed,Some(&id),Some(read),format!("item marked {}",if read{"read"}else{"unread"}));}
                     return self.rss_action(format!("item marked {}", if read { "read" } else { "unread" }), move |c| c.rss_set_read(&feed, &id, read));
                 }
             },
             actions::Intent::MarkAll => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
+                if self.cfg.native(){return self.native_feed_action("rss.mark_feed_read",&name,None,None,format!("marked {name} as read"));}
                 return self.rss_action(format!("marked {name} as read"), move |c| c.rss_mark_read(&name, None));
             },
             actions::Intent::Primary if !self.rss_focus_items => {
@@ -107,6 +113,7 @@ impl TuiApp {
                         let url = if a.torrent_url.is_empty() { a.link.clone() } else { a.torrent_url.clone() };
                         let (feed, id, label) = (f.name.clone(), a.id.clone(), short(&a.title, 40));
                         let opts = self.add_opts();
+                        if self.cfg.native(){return self.native_feed_action("rss.grab",&feed,Some(&id),None,format!("added {label}"));}
                         return self.rss_action(format!("added {label}"), move |c| { c.add_url(&url, &opts)?; c.rss_mark_read(&feed, Some(&id)) });
                     }
                 }
@@ -128,59 +135,180 @@ impl TuiApp {
 
     pub(super) fn view_rss(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
-        let cols = Flex::horizontal().constraints([Constraint::Percentage(34.0), Constraint::Fill]).split(area);
-        let title = format!(" Feeds ({}) ", self.feeds.len());
-        let block = Block::bordered().border_type(BorderType::Rounded)
-            .border_style(if self.rss_focus_items { th.border() } else { th.border_focused() }).title(&title);
-        let inner = block.inner(cols[0]);
-        block.render(cols[0], frame);
-        if self.feeds.is_empty() {
-            Paragraph::new("No feeds yet.\n\n(N)ew feed: add an RSS URL").style(th.dimmed()).render(pad(inner), frame);
+        let tier = layout::Tier::at(area.width);
+        let cols = if tier == layout::Tier::Narrow {
+            if self.rss_focus_items {
+                [Rect::default(), area]
+            } else {
+                [area, Rect::default()]
+            }
         } else {
-            let elapsed = self.marquee_elapsed();
-            let items: Vec<ListItem> = self.feeds.iter().enumerate().map(|(i, f)| {
-                let unread = f.articles.iter().filter(|a| !a.is_read).count();
-                let w = inner.width.saturating_sub(2) as usize;
-                let count = format!(" {unread}/{}", f.articles.len());
-                let name = readable_cell(&f.name, w.saturating_sub(count.len() + 1),
-                    hovered_for(&self.feed_list,i,elapsed));
-                let padn = 1;
-                let mut spans = vec![Span::styled(name, if unread > 0 { th.text().bold() } else { th.text() }), Span::raw(" ".repeat(padn)), Span::styled(count, th.dimmed())];
-                if f.has_error { spans.push(Span::styled(" !", th.err())); }
-                li(Line::from_spans(spans))
-            }).collect();
-            let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
-            StatefulWidget::render(&list, inner, frame, &mut self.feed_list.borrow_mut());
+            let split = Flex::horizontal()
+                .constraints([Constraint::Percentage(34.0), Constraint::Fill])
+                .split(area);
+            [split[0], split[1]]
+        };
+        if !cols[0].is_empty() {
+            let title = format!(" RSS › Feeds ({}) ", self.feeds.len());
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .padding(Sides::all(0))
+                .border_style(if self.rss_focus_items {
+                    th.border()
+                } else {
+                    th.border_focused()
+                })
+                .title(&title);
+            let inner = block.inner(cols[0]);
+            block.render(cols[0], frame);
+            if self.feeds.is_empty() {
+                Paragraph::new("No feeds yet.\n\n(n) New feed: add an RSS URL")
+                    .style(th.dimmed())
+                    .render(pad(inner), frame);
+            } else {
+                let elapsed = self.marquee_elapsed();
+                let width = inner.width.saturating_sub(2) as usize;
+                self.view_rows(
+                    MouseList::Feeds,
+                    inner,
+                    self.feeds.len(),
+                    |i| {
+                        let f = &self.feeds[i];
+                        layout::fingerprint(&(
+                            &f.name,
+                            f.articles.len(),
+                            self.feed_counts(f),
+                            f.has_error,
+                            f.is_loading,
+                        ))
+                    },
+                    |i| {
+                        let f = &self.feeds[i];
+                        let (unread,total)=self.feed_counts(f);
+                        let count=format!(" {}{}",total.map_or_else(||format!("{unread} unread"),|n|format!("{unread}/{n}")),if f.has_error{" !"}else{""});
+                        Line::from_spans([
+                            Span::styled(
+                                readable_cell(
+                                    &f.name,
+                                    width.saturating_sub(dw(&count)),
+                                    hovered_for(&self.feed_list, i, elapsed),
+                                ),
+                                if unread > 0 {
+                                    th.text().bold()
+                                } else {
+                                    th.text()
+                                },
+                            ),
+                            Span::styled(count, th.dimmed()),
+                        ])
+                    },
+                    frame,
+                );
+            }
         }
-
-        let feed = self.selected_feed();
-        let title = match feed { Some(f) => format!(" {} ", if f.title.is_empty() { f.name.clone() } else { f.title.clone() }), None => " Items ".into() };
-        let block = Block::bordered().border_type(BorderType::Rounded)
-            .border_style(if self.rss_focus_items { th.border_focused() } else { th.border() }).title(&title);
-        let inner = block.inner(cols[1]);
-        block.render(cols[1], frame);
-        let Some(f) = feed else { return };
-        if f.articles.is_empty() {
-            Paragraph::new(if f.is_loading { "Loading…" } else { "No items.\n(R)efresh feeds" }).style(th.dimmed()).render(pad(inner), frame);
+        if cols[1].is_empty() {
             return;
         }
-        let w = inner.width.saturating_sub(2) as usize;
+        let feed = self.selected_feed();
+        let title = feed
+            .map(|f| {
+                format!(
+                    " RSS › {} ",
+                    if f.title.is_empty() {
+                        &f.name
+                    } else {
+                        &f.title
+                    }
+                )
+            })
+            .unwrap_or_else(|| " RSS › Items ".into());
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .padding(Sides::all(0))
+            .border_style(if self.rss_focus_items {
+                th.border_focused()
+            } else {
+                th.border()
+            })
+            .title(&title);
+        let inner = block.inner(cols[1]);
+        block.render(cols[1], frame);
+        let Some(feed) = feed else {
+            return;
+        };
+        if feed.articles.is_empty() {
+            Paragraph::new(if feed.is_loading {
+                "Loading…"
+            } else {
+                "No items.\n(r) Refresh feeds"
+            })
+            .style(th.dimmed())
+            .render(pad(inner), frame);
+            return;
+        }
+        let sizes = feed.articles.iter().any(|a| a.size.is_some());
+        let width = inner.width.saturating_sub(2) as usize;
         let elapsed = self.marquee_elapsed();
-        let items: Vec<ListItem> = f.articles.iter().enumerate().map(|(i, a)| {
-            let date = if a.ts > 0 { ymd(a.ts) } else { a.date.chars().take(11).collect() };
-            let size = a.size.map(human_bytes).unwrap_or_default();
-            let tail = format!(" {size:>9}  {date}");
-            let title = readable_cell(&a.title, w.saturating_sub(tail.len() + 2),
-                hovered_for(&self.item_list,i,elapsed));
-            let padn = 0;
-            li(Line::from_spans([
-                Span::styled(if a.is_read { "  " } else { "● " }, th.accented()),
-                Span::styled(title, if a.is_read { th.dimmed() } else { th.text() }),
-                Span::raw(" ".repeat(padn)),
-                Span::styled(tail, th.dimmed()),
-            ]))
-        }).collect();
-        let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
-        StatefulWidget::render(&list, inner, frame, &mut self.item_list.borrow_mut());
+        self.view_rows(
+            MouseList::Items,
+            inner,
+            feed.articles.len(),
+            |i| layout::fingerprint(&(&feed.articles[i], sizes, tier.extended())),
+            |i| {
+                let article = &feed.articles[i];
+                let key = crate::release::parse(&article.title)
+                    .episode
+                    .unwrap_or_default();
+                let date = if tier.extended() {
+                    format!(
+                        "  {}",
+                        if article.ts > 0 {
+                            ymd(article.ts)
+                        } else {
+                            article.date.chars().take(10).collect()
+                        }
+                    )
+                } else {
+                    String::new()
+                };
+                let size = if sizes {
+                    format!(" {:>9}", article.size.map(human_bytes).unwrap_or_default())
+                } else {
+                    String::new()
+                };
+                let key = if key.is_empty() {
+                    String::new()
+                } else {
+                    format!("{key} ")
+                };
+                let name_width = width.saturating_sub(9 + dw(&key) + dw(&size) + dw(&date));
+                let style = if article.is_read {
+                    th.dimmed()
+                } else {
+                    th.text()
+                };
+                Line::from_spans([
+                    Span::styled(
+                        if article.is_read {
+                            "✓ Read   "
+                        } else {
+                            "● Unread "
+                        },
+                        style,
+                    ),
+                    Span::styled(key, style),
+                    Span::styled(
+                        readable_cell(
+                            &article.title,
+                            name_width,
+                            hovered_for(&self.item_list, i, elapsed),
+                        ),
+                        style,
+                    ),
+                    Span::styled(format!("{size}{date}"), th.dimmed()),
+                ])
+            },
+            frame,
+        );
     }
 }

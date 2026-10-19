@@ -1,0 +1,44 @@
+import QtQuick
+import Quickshell
+import "Plugin/DetailFlow.js" as DetailFlow
+import "Plugin/Store.js" as Store
+ShellRoot {
+  function check(name,condition,expect,observed){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise details controller and reducers",expect:expect,observed:JSON.stringify(observed),ok:!!condition,ms:0}))}
+  function service(){
+    var s={store:Store.create(),calls:[],topics:[],consumers:{}}
+    s.client={caps:["files","subscribe","imdb","log"],request:function(op,args,options){s.calls.push({op:op,args:args,callback:options ? options.callback : null});return s.calls.length}}
+    s.unsubscribeDetail=function(){s.topics=[]};s.subscribeDetail=function(hash,topics){s.topics=topics.map(function(t){return "torrent:"+hash+"."+t})}
+    s.logConsumer=function(id,on){s.consumers[id]=on};s.lookupImdb=function(args,done){return s.client.request("imdb.lookup",args,{callback:done})}
+    s.setFiles=function(hash,ids,on,done){s.calls.push({op:"torrents.set_files",hash:hash,ids:ids,on:on,callback:done});return true}
+    s.openTarget=function(hash,index){s.opened={hash:hash,index:index}}
+    return s
+  }
+  Component.onCompleted:{
+    var s=service(),h="a".repeat(40),other="b".repeat(40),d=DetailFlow.create(s,function(){})
+    s.store.torrents[h]={hash:h,name:"Local Fixture",state:"paused"};s.store.torrents[other]={hash:other,name:"Other",state:"paused"}
+    d.begin(h);d.lookup();s.calls[0].callback({torrent:{hash:h,private:true,file_count:10}},null);s.calls[1].callback({card:null},null)
+    d.hide();d.begin(h);d.lookup()
+    check("lookup_cache",s.calls.length===2 && d.card===null,"get extras once per torrent and cache a null IMDb result",s.calls)
+    d.selectTab("files")
+    var rows={};[10,2,9,1,4,3,8,5,7,6].forEach(function(n,index){rows[index]={index:index,path:"E"+n+".mkv",sort_key:String(n).padStart(10,"0"),size:20,progress:0,included:true}})
+    s.store.topics[s.topics[0]]=rows;d.frame({ev:"snapshot.end",topic:s.topics[0]})
+    check("natural_files",d.files.map(function(f){return f.path}).join(",")==="E1.mkv,E2.mkv,E3.mkv,E4.mkv,E5.mkv,E6.mkv,E7.mkv,E8.mkv,E9.mkv,E10.mkv","plain sort_key order differs from file index order",d.files)
+    d.toggle();check("file_actions",s.calls[2].ids[0]===3 && !s.calls[2].on,"Space skips the displayed file's true index",s.calls[2])
+    d.filter("e10");d.setFiles(true,true);check("file_actions",s.calls[3].ids.join(",")==="0","all acts only on the case-insensitive filtered set",s.calls[3])
+    d.filter("absent");d.setFiles(false,true);check("file_actions",s.calls[4].ids.length===0,"empty filtered set is sent without inventing an index",s.calls[4])
+    s.store.torrents[h].state="checking";var n=s.calls.length;d.toggle();d.setFiles(true,true);check("file_actions",s.calls.length===n,"checking refuses all file selection writes",s.calls.length)
+    d.selectTab("log");check("topic_lifetime",!s.topics.length && s.consumers.details,"Log releases file sampling and acquires one log consumer",s)
+    d.hide();check("topic_lifetime",!s.topics.length && !s.consumers.details,"hide releases the detail topics and log consumer",s.topics)
+    d.begin(h);n=s.calls.length;d.frame({ev:"delta",topic:"events",added:[{ev:"engine.changed"}]});check("lookup_cache",s.calls.length===n+1,"nested engine.changed refetches detail extras",s.calls)
+    var store=Store.create(),entries=[];for(var i=0;i<1010;i++)entries.push({seq:i,ts:0,hash:i%2 ? h : other,message:"entry "+i,level:"info",source:"engine"})
+    store.apply({id:1,ok:true,result:{entries:entries,next_seq:1010}},{op:"app.log",args:{}})
+    check("log_ring",Object.keys(store.topics.log).length===1000 && store.logEntries(h).length===500 && store.logEntries(h)[0].seq===11,"log uses seq keys, bounds the ring to 1000 and filters by hash",store.logEntries(h).slice(0,2))
+    store.apply({id:2,ok:true,result:{sub:4,topics:["log"]}},{op:"subscribe",args:{topics:["log"]}})
+    store.apply({ev:"delta",sub:4,topic:"log",rev:1,added:[{seq:1010,hash:h,message:"next"}]})
+    check("log_ring",Object.keys(store.topics.log).length===1000 && store.logEntries(h).slice(-1)[0].seq===1010,"append delta keeps prior same-hash entries and enforces the bound",Object.keys(store.topics.log).length)
+    var rejected=false;try{store.apply({ev:"delta",sub:4,topic:"log",rev:2,changed:{1010:{message:"rewritten"}}})}catch(error){rejected=String(error).indexOf("append-only")>=0}
+    check("log_ring",rejected && store.logEntries(h).slice(-1)[0].message==="next","changed log entries are rejected without rewriting the append-only ring",rejected)
+    ;["lookup_cache","natural_files","file_actions","topic_lifetime","log_ring"].forEach(function(name){console.log("FBTQS-PASS "+name)})
+    Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})
+  }
+}

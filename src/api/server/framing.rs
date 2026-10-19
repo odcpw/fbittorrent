@@ -121,7 +121,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
     let op = raw["op"].as_str().unwrap_or("");
     // Settings validate the entire patch against Config before any side effects,
     // retaining the exact offending key for both types and semantic bounds.
-    if op == "app.settings.set" { return None; }
+    if op == "app.settings.set" || op.starts_with("search.") { return None; }
     for (key, value) in args {
         let valid = match key.as_str() {
             "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
@@ -139,7 +139,9 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
             "origin" if op == "torrents.list" => value
                 .as_array()
                 .is_some_and(|values| values.iter().all(Value::is_string)),
+            "path" if op == "app.free_space" => value.as_str().is_some_and(|path| crate::free_space::valid_path(path).is_ok()),
             "reason" | "save_path" | "category" | "origin" => value.is_string(),
+            "to" if op=="torrents.queue_move" => serde_json::from_value::<QueueTo>(value.clone()).is_ok(),
             "scope" => serde_json::from_value::<RestartScope>(value.clone()).is_ok(),
             "source" if op == "app.log" => value.is_string(),
             "level" => serde_json::from_value::<LogLevel>(value.clone()).is_ok(),

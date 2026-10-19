@@ -204,6 +204,11 @@ impl Shared {
         };
         if result.is_err() && task.handler_add { self.daemon.notifier.failed(); }
         let (outcome, failure, result) = match result {
+            Ok(Reply::TorrentsRecheck(RecheckReply::Complete(report))) if !report.failed.is_empty() => (
+                MutationOutcome::Failed,
+                Some(error(ErrorCode::InvalidState, "one or more rechecks failed", None)),
+                Some(serde_json::to_value(report).unwrap().as_object().unwrap().clone()),
+            ),
             Ok(reply) => (
                 MutationOutcome::Done,
                 None,
@@ -262,7 +267,11 @@ impl Shared {
                 continue;
             }
             let result = match entry.confirmation {
-                Some(Confirmation::Metadata(Reply::TorrentsAdd(mut added))) => {
+                Some(Confirmation::Move(batch))=>batch.result().map(ops::moving::complete),
+                Some(Confirmation::Recheck(batch)) => batch.result().map(|report| Ok(ops::recheck::complete(report))),
+                Some(Confirmation::Metadata(reply)) => {
+                    let search = matches!(&reply, Reply::SearchGrab(_));
+                    let mut added = match reply { Reply::TorrentsAdd(added) | Reply::SearchGrab(added) => added, _ => unreachable!("metadata add receipt") };
                     let hash = added.hash.as_ref().unwrap().as_str();
                     // Reading the restore receipt never waits on a runtime or on
                     // payload I/O, including while the owner replaces a slot.
@@ -284,7 +293,7 @@ impl Shared {
                                 added.name = Some(detail.torrent.name);
                             }
                             added.status = MutationResult::Done;
-                            Some(Ok(Reply::TorrentsAdd(added)))
+                            Some(Ok(if search { Reply::SearchGrab(added) } else { Reply::TorrentsAdd(added) }))
                         }
                         Some(crate::engine::RestoreOutcome::Failed { message, .. }) => {
                             Some(Err(error(
@@ -306,7 +315,7 @@ impl Shared {
                         continue;
                     };
                     (slot.engine_epoch > epoch
-                        && matches!(slot.slot, crate::daemon::slot::Slot::Running(_)))
+                        && matches!(slot.slot, crate::daemon::slot::Slot::Running(_) | crate::daemon::slot::Slot::Parked(_)))
                     .then(|| Ok(Reply::TorrentsSetUploadLimit(MutationResult::Done)))
                 }
                 _ => None,

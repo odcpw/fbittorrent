@@ -567,3 +567,439 @@ All paths below are under `target/test-logs/fbt-p3-05-8q4/`. `run.py` retains ex
 | Build/size | `cargo check --locked`; `cargo build --locked`; `scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`; `git diff --check` | `check.{jsonl,log}`; `debug-binary-final.{jsonl,log}`; `size-final.{jsonl,log}` | PASS; every changed source below 900 lines |
 
 Follow-up: when P1-08 lands, publish Service::generation/get as Settings state-on-change, then qualify pushed settings and both engine.changed events (including a binding change); when P1-12 lands, qualify actual idle expiry after changing idle_exit_secs. P3-06 requires P1-12 and has not been started on this checkpoint.
+
+
+## P5-03 — fbt-p5-03-5ry (daemon/API half)
+
+Added `torrents.recheck`, its pending/ref and measured result types, `recheck` capability, non-idempotent operation row, independent success/failure transcript and contract 1.2.3. Engine-owned work checks one hash at a time outside the dispatch pool and releases the ledger before waiting for checksum I/O. Duplicate requests share a check and result; admission/handle replacement serializes against ledger mutations, paused intent stays paused, checks consume no queue slots, and owner teardown cancels/joins work and publishes terminal receipts before bye. Saved completion is invalidated before opening data; missing/failed checks cannot resurrect the old finished claim, while unchanged verified data retains its original completion time. Added a serde-default, omitted-when-false staged bit solely to support the required refusal before P3-06. No previous transcript or legacy byte fixture was regenerated. UI criteria (R action, default-No confirmation, overview button/checking presentation, keymap/UI tests) are **deferred to tracks C/D** per the owner clarification. The CLI verb remains a track-B surface follow-up outside this explicitly assigned daemon/API half. Completion notification re-emission and summary mutation busy-reason qualification await P1-08/P1-12/P1-13; durable reset/second completion and the server's pending mutation registry are proven here. No all.sh between track beads per owner policy.
+
+Evidence root: `target/test-logs/fbt-p5-03-5ry/`; exact argv/exit codes live in its command JSONL files. Named process cases run over api.sock with private HOME/TMPDIR/five XDG dirs, loopback peers and disposable systemd units.
+
+| Criterion / check | Command | Log / artifact | Observed |
+|---|---|---|---|
+| Corrupt-byte verification then repair | `run-daemon.py repair-qualified target/debug/fbittorrent recheck_corrupt_byte recheck_corrupt_byte_256k` | `repair-qualified/daemon/recheck_corrupt_byte{,_256k}.jsonl` | PASS: seed stays paused until mutation.result; 64 MiB case observes checking→stalled/downloading→done; exact 256 KiB/16-piece case reports 245760 verified bytes, then local seed repairs the missing piece and restores exact SHA256/completion. A 256 KiB scan can finish between API reads, so the larger independent fixture proves observable state without adding production delays; the prescribed 256 KiB fixture remains an exact-byte test |
+| Dormant check once | `cargo test --locked -p fbittorrent recheck -- --nocapture`; `run-daemon.py live-final ... recheck_dormant` | `module-diagnostic.{jsonl,log}`; `live-final/daemon/recheck_dormant.jsonl` | PASS: dormant row checked:false; one storage create, one 5-byte checksum read; one real admission in daemon log |
+| Paused intent preserved | `run-daemon.py live-final ... recheck_paused_stays_paused` (also systemd-final) | corresponding `daemon/recheck_paused_stays_paused.jsonl` | PASS: verifies complete data while saved paused:true/intent:pause remain; final paused; metadata-less and unknown hashes refused |
+| Mid-repair restart | `run-daemon.py {live-final,systemd-qualified} ... recheck_resets_completion` | corresponding `daemon/recheck_resets_completion.jsonl` | PASS: SIGKILL during an API-observed check leaves completion_on=0; restart hashes and returns incomplete/stalled, never dormant done |
+| Staged refusal | `run-daemon.py {live-final,systemd-final} ... recheck_staged_invalid_state` | corresponding case JSONL | PASS: isolated saved staged record yields invalid_state with reason:staged (A.3 exit mapping 1); actual staging operation/CLI case awaits P3-06/CLI surface |
+| Failure is terminal and truthful | `run-daemon.py {live-final,systemd-qualified} ... recheck_failed_receipt`; focused recheck units | corresponding case JSONL; `module-diagnostic.log` | PASS: deliberate cache-write failure gives one failed ref event with per-hash message, error row, durable completion 0; reconciliation cannot restore the old completion |
+| Async sharing / no timeout | `cargo test --locked -p fbittorrent recheck -- --nocapture` | `module-diagnostic.{jsonl,log}` | 10 passed, including gated real checksum read: two requests, one physical scan; info/reconcile responsive; zero queue slots; pending receipt remains valid beyond its nominal deadline; operation non-idempotent |
+| Full suite / compatibility | `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture` | `full-unit.{jsonl,log}`; final focused log above | Full run 327 passed, 2 deliberately ignored; subsequent admission/failure/timestamp hardening covered by final 10 focused tests. Ten pre-existing transcripts byte-identical (`frozen-fixtures.json`); 768-row mapping and old wire goldens passed full run |
+| Contract / source size | `agent_contract.py ... --case contract`; `scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`; `git diff --check` | `cli-contract/agent_contract/contract.jsonl`; `size.{jsonl,log}` | PASS; existing CLI commands unchanged; all changed/new source files below 900 lines |
+
+Initial failures retained: first restart/repair fixtures waited for visible done before its timestamp had been durably saved; corrected to wait for positive completed_at. The systemd-run SIGKILL launcher status is 255, versus foreground -9 (earlier wrong 137 expectation retained). The initial 256 KiB checking observation was too short for sampling; the separate 64 MiB state fixture above supplies that assertion. One parallel focused run missed the checksum read gate's existing 5-second deadline; unchanged exact test passed in 37 ms and the final 10-test module passed with the same deadline/assertions plus better diagnostics. Follow-up: investigate that gate scheduling variance; replace the saved staged-record precondition with real `stage:true` after P3-06; qualify completion pushes and busy-reason integration after track A lands; wire the CLI verb on track B and UI criteria on C/D.
+
+
+## P6-05 — fbt-p6-05-38j (daemon/API half)
+
+Added durable force intent, linear queue-position projection, pure admission/order functions, `torrents.force_start`, `torrents.queue_move` and `torrents.start {force:true}` with typed results, capability `queue`, the independent queue transcript and contract 1.2.4. Forced records bypass the ordinary limit; force-off rejoins the queue, and stop/completion clear force. Reorders protect current transfers across maintenance ticks without changing existing FIFO resume behavior; paused/done/forced/staged rows are skipped for positions. Parked operations persist and survive slot restart. Adjacent fix: the existing owner restart receipt now completes when a new slot is parked, as well as running. The existing API test's reserved `force:false` rejection became a positive ordinary-start assertion because the flag is now implemented. All eleven previous transcripts and legacy fixtures remain unchanged. UI presentation/key/dialog tests are **deferred to tracks C/D**; CLI `start --force`/`queue` wiring remains track B's surface follow-up. Pushed Summary.counts qualification is deferred to P1-08; normalized rows and the physical engine counter both prove two transfers under limit one. No all.sh between beads per owner policy.
+
+Evidence root `target/test-logs/fbt-p6-05-38j/`; command JSONL retains exact argv and exits. All process fixtures have private HOME/TMPDIR/five XDG dirs and real loopback seed/leech peers; each of three payloads is 8 MiB and the seed's global upload limit is 65536 B/s, so none completes during the ordering assertions.
+
+| Criterion/check | Command | Evidence | Observed |
+|---|---|---|---|
+| Force bypasses limit one | `run-daemon.py {foreground,systemd} ... force_start_bypasses_limit` | corresponding `daemon/force_start_bypasses_limit.jsonl` | PASS: two live incomplete transfers with run intent; physical active_downloads=2, limit=1; forced row has no queue_pos; already-running forced start stays in started; completed no-seed refusal gives `fbittorrent seed <hash>` |
+| Move third to top without pausing first; start it when first stops | `run-daemon.py {foreground,systemd} ... queue_move_order` | corresponding `daemon/queue_move_order.jsonl` | PASS: third queue_pos=1; two existing transfers remain active through a maintenance tick; stopping first admits third; stale-instance move refused |
+| Moving forced torrent is invalid_state | same case | same log | PASS with reason no_queue_position |
+| Force-off returns second to queue | `run-daemon.py {foreground,systemd} ... force_off_returns_to_queue` | corresponding `daemon/force_off_returns_to_queue.jsonl` | PASS: force:false, queue_pos=2, state queued/reason queue_full; explicit stop also clears force and removes position |
+| Parked durability and order | `run-daemon.py {foreground,systemd} ... queue_parked_persists` | corresponding `daemon/queue_parked_persists.jsonl` | PASS: forced row and C/B/A ledger order survive parked engine restart; restart gets a done ref result; same daemon instance |
+| Pure rules and regression | `cargo test --locked -p fbittorrent queue -- --nocapture`; `cargo test --locked ... -- --nocapture` | `queue-final-unit.{jsonl,log}`; `full-unit.{jsonl,log}` | Focused 10 passed. Full suite once: 335 passed, 2 deliberately ignored; includes save_preserves_order, no saved timestamp completion refusal/force clearing, original FIFO tests, 768-row state table and legacy wire goldens |
+| Existing API and CLI contract | `run-daemon.py api-regression ... api_torrent_operations`; `agent_contract.py ... --case contract` | `api-regression/daemon/api_torrent_operations.jsonl`; `cli-contract/agent_contract/contract.jsonl` | PASS, including implemented force:false positive control and contract 1.2.4 |
+| Compile / size / frozen data | `cargo check --locked`; debug `cargo build --locked`; size gate; `git diff --check` | `check`, `debug-binary`, `size-final` JSONL/logs; `frozen-fixtures.json` | PASS; all changed source below 900 lines; eleven prior transcript files byte-identical |
+
+Follow-ups: track A supplies the pushed Summary count assertion; C/D add forced/queue-position presentation and P/K/J controls; track B wires CLI force/queue commands. No daemon/API criterion otherwise remains unmet in this scoped half.
+
+## P6-08 — fbt-p6-08-xrh, daemon/API increment
+
+Durable open-string origins now migrate historical attribution tags, default old records to manual, survive daemon restart and support Search/RSS/Shows/Manual buckets (including clipboard/handler/agent/unknown). Keep-files batch removal durably removes ledger intent while caching private record/metainfo links; its one ten-second monotonic authorization belongs to the daemon across slot restarts. Restore appends saved intent at the queue tail, invalidates completion, performs a fresh real check, and preserves policy/origin; repeated restore of an existing hash is a duplicate. Authorization and expired caches die with the daemon. Per-hash cancellation settles concurrent rechecks before removal acknowledges, preventing stale failures from poisoning a restored row. Added `origin` cap, `origin.ndjson`, contract patch 1.2.5 and API documentation; twelve pre-existing transcripts unchanged. Neighbouring edits: daemon-owned history, additive typed engine ops/results, AddRequest/Record constructors and origin projection, recheck cancellation and shared fixture registration. No structural refactor. No release build/all.sh between track beads, per owner policy.
+
+Commands use `target/test-logs/fbt-p6-08-xrh/run.py` (isolated XDG, rch, CARGO_BUILD_JOBS=4); `run-daemon.py <label> target/debug/fbittorrent <cases...>` writes E.1 JSONL and retained daemon stderr beneath the label. The full Rust command was run once: `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture` → **343 passed, 2 intentionally ignored** (`full-unit.{jsonl,log}`). `cargo check --locked` → pass (`check-final.{jsonl,log}`); focused engine tests → 72 passed/1 ignored (`focused-engine.log`), then full Rust also covers the final cache-save retry and exit-code regressions. Frozen API fixture tests → 30/30 (`api-fixtures-qualified.log`). Source-size ratchet and contract 1.2.5 CLI capability test pass (`source-size.jsonl`, `agent-contract/agent_contract/contract.jsonl`, outer `contract.jsonl`).
+
+| Criterion | Case / artifact under target/test-logs/fbt-p6-08-xrh | Observed |
+|---|---|---|
+| Origin persists across restart | `foreground-final/daemon/origin_persists.jsonl`, `systemd-final/daemon/origin_persists.jsonl`; `ledger::tests::origin_default_manual` in `full-unit.log` | Eight origin strings survive full daemon restart; legacy migration/default and exact comma-containing unknown value verified; all buckets correct |
+| Filtered bulk count/size and confirmation | Both modes: `bulk_remove_mixed_sizes.jsonl` | Four RSS rows, 49,152 known bytes plus two unknown sizes; one request removes exactly that set, Search survivor remains, undo appends in requested order. Dialog/required y/toast **deferred to tracks C/D** |
+| Undo within 10s checks to done without download | Both modes: `undo_restore.jsonl`, `undo_incomplete_download.jsonl`, `undo_owner_lifetime.jsonl`; engine typed_seed/check_reconciliation and undo tests in `full-unit.log` | 64 MiB complete payload rechecks to done with exact SHA-256 and zero session downloads; real 64 MiB half-complete payload checks then receives loopback data; physical five-byte oracle creates=1/read=1/bytes=5; gated incomplete check is checking/checked=false; cancellation race, slot survival, tail append and save-failure retry pass |
+| Expired undo is invalid_state / exit 1 | Both modes: `undo_expired.jsonl`; `api::ops::torrents::expired_undo_maps_to_nonretryable_exit_one` | After 11 seconds: nonretryable invalid_state, reason undo_expired; cache collected; existing CLI error dictionary maps this exact engine error to exit 1. CLI `undo` verb itself remains Track B surface follow-up |
+
+Final native qualification is **6/6 foreground + 6/6 systemd**. Existing API operations, stale-instance removal and 257-hash rejection pass (`api-regression-qualified/daemon/`); mutation receipt replay/removal safety pass (`mutation-regression/daemon/`). Initial failures remain retained: missing args/scope in the new restart fixture, an early queued-state sample, and advertising a paused seed caused a connection retry delay; the final fixture advertises the peer only after verification and live seeding. No timeout was relaxed. Initial new transcript missed required staged/save_path fields; its corrected additive fixture passes frozen type validation. All final runs retain real processes, isolated storage and explicit stderr checks.
+
+**Unresolved frozen replay conflict, not claimed green:** `replay-qualified-inventory/daemon/contract_torrents.jsonl` has eight byte-comparison failures; both the captured live transcript and frozen fixture pass the Rust structural validator. Exact mismatch records are in `replay-qualified-inventory/mismatches.json`; existing fixture bytes and the declared normalization table were not changed. A ruling was requested about explicit logged restore preconditions versus a separate fixture correction. The pre-existing watch-conditioned line 39 also expects seed=false after an earlier set_seed(true); no hidden seed-policy reset was introduced.
+
+| Frozen torrents.ndjson line | JSON pointer | Expected / live | Proposed classification |
+|---|---|---|---|
+| 23 | `/result/undo_until` | 1792310430 / 1792391569 | Add undo_until to declared timestamp normalization (new field, otherwise correct ten-second deadline) |
+| 27, 29, 31, 35 | `/result` | `{state:done}` / absent, live not_found | Fixture/precondition conflict: hash was removed at line 23, no restore request precedes these mutations |
+| 37 | `/result` | `{kind:file,path:/tmp/fbt-fixture/downloads/Example e2.mkv}` / absent, live not_found | Same post-remove precondition conflict |
+| 49 | `/result/torrent/undo_until` | 1792310490 / absent | Fixture/precondition conflict: active done record has never been removed; no undo deadline exists |
+| 61 | `/result` | `{ref:fixture-upload,state:pending}` / absent, live not_found | Same post-remove precondition conflict |
+
+UI confirmations/toasts/presentation remain deferred to tracks C/D under the explicit backend-half ruling. Follow-ups: Track B CLI undo/delete undo_until/origin arguments; future search/RSS/Shows grabs and clipboard wiring consume the now-open add origin; P1-08 must qualify pushed removals/additions after integration. Frozen replay reconciliation remains open pending the ruling above; this increment does not close P6-08 or its old P1-06 replay deferrals.
+
+
+## P6-08 — standing-authority replay reconciliation
+
+Owner authority (2026-10-19): computed timestamps compare by type/validity, undo deadlines must be future and within the originating removal's ten-second window; self-contradictory fixtures may receive minimal byte corrections without changing API meaning. Added explicit restore, full-selection reset and seed/run intent exchanges; corrected file progress, invariant private flag and multi-file content-folder expectations; removed the impossible deadline on a never-removed done row; a mutation after file-deleting removal now expects the existing not_found error. All other original line bytes remain intact. The reserved TorrentDetail.undo_until remains covered as a standalone typed-object fixture (present/absent, validate and lossless serde round trip), without claiming an impossible active Get is live proof. Negative tests still assert exact error lines/pointers, locating edited scenarios by payload instead of brittle line offsets. The replay drives the declared tracker_count, stops only competing downloads, and waits for the actual terminal file-removal receipt before the subsequent missing-record scenario. No production server change, release build or all.sh.
+
+Fixture bytes before/after are recorded exactly below, including successive edits. Original SHA-256: `a128efd3cf42d56630c36be90a111f028602dff7aa74f8dd1aa9b1dd3ed32678` (18145 bytes); final: `e1250b47077c2fd677ae27a20894e774158c6582379f7c95bf8b0a8fde59cbd5` (19044 bytes). Source base is commit d206640.
+
+```json
+[
+  {
+    "old_line": 23,
+    "before": "",
+    "after": "{\"dir\":\"c2s\",\"frame\":{\"args\":{\"source\":{\"restore\":\"0123456789abcdef0123456789abcdef01234567\"}},\"id\":300,\"op\":\"torrents.add\"}}\n{\"dir\":\"s2c\",\"frame\":{\"id\":300,\"ok\":true,\"result\":{\"duplicate\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"name\":\"Example e2.mkv\",\"state\":\"done\"}}}\n",
+    "reason": "explicit undo restore before reads and edits of removed hash"
+  },
+  {
+    "old_line": 25,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":14,\"ok\":true,\"result\":{\"files\":[{\"included\":true,\"index\":0,\"path\":\"Example e2.mkv\",\"progress\":0.25,\"ready\":true,\"size\":2048,\"sort_key\":\"example e0000000002.mkv\"},{\"included\":true,\"index\":1,\"path\":\"Example e10.mkv\",\"progress\":0.25,\"size\":2048,\"sort_key\":\"example e0000000010.mkv\"}]}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":14,\"ok\":true,\"result\":{\"files\":[{\"included\":true,\"index\":0,\"path\":\"Example e2.mkv\",\"progress\":0.5,\"ready\":true,\"size\":2048,\"sort_key\":\"example e0000000002.mkv\"},{\"included\":true,\"index\":1,\"path\":\"Example e10.mkv\",\"progress\":0.0,\"size\":2048,\"sort_key\":\"example e0000000010.mkv\"}]}}}\n",
+    "reason": "file progress agrees with one verified 1024-byte piece"
+  },
+  {
+    "old_line": 38,
+    "before": "",
+    "after": "{\"dir\":\"c2s\",\"frame\":{\"args\":{\"hashes\":[\"0123456789abcdef0123456789abcdef01234567\"],\"on\":false},\"id\":301,\"op\":\"torrents.set_seed\"}}\n{\"dir\":\"s2c\",\"frame\":{\"id\":301,\"ok\":true,\"result\":{\"state\":\"done\"}}}\n{\"dir\":\"c2s\",\"frame\":{\"args\":{\"hashes\":[\"0123456789abcdef0123456789abcdef01234567\"]},\"id\":302,\"op\":\"torrents.start\"}}\n{\"dir\":\"s2c\",\"frame\":{\"id\":302,\"ok\":true,\"result\":{\"skipped\":[],\"started\":[\"0123456789abcdef0123456789abcdef01234567\"],\"state\":\"done\"}}}\n",
+    "reason": "restore retains paused intent; explicitly return seed/run policy before the downloading detail"
+  },
+  {
+    "old_line": 39,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":100,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads/Example e2.mkv\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":false,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":100,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads/Example e2.mkv\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":true,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "reason": "same hash retains the private metadata flag"
+  },
+  {
+    "old_line": 49,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":105,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Fixture detail\",\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture done\",\"created_by\":\"fbittorrent fixtures\",\"file_count\":2,\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"piece_count\":4,\"piece_size\":1024,\"private\":false,\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"tracker_count\":1,\"undo_until\":1792310490,\"upload_policy\":\"default_cap\"}}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":105,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Fixture detail\",\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture done\",\"created_by\":\"fbittorrent fixtures\",\"file_count\":2,\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"piece_count\":4,\"piece_size\":1024,\"private\":false,\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"tracker_count\":1,\"upload_policy\":\"default_cap\"}}}}\n",
+    "reason": "active unremoved row has no undo deadline"
+  },
+  {
+    "old_line": 61,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":201,\"ok\":true,\"result\":{\"ref\":\"fixture-upload\",\"state\":\"pending\"}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"error\":{\"code\":\"not_found\",\"hint\":\"inspect fbittorrent log\",\"message\":\"not found\",\"retryable\":false},\"id\":201,\"ok\":false}}\n",
+    "reason": "file-deleting removal cannot be undone; subsequent upload edit is not_found"
+  },
+  {
+    "intermediate_line": 13,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":8,\"ok\":true,\"result\":{\"torrents\":[{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads/Example e2.mkv\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512},{\"added_at\":1792310400,\"checked\":false,\"force\":false,\"hash\":\"1111111111111111111111111111111111111111\",\"intent\":\"run\",\"name\":\"Fixture metadata\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"metadata\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":false,\"completed_bytes\":33554432,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture checking\",\"force\":false,\"hash\":\"2222222222222222222222222222222222222222\",\"intent\":\"run\",\"name\":\"Fixture checking\",\"progress\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":67108864,\"staged\":false,\"state\":\"checking\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture queued\",\"force\":false,\"hash\":\"3333333333333333333333333333333333333333\",\"intent\":\"run\",\"name\":\"Fixture queued\",\"progress\":0.5,\"reason\":\"queue_full\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"queued\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture paused\",\"force\":false,\"hash\":\"4444444444444444444444444444444444444444\",\"intent\":\"pause\",\"name\":\"Fixture paused\",\"progress\":0.5,\"reason\":\"user\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"paused\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture done\",\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture seeding\",\"dl_bps\":0,\"force\":false,\"hash\":\"6666666666666666666666666666666666666666\",\"intent\":\"run\",\"name\":\"Fixture seeding\",\"peers\":3,\"playable\":{\"acked\":true,\"file\":0,\"prefix_bytes\":4096,\"ready\":true},\"progress\":1.0,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":true,\"seeds\":2,\"size\":4096,\"staged\":false,\"state\":\"seeding\",\"ul_bps\":4096,\"upload_policy\":\"unlimited\",\"uploaded_bytes\":2048},{\"added_at\":1792310400,\"checked\":false,\"force\":false,\"hash\":\"7777777777777777777777777777777777777777\",\"intent\":\"run\",\"name\":\"Fixture waiting_vpn\",\"reason\":\"vpn_down\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"waiting_vpn\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":false,\"error\":\"Fixture error restore failed: missing files\",\"force\":false,\"hash\":\"8888888888888888888888888888888888888888\",\"intent\":\"run\",\"name\":\"Fixture error\",\"reason\":\"missing_files\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"error\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture stalled\",\"dl_bps\":0,\"force\":false,\"hash\":\"9999999999999999999999999999999999999999\",\"intent\":\"run\",\"name\":\"Fixture stalled\",\"peers\":1,\"progress\":0.5,\"ratio\":0.0,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"stalled\",\"ul_bps\":0,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":0},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":0,\"dl_bps\":0,\"force\":false,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"intent\":\"run\",\"name\":\"New transfer\",\"peers\":0,\"progress\":0.0,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":8388608,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":0}]}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":8,\"ok\":true,\"result\":{\"torrents\":[{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512},{\"added_at\":1792310400,\"checked\":false,\"force\":false,\"hash\":\"1111111111111111111111111111111111111111\",\"intent\":\"run\",\"name\":\"Fixture metadata\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"metadata\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":false,\"completed_bytes\":33554432,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture checking\",\"force\":false,\"hash\":\"2222222222222222222222222222222222222222\",\"intent\":\"run\",\"name\":\"Fixture checking\",\"progress\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":67108864,\"staged\":false,\"state\":\"checking\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture queued\",\"force\":false,\"hash\":\"3333333333333333333333333333333333333333\",\"intent\":\"run\",\"name\":\"Fixture queued\",\"progress\":0.5,\"reason\":\"queue_full\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"queued\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture paused\",\"force\":false,\"hash\":\"4444444444444444444444444444444444444444\",\"intent\":\"pause\",\"name\":\"Fixture paused\",\"progress\":0.5,\"reason\":\"user\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"paused\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads\",\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture seeding\",\"dl_bps\":0,\"force\":false,\"hash\":\"6666666666666666666666666666666666666666\",\"intent\":\"run\",\"name\":\"Fixture seeding\",\"peers\":3,\"playable\":{\"acked\":true,\"file\":0,\"prefix_bytes\":4096,\"ready\":true},\"progress\":1.0,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":true,\"seeds\":2,\"size\":4096,\"staged\":false,\"state\":\"seeding\",\"ul_bps\":4096,\"upload_policy\":\"unlimited\",\"uploaded_bytes\":2048},{\"added_at\":1792310400,\"checked\":false,\"force\":false,\"hash\":\"7777777777777777777777777777777777777777\",\"intent\":\"run\",\"name\":\"Fixture waiting_vpn\",\"reason\":\"vpn_down\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"waiting_vpn\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":false,\"error\":\"Fixture error restore failed: missing files\",\"force\":false,\"hash\":\"8888888888888888888888888888888888888888\",\"intent\":\"run\",\"name\":\"Fixture error\",\"reason\":\"missing_files\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"staged\":false,\"state\":\"error\",\"upload_policy\":\"default_cap\"},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":2048,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture stalled\",\"dl_bps\":0,\"force\":false,\"hash\":\"9999999999999999999999999999999999999999\",\"intent\":\"run\",\"name\":\"Fixture stalled\",\"peers\":1,\"progress\":0.5,\"ratio\":0.0,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"stalled\",\"ul_bps\":0,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":0},{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":0,\"dl_bps\":0,\"force\":false,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"intent\":\"run\",\"name\":\"New transfer\",\"peers\":0,\"progress\":0.0,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":8388608,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":0}]}}}\n",
+    "reason": "multi-file explicit save folder is the content folder; individual file remains open_target(file=0)"
+  },
+  {
+    "intermediate_line": 15,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":9,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Legal fixture payload\",\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads/Example e2.mkv\",\"created_by\":\"fbittorrent fixture\",\"dl_bps\":1024,\"eta_s\":3,\"file_count\":2,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"piece_count\":4,\"piece_size\":1024,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":true,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"tracker_count\":1,\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":9,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Legal fixture payload\",\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads\",\"created_by\":\"fbittorrent fixture\",\"dl_bps\":1024,\"eta_s\":3,\"file_count\":2,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"piece_count\":4,\"piece_size\":1024,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":true,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"tracker_count\":1,\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "reason": "multi-file explicit save folder is the content folder; individual file remains open_target(file=0)"
+  },
+  {
+    "intermediate_line": 40,
+    "before": "",
+    "after": "{\"dir\":\"c2s\",\"frame\":{\"args\":{\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"include\":[0,1]},\"id\":303,\"op\":\"torrents.set_files\"}}\n{\"dir\":\"s2c\",\"frame\":{\"id\":303,\"ok\":true,\"result\":{\"state\":\"done\"}}}\n",
+    "reason": "reset selection before original full-size downloading detail"
+  },
+  {
+    "intermediate_line": 45,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":100,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads/Example e2.mkv\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":true,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":100,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"completed_bytes\":1024,\"content_path\":\"/tmp/fbt-fixture/downloads\",\"dl_bps\":1024,\"eta_s\":3,\"force\":false,\"hash\":\"0123456789abcdef0123456789abcdef01234567\",\"imdb_id\":\"tt1234567\",\"intent\":\"run\",\"name\":\"Example e2.mkv\",\"origin\":\"manual\",\"peers\":2,\"playable\":{\"acked\":false,\"buffered_s\":30,\"file\":0,\"finishes_in_s\":3,\"prefix_bytes\":1024,\"ready\":true,\"stall_free\":true},\"private\":true,\"progress\":0.25,\"queue_pos\":1,\"ratio\":0.5,\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"seeds\":3,\"size\":4096,\"staged\":false,\"state\":\"downloading\",\"ul_bps\":0,\"upload_limit_bps\":32768,\"upload_policy\":\"default_cap\",\"uploaded_bytes\":512}}}}\n",
+    "reason": "multi-file explicit save folder is the content folder; individual file remains open_target(file=0)"
+  },
+  {
+    "intermediate_line": 55,
+    "before": "{\"dir\":\"s2c\",\"frame\":{\"id\":105,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Fixture detail\",\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads/Fixture done\",\"created_by\":\"fbittorrent fixtures\",\"file_count\":2,\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"piece_count\":4,\"piece_size\":1024,\"private\":false,\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"tracker_count\":1,\"upload_policy\":\"default_cap\"}}}}\n",
+    "after": "{\"dir\":\"s2c\",\"frame\":{\"id\":105,\"ok\":true,\"result\":{\"torrent\":{\"added_at\":1792310400,\"checked\":true,\"comment\":\"Fixture detail\",\"completed_at\":1792310430,\"completed_bytes\":4096,\"content_path\":\"/tmp/fbt-fixture/downloads\",\"created_by\":\"fbittorrent fixtures\",\"file_count\":2,\"force\":false,\"hash\":\"5555555555555555555555555555555555555555\",\"intent\":\"run\",\"name\":\"Fixture done\",\"piece_count\":4,\"piece_size\":1024,\"private\":false,\"progress\":1.0,\"reason\":\"complete_no_seed\",\"save_path\":\"/tmp/fbt-fixture/downloads\",\"seed\":false,\"size\":4096,\"staged\":false,\"state\":\"done\",\"tracker_count\":1,\"upload_policy\":\"default_cap\"}}}}\n",
+    "reason": "multi-file explicit save folder is the content folder; individual file remains open_target(file=0)"
+  }
+]
+```
+
+Final normalization table (same text as daemon.py and IPC.md):
+
+| JSON pointer(s) | Comparison | Validity |
+|---|---|---|
+| `/id` | identity:request | positive u64, consistent first-occurrence bijection |
+| `/result/instance` | identity:instance | 32 lowercase hex, consistent first-occurrence bijection |
+| `/**/hash; /result/started/*; /result/stopped/*` | identity:hash | 40 lowercase hex; API-generated hashes bound to fixture identities |
+| `/ref; /result/ref` | identity:ref | at most 64 ASCII characters, consistent first-occurrence bijection |
+| `/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at` | timestamp | positive u64; presence preserved |
+| `/**/undo_until` | undo deadline | positive u64; future time at observation, at most 10 seconds after the originating keep-files remove reply; originating remove required |
+| `/**/*_at; /**/*_until` | timestamp | server-computed Unix seconds: positive u64; presence preserved |
+| `/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps` | u64 | nonnegative u64; presence preserved |
+| `/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds` | u64 | nonnegative u64; presence preserved |
+| `/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*` | u64 | nonnegative u64; presence preserved |
+| `/result/server/pid` | timestamp | positive u64; presence preserved |
+| `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
+| `/result/server/version` | version | semantic version string; presence preserved |
+| `/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress` | checking only | live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals |
+| `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
+| `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
+
+Qualification: `cargo test --locked` once → **343 passed / 2 ignored** (`reconcile-full-unit.{jsonl,log}`); final changed fixture/negative tests → **30/30** (`reconcile-fixture-final.{jsonl,log}`); timestamp/window positive and negative controls pass (`reconcile-normalization/daemon/api_replay_normalization.jsonl`). Hello/errors replay passes (`reconcile-replay/daemon/contract_{hello,errors}.jsonl`). Torrents final replay passes with namespace VPN off (`reconcile-complete/daemon/contract_torrents.jsonl`) and on (`vpn-reconcile-complete/daemon/contract_torrents.jsonl`), including strict Rust live/fixture validation. **No P6-08 deferrals remain**; retained other-feature/protocol/catalogue deferrals: {'reconcile-complete': 13, 'vpn-reconcile-complete': 12}. The opt-out run retains the explicit fixture0 environment deferral. Initial failures are retained; final setup fixes address real missing preconditions, never masked comparisons. Exact final deferred/optional lists remain alongside each JSONL case. This supersedes the previous eight unresolved mismatches.
+
+## P6-06 — fbt-p6-06-tvx, app-owned fast resume
+
+Added private versioned resume snapshots with CRC32 integrity, exact selection/metainfo/bit geometry, file length/nanosecond mtime/device/inode checks, and coverage of files sharing claimed pieces. The daemon consumes CLEAN before startup and retains the earned token across engine-slot changes; clean drain stops writers, syncs payload/snapshot bytes and writes CLEAN before socket/lock release. Panic/failed drain abandons the token; parked clean exits preserve only previously earned authority. Periodic snapshots run every 300 seconds and never authorize crash recovery. The fork accepts serde-skipped trusted bytes once, retains byte-rounded zero padding, and never reuses them on error recovery. Trusted pending rows are checked without showing checking; the existing 768-row state mapping and legacy byte fixtures stay green. Explicit recheck invalidates cache durably before pending acknowledgement; undo restore also invalidates it. Engine evaluation and fork provenance document the trust boundary. Neighbour edits: daemon/store ownership, startup/drain hooks, restore/recheck/undo admissions, state projection and existing test constructors. No API surface/version change, release build or all.sh, per track policy.
+
+All commands below run through `target/test-logs/fbt-p6-06-tvx/run.py` (rch, CARGO_BUILD_JOBS=4, isolated XDG), and JSONL/stderr live below that root.
+
+| Criterion | Command / log | Observed |
+|---|---|---|
+| Untouched restart shows no checking | `run-daemon.py foreground-final target/debug/fbittorrent resume_trusted`; systemd equivalent; `foreground-final/daemon/resume_trusted.jsonl`, `systemd-final/daemon/resume_trusted.jsonl` | Both snapshots trusted; every observed row checked and no checking state. Physical storage regression in `full-unit.log`: trusted restart adds **zero payload checksum reads**, then explicit recheck adds exactly one real five-byte read |
+| Touching one file rechecks only that torrent | Same runner `resume_touched_file`; both final mode JSONLs; changed-file physical regression in `full-unit.log` | One-ms mtime change selects exactly that hash for checking, other record remains trusted; real changed-data unit adds one physical checksum read |
+| kill -9 forces full checks | Same runner `resume_after_kill9`; both final mode JSONLs | Existing snapshots remain but active marker is absent; after SIGKILL both hashes require checking; missing-marker physical regression adds one real checksum read |
+| Escape hatch, integrity and lifecycle | `recheck_drops_resume_file`; both final mode JSONLs; `engine::resume::tests` and typed_seed::fast_resume in `full-unit.log` | Resume bin absent before pending acknowledgement; measured terminal recheck receipt; CRC/header/body corruption, missing marker, changed stats/selection/geometry, parked-token preservation, single-use trust, private modes and periodic-without-CLEAN all pass |
+| Fork / full app / compilation / sizes | `cargo test --locked -p librqbit --features rust-tls --lib trusted_bitfield_accepted -- --nocapture`; full `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`; `cargo check --locked`; source-size ratchet | `fork-final.jsonl`: 1 pass. `full-unit.jsonl`: **351 passed, 2 ignored** (full suite once). `check-final.jsonl`, `source-size-final.jsonl`: pass |
+
+Final daemon qualification: **4/4 foreground + 4/4 systemd** on the final CRC-enabled debug binary (`debug-final.jsonl`). Foreground additionally passes `undo_restore` and the prescribed 256 KiB corrupt-byte repair, proving undo's fresh-check promise remains intact. The five-minute periodic path is tested using an elapsed monotonic timer and real snapshot I/O, not claimed as a five-minute wall-clock run. Initial failures are retained: a byte-rounded tracker mismatch (fixed by keeping zero padding) and an extra metadata-only startup diagnostic (fixed by logging check-required only for cached-metainfo records); the existing exact five-line timeout test is unchanged and green. No acceptance criterion remains unmet; no P6-06 follow-up identified.
+
+## P6-01 — tracker observations, forced announces, API/CLI slice (fbt-p6-01-ymi)
+
+The fork keeps sorted tracker observations on `ManagedTorrentShared` through pause; HTTP and UDP record error/success, peer counts and announce times. Forced event=none announces wake interval/error-backoff waits and coalesce for 60 seconds. Unsupported and private secondary URLs remain visible with their prescribed reasons. The API adds `torrents.trackers`, `torrents.reannounce`, the `trackers` cap and a new additive transcript; CLI adds `reannounce` and show fields under contract 1.2.6. Saved metadata/magnet reads do not restore torrents or contact trackers. Query redaction covers spans, remote messages, UDP response tracing and the old raw-metainfo TRACE dump (replaced with its byte count). Neighbouring edits register typed ops/results, the CLI verb and the cap. Existing wire fixtures and UI files are unchanged.
+
+| Criterion / scope | Command and JSONL/log evidence (under `target/test-logs/fbt-p6-01-ymi/`) | Observed |
+|---|---|---|
+| First announce error → forced OK, peers=1 | `cargo test --locked -p librqbit --features rust-tls --lib tracker_stats_ -- --nocapture`; `fork-redaction-final.{jsonl,log}` | 2 real HTTP/UDP tests pass; forced result in 10 ms; secondary/private/unsupported records asserted. |
+| Announce within 2 s; repeat suppressed | `run-daemon.py {foreground-final,systemd-final} target/debug/fbittorrent tracker_status reannounce reannounce_rate_limited reannounce_not_live_invalid_state tracker_url_redacted tracker_saved_views`; corresponding `daemon/*.jsonl` and daemon stderr | 6/6 per mode; tracker.log records event=none within 2 s; second request causes no extra announce. |
+| Paused retains last result; non-live refuses; saved reads work | Same daemon cases and fork tests; `foreground-final/daemon/{tracker_status,reannounce_not_live_invalid_state,tracker_saved_views}.jsonl` | Preserved exact last row; invalid_state/not_found/engine_unavailable verified; parked metainfo and unresolved magnet stay not_contacted without traffic. |
+| No tracker query in diagnostics | `fork-redaction-final.log`; `*/daemon/tracker_url_redacted.jsonl` | Actual TRACE captured (4,939/5,468 bytes); secret/query absence and positive redacted-URL controls pass. Wire URL stays complete. |
+| CLI, contract and legacy regressions | `agent_contract.py ... --case reannounce_verb --case contract --log-root .../cli-final`; `cli-final/agent_contract/*.jsonl`; `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`; `full-final.{jsonl,log}` | CLI 2/2; act envelope, show count/rows and exits 0/1/2/6; full Rust 353 passed, 2 ignored, including frozen engine wire/state fixtures. |
+| Tracker transport and size checks | `cargo test --locked -p librqbit-tracker-comms -- --nocapture`; `comms-unit.{jsonl,log}`; `source-size-final.{jsonl,log}` | 8 transport/redaction tests pass; all src files meet size gate. |
+
+The full Rust pass preceded the final log-only raw-metainfo TRACE removal; both real tracker tests were rebuilt and passed after that removal with TRACE capture enabled. Failed preparation runs are retained: an unavailable tempfile import / missing test directory, an incorrect URL-order assumption in the initial fork test, and a real query leak exposed by TRACE capture were corrected. `foreground/` used the stale debug artifact while its replacement was still building; `foreground-built/` and final qualification use the completed build. No all.sh/release run between track beads, per the owner track policy.
+
+Deferred to integration/other tracks: `torrent:<hash>.trackers` typed topic/item registration, 5,000 ms subscription ticks and immediate structural pushes (P1-08 integration); shared tracker state rows, dashboard tab, TUI modal/golden and query-free display (C/D). `tracker_status` currently proves real API observations by polling; no subscription or UI proof is claimed. All daemon/fork/CLI criteria above are met; the complete UI/subscription acceptance remains open.
+
+## P7-02 — payload move API and CLI (fbt-p7-02-ss9)
+
+Added owned move jobs with pending/ref results and no operation timeout. Descriptor-anchored file transactions reject traversal, symlinked descendants and destination collisions; same-device moves rename, cross-device moves copy, fsync and preserve times. A failed copy retains sources; a failed ledger save before replacement rolls payloads back. Durable relocation re-admits the verified bitfield without hashing, retains pause/seed intent and transfers tracker observations and the monotonic announce gate. Reads remain available; conflicting mutations get typed busy. Queued moves cancel promptly on shutdown, and a timed-out drain retains owned joins. CLI `move <sel> <path>` expands/chunks all, waits for its receipt, never resends after loss and uses contract 1.2.7. Frozen transcripts are unchanged; `move.ndjson` is additive. Foundation commit: `f623213`.
+
+| Criterion / scope | Command and evidence under `target/test-logs/fbt-p7-02-ss9/` | Observed |
+|---|---|---|
+| Move within/across filesystems | `run-daemon.py {foreground-final,systemd-final} target/debug/fbittorrent move_same_fs move_cross_fs move_failed_copy_keeps_source`; corresponding `daemon/*.jsonl` | 3/3 per mode; real distinct `/tmp` and `/dev/shm` devices used; destination SHA256 equals source; old payload removed after success; new save_path durable. |
+| Complete remains done without checking | Same process cases; `cargo test --locked -p fbittorrent moving -- --nocapture`, `lifecycle-qualified.{jsonl,log}` | 14 focused tests pass. Actual storage counter stays at 1 checksum read / 5 bytes across move; observed states remain Done; paused intent stays paused. Missing/truncated sources discard old trust and fail. |
+| Failed copy preserves source and reports failed | `move_failed_copy_keeps_source.jsonl`; filesystem partial-write unit in `lifecycle-qualified.log` | Cross-device destination collision returns failed ref result; every source SHA256 unchanged. Injected real writer failure after 65,536 bytes leaves source intact and removes staging. |
+| Ownership / failure boundaries | `lifecycle-qualified.log` | Failed ledger save rolls files back and does not follow its temporary symlink; cancelled staging rolls back; timed-out drain retains its join; queued shutdown finishes while an unrelated mutation lock stays held. |
+| CLI / protocol | `agent_contract.py ... --case move_verb --case contract --log-root .../cli-final`; `cli-final/agent_contract/*.jsonl` | 2/2; exact act envelope, all, exits 0/2/4/6/7/8. Real daemon fault proxy forwards pending then drops the client: exit 8, list hint, exactly one move request; daemon still completes; shared-directory neighbour intact. |
+| Regression scope | `cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`, `full-unit.*`; `cargo test --locked -p fbittorrent engine:: -- --nocapture`, `engine-qualified.*`; fork `tracker_stats_`, `fork-qualified.*` | Full Rust 365 passed / 2 existing ignores; affected engine 94 passed / 1 existing ignore; final moving 14 passed after subsequent hardening/cancellation checks; fork HTTP/UDP 2 passed. |
+| Build / size | `debug-end.{jsonl,log}`, `size-final.{jsonl,log}` | Final debug binary built; every src file ≤900 lines. No release/all.sh between track beads, per owner policy. |
+
+Neighbouring edits: typed op/result registration, connection/mutation no-timeout handling, engine drain and queue exclusion, trusted re-admission, ledger temporary O_NOFOLLOW, CLI acknowledgement allowance for engine startup, and a serde-skipped native tracker-state Arc for handle replacement. Final module checks cover the small failure-boundary changes made after the single full-suite pass; final foreground/systemd/CLI cases use `debug-end`.
+
+Deferred: dashboard Overview action/folder picker and its UI acceptance; P1-12 integration must count pending moves as mutation busy work. By the plan default, dormant/staged/metadata records need activation before a move. Follow-up: no durable recovery journal exists for SIGKILL/power loss during a partially staged multi-file move; rollback is qualified for returned errors and graceful cancellation, not abrupt process loss.
+
+
+## P3-06 — staged add API (fbt-p3-06-iu2)
+
+Implemented `stage:true`, `torrents.commit/discard`, capability/table/typed result registration and new `staging.ndjson`; existing transcript bytes are unchanged. Staging persists a paused ledger record and private metainfo only, including real magnet resolution with a 90-second deadline; payload storage is admitted only after a durable commit. Commit validates choices and applies destination/files/seed intent. Discard never opens or deletes payloads. Daemon-start cleanup runs under its instance lock before listeners, removes staged records/cached metainfo and emits the prescribed log; engine-slot restarts retain a live add sheet. The legacy TUI client and contract-1.2.8 CLI expose `staged`, and CLI counts exclude it from ordinary buckets. New engine module/tests stay below 900 lines. Neighbouring changes cover daemon startup, cached-first restore, typed transport/ref handling, legacy/CLI visibility and staged-operation guards. No release/all.sh between track beads per owner policy.
+
+| Criterion / scope | Command; evidence under `target/test-logs/fbt-p3-06-iu2/` | Result |
+|---|---|---|
+| Discard preserves existing files | `run-daemon.py {foreground-final,systemd-final} target/debug/fbittorrent staged_discard_keeps_files`; `daemon/staged_discard_keeps_files.jsonl` | PASS in both modes; every pre-existing file SHA256 unchanged, cached metainfo removed; repeated ref succeeds. |
+| Staging does not keep daemon alive | Queue-only `run-daemon.py {foreground-queue,systemd-queue} ... staged_queue_excluded`; corresponding JSONL | PARTIAL: zero active/queued downloads; CLI total/stopped=0, staged=1. Actual `Summary.counts`, `summary.daemon.busy_reasons`, `idle_exit_in_s` and real idle exit remain UNMET pending P1-08/P1-12 integration (absent on this branch). No passing idle test is claimed. |
+| No survival across daemon restart; non-staged commit/discard refuse | `run-daemon.py metadata-qualified ... staged_discarded_at_restart`; `systemd-metadata/daemon/staged_discarded_at_restart.jsonl`; `foreground-final` / `systemd-final` `commit_non_staged_invalid_state.jsonl` | PASS: engine_epoch advances while staging remains; new daemon lifetime has empty ledger, required hash log line and byte-identical payload; both ops give nonretryable invalid_state / not_staged on existing ordinary records. |
+| Commit joins queue with selected choices | `foreground-final` / `systemd-final` `daemon/staged_commit_joins_queue.jsonl` | PASS: staged pause → unchecked/checking → ordinary admitted transfer; destination/files/seed/run intent durable, same ref replays once. Stage rejects start/force/recheck without opening data. |
+| Metadata success and deadline | `metadata-complete/daemon/staged_magnet_metadata_only.jsonl`; `systemd-metadata/daemon/staged_magnet_metadata_only.jsonl`; `foreground-timeout/daemon/staged_metadata_timeout.jsonl` | PASS: actual loopback peer supplies metainfo; staged row remains paused/unchecked and target folder absent. Unanswered magnet reaches metadata_timeout at 90.75 s, remains staged/paused and discardable. |
+| Unit / protocol / golden regressions | `run.py full-unit cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`; `full-unit.{log,jsonl}` | PASS: 370 passed / 2 existing ignores, including engine staging tests, all API contract tests, 768-row state mapping and frozen legacy wire bytes. |
+| CLI / build / size | `agent_contract.py ... --case contract --log-root .../cli-final`; `debug-final.*`; `size-final.*` | PASS: contract 1.2.8 and CLI metadata; final debug build, all src files ≤900 lines. |
+
+The new transcript's `expect` Summary model documents the required staged-only count; it is not a live summary claim. The named future `ledger::tests::staged_excluded_from_counts_and_busy` / daemon `staged_not_busy` await the actual P1-08/P1-12 producer/policy rather than duplicating it in this bead. Queue admission and real storage exclusion are tested now. Track A integration must filter both staged rows and their metadata-resolution tasks out of every busy reason.
+
+Retained failed setup evidence: `foreground-initial` ran the prior binary before its build completed (now corrected); `api-focused` first exposed missing documented op rows (fixed; full suite green); `metadata-final` used ignored x.pe and `metadata-qualified` initially used a private seed, which correctly refuses BEP 9 metadata under BEP 27. The final generated metadata fixture is non-private and discovers the owned seed exclusively through a local tracker; no production torrent or user data is involved. No failed expectation was weakened. Follow-up: complete pushed Summary / idle acceptance after track A merges; provide the staged timeout sheet state in track C/D.
+
+
+## P3-06 — integrated Summary / idle completion and dependency merge
+
+Resolved the orchestrator-started merge of main `2028915` into `cfc201a`, preserving search/bus/policy/log/catalogue/limits behavior alongside move/staging. Kept contract 1.2.8, unioned operation args/results and test registrations, carried staged into the new TUI converter, and added move/staging to the exact hello/error capability arrays and matching IPC example. Summary now counts staged rows only in `counts.staged`, omits them from top/disk demand, and samples pending restore work atomically with the ledger so staged metadata jobs cannot hold idle exit. The named ledger counts/busy regression exercises both the real Summary counter and policy, with an ordinary pending restore as the positive busy control. The new real `daemon.py::staged_not_busy` runs in foreground and transient systemd modes, sees counts.staged=2 and every other bucket=0, busy_reasons=[], a 3-second idle countdown, bye{reason:idle}, exit 0 and byte-identical payloads after cancellation of an unanswered staged magnet. **All three P3-06 acceptance criteria are now met on the integrated tree.**
+
+| Criterion / check | Command / evidence under `target/test-logs/fbt-p3-06-iu2/` | Observed |
+|---|---|---|
+| Discard keeps payload bytes | `run-daemon.py {merge-foreground,systemd-merged} ... staged_discard_keeps_files`; corresponding JSONL | PASS in both modes; all SHA256 values unchanged. |
+| Staged records never hold lifetime | Same runners, `staged_not_busy`; `merge-fixtures-final.log` named `engine::ledger::tests::staged_excluded_from_counts_and_busy` | PASS in both modes; all ordinary counts zero, no busy reasons, idle exit cancels actual metadata job and closes both sockets; payload SHA256 unchanged. Ordinary pending metadata remains busy in the unit control. |
+| Startup discard / non-staged refusal | Same runners, `staged_discarded_at_restart` and `commit_non_staged_invalid_state` | PASS in both modes; actual engine_epoch advance retains staging, next daemon startup discards it with required line, ordinary records refuse both ops. |
+| Merged behavior and contracts | Same runners: 13 cases per mode including metadata, commit, queue, three moves, bus, structural timing and search; `merged-replay/daemon/contract_{hello,errors,torrents}.jsonl` | 13/13 per mode; all three live replay groups pass under the established normalization/deferral rules. |
+| Build / units / CLI / size | `merge-check-final.*` (`cargo check --locked --tests`); `integrated-focused.*`; `merge-fixtures-final.*`; `merge-full-final.*` (`cargo test --locked --config 'target.x86_64-unknown-linux-gnu.runner=["env","TMPDIR=/tmp"]' -- --nocapture`); `merge-cli/agent_contract/*.jsonl`; `merge-size-final.*` | Check PASS; focused 113 passed / 1 existing ignore; fixture/count regression 41 passed; final full Rust 472 passed / 3 existing ignores; CLI contract, move, exact IPC catalogue and limits 4/4; every src file ≤900 lines. |
+
+The initial full merge run (`merge-full-unit.*`: 471 passed, one fixture-model failure, three ignored) exposed a contradiction in this track's staging transcript: an expect Summary without a preceding state frame. Fixed by inserting the subscribe/reply/state exchange, using zero download disk demand for uncommitted adds, naming magnets through dn, and using a fresh hash for the second staged add after the first had been committed. Raised the TUI mirror's exact expected-model count from 9 to 10; no assertion was weakened. The focused replay and final full run pass. A full retry was used only to qualify that identified failure after correction. No release build/all.sh between track beads per owner policy. Neighbouring edits: bus Summary helper, engine atomic sample/restore predicate, TUI conversion and fixture-count characterization, exact catalogue/capability metadata and the new process case. No tracker edits were made; .beads changes are inherited from the orchestrator's main merge.
+
+Exact staging fixture correction (other bytes retained): before SHA256 `96aa411f5ea68c94439d84aaa1f0d3113b5744b18f0d164f13a35674e9b95151`, after SHA256 `daca473b29848068e19d303dc98c46d09f94b9e2526dddcc67c68d0777298958`; original/corrected complete bytes and unified diff retained at `staging-fixture-{before,after}.ndjson` and `staging-fixture-correction.diff` in the evidence root. Before/after changed bytes:
+
+```diff
+--- staging.ndjson-before
++++ staging.ndjson-after
+@@ -1,11 +1,14 @@
+-{"dir":"c2s","frame":{"id":1,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"},"stage":true}}}
++{"dir":"c2s","frame":{"id":1,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Staged%20fixture"},"stage":true}}}
+ {"dir":"s2c","frame":{"id":1,"ok":true,"result":{"state":"done","hash":"0123456789abcdef0123456789abcdef01234567","name":"Staged fixture","duplicate":false}}}
+ {"dir":"c2s","frame":{"id":2,"op":"torrents.get","args":{"hash":"0123456789abcdef0123456789abcdef01234567"}}}
+ {"dir":"s2c","frame":{"id":2,"ok":true,"result":{"torrent":{"hash":"0123456789abcdef0123456789abcdef01234567","name":"Staged fixture","state":"paused","reason":"user","intent":"pause","staged":true,"checked":false,"seed":false,"upload_policy":"default_cap","upload_limit_bps":32768,"save_path":"/tmp/fixture","added_at":1,"force":false,"private":false}}}}
+-{"dir":"expect","model":{"summary":{"alt":false,"counts":{"checking":0,"done":0,"downloading":0,"error":0,"metadata":0,"paused":0,"queued":0,"ready":0,"seeding":0,"staged":1,"stalled":0,"total":0,"waiting_vpn":0},"daemon":{"busy_reasons":[],"idle_exit_in_s":300,"state":"running","upgrade_pending":false},"disk":{"free_bytes":1048576,"low":false,"needed_bytes":3072},"dl_bps":0,"limits":{},"network":{"interface":"fixture0","message":"ready","state":"ready"},"top":[],"ul_bps":0}}}
++{"dir":"c2s","frame":{"id":6,"op":"subscribe","args":{"topics":["summary"]}}}
++{"dir":"s2c","frame":{"id":6,"ok":true,"result":{"sub":1,"topics":["summary"]}}}
++{"dir":"s2c","frame":{"ev":"state","sub":1,"topic":"summary","rev":1,"data":{"alt":false,"counts":{"checking":0,"done":0,"downloading":0,"error":0,"metadata":0,"paused":0,"queued":0,"ready":0,"seeding":0,"staged":1,"stalled":0,"total":0,"waiting_vpn":0},"daemon":{"busy_reasons":[],"idle_exit_in_s":300,"state":"running","upgrade_pending":false},"disk":{"free_bytes":1048576,"low":false,"needed_bytes":0},"dl_bps":0,"limits":{},"network":{"interface":"fixture0","message":"ready","state":"ready"},"top":[],"ul_bps":0}}}
++{"dir":"expect","model":{"summary":{"alt":false,"counts":{"checking":0,"done":0,"downloading":0,"error":0,"metadata":0,"paused":0,"queued":0,"ready":0,"seeding":0,"staged":1,"stalled":0,"total":0,"waiting_vpn":0},"daemon":{"busy_reasons":[],"idle_exit_in_s":300,"state":"running","upgrade_pending":false},"disk":{"free_bytes":1048576,"low":false,"needed_bytes":0},"dl_bps":0,"limits":{},"network":{"interface":"fixture0","message":"ready","state":"ready"},"top":[],"ul_bps":0}}}
+ {"dir":"c2s","frame":{"id":3,"op":"torrents.commit","args":{"hash":"0123456789abcdef0123456789abcdef01234567","files":[0],"seed":false,"save_path":"/tmp/fixture"}}}
+ {"dir":"s2c","frame":{"id":3,"ok":true,"result":{"state":"done"}}}
+-{"dir":"c2s","frame":{"id":4,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"},"stage":true}}}
+-{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"state":"done","hash":"0123456789abcdef0123456789abcdef01234567","name":"Staged fixture","duplicate":false}}}
+-{"dir":"c2s","frame":{"id":5,"op":"torrents.discard","args":{"hash":"0123456789abcdef0123456789abcdef01234567"}}}
++{"dir":"c2s","frame":{"id":4,"op":"torrents.add","args":{"source":{"magnet":"magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234568&dn=Staged%20fixture"},"stage":true}}}
++{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"state":"done","hash":"0123456789abcdef0123456789abcdef01234568","name":"Staged fixture","duplicate":false}}}
++{"dir":"c2s","frame":{"id":5,"op":"torrents.discard","args":{"hash":"0123456789abcdef0123456789abcdef01234568"}}}
+ {"dir":"s2c","frame":{"id":5,"ok":true,"result":{"state":"done"}}}
+```
+
+
+## P3-07 (fbt-p3-07-c2p) — search/IMDb checkpoint
+
+Native CLI search and IMDb probe one 200 ms hello and use only a running capable
+owner; otherwise shared normalized local sources run without launching an engine.
+One legacy JSON/human shaper serves both paths. Search waits for search.done,
+takes an atomic snapshot, dedupes/sorts before limit, releases sessions/subs,
+returns partial rows on bounded waits and reports all-provider failure as exit 5.
+IMDb refresh reaches the persistent owner and reloads exactly once. Contract
+1.2.9 adds providers[]; primary engineName follows the selected provider URL.
+A real multi-provider test exposed Nova inheriting the daemon's blocked TERM
+mask: the owned child launcher now clears that mask, so pool workers terminate
+and search.done arrives. Invalid non-HTTPS install URLs retain local rejection
+(exit 5); the API's HTTPS-only rule stays unchanged. Pending install failures
+are awaited, demonstrated by a real local TLS peer receiving ClientHello then
+closing after 500 ms; successful HTTPS installation is not newly qualified.
+
+Evidence root: target/test-logs/fbt-p3-07-c2p/. run-daemon.py <label>
+target/debug/fbittorrent <cases> used isolated retaining Sandboxes and owned
+foreground/transient-unit processes. foreground-final/daemon/ and
+systemd-final/daemon/: six cases each PASS (cli_search_both_paths_identical,
+cli_search_dedupe_both_paths, cli_search_timeout_cleans_provider,
+cli_search_parked_fallback, cli_search_silent_hello_fallback,
+cli_imdb_both_paths_identical). foreground-install/daemon/ and
+systemd-install/daemon/: cli_search_install_waits PASS each. Agreement cases
+log both stdout SHA256 and first differing byte; provider process groups are
+proven drained. IMDb refresh loads exactly one new index. cli-contract/
+agent_contract/contract.jsonl PASS 65 steps. cargo test --locked: full.log +
+full.jsonl PASS 474, 3 ignored. source-focused.log: 4 pass/1 ignored for shared
+shape/IMDb argument checks. cargo build --locked: debug-final.* PASS. size.*
+PASS (all changed src files under 900 lines); git diff --check PASS.
+Initial foreground/systemd runs retain the two-provider completion and IMDb
+fixture shutdown failures; final cases close both with no weakened assertions.
+
+Acceptance: search/IMDb JSON and human bytes agree up/down, including old search
+characterization bytes with only providers[] removed. Golden provenance is
+actual pre-change 212c3cd (package 0.1.0), captured before this implementation;
+no v0.1.2 binary/tag was available, so v0.1.2 provenance remains unmet. RSS/Shows
+verbs, their selectors/grab/refresh waits, TUI stale/fresh refresh criterion and
+RSS/Shows shape goldens remain pending track A integration: commits 07b3481
+(RSS) and a42a4a3 (Shows) are visible but not ancestors of this branch. No
+unmerged service is duplicated. Additional neighbouring edits: src/search/
+normalization export + child signal mask, src/agent.rs version/changes,
+regression registries and backward-compatible imdb_owned(with_process=True).
+No release/all.sh between beads per the owner's track cadence.
+
+
+## P5-05 (fbt-p5-05-orh) — verified ready to watch
+
+Added daemon-owned watch history and a once-per-second engine snapshot adapter.
+The largest included video starts at its own piece offset; threshold is
+max(32 MiB, ceil(3%)) plus verified last piece. MKV Info/Duration and MP4 mvhd
+reads are bounded to 1 MiB and remain absent on unknown/malformed data. Playback
+rate calculations remain absent when not downloading or rate/duration unknown.
+History is private 0600, no-follow, bounded (32,768 retained hashes / 2 MiB read),
+atomic and fsynced, survives engine-slot replacement and daemon restart, and
+re-arms after a verified lost prefix while emitting at most once per daemon life.
+Open/default actions use the existing notifier; open_target and glance acknowledge
+shared readiness. API list/get/files, Summary ready counts, events, CLI
+wait --until complete|playable|stall-free, ready file paths, truthful TUI detail
+wording and popup labels now share the same values. Existing coalescing preserves
+ready/stall-free flips while buffering counters coalesce. Contract 1.2.10 / watch
+uses the already-frozen Playable/event shapes; exact hello/error examples append
+only the new implemented capability. Legacy engine wire goldens/state table stay
+unchanged and pass the root suite. All changed src files remain below 900 lines.
+
+Evidence root target/test-logs/fbt-p5-05-orh/: run-daemon.py foreground-final
+target/debug/fbittorrent playable_before_complete playable_never_for_iso
+playable_two_file_mid_piece — 3/3 PASS on the final debug binary. The comprehensive
+case proves: (AC1) real 64 MiB Matroska / 1 MiB/s seed emits exactly one playable
+at >=32 MiB before completed; (AC2) notification Open records xdg-open with the
+video path and shared ack; (AC3) CLI playable wait exits 0 while incomplete,
+returns the video path, and stall-free wait also succeeds; (AC5) pause retains
+readiness; (AC6) restart suppresses the event, actual first-byte corruption makes
+a subsequent startup check lose the prefix, and repair re-arms exactly once.
+Each step is recorded in foreground-final/daemon/playable_before_complete.jsonl.
+AC4: foreground-final/daemon/playable_never_for_iso.jsonl proves the real ISO
+transfer never has playback metadata/event, and both watch waits time out as 8.
+The mid-piece case proves prefix 32.5 MiB from video file index 1 despite absent
+torrent piece 0, per-file readiness only on that video, and paused playable wait.
+systemd-boundary/daemon/playable_two_file_mid_piece.jsonl also PASS.
+
+cargo test --locked: full.* PASS 483, 3 ignored, run once on the final Rust code.
+Focused new-watch-goldens.* PASS 14 checks (watch, bus, TUI words and two new
+80x24 baselines); new baselines reviewed as synthetic rendering only. Earlier
+watch-unit.* PASS 7. size-final.* and git diff --check PASS. watch-cli-final.*
+is the final successful cargo build --locked (debug). No release/all.sh between
+track beads, per owner cadence. Initial live throttle of 16 KiB/s produced a
+truthful stalled/unknown-rate state instead of active slow downloading; the
+qualification now uses 512 KiB/s for the same false assertion and proves the
+faster-rate true flip within 2 seconds. Initial source compile errors were fixed;
+all final assertions remain strict.
+
+UI: qs-format.* and qs-format-artifacts/ PASS, including literal unknown/slow/
+stall-free controls. Actual private headless popup captures over real throttled
+watch daemons PASS: visual-ready-qualified.* / visual-ready-artifacts/ and
+visual-may-stall-final.* / visual-may-stall-artifacts/. PNGs visually inspected:
+target/test-logs/visual/2026-10-19/popup-ready-tokyo-night.png and
+popup-may-stall-tokyo-night.png show Ready to watch and Playable · may stall.
+The ignored headless Sway tool was reused read-only from cod_3's
+plugin/tests/target/headless-tools/usr/bin/sway through FBT_TEST_SWAY; all displays,
+network namespaces, daemons and XDG paths remained private. Early capture attempts
+record the missing-tool, relative-binary-path and hyphenated-case-slug setup
+failures; the harness fixes and qualified runs are retained. No owner shell,
+notification service or torrents were exercised. Additional neighbouring edits
+are the existing TUI details/state views, Model.js, visual fixture/case registry,
+README, capability examples and CLI contract expectations. Dashboard uses the
+existing watch fields/ready counts; a separate dashboard interaction capture is
+not newly qualified. Follow-ups: qualify immediate Open after a completed move
+against the 1-second cached target refresh; refresh P1-06's old watch-fixture
+preconditions when removing its documented watch replay deferrals.
+
+### Integration of P3-07 and P5-05 (2026-10-19)
+
+Merged through c155727 after the dashboard-presence integration. The branch-local
+contract numbers above describe the owner's qualification snapshots; integration
+allocates P3-07 search provenance to 1.2.24 and P5-05 watch readiness to 1.2.25.
+Capabilities, the changes table, IPC examples and contract assertions agree.
+Disk monitoring and sleep inhibition remain alongside watch sampling; hidden bar
+connections do not acknowledge watch readiness without dashboard visibility.
+The IMDb harness still cleans up its actual replacement daemon.
+
+Integration evidence: target/test-logs/integration/batch11-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests: agent 6, API fixtures 30, bus 6, server argument
+validation 10 (one existing harness-only ignore), watch 7; 59 passed, no failures.
+No full suite, release build or live native gate was re-run by the integrator.
+
+
+### Gate7 integration regressions (P5-03 / P3-06 / P7-02)
+
+Reconciled authorized main `027886f` with the services track, retaining disk/inhibitor/RSS/Shows/dashboard presence and watch sampling; capability bookkeeping is unioned at CLI 1.2.25 (search provenance 1.2.24, watch 1.2.25). The Torznab implementation is preserved in compiling checkpoint `3e93460`; its live acceptance remains pending. Recheck refusal now creates the staged record through `torrents.add {stage:true}` and proves its durable paused intent and unchecked visibility in the same daemon lifetime; daemon startup deliberately discards staged records (IPC staging section). Duplicate `stage:false` now requires successful `duplicate:true`, the original hash and preserved policy, matching IPC's explicit duplicate-success contract. Move's private, trackerless local-file fixture explicitly disables binding and verifies `app.network.ready=true` plus a running engine before admission. The reported transient `Waiting for lo` was not reproduced: the supplied release binary and previous debug binary both reported loopback ready in foreground/systemd probes; no unsupported causal claim is made. Deferred CLI helper imports remove the watch/catalogue registration cycle. Main's Log tab is added to the two watch goldens without changing readiness expectations.
+
+`python3 target/test-logs/track-B-regressions/run-cases.py {foreground,systemd}-release /home/oliver/Projects/odcpw/fbittorrent-gate/target/release/fbittorrent recheck_staged_invalid_state api_torrent_operations move_verb`: all three pass in each mode; logs `target/test-logs/track-B-regressions/{foreground,systemd}-release/{daemon,agent_contract}/*.jsonl`. The same three plus `staged_discarded_at_restart`, `recheck_dormant`, `playable_two_file_mid_piece` pass on the merged debug binary in each mode, under `{foreground,systemd}-debug/` (12 cases). `cargo check --locked --tests`, `cargo build --locked`, the size ratchet, and catalogue `api_list_matches` pass (`check.*`, `debug.*`, `sizes.*`, `catalogue/`). The first full root test run passed 534 tests and exposed two integration-only assertions: missing patch-history documentation and the watch golden's missing Log tab. After correcting them, focused `cargo test --locked -p fbittorrent agent:: -- --nocapture` passes 7/7 (`merged-agent.*`) and the watch golden test passes (`merged-watch.*`); the failed full attempt is retained in `full.*`. No release build or all.sh was repeated for this requested focused repair.
+
+Final merged-tree `cargo test --locked`: **536 passed, 0 failed, 3 ignored** in 9.38 s (`target/test-logs/track-B-regressions/full-final.{log,jsonl}`); this second invocation only reran the now-cached suite after the first run identified the two repaired integration assertions. The requested three regression fixes are met. Follow-up: capture the actual kernel readiness error if the transient loopback failure recurs; existing logs showed only its waiting label.
+
+### Integration of the gate fixes and Torznab checkpoint (2026-10-19)
+
+Merged services tip b5ae95a, including the authorized partial P7-01 checkpoint
+3e93460, onto f086ed9. The checkpoint stays open: this integration does not
+claim live Torznab qualification. Current peers/download-limit capabilities,
+disk/inhibitor/watch ordering, and the actual IMDb replacement-daemon cleanup
+are preserved. The additive Torznab CLI/provider surface receives unique contract
+patch 1.2.28; preceding patches 1.2.26 and 1.2.27 remain unchanged.
+
+Integration evidence: target/test-logs/integration/batch13-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests pass: search 27 (including four Torznab controls),
+agent 6, API fixtures 30, watch rendering 1; 64 passed, no failures. The owner's
+retained foreground/systemd debug JSONL for recheck_staged_invalid_state,
+api_torrent_operations and move_verb was inspected: all six cases passed. Those
+are owner-run evidence, not new live runs by the integrator. No full suite, release
+build or all.sh was run for integration.

@@ -9,6 +9,12 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 - **Streaming priority is automatic.** The native engine downloads each file
   sequentially and prioritizes its first and last pieces. These policies cannot
   be toggled off in native mode.
+- **Ready to watch.** The largest selected video gets a playback badge after its
+  verified contiguous prefix reaches 32 MiB or 3% of the file, whichever is larger,
+  and its last piece is present. The row says when playback may stall. Known MKV/MP4
+  duration supplies the buffer estimate; unknown duration stays unknown. The
+  notification's Open action plays the file. Agents can use
+  `fbittorrent wait <hash> --until playable --json` or `--until stall-free`.
 - **Seeding off by default.** New torrents get a 32 KiB/s upload cap while
   downloading and stop when complete. This limits uploaded payload; it does not
   guarantee zero upload. Allow seeding per torrent with `u` in the TUI or widget,
@@ -76,6 +82,14 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 - **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
   desktop handler owns both), the clipboard, the TUI (`a`, with F4 to change
   seeding for that add), or the CLI.
+- **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
+  torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
+  keeps files. Without the daemon staging capability, the sheet says that metadata
+  arrives after Download and creates no record before confirmation. With staging,
+  it resolves metadata first and offers file selection, seeding and destination.
+  The desktop handler respects `handler = "confirm"` by opening this sheet;
+  `handler = "add"` adds immediately. A local file drop uses the same sheet;
+  file-manager drag and drop on Hyprland still needs manual qualification.
 - **File selection.** Enter on a torrent opens its file list: Space toggles a
   file between included and skipped, `1` includes it, and `a`/`n` select all or
   none. Native mode does not support high/max file priorities.
@@ -97,15 +111,34 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
 ## Install
 
 ```bash
-scripts/install.sh                 # locked build, atomic binary replacement, setup --magnet
-fbittorrent search --install        # provider scripts; Python 3 is required
-ln -s "$PWD/plugin/oliver.torrents" ~/.config/omarchy/plugins/oliver.torrents
-omarchy plugin enable oliver.torrents
-omarchy bar put oliver.torrents --before omarchy.tailscale
+scripts/install.sh                       # locked release build, atomic replacement, setup --magnet --plugin=link
+fbittorrent setup --magnet --plugin=copy  # stable plugin copy instead of a checkout symlink
+fbittorrent setup --magnet --plugin=link --dry-run --json  # exact plan, no changes
+fbittorrent search --install              # provider scripts; Python 3 required
 ```
 
-Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
-`torrents.*`.
+Setup writes the static user unit, desktop/MIME entries and icon, places the
+plugin in the bar only when missing, and updates only `torrents.*` menu entries.
+Open and Search summon the dashboard; Terminal keeps the TUI. Stop is shown
+while `fbittorrent status --quiet` succeeds. Repeating setup with the same
+options leaves files and commands unchanged. Nothing starts at login.
+
+For a private prefix or a build already produced by CI, use
+`scripts/install.sh --prefix /path/to/prefix --binary /path/to/fbittorrent` with
+an isolated HOME and XDG directories. The default prefix is `~/.local`.
+
+`fbittorrent setup --uninstall` removes desktop integration and keeps saved
+records, RSS, Shows and downloaded files. `setup --purge --yes` also removes
+application config/cache/state/data; it keeps downloaded payloads.
+
+Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activity):
+
+```lua
+o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
+```
+
+Add it to your own bindings file if desired. Setup does not change keybindings
+or reload your shell.
 
 ## Lifecycle
 
@@ -152,6 +185,29 @@ hl.window_rule({
   float = true,
 })
 ```
+
+Search starts from a query payload or Enter in the focused query field. Results
+stream from the daemon, merge duplicate hashes, and keep provider names. Press
+`s` to sort Seeds, Size, Uploaded, Name or rating, and `S` to reverse; unknown
+measurements stay last. `b` opens browse lists and `P` manages providers. A result
+marked `+ In your list` selects its existing torrent on Enter. New results open
+the shared review sheet: staged add is used when the daemon advertises it; older
+daemons send `search.grab` only after Download. `y` copies a magnet, `O` opens the
+source page, and `f` follows an IMDb-linked show. The table renders at most 500 rows.
+
+The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
+logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
+closes it. Drag the divider to resize it; width and sort order survive reopening
+the window or restarting the shell. `h` / `l` change pane focus. In focused Files,
+Space toggles the selected file, `a` / `n` include or skip the filtered files, `/`
+filters names, and `o` opens the selected file. Files sort naturally by episode
+number. Overview loads the daemon's local IMDb poster and shows the confirmed
+seed policy. Log shares one bounded subscription and filters by torrent hash.
+
+Run `plugin/tests/qs-dashboard.sh --details --binary /path/to/fbittorrent` for the
+private-compositor acceptance cases. They use isolated state and a local IMDb
+server, restart their own daemon and shell, and retain JSONL plus native captures
+under `target/test-logs/qs_details/`; they never restart the owner's shell.
 
 ## CLI
 
@@ -396,7 +452,7 @@ agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; 
 cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, legacy client
 python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
 …/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
-…/regression_tests/tui_smoke.sh                        # drives the TUI in tmux: list, files modal, prompt toggles, screens, help, quit
+python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
 …/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
 ```
 
@@ -430,6 +486,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
 | --- | --- | --- | --- | --- | --- |
+| `modal:clipboard` | Add offered magnet | — | `y` | `y` |  |
+| `modal:clipboard` | Dismiss offered magnet | — | `Esc` | `Esc` |  |
+| `global` | Turtle limits | `z` | `z` | `z` |  |
 | `global` | Torrents | `1` | `1` | — |  |
 | `global` | Search | `2` | `2` | — |  |
 | `global` | Shows | `3` | `3` | — |  |
@@ -447,6 +506,31 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Back | `Esc`, `h` | — | — |  |
+| `modal:details` | Next tab | `]` | — | — |  |
+| `modal:details` | Previous tab | `[` | — | — |  |
+| `modal:files` | Next tab | `]` | — | — |  |
+| `modal:files` | Overview | `[` | — | — |  |
+| `modal:details` | Open | `o` | — | — |  |
+| `modal:details` | Pause/resume | `p` | — | — |  |
+| `modal:details` | Seed | `u` | — | — |  |
+| `modal:details` | Remove | `d` | — | — |  |
+| `modal:details` | Delete files | `D` | — | — |  |
+| `modal:details` | IMDb | `i` | — | — |  |
+| `modal:details` | Wikipedia | `w` | — | — |  |
+| `global` | Log | `L` | `L` | — |  |
+| `modal:log` | Back | `Esc` | — | — |  |
+| `modal:log` | Back | `L` | — | — |  |
+| `modal:log` | Level | `l` | — | — |  |
+| `modal:log` | Source | `h` | — | — |  |
+| `modal:log` | Previous | `↑` | — | — |  |
+| `modal:log` | Next | `↓` | — | — |  |
+| `modal:log` | First | `Home` | — | — |  |
+| `modal:log` | Last | `End` | — | — |  |
+| `modal:log` | Files | `[` | — | — |  |
+| `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Previous details tab | — | `[` | — |  |
+| `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
@@ -454,7 +538,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Last | `G`, `End` | `G`, `End` | — |  |
 | `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
 | `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
-| `screen:torrents` | Files | `Enter` | `Enter` | — |  |
+| `screen:torrents` | Details | `Enter` | `Enter` | — |  |
 | `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
 | `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
 | `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
@@ -466,6 +550,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Sort results | — | `s` | — |  |
+| `screen:search` | Reverse results sort | — | `S` | — |  |
+| `pane:search.results` | Copy magnet | — | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -519,12 +606,12 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | Wikipedia | `w` | `w` | — |  |
 | `screen:shows` | EZTV | `O` | `O` | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
-| `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
-| `modal:files` | Next | `j`, `↓` | — | — |  |
-| `modal:files` | Previous | `k`, `↑` | — | — |  |
-| `modal:files` | Include/skip | `Space` | — | — |  |
-| `modal:files` | All | `a` | — | — |  |
-| `modal:files` | None | `n` | — | — |  |
+| `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
+| `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:files` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:files` | Include/skip | `Space` | `Space` | — |  |
+| `modal:files` | All | `a` | `a` | — |  |
+| `modal:files` | None | `n` | `n` | — |  |
 | `modal:files` | Reload | `r` | — | — |  |
 | `modal:files` | First | `g`, `Home` | — | — |  |
 | `modal:files` | Last | `G`, `End` | — | — |  |
@@ -532,9 +619,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:files` | High (legacy) | `2` | — | — |  |
 | `modal:files` | Max (legacy) | `3` | — | — |  |
 | `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
-| `modal:providers` | Next | `j`, `↓` | — | — |  |
-| `modal:providers` | Previous | `k`, `↑` | — | — |  |
-| `modal:providers` | Toggle | `Space` | — | — |  |
+| `modal:providers` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `modal:providers` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `modal:providers` | Toggle | `Space` | `Space` | — |  |
 | `modal:providers` | All | `a` | — | — |  |
 | `modal:providers` | None | `n` | — | — |  |
 | `modal:providers` | Reload | `r` | — | — |  |
@@ -558,6 +645,10 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | Sequential (legacy) | `F2` | — | — |  |
 | `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
+| `global` | Card | `v` | — | — |  |
+| `modal:poster` | Back | `Esc`, `v` | — | — |  |
+| `modal:poster` | IMDb | `i` | — | — |  |
+| `modal:poster` | Wikipedia | `w` | — | — |  |
 <!-- keys:end -->
 
 The daemon checks its executable inode and modification time every 30 seconds.

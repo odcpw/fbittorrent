@@ -356,7 +356,7 @@ mod tests {
                 ratio_limit: 0.0,
                 stopped: true,
                 category: String::new(),
-                tags: String::new(),
+                tags: String::new(), origin: None,
             }),
             "fbmissing0",
         )

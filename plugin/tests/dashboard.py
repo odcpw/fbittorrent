@@ -30,13 +30,20 @@ class Session:
         host=self.config/'Host';host.mkdir()
         shutil.copyfile('/usr/share/omarchy/shell/services/PluginRegistry.qml',host/'PluginRegistry.qml')
         self.env.update(self.compositor.env)
+        self.env['FBT_FONT_FAMILY']=os.environ.get('FBT_FONT_FAMILY') or subprocess.check_output(['fc-match','monospace','-f','%{family[0]}'],text=True)
         self.env.pop('HYPRLAND_INSTANCE_SIGNATURE',None)
+        if os.environ.get('FBT_TEST_RENDER_TIMING')=='1':self.env.update(QSG_RENDER_TIMING='1',QT_LOGGING_RULES='qt.scenegraph.time.renderloop=true')
         fixtures.path_shim('fbittorrent','exit 0',sandbox.root)
         self.env.update(OMARCHY_PATH=str(sandbox.root),FBT_TEST_BINARY=str(sandbox.root/'shims/fbittorrent'),FBT_TEST_HOOKS='1' if self.hooks else '0')
-        theme=Path(self.env['HOME'])/'.local/state/omarchy/current/theme';theme.mkdir(parents=True)
+        theme=Path(self.env['HOME'])/'.local/state/omarchy/current/theme';theme.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(ROOT/'contracts/ui/themes/owner.toml',theme/'colors.toml')
         self.log=self.case.path.with_suffix('.qs.log');self.output=self.log.open('w')
-        self.child=subprocess.Popen(['qs','--no-color','-p',str(self.config)],env=self.env,stdout=self.output,stderr=subprocess.STDOUT)
+        command=['qs','--no-color','-p',str(self.config)]
+        if os.environ.get('FBT_TEST_QS_DIAG')=='1':
+            # A fresh exec wrapper avoids Python preexec_fn after the DNS thread starts.
+            script='import ctypes,os,sys; result=ctypes.CDLL(None).prctl(0x59616d61,ctypes.c_ulong(-1),0,0,0); assert result==0; os.execvp("qs",sys.argv[1:])'
+            command=[sys.executable,'-c',script,*command]
+        self.child=subprocess.Popen(command,env=self.env,stdout=self.output,stderr=subprocess.STDOUT)
 
     def ipc(self,method,*args):
         result=subprocess.run(['qs','ipc','-p',str(self.config),'call','fbt-dashboard',method,*map(str,args)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=3)
@@ -69,17 +76,27 @@ class Session:
     def keys(self,args,predicate):
         child=subprocess.Popen(['wtype','-s','80',*args,'-s','700'],env=self.env)
         try:return self.wait(predicate)
+        except TimeoutError as error:raise TimeoutError(json.dumps(self.state())) from error
         finally:child.wait(timeout=3)
 
+    def diagnose(self):
+        if os.environ.get('FBT_TEST_QS_DIAG')!='1':return
+        path=self.case.path.with_suffix('.threads.log')
+        with path.open('w') as output:
+            subprocess.run(['ps','-L','-p',str(self.child.pid),'-o','pid,tid,stat,pcpu,wchan:28,comm'],stdout=output,stderr=subprocess.STDOUT,timeout=2)
+            subprocess.run(['gdb','--batch','-ex','set pagination off','-ex','thread apply all bt 20','-ex','detach','-ex','quit','-p',str(self.child.pid)],stdout=output,stderr=subprocess.STDOUT,timeout=10)
+
     def close(self):
-        if self.child.poll() is None:
-            subprocess.run(['qs','kill','--pid',str(self.child.pid)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=3)
-            try:self.child.wait(timeout=3)
-            except subprocess.TimeoutExpired:self.child.kill();self.child.wait()
-        self.output.close();text=self.log.read_text()
-        errors=[line for line in text.splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected'))]
-        self.case.check(self.child.returncode==0 and not errors,'owned dashboard shell closes without QML errors',f'exit={self.child.returncode}; errors={errors}; {self.log}')
-        self.compositor.close()
+        try:
+            if self.child.poll() is None:
+                try:subprocess.run(['qs','kill','--pid',str(self.child.pid)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=3)
+                except subprocess.TimeoutExpired:self.child.terminate()
+                try:self.child.wait(timeout=3)
+                except subprocess.TimeoutExpired:self.child.kill();self.child.wait()
+            self.output.close();text=self.log.read_text()
+            errors=[line for line in text.splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected'))]
+            self.case.check(self.child.returncode==0 and not errors,'owned dashboard shell closes without QML errors',f'exit={self.child.returncode}; errors={errors}; {self.log}')
+        finally:self.compositor.close()
 
 
 def descriptors(pid):
@@ -120,7 +137,7 @@ def run(binary):
             case.check(state['view']['window']['view']=='search' and state['view']['query']=='sintel','actual omarchy-shell CLI routes Search/query to the private real Dashboard',json.dumps(state))
             keyboard=subprocess.Popen(['wtype','-s','80','-k','End','-s','30',' typed','-s','700'],env=q.env)
             try:
-                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view']['cursor']=='query' else None)
+                typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view'].get('focus',s['view']['cursor'])=='query' else None)
                 case.check(True,'typing through wtype reaches the focused native search field',json.dumps(dict(state=typed,focus_steps=q.ipc('focusSteps'))))
             finally:keyboard.wait(timeout=3)
             q.keys(['-k','Tab'],lambda:q.state()['view']['window']['view']=='shows')
@@ -180,6 +197,8 @@ def run(binary):
         try:
             q.wait(lambda:json.loads(q.ipc('registryState'))['enabled'])
             result=q.native_hook('summonView','{"view":"search"}')
+            case.check(q.ipc('startScrolling')=='false','private scroll driver also refuses without hooks','no timer started')
+            case.check(q.native_hook('setPaneWidth','420').startswith('refused:'),'pane width hook refuses without FBT_TEST_HOOKS=1','production guard checked before any width mutation')
             case.check(result.startswith('refused:') and q.state()['view'] is None,'production summonView refuses without FBT_TEST_HOOKS=1',result)
             case.check(not (sandbox.root/'shims/fbittorrent.log').exists(),'refused hook never starts a daemon','recording up shim untouched')
         finally:q.close()

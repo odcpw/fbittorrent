@@ -750,3 +750,54 @@ integration follow-up, not claimed proven here. Both named announce acceptance
 criteria pass. Main f086ed9 arrived after these edits were underway; this tested
 commit must be included by the integrator before the branch can fast-forward
 and the complete-harness wall-budget work can run.
+### Integration of P5-01 and P7-06 (2026-10-19)
+
+Merged track A through e31703d onto 50188d2. The already-applied M1a presence
+implementation, fixture, connection handler and QML presence regression are
+byte-identical to the integration parent. Existing search/watch/staging/origin
+paths remain alongside peer topics and download caps; the daemon has one log
+ring. Global/turtle selection keeps the previously integrated policy.
+
+Branch-local contract 1.2.12 (P5-01) and 1.2.14 (P7-06) above refer to the
+owner's qualification snapshots. Integration assigns 1.2.26 and 1.2.27;
+presence remains 1.2.23. The 27 patch entries, 24 capabilities, hello/error
+fixtures, documented examples and version assertions agree.
+
+Evidence: target/test-logs/integration/batch12-track-a/checks.jsonl. Cargo check
+--locked --tests, regression Python compilation, daemon case listing and size
+lint pass. Focused Rust tests: 73 passed, zero failed; one existing live-capture
+harness entry point ignored. Isolated QML: 17 client and 35 store cases pass
+under batch12-track-a/qs/. No full suite, release build or native case re-run.
+
+
+### P7-04 / P6-01 semantic merge of main c1a13e0
+
+Reconciled all 15 conflicts, retaining main's features and P7-04 edits. The live
+ordered tracker set now owns the same observation store used by the monitors;
+remove retires its row immediately, cancelled/stale requests cannot recreate it
+or overwrite a re-added row, and saved reads merge edits without admitting a
+handle. Reannounce keeps its original sixty-second throttle owner across edits
+and handle replacement. Mutation edits respect main's operation/move exclusion.
+Main's complete contract history was retained; P7-04 uses the next unique slot
+1.2.29 above main's 1.2.28, as required by the unchanged history-uniqueness test;
+the integrator can renumber this additive entry. Exact 25-cap hello/error
+fixtures and docs agree. No existing assertion was weakened.
+
+Evidence under `target/test-logs/fbt-p7-04-aq7/` (private-XDG wrapper as above):
+`cargo check --locked --tests` green (`merge-check-final/`);
+`cargo test --locked --bin fbittorrent api:: -- --nocapture` 104 passed, one
+existing opt-in ignored (`merge-api/`);
+`cargo test --locked -p librqbit-tracker-comms -- --nocapture` ten passed,
+including stale-response/removal and throttle ownership (`merge-tracker-units/`);
+`daemon.py --case tracker_saved_views --case tracker_status --case reannounce
+--case reannounce_rate_limited --case reannounce_not_live_invalid_state --case
+tracker_url_redacted --case tracker_add_remove` seven passed with each of
+`--no-systemd` and `--systemd` (`merge-{foreground,systemd}/processes/daemon/*.jsonl`);
+`cargo test --locked -- --nocapture` 547 passed, zero failed, three existing
+opt-in tests ignored (`merge-full/`). Python compilation and diff checks passed.
+Initial merge check exposed one missing origin field in a test initializer;
+fixed before the final check. No unexpected panic/leak/drain failure in final
+runs. The integrated default foreground selection is now 203 cases, versus the
+older reported 186; wall-budget work will measure every currently selected case.
+The previously recorded tracker-topic/UI follow-ups remain; this merge proves
+current-set RPC observations and announce control.

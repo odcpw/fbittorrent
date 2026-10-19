@@ -7,14 +7,16 @@ use std::collections::{BTreeMap, VecDeque};
 mod pending;
 mod snapshot;
 mod sort;
+mod search_sort;
+pub(super) use search_sort::{SearchSort,search_order,legacy_search_order};
 use snapshot::Snapshot;
-pub(super) use sort::TorrentSort;
+pub(super) use sort::{TorrentSort,legacy_order};
 #[cfg(test)]
 mod tests;
 
 const MAX_ITEMS: usize = 100_000;
 const MAX_SNAPSHOT_BYTES: usize = 32 * api::LINE_OUT;
-const MAX_EVENTS: usize = 512;
+const MAX_EVENTS: usize = 1000; // Match the daemon event ring, including reconnect snapshots.
 const MAX_LOGS: usize = 2000;
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,9 +41,11 @@ pub(super) struct Store {
     pub torrents: BTreeMap<String, api::Torrent>,
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
+    pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
     pub peers: BTreeMap<api::Hash, BTreeMap<String, api::Peer>>,
     pub rss_feeds:BTreeMap<String,api::Feed>,
     pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
+    pub releases_topic:Option<String>,
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
@@ -55,17 +59,12 @@ pub(super) struct Store {
 }
 impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
-        let changed = self
-            .hello
-            .as_ref()
-            .is_none_or(|old| old.instance != hello.instance);
-        if changed {
-            self.stale = true;
-            self.lose_pending();
-            self.subscriptions.clear();
-            self.snapshots.clear();
-            // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
-        }
+        self.stale = true;
+        self.lose_pending();
+        self.subscriptions.clear();
+        self.snapshots.clear();
+        // Subscriptions belong to the connection, even if the instance did not change.
+        // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
         self.connected = hello.proto == api::PROTO;
         self.caps = api::validation::NegotiatedCaps::from_hello(&hello);
         self.hello = Some(hello);
@@ -80,7 +79,7 @@ impl Store {
         self.caps.reply(&reply)?;
         match (call, reply) {
             (_,api::Reply::ShowsList(result))=>{ensure!(result.shows.len()<=MAX_ITEMS,"show list exceeds UI row budget");self.shows=result.shows.into_iter().map(|row|(row.imdb.clone(),row)).collect();},
-            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
+            (api::Call::ShowsReleases {args},api::Reply::ShowsReleases(result))=>{ensure!(result.releases.len()<=MAX_ITEMS,"show releases exceed UI row budget");self.releases_topic=Some(args.imdb.clone().unwrap_or_else(||"inbox".into()));self.show_releases=result.releases.into_iter().map(|row|(api::release_key(args.inbox.unwrap_or(false),&row),row)).collect();},
             (_,api::Reply::RssFeeds(result))=>{
                 ensure!(result.feeds.len()<=MAX_ITEMS,"feed list exceeds UI row budget");
                 self.rss_feeds=result.feeds.into_iter().map(|row|(row.id.clone(),row)).collect();
@@ -282,6 +281,10 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Search(id) => patch(
+                    self.searches.entry(*id).or_default(), changed, added, removed,
+                    |item| match item { api::Item::Search(row) => Some((row.key.clone(),row.clone())), _ => None },
+                )?,
                 api::Topic::Events => {
                     for item in added.iter().flatten() {
                         let api::Item::Event(event) = item else {
@@ -321,7 +324,7 @@ impl Store {
         ensure!(snapshot.len() == snapshot.count, "incomplete snapshot");
         match topic {
             api::Topic::Shows=>self.shows=snapshot.shows,
-            api::Topic::ShowReleases(_)=>self.show_releases=snapshot.releases,
+            api::Topic::ShowReleases(id)=>{self.releases_topic=Some(id.clone());self.show_releases=snapshot.releases;},
             api::Topic::RssFeeds=>self.rss_feeds=snapshot.feeds,
             api::Topic::RssItems(id)=>{self.rss_items.clear();self.rss_items.insert(id.clone(),snapshot.feed_items);},
             api::Topic::Torrents => {
@@ -333,6 +336,10 @@ impl Store {
             api::Topic::Files(hash) => {
                 self.files.clear();
                 self.files.insert(hash.clone(), snapshot.files);
+            }
+            api::Topic::Search(id) => {
+                self.searches.clear(); // The TUI retains only its current search.
+                self.searches.insert(*id, snapshot.searches);
             }
             api::Topic::Events => {
                 for event in snapshot.events {

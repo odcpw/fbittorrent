@@ -80,7 +80,7 @@ impl Connection {
             });
         }
         let generation = self.sequence.fetch_add(1, Ordering::Relaxed);
-        let after = if matches!(request.call, Call::TorrentsAdd { .. }) {
+        let after = if matches!(request.call, Call::TorrentsAdd { .. } | Call::SearchGrab { .. } | Call::SearchInstall { .. }) {
             95
         } else {
             15
@@ -90,7 +90,7 @@ impl Connection {
             Pending {
                 generation,
                 deadline: Instant::now() + Duration::from_secs(after),
-                no_timeout: matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
+                no_timeout: matches!(&request.call, Call::TorrentsRecheck { .. }|Call::TorrentsMove {..}) || matches!(&request.call, Call::TorrentsRemove { args } if args.delete_files),
                 after,
             },
         );
@@ -170,7 +170,9 @@ impl Shared {
         let interactive = client.interactive && client.client.as_ref()
             .is_some_and(|c| c.kind != ClientKind::Bar || client.dashboard_visible);
         let glance = client.glance;
+        let acknowledge = glance || (interactive && client.client.as_ref().is_some_and(|c| c.kind == ClientKind::Bar));
         drop(client);
+        if acknowledge {self.daemon.watch.lock().unwrap().acknowledge(None);}
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
         self.daemon.rss.presence(connection.number,interactive);
         self.daemon.shows.presence(connection.number,interactive);
@@ -182,6 +184,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
     impl Drop for Presence<'_> {
         fn drop(&mut self) {
             self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
+            self.0.daemon.search.disconnected(self.1);
             self.0.daemon.rss.presence(self.1,false);
             self.0.daemon.shows.presence(self.1,false);
             self.0.bus.remove_connection(self.1);

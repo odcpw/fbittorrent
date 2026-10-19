@@ -26,14 +26,20 @@ pub(super) fn pane(app: &TuiApp, screen: Screen) -> Scope {
     }
 }
 pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
-    if app.settings.is_some() {
+    if app.prompt.is_some() {
+        Scope::Prompt
+    } else if app.settings.is_some() {
         Scope::Modal(ModalKind::Settings)
     } else if app.show_help {
         Scope::Modal(ModalKind::Help)
-    } else if app.prompt.is_some() {
-        Scope::Prompt
+    } else if app.log_open || app.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Log) {
+        Scope::Modal(ModalKind::Log)
+    } else if app.poster_open {
+        Scope::Modal(ModalKind::Poster)
     } else if app.files.is_some() {
         Scope::Modal(ModalKind::Files)
+    } else if app.details.is_some() {
+        Scope::Modal(ModalKind::Details)
     } else if app.providers.is_some() {
         Scope::Modal(ModalKind::Providers)
     } else if app.daemon_stopped {
@@ -143,15 +149,19 @@ pub(super) fn refresh(app: &mut TuiApp) -> Cmd<Msg> {
     if app.online {
         return app.poll();
     }
+    if app.cfg.native() {
+        return if app.presence.as_ref().is_some_and(|connection|connection.alive()) {app.poll()} else {app.start_daemon()};
+    }
     let cfg = app.cfg.clone();
     Cmd::task(move || {
-        let client = Client::from_config(&cfg);
+        let client = LegacyClient::from_config(&cfg);
         match crate::backend::ensure_running(&cfg, &client) {
             Ok(_) => Msg::ActionDone(Ok("torrent engine ready".into())),
             Err(error) => Msg::ActionDone(Err(error.to_string())),
         }
     })
 }
+
 pub(super) fn query_submit(app: &mut TuiApp) -> Cmd<Msg> {
     if !app.search_input.value().trim().is_empty() {
         return app.start_search();
