@@ -34,3 +34,12 @@ function cells(map,width){
  }
  return out
 }
+
+// A missing live bitfield does not imply a check has been scheduled.
+function unavailable(torrent){
+ if(torrent && torrent.state==="done" && !torrent.checked)return "Completed data is parked; the piece map is not retained. Recheck to inspect verified pieces."
+ if(torrent && torrent.state==="checking")return "Checking data… verified pieces will appear when it completes."
+ if(torrent && torrent.state==="metadata")return "Waiting for metadata before pieces can be inspected."
+ if(torrent && torrent.state==="waiting_vpn")return "Verified piece map is unavailable while the engine waits for the network."
+ return "Waiting for a verified piece map from the daemon."
+}

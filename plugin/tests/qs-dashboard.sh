@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [[ "${1:-}" == --owner-review ]]; then
+  shift
+  exec python3 plugin/tests/owner-review.py "$@"
+fi
+if [[ "${1:-}" == --rss ]]; then
+  shift
+  exec python3 plugin/tests/rss.py "$@"
+fi
+if [[ "${1:-}" == --recheck ]]; then
+  shift
+  exec python3 plugin/tests/recheck.py "$@"
+fi
 if [[ "${1:-}" == --journeys ]]; then
   shift
   exec python3 plugin/tests/journeys.py "$@"

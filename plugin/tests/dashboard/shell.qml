@@ -63,8 +63,15 @@ ShellRoot {
   }
   TestCase {id:preferencesInput;name:"PreferencesPointer";when:false}
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
+  function texts(item){var out=[];if(typeof item.text==="string" && item.visible)out.push(item.text);for(var i=0;i<item.children.length;i++)out=out.concat(texts(item.children[i]));return out}
+  function tableRows(item){
+    if(item.hasCursor!==undefined && item.torrent!==undefined)return [{hash:item.torrent.hash,texts:texts(item)}]
+    var out=[];for(var i=0;i<item.children.length;i++)out=out.concat(tableRows(item.children[i]));return out
+  }
   IpcHandler {
     target:"fbt-dashboard"
+    function renderedRows():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.tableRows(dashboard.item.torrents) : [])}
+    function detailTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? root.texts(dashboard.item.torrents.pane) : [])}
     function setting(key:string,valueJson:string):string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.settingsSheet)return "refused"
       var sheet=dashboard.item.settingsSheet,item=sheet.row(key),value=JSON.parse(valueJson)
@@ -77,6 +84,21 @@ ShellRoot {
     }
     function focusSetting(key:string):bool {return Quickshell.env("FBT_TEST_HOOKS")==="1" && dashboard.item && dashboard.item.settingsSheet ? dashboard.item.settingsSheet.focusSetting(key) : false}
     function settingsTrace():string {return JSON.stringify({actions:service.client ? service.client.actions : {},results:service.store.mutations})}
+    function recheckState():string {
+      var button=root.find(dashboard.item ? dashboard.item.torrents : null,"torrent-recheck"),overview=root.find(dashboard.item ? dashboard.item.torrents : null,"torrent-overview")
+      return JSON.stringify({button:button ? {text:button.text,enabled:button.enabled,y:button.mapToItem(overview,0,0).y,height:button.height} : null,viewport:overview ? {height:overview.height,moving:overview.contentItem.moving,contentY:overview.contentItem.contentY,contentHeight:overview.contentItem.contentHeight} : null,error:service.lastError,message:service.lastMessageText,actions:service.client ? service.client.actions : {}})
+    }
+    function scrollRecheck():bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var overview=root.find(dashboard.item.torrents,"torrent-overview")
+      if(!overview)return false
+      preferencesInput.mouseWheel(overview,overview.width/2,overview.height/2,0,-4800);return true
+    }
+    function recheckButton():bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var button=root.find(dashboard.item.torrents,"torrent-recheck");if(!button || !button.enabled)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
     function helpKeys():string{return JSON.stringify(dashboard.item && dashboard.item.helpOverlay ? dashboard.item.helpOverlay.listedKeys() : [])}
     function logRows():string{return JSON.stringify(dashboard.item && dashboard.item.logView ? dashboard.item.logView.rendered() : [])}
     function logFilter(kind:string,value:string):bool {

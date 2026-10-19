@@ -31,10 +31,26 @@ def run(binary):
         saved=box.downloads/'unrelated.bin';saved.write_bytes(b'keep existing files')
         process=h.start_serve();h.receive_ready();h.wait_engine();q=RssSession(case,box)
         try:
-            q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"rss"}');q.wait(lambda:'rss' in view(q))
+            q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
+            q.keys(['4'],lambda:'rss' in view(q))
             q.keys(['n'],lambda:rss(q).get('modal')=='add')
             q.keys([http.base+'/feed.xml','-k','Tab','Owner feed','-k','Return'],lambda:len(rss(q).get('feeds',[]))==1 and not rss(q).get('modal'))
             feed=rss(q)['feed']
+            # Reproduce the owner's starting point: an already saved feed,
+            # loaded by a new daemon, reached by the dashboard's numbered key.
+            q.shell('hide');q.wait(lambda:q.state().get('view') is None)
+            h.stop_serve(process);h.notify.close()
+            process=h.start_serve();h.receive_ready();h.wait_engine()
+            q.wait(lambda:q.ipc('ready')=='true',timeout=12)
+            listed=h.cli('rss','list')
+            case.check(listed['feeds'][0]['name']=='Owner feed' and len(listed['feeds'][0]['articles'])==1,'saved feed and item load through the same data path as the TUI',json.dumps(listed))
+            q.shell('summon','{"view":"torrents"}')
+            q.keys(['4'],lambda:len(rss(q).get('feeds',[]))==1 and len(rss(q).get('items',[]))==1)
+            case.check(rss(q)['feed']==feed and rss(q)['feeds'][0]['name']=='Owner feed','pressing 4 renders the existing feed and its articles after restart',json.dumps(rss(q)))
+            image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.exists() and image.stat().st_size>0)
+            q.keys(['n'],lambda:rss(q).get('modal')=='add')
+            q.keys(['-k','Escape'],lambda:not rss(q).get('modal'))
+            case.check(len(rss(q)['feeds'])==1,'n opens the add-feed dialog and Escape safely cancels it','saved feed retained')
             q.keys(['-k','Return'],lambda:rss(q).get('pane')=='items' and len(rss(q).get('items',[]))==1)
             row=rss(q)['items'][0];case.check(not row['read'] and 'size' not in row,'feed articles show unread and unknown size honestly',json.dumps(row))
             q.compositor.ipc('[title="^fbittorrent$"] floating enable, resize set width 900 px height 720 px')

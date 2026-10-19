@@ -14,6 +14,17 @@ pub struct Pieces {
     pub playable_end: Option<u64>,
 }
 impl Pieces {
+    /// No payload reads or synthetic bitfield: explain why no live map exists.
+    pub(crate) fn unavailable_reason(state: super::TorrentState, checked: bool) -> &'static str {
+        match state {
+            super::TorrentState::Done if !checked => "Completed data is parked; the piece map is not retained. Recheck to inspect verified pieces.",
+            super::TorrentState::Checking => "Checking data… verified pieces will appear when it completes.",
+            super::TorrentState::Metadata => "Waiting for metadata before pieces can be inspected.",
+            super::TorrentState::WaitingVpn => "Verified piece map is unavailable while the engine waits for the network.",
+            _ => "Waiting for a verified piece map from the daemon.",
+        }
+    }
+
     pub fn decode(&self) -> Result<Vec<u8>, Violation> {
         if self.have.len() > super::LINE_OUT || self.count > (super::LINE_OUT as u64) * 6 {
             return Err(Violation("pieces.have: exceeds frame budget".into()));
@@ -48,6 +59,19 @@ impl Validate for Pieces {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_map_does_not_claim_a_check_is_running() {
+        use super::super::TorrentState::*;
+        let dormant=Pieces::unavailable_reason(Done,false);
+        assert!(dormant.contains("Completed data is parked") && dormant.contains("Recheck"));
+        assert!(!dormant.contains("Checking") && !dormant.contains("until"));
+        assert!(Pieces::unavailable_reason(Checking,false).starts_with("Checking data"));
+        assert!(Pieces::unavailable_reason(Metadata,false).starts_with("Waiting for metadata"));
+        for state in [Done,Paused,Downloading,Stalled,Queued,Seeding,Error] {
+            let message=Pieces::unavailable_reason(state,true);
+            assert_eq!(message,"Waiting for a verified piece map from the daemon.");
+        }
+    }
     #[test]
     fn bitfield_roundtrip() {
         let p=Pieces {count:10,piece_size:16384,have:STANDARD.encode([0x81,0x40]),priority:vec![0,9],playable_end:Some(1)};
