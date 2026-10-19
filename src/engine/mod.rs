@@ -63,7 +63,7 @@ mod parked;
 
 use ledger::{Record, Ledger, read_ledger, save_parked_ledger};
 use ops::{mutation_hashes, json, now};
-pub use parked::ParkedLedger;
+pub use parked::{ParkedLedger, ParkedRefusal};
 pub use ledger::LedgerGeneration;
 pub use dormant::InvalidTorrentState;
 

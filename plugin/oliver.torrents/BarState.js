@@ -31,7 +31,7 @@ function describe(svc) {
     result.tooltip=error && error.error ? error.error : counts.error>0 ? "Torrent error · " + counts.error + " needs attention" : svc.lastError || "Engine error"
   } else if (svc.backendState==="parked" || (summary.network && summary.network.state==="waiting")) {
     result.state="waiting_vpn"; result.glyph=Glyphs.vpn; result.tone="urgent"
-    result.tooltip="Waiting for ProtonVPN" + (counts.waiting_vpn>0 ? " · " + counts.waiting_vpn + " downloads waiting" : "")
+    result.tooltip="Waiting for " + PopupState.networkName(summary.network) + (counts.waiting_vpn>0 ? " · " + counts.waiting_vpn + " downloads waiting" : "")
   } else if (ready) {
     result.state="ready"; result.glyph=Glyphs.ready; result.tone="normal"
     result.tooltip="Ready to watch: " + ready.name; result.rate=Model.barRate(dl,true)

@@ -4,6 +4,12 @@ function diskBanner(disk) {
   if(!disk || !disk.low)return ""
   return "Not enough space for the running downloads: "+Model.size(disk.needed_bytes,false)+" needed, "+(disk.free_bytes===undefined ? "free space unknown" : Model.size(disk.free_bytes,false)+" free")
 }
+// The network the owner waits for, by the name the user configured.
+function networkName(network) {
+  var n=network || {},iface=n.interface || n.selection
+  if(n.selection==="proton" || (!n.selection && (!iface || iface==="proton0")))return "ProtonVPN"
+  return iface
+}
 function warningBanner(warnings) {
   if(!warnings || !warnings.length)return ""
   var first=warnings[0],file={config:"config.toml",shows:"shows.json",rss:"rss.json"}[first.source] || first.source
@@ -19,7 +25,8 @@ function describe(s) {
   else if(s.reconnecting){r.message="Reconnecting… retry in "+Math.ceil((client.retryDelay || 500)/1000)+" s";r.dim=true}
   else if(!s.online)r.message=s.stoppedRecently ? "fbittorrent stopped. Enter Start · w Open window" : client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent is not running. Enter Start · w Open window"
   if(s.online && (s.backendState==="parked" || network.ready===false || network.state==="waiting")){
-    r.banner="Waiting for ProtonVPN ("+(network.interface || network.selection || "proton0")+"). Downloads resume when it connects.";r.urgent=true;r.dim=true
+    var name=networkName(network)
+    r.banner="Waiting for "+(name==="ProtonVPN" ? "ProtonVPN ("+(network.interface || "proton0")+")" : name)+". Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
   else if(s.online && daemon.warnings && daemon.warnings.length)r.banner=warningBanner(daemon.warnings)
