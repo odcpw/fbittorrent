@@ -212,6 +212,7 @@ impl Validate for Summary {
 impl Validate for Reply {
     fn validate(&self) -> Checked {
         match self {
+            Self::TorrentsPieces(result) => result.validate(),
             Self::AppLog(result) => {
                 require(result.entries.len() <= 1000, "entries", "at most 1000")?;
                 for entry in &result.entries { entry.validate()?; }
@@ -347,12 +348,14 @@ impl TorrentFileSizes {
 pub struct NegotiatedCaps {
     watch: bool,
     log: bool,
+    pieces: bool,
 }
 impl NegotiatedCaps {
     pub fn from_hello(hello: &HelloResult) -> Self {
         Self {
             watch: hello.caps.iter().any(|cap| cap == "watch"),
             log: hello.caps.iter().any(|cap| cap == "log"),
+            pieces: hello.caps.iter().any(|cap|cap=="pieces"),
         }
     }
     fn playable(&self, present: bool, path: &str) -> Checked {
@@ -376,6 +379,7 @@ impl NegotiatedCaps {
     }
     pub fn reply(&self, value: &Reply) -> Checked {
         match value {
+            Reply::TorrentsPieces(_) => require(self.pieces,"result","requires the pieces capability"),
             Reply::AppLog(_) | Reply::AppStats(_) => require(self.log, "result", "requires the log capability"),
             Reply::TorrentsList(result) => {
                 for torrent in &result.torrents {
@@ -400,6 +404,7 @@ impl NegotiatedCaps {
     }
     pub fn event(&self, value: &Event) -> Checked {
         match value {
+            Event::State {topic:Topic::Pieces(_),..} => {require(self.pieces,"topic","requires the pieces capability")?;},
             Event::SnapshotBegin { topic: Topic::Log, .. } | Event::SnapshotChunk { topic: Topic::Log, .. }
             | Event::SnapshotEnd { topic: Topic::Log, .. } | Event::Delta { topic: Topic::Log, .. } => {
                 require(self.log, "topic", "requires the log capability")?;
@@ -576,6 +581,7 @@ impl Validate for Event {
                 Ok(())
             }
             Self::State { topic, data, .. } => match (topic, data) {
+                (Topic::Pieces(_), StateData::Pieces(value)) => value.validate(),
                 (Topic::Summary, StateData::Summary(value)) => value.validate(),
                 (Topic::Network, StateData::Network(_))
                 | (Topic::Settings, StateData::Settings(_)) => Ok(()),

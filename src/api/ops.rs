@@ -9,6 +9,7 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation {name:"torrents.pieces",mutating:false,idempotent:false,since:"P6-02",args:"`hash: hash`",result:"`Pieces` (MSB-first base64 verified bitfield)"},
     Operation {
         name: "app.free_space",
         mutating: false,
@@ -134,6 +135,7 @@ pub mod trackers;
 pub mod rss;
 pub mod shows;
 pub mod moving;
+pub mod pieces;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

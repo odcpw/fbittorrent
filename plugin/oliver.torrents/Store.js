@@ -1,4 +1,5 @@
 .pragma library
+.import "PiecesModel.js" as PiecesModel
 
 var STATES = ["metadata", "checking", "downloading", "stalled", "queued", "paused", "done", "seeding", "waiting_vpn", "error"]
 function dictionary() { return Object.create(null) }
@@ -169,6 +170,7 @@ function create(options) {
         }
         delete s.snapshots[snapshotKey]
       } else if (frame.ev === "state") {
+        if(/^torrent:.*\.pieces$/.test(topic))PiecesModel.decode(frame.data)
         s.topics[topic] = frame.data
         if (topic === "summary" || topic === "network" || topic === "settings") s[topic] = frame.data
       } else if (frame.ev === "delta") {
@@ -241,6 +243,7 @@ function create(options) {
       result.peers.forEach(function(peer) { peers[peer.addr] = peer })
       s.topics["torrent:" + call.args.hash + ".peers"] = peers
     }
+    else if(call.op === "torrents.pieces") {PiecesModel.decode(result);s.topics["torrent:"+call.args.hash+".pieces"]=result}
     else if (call.op === "torrents.files") {
       var files = dictionary()
       result.files.forEach(function(file) { files[String(file.index)] = file })

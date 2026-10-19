@@ -166,6 +166,7 @@ impl Shared {
                 ),
                 Call::Subscribe { args } => self.bus.subscribe(EventSink(job.connection.clone()), args),
                 Call::Unsubscribe { args } => Ok(self.bus.unsubscribe(job.connection.number, args.sub)),
+                Call::TorrentsPieces {args} => ops::pieces::read(&self.daemon,&args.hash).map(Reply::TorrentsPieces),
                 Call::TorrentsTrackers {..} | Call::TorrentsReannounce {..} => ops::trackers::dispatch(&self.daemon,&job.request.call),
                 Call::TorrentsForceStart {..} | Call::TorrentsQueueMove {..} => ops::queue::dispatch(&self.daemon,&job.request.call),
                 Call::TransferSetLimits { args } => ops::transfer::set_limits(&self.daemon, args),

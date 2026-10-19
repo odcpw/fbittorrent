@@ -28,6 +28,9 @@ mod modals_files;
 use modals_files::*;
 #[path = "modals/details.rs"]
 mod modals_details;
+#[path = "modals/pieces.rs"]
+mod modals_pieces;
+use modals_pieces::*;
 use modals_details::*;
 #[path = "modals/poster.rs"]
 mod modals_poster;
@@ -206,7 +209,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,self.subscribe_ui()]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,self.subscribe_ui()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {

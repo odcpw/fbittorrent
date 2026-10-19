@@ -58,7 +58,7 @@ function create(io, options) {
   }
   c.request = function(op, args, settings) {
     settings = settings || {}
-    var cap = op === "torrents.files" || op === "torrents.set_files" ? "files" : op.indexOf("torrents.") === 0 ? "torrents" : ""
+    var cap = op === "torrents.pieces" ? "pieces" : op === "torrents.files" || op === "torrents.set_files" ? "files" : op.indexOf("torrents.") === 0 ? "torrents" : ""
     if (c.online && cap && c.caps.indexOf(cap) < 0) {
       var unsupported = {code:"unsupported", message:"This daemon lacks " + cap + "; restart to update", retryable:false}
       c.lastError = unsupported
