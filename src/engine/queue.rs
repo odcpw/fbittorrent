@@ -19,6 +19,7 @@ impl Inner {
         let mut slots = 0;
         let mut decisions = Vec::new();
         let mut changed = false;
+        let mut completed = Vec::new();
         for record in &mut ledger.records {
             cx.checkpoint()?;
             let Ok(handle) = self.handle(&record.hash) else {
@@ -38,6 +39,11 @@ impl Inner {
                 && !self.check_cancelled(&record.hash, &handle);
             if stats.finished && record.completion_on <= 0 {
                 record.completion_on = now();
+                let target = handle.metadata.load_full().filter(|m| m.file_infos.len() == 1)
+                    .map(|m| handle.output_folder().join(&m.file_infos[0].relative_filename))
+                    .unwrap_or_else(|| handle.output_folder().to_path_buf());
+                completed.push(serde_json::json!({"ev":"torrent.completed", "hash":record.hash,
+                    "name":handle.name().unwrap_or_else(|| record.name.clone()), "open_target":target.to_string_lossy()}));
                 changed = true;
             }
             let retry = retry_errors.contains(&record.hash);
@@ -57,6 +63,13 @@ impl Inner {
         }
         if changed {
             self.save(cx, ledger).await?;
+            let mut events = self.completions.lock().unwrap();
+            for event in completed {
+                if events.len() == 1024 { eprintln!("WARN engine completion queue full capacity=1024"); events.pop_front(); }
+                events.push_back(event);
+            }
+            drop(events);
+            self.bus_changed.notify_waiters();
         }
         // Stop first: reducing the limit or restarting an earlier queue entry
         // must never create a transient extra payload download.

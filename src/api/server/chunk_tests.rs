@@ -68,3 +68,24 @@ fn collection_transport_splits_by_bytes_and_preserves_items_and_revisions() {
     assert_eq!(revisions, (4..=last).collect::<Vec<_>>());
     println!("chunk transport: 1100 items, {} real Unix frames, max={} bytes including newline; contiguous rev=4..={last}",frames.len(),max);
 }
+
+#[cfg(test)]
+mod defaults_tests {
+    use super::*;
+    #[test]
+    fn summary_default_follows_bar_visibility() {
+        let (connection, _peer) = super::super::tests::connection();
+        let sink = EventSink(Arc::new(connection));
+        sink.0.client.lock().unwrap().client = Some(Client {
+            kind: ClientKind::Bar,
+            name: ClientName::new("visibility-test").unwrap(),
+            version: "test".into(),
+        });
+        assert_eq!(sink.summary_interval(), 5000, "idle bar default");
+        sink.0.client.lock().unwrap().glance = true;
+        assert_eq!(sink.summary_interval(), 1000, "visible popup default");
+        sink.0.client.lock().unwrap().glance = false;
+        sink.0.client.lock().unwrap().interactive = true;
+        assert_eq!(sink.summary_interval(), 1000, "interactive client default");
+    }
+}

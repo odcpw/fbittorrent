@@ -138,6 +138,9 @@ impl Inner {
             .await?
             .into_handle()
             .context("torrent admission did not return a handle")?;
+        // The bus may currently have no waiter for this newly resolved hash.
+        // Wake its engine-wide observer so it arms the new handle before sampling.
+        self.bus_changed.notify_waiters();
         Ok(handle)
     }
     pub(super) async fn restore_record(&self, cx: &Cx, record: &Record, paused: bool) -> Result<Arc<ManagedTorrent>> {
@@ -238,8 +241,10 @@ impl Inner {
                 inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await
             }.await;
             let mut restores = inner.restores.lock().unwrap();
+            let mut changed = false;
             if let Some(restore) = restores.get_mut(&record.hash) {
                 if restore.generation == generation {
+                    changed = true;
                     restore.outcome = match result {
                         Ok(()) => {
                             restore.last_error = None;
@@ -253,6 +258,8 @@ impl Inner {
                     };
                 }
             }
+            drop(restores);
+            if changed { inner.bus_changed.notify_waiters(); }
         })?;
         if let Some(previous) = restores.insert(hash, RestoreTask { generation, outcome, last_error, task: Some(task), cancel }) {
             self.retire_restore(previous);

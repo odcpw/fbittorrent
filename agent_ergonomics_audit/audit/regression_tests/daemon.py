@@ -1514,19 +1514,6 @@ def api_collection_cap(binary, systemd):
             harness.lock_free()
 
 
-def api_subscriptions_deferred(binary, systemd):
-    with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
-        hello = client.hello()["result"]
-        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add", "imdb"], "P1-06, P1-09, P7-09 and P3-04 advertise exactly their implemented capabilities", str(hello["caps"]))
-
-        for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
-            frame = client.call(op, args, error="unknown_op")
-            nearest = ["torrents.list"] if op == "torrents.lis" else []
-            case.check(frame["error"]["details"]["nearest"] == nearest and bool(frame["error"].get("hint")),
-                       "unknown_op includes only implemented nearby names and a hint", str(frame))
-        client.call("app.info")
-
-
 def api_start_results(binary, systemd):
     with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         client.hello()
@@ -2562,6 +2549,9 @@ def contract_group(group, binary, systemd):
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
+                        if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
+
                         if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
@@ -3142,8 +3132,12 @@ def setup_desktop_handlers(binary, systemd):
         h.cli("setup", "--magnet")
         apps = Path(sandbox.env["XDG_DATA_HOME"]) / "applications"
         app, magnet = [(apps / name).read_text() for name in ("fbittorrent.desktop", "fbittorrent-magnet.desktop")]
-        case.check(" dashboard\n" in app and " add %u\n" in magnet and "Terminal=false" in magnet,
+        case.check(" dashboard\n" in app and " add --origin handler %u\n" in magnet and "Terminal=false" in magnet,
                    "setup writes dashboard and direct headless magnet desktop entries", app + magnet)
+        icon = Path(sandbox.env["XDG_DATA_HOME"]) / "icons/hicolor/scalable/apps/fbittorrent.svg"
+        case.check("Icon=fbittorrent" in app and "Icon=fbittorrent" in magnet and
+                   icon.read_text() == (REPO / "assets/fbittorrent.svg").read_text(),
+                   "both desktop entries and the private hicolor SVG use fbittorrent's download glyph", str(icon))
         calls = [json.loads(line) for line in (sandbox.root / "shims/xdg-mime.log").read_text().splitlines()]
         case.check(len(calls) == 2 and all(call[:2] == ["default", "fbittorrent-magnet.desktop"] for call in calls),
                    "both magnet and torrent-file MIME registrations use the direct add handler", str(calls))
@@ -3206,6 +3200,22 @@ def install_atomic(binary, systemd):
             case.check(not installed.with_suffix(".tmp").exists(), "installer leaves no temporary executable")
             h.cli("down", start=True)
 
+
+if __name__ == "__main__":
+    sys.modules["daemon"] = sys.modules[__name__]
+from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
+                        structural_frame_within_100ms, detail_topic_released,
+                        engine_restart_keeps_connection, slow_client_closed_others_live,
+                        rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay, mutation_bus_sequence)
+
+from daemon_notify import (notify_completed, notify_action_open, notify_action_default,
+    notify_action_folder, notify_added_undo, notify_off, notify_failed, notify_queue_bounded,
+    notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
+
+from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
+    idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
+    idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
+    idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
 
 # P1-09: every mutation records its complete envelope, including resend identity.
 def mutation_request(client, op, args, ref=None, instance=None, error=None):
@@ -4013,20 +4023,27 @@ def recheck_failed_receipt(binary,systemd):
 CASES = {function.__name__: function for function in
          (recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state,
           settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
-          settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic,
-          fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
-          tui_single_connection, systemd_without_bus_address, interim_engine_socket, ready_notify,
-          parked_start, sigterm_drains, panic_exits_70, second_serve_refused, engine_restart_retains_owner,
-          shutdown_inflight_add, unit_is_static, add_starts_unit_no_launcher, status_never_starts,
-          down_stops, kill9_restarts, killmode_mixed, start_limit_not_hit, start_while_deactivating,
-          down_cancels_restart, down_failed_manager_query, down_malformed_manager_query,
-          down_failed_query_without_unit_file, cleanup_failed_stop, cleanup_stop_timeout, foreground_down,
-          unit_install_unwritable, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic,
-          startup_failure_hint, unit_exec_path, cap_change_no_check, seed_toggle_no_check, connection_limit,
-          line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes, ninth_inflight_busy,
-          api_quiesce_bye, api_torrent_operations, dispatch_queue_busy, api_concurrent_adds,
-          api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
-          offline_stop_ledger, offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
+          settings_offline_no_start, tui_single_connection, offline_stop_ledger,
+          offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
+          notify_completed, notify_action_open, notify_action_default, notify_action_folder,
+          notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
+          idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
+          idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
+          idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,
+          state_watcher_cancellation_stress, mutation_bus_sequence, subscribe_gap_recovery, structural_frame_within_100ms,
+          detail_topic_released, engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
+          imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+          systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
+          panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
+          unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
+          killmode_mixed, start_limit_not_hit, start_while_deactivating, down_cancels_restart,
+          down_failed_manager_query, down_malformed_manager_query, down_failed_query_without_unit_file,
+          cleanup_failed_stop, cleanup_stop_timeout, foreground_down, unit_install_unwritable, no_manager, dashboard_routes, setup_desktop_handlers, install_atomic, startup_failure_hint, unit_exec_path,
+          cap_change_no_check, seed_toggle_no_check,
+          connection_limit, line_cap, non_object_line, hello_twice, hello_deadline, slow_hello_bytes,
+          ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
+          api_concurrent_adds, api_collection_cap, api_replay_normalization, api_start_results,
           api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
 CASES.update((function.__name__, function) for function in MUTATION_CASES)

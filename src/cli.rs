@@ -32,7 +32,7 @@ pub(super) struct Cli {
 pub(super) enum Cmd {
     /// Run the torrent engine daemon (other commands start it on demand)
     Serve {
-        /// Idle shutdown delay; 0 disables the idle safety net
+        /// Override the configured idle delay (default 300); 0 disables it
         #[arg(long)]
         idle_exit_secs: Option<u64>,
         /// Disable desktop notifications (systemd readiness is still sent)
@@ -107,6 +107,9 @@ pub(super) enum Cmd {
         /// Suppress the desktop notification
         #[arg(long)]
         quiet: bool,
+        /// Show a plain notification even when stdout is not a TTY (never with --json)
+        #[arg(long)]
+        notify: bool,
         /// Block until the download completes (see `wait`)
         #[arg(long)]
         wait: bool,
@@ -304,6 +307,13 @@ pub(super) enum ShowsCmd {
 mod tests {
     use super::*;
 
+    #[test]
+    fn serve_idle_override_preserves_config_default_and_short_test_delays() {
+        let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Serve { idle_exit_secs: None, .. })));
+        let cli = Cli::try_parse_from(["fbittorrent", "serve", "--idle-exit-secs", "2"]).unwrap();
+        assert!(matches!(cli.cmd, Some(Cmd::Serve { idle_exit_secs: Some(2), .. })));
+    }
     #[test]
     fn robot_docs_keys_selects_each_surface_and_json() {
         for surface in ["tui","dashboard","popup","all"] {

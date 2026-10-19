@@ -197,6 +197,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             save,
             category,
             quiet,
+            notify: explicit_notify,
             wait,
             timeout,
             origin,
@@ -216,9 +217,10 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 *seed,
                 save.clone(),
                 category.clone(),
-                origin,
+                if origin == "handler" && (*quiet || json_mode) { "agent" } else { origin },
             )?;
-            if !quiet && cfg.notify {
+            if !quiet && cfg.notify && !json_mode && origin != "handler" && origin != "agent"
+                && (*explicit_notify || crate::agent::stdout_is_tty()) {
                 crate::notify(
                     if added["deferred"] == true {
                         "Waiting for VPN"

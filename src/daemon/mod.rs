@@ -1,4 +1,6 @@
 pub mod lifecycle;
+pub(crate) mod policy;
+pub(crate) mod notify;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
@@ -14,8 +16,8 @@ use lifecycle::{Lifecycle, Request as LifecycleRequest, StopReason};
 use slot::{EngineSlot, Slot, State};
 use std::io::Read;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc, RwLock,
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, RwLock,
 };
 use std::time::{Duration, Instant};
 
@@ -26,15 +28,20 @@ pub struct Daemon {
     pub slot: RwLock<EngineSlot>,
     pub instance: String,
     pub launcher: &'static str,
-    pub idle_exit_secs: AtomicU64,
+    pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
+    pub(crate) notifier: notify::Notifier,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
 
 impl Daemon {
+    pub(crate) fn idle_exit_secs(&self) -> u64 {
+        self.policy.lock().unwrap().seconds()
+    }
+
     pub(crate) fn network(&self) -> network_app::NetworkState {
         self.network.read().unwrap().clone()
     }
@@ -119,7 +126,7 @@ impl Daemon {
                     else { "the terminal running fbittorrent serve" }},
             "engine": format!("librqbit {}", librqbit::version()),
             "instance": self.instance, "engine_epoch": slot.engine_epoch,
-            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs.load(Ordering::Acquire)},
+            "state": slot.slot.state().name(), "policy": {"idle_exit_secs": self.idle_exit_secs()},
         })
     }
 
@@ -141,6 +148,8 @@ impl Daemon {
         if let Some(result) = crate::api::legacy::control(&op, &network, &self.lifecycle) {
             return result;
         }
+        let _activity = (request.method != "GET")
+            .then(|| policy::Mutation::start(self.policy.clone()));
         let began = Instant::now();
         loop {
             let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
@@ -229,7 +238,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         )))?;
     } else {
         let mut engine_cfg = cfg.clone();
-        engine_cfg.network_interface = network.interface;
+        engine_cfg.network_interface = network.interface.clone();
         eprintln!("INFO engine starting session");
         let engine =
             match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone()) {
@@ -246,6 +255,14 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
+    daemon.notifier.enabled(cfg.notify && !daemon.no_notify);
+    let resumed = match daemon.execute(engine::ops::EngineOp::Info) {
+        Ok(engine::ops::EngineResult::Torrents(rows)) => rows.into_iter()
+            .filter_map(|row| crate::api::ops::torrents::torrent(row).ok())
+            .filter(|row| row.intent == crate::api::Intent::Run && !row.staged && row.completed_at.is_none()).count(),
+        _ => 0,
+    };
+    daemon.notifier.network(network.ready, cfg.network_interface.as_deref().unwrap_or("network"), resumed);
     Ok(())
 }
 
@@ -258,7 +275,18 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
-        let request = daemon.lifecycle.wait(Duration::from_secs(1));
+        let timeout = {
+            let mut policy = daemon.policy.lock().unwrap();
+            let now = Instant::now();
+            if policy.expired(now) { return Ok(StopReason::Idle); }
+            policy.wait(now)
+        };
+        // Network safety still checks once a second when bound. Otherwise the
+        // idle supervisor sleeps five seconds, or until its earlier deadline.
+        let timeout = if cfg.network_interface.is_some() {
+            timeout.min(Duration::from_secs(1))
+        } else { timeout };
+        let request = daemon.lifecycle.wait(timeout);
         match request {
             Some(LifecycleRequest::Stop(reason)) => return Ok(reason),
             Some(LifecycleRequest::Restart(reason)) => {
@@ -290,7 +318,7 @@ fn supervise(
 
 /// Blocks until the daemon owner has drained. Signal setup precedes all daemon
 /// threads; main routes here before search::begin_session or any TUI guard.
-pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Result<i32> {
+pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) -> Result<i32> {
     if no_notify {
         cfg.notify = false;
     }
@@ -316,9 +344,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         } else {
             "foreground"
         },
-        idle_exit_secs: AtomicU64::new(idle_exit_secs),
+        policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         settings: Default::default(),
         no_notify,
+        notifier: notify::Notifier::new(cfg.notify)?,
         imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
@@ -330,8 +359,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         "INFO daemon listening {} no_notify={no_notify}",
         daemon.info()
     );
-    // P1-12 owns the idle busy table; P1-13 owns desktop notifications and
-    // consumes no_notify. sd_notify is always active when NOTIFY_SOCKET is set.
+    // P1-13 owns desktop notifications. sd_notify remains active when
+    // NOTIFY_SOCKET is set, independently of the notification preference.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         notify.send("READY=1")?;
         eprintln!("INFO daemon ready state=starting");
@@ -351,6 +380,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();

@@ -15,7 +15,7 @@ pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
 pub const CONTRACT_VERSION: &str = "1.2.3";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
-const SERVE_LIMITATIONS: &str = "serve has no idle exit yet; systemd starts it on demand for writes or a TUI. API v1 serves torrents, files, mutations and IMDb and provides interactive presence and owner commands; subscriptions and automatic idle/upgrade policy follow their owner beads. CLI and TUI data still use the framed legacy socket (engine.sock). Settings use app.settings.get/set while running and the private config while stopped.";
+const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar client never counts as interactive, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; automatic upgrades follow P1-17.";
 
 const JSON_CONVENTION: &str = "Ordinary CLI commands with --json print one JSON object on stdout; errors use {ok:false,code,code_name,error,hint} and the same exit code. serve is a long-running owner with stderr diagnostics, not a JSON response command; --json only formats its startup errors.";
 const UNIT_EXITS: &str = "serve unit-only exits: 70 panic; 75 upgrade (reserved until upgrade checks land). These are outside the CLI 0..8 dictionary.";
@@ -161,7 +161,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "show", aliases: &["info"], summary: "One torrent in full, including its files and the path to open", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "search", aliases: &["find"], summary: "Search local providers; results carry magnet links; native mode does not open the app", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; returns the hash; --wait blocks until complete", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; --wait blocks until complete; --notify requests a plain toast; --origin handler delegates actions to the daemon", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "wait", aliases: &[], summary: "Block until torrents complete (or --timeout); progress on stderr", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "start", aliases: &["resume"], summary: "Start torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "stop", aliases: &["pause"], summary: "Stop torrents", json: true, mutating: true, needs_backend: true },
@@ -410,7 +410,7 @@ mod tests {
             assert!(guide.contains(text), "robot-docs disagrees with capabilities: {text}");
         }
         assert!(guide.contains("fbittorrent serve"));
-        for limitation in ["no idle exit yet", "on demand", "API v1"] {
+        for limitation in ["idle_exit_secs", "on demand", "API v1", "api.sock", "glance pauses"] {
             assert!(guide.contains(limitation));
         }
         for (code, name) in [(70, "panic"), (75, "upgrade")] {

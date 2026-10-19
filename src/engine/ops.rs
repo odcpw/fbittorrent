@@ -6,6 +6,10 @@ pub use parser::{Route, LEGACY_ROUTES};
 pub use types::*;
 
 impl EngineDispatcher {
+    pub(crate) fn has_pending_restore(&self) -> bool {
+        self.inner.restores.lock().unwrap().values()
+            .any(|r| matches!(r.outcome, RestoreOutcome::Checking | RestoreOutcome::Metadata))
+    }
     pub fn restore_outcomes(&self) -> HashMap<String, RestoreOutcome> {
         self.inner
             .restores

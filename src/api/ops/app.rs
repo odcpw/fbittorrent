@@ -7,7 +7,7 @@ use crate::daemon::{
 };
 use serde_json::{json, Value};
 
-pub const CAPS:&[&str]=&["torrents","files","mutations","deferred_add","imdb","settings","recheck"];
+pub const CAPS:&[&str]=&["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck"];
 
 pub fn hello(daemon: &Daemon) -> HelloResult {
     let mut info = daemon.info();
@@ -27,6 +27,7 @@ pub fn dispatch(
     reference: &str,
     counts: Value,
     uptime: u64,
+    subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
     Ok(match call {
         Call::AppSettingsGet { .. } => Reply::AppSettingsGet(super::settings::get(daemon)?),
@@ -36,7 +37,7 @@ pub fn dispatch(
             value["uptime_s"] = json!(uptime);
             value["upgrade_pending"] = json!(false);
             value["clients"] = counts;
-            value["subscriptions"] = json!({"total":0,"by_topic":{}});
+            value["subscriptions"] = serde_json::to_value(subscriptions).unwrap();
             Reply::AppInfo(serde_json::from_value(value).unwrap())
         }
         Call::AppNetwork { .. } => {

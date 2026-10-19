@@ -21,6 +21,7 @@ WantedBy=default.target
 
 pub fn run(port: u16, save_path: Option<String>) -> Result<()> {
     let mut cfg = crate::config::Config::load()?;
+    install_icon()?;
     if cfg.native() {
         let save = save_path.or(cfg.save_path.clone()).unwrap_or_else(|| {
             dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads"))
@@ -219,15 +220,16 @@ pub fn uninstall() -> Result<()> {
 
 /// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
 pub fn register_magnet_handler() -> Result<()> {
+    install_icon()?;
     let exe = std::env::current_exe()?;
     let command = desktop_executable(&exe.to_string_lossy())?;
     let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
     std::fs::create_dir_all(&apps)?;
     std::fs::write(apps.join("fbittorrent.desktop"), format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=qbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
     let desktop = apps.join("fbittorrent-magnet.desktop");
     std::fs::write(&desktop, format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add --origin handler %u\nIcon=qbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
+        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add --origin handler %u\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
     for mime in ["x-scheme-handler/magnet", "application/x-bittorrent"] {
         let st = Command::new("xdg-mime").args(["default", "fbittorrent-magnet.desktop", mime]).status()?;
         if !st.success() { bail!("xdg-mime default failed for {mime}"); }
@@ -305,4 +307,11 @@ mod tests {
         assert_eq!(super::desktop_executable("/tmp/percent%/fbittorrent").unwrap(),
             "\"/tmp/percent%%/fbittorrent\"");
     }
+}
+
+fn install_icon() -> Result<()> {
+    let directory = dirs::data_local_dir().context("no data directory")?.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::write(directory.join("fbittorrent.svg"), include_str!("../assets/fbittorrent.svg"))?;
+    Ok(())
 }

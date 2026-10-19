@@ -35,6 +35,7 @@ fn dispatch_queue_is_64_and_closed_pool_refuses_work() {
         request: decode(br#"{"id":1,"op":"app.info"}"#).unwrap(),
         generation: 1,
         mutation: None,
+        _activity: None,
     };
     for _ in 0..64 {
         assert!(pool.submit(job()).is_ok());
