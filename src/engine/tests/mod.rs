@@ -89,6 +89,7 @@ use fixture::*;
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
             rechecks: Default::default(),
+            saved: Default::default(),
             resume: Arc::new(resume::Store::open(directory).unwrap()),
             resume_prepared: Default::default(),
             undo: Default::default(),

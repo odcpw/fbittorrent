@@ -21,22 +21,13 @@ pub(super) fn parked_metadata(record: &Record, directory: &Path) -> Result<Optio
     metadata.info.data.validate()?;
     Ok(Some(bytes))
 }
-fn parked_view(record: &Record, directory: &Path) -> Result<TorrentView> {
-    let metadata = if let Some(bytes) = parked_metadata(record, directory)? {
-        let torrent = librqbit::torrent_from_bytes(&bytes)?;
-        let info = torrent.info.data.validate()?;
-        let files: Vec<_> = info.iter_file_details().collect();
-        Some((
-            info.lengths().total_length(),
-            if files.len() == 1 {
-                Some(Path::new(&record.output_folder).join(files[0].filename.to_pathbuf()))
-            } else {
-                None
-            },
-        ))
-    } else {
-        None
-    };
+fn parked_view(record: &Record, directory: &Path, saved: &saved::SavedCache) -> Result<TorrentView> {
+    let metadata = saved.info(record, directory)?.map(|info| {
+        (
+            info.total_length,
+            (info.files.len() == 1).then(|| Path::new(&record.output_folder).join(&info.files[0].path)),
+        )
+    });
     Ok(TorrentView::parked(record, metadata))
 }
 
@@ -45,6 +36,10 @@ pub struct ParkedLedger {
     lifecycle: Lifecycle,
     generation: Arc<LedgerGeneration>,
     undo: Arc<undo::History>,
+    /// Saved records by torrents.json identity, and parsed metainfo: the
+    /// sampler's parked Info reads no file whose identity is unchanged.
+    records: std::sync::Mutex<Option<(saved::Stamp, Arc<Vec<Record>>)>>,
+    saved: saved::SavedCache,
 }
 impl ParkedLedger {
     pub fn new(directory: PathBuf, lifecycle: Lifecycle) -> Self {
@@ -53,11 +48,28 @@ impl ParkedLedger {
             lifecycle,
             generation: Arc::default(),
             undo: Arc::default(),
+            records: Default::default(),
+            saved: Default::default(),
         }
     }
     pub fn with_undo(mut self, history: Arc<undo::History>) -> Self { self.undo=history; self }
     pub fn ledger_generation(&self) -> Arc<LedgerGeneration> {
         self.generation.clone()
+    }
+    /// Read-only records, reparsed only after torrents.json is replaced.
+    fn saved_records(&self) -> Result<Arc<Vec<Record>>> {
+        let path = self.directory.join("torrents.json");
+        let Some(current) = saved::file_stamp(&path) else {
+            return Ok(Arc::new(read_ledger(&path)?.records));
+        };
+        let mut cached = self.records.lock().unwrap();
+        if let Some((seen, records)) = cached.as_ref() {
+            if *seen == current { return Ok(records.clone()); }
+        }
+        let records = Arc::new(read_ledger(&path)?.records);
+        // A replacement that crossed this read is observed on the next call.
+        if saved::file_stamp(&path) == Some(current) { *cached = Some((current, records.clone())); }
+        Ok(records)
     }
     pub fn execute(&self, op: EngineOp) -> Result<EngineResult> {
         op.validate()?;
@@ -108,6 +120,18 @@ impl ParkedLedger {
             _ => bail!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ),
+        }
+        if matches!(&op, EngineOp::Info) {
+            let records = self.saved_records()?;
+            let mut queue_position=0;
+            let mut rows=records.iter().map(|record| {
+                let mut view=parked_view(record,&self.directory,&self.saved)?;
+                view.origin=Some(record.origin.clone());
+                view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
+                Ok(view)
+            }).collect::<Result<Vec<_>>>()?;
+            rows.sort_by(|a,b|b.added_at.cmp(&a.added_at));
+            return Ok(EngineResult::Torrents(rows));
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
@@ -176,17 +200,6 @@ impl ParkedLedger {
                     network_blocked: true,
                 }));
             }
-            EngineOp::Info => {
-                let mut queue_position=0;
-                let mut rows=ledger.records.iter().map(|record| {
-                    let mut view=parked_view(record,&self.directory)?;
-                    view.origin=Some(record.origin.clone());
-                    view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
-                    Ok(view)
-                }).collect::<Result<Vec<_>>>()?;
-                rows.sort_by(|a,b|b.added_at.cmp(&a.added_at));
-                return Ok(EngineResult::Torrents(rows));
-            }
             EngineOp::Peers{hash}=>{
                 anyhow::ensure!(ledger.records.iter().any(|r|&r.hash==hash),"torrent record not found");
                 return Ok(EngineResult::Peers(Vec::new()));
@@ -197,17 +210,15 @@ impl ParkedLedger {
                     .iter()
                     .find(|record| &record.hash == hash)
                     .context("torrent record not found")?;
-                let bytes = parked_metadata(record, &self.directory)?.context(
+                let info = self.saved.info(record, &self.directory)?.context(
                     "saved torrent metadata is unavailable; connect ProtonVPN to resolve it",
                 )?;
-                let torrent = librqbit::torrent_from_bytes(&bytes)?;
-                let info = torrent.info.data.validate()?;
                 return Ok(EngineResult::Files(
-                    info.iter_file_details()
+                    info.files.iter()
                         .enumerate()
                         .map(|(index, file)| TorrentFile {
                             index: index as i64,
-                            name: file.filename.to_pathbuf().to_string_lossy().into(),
+                            name: file.name.clone(),
                             size: file.len as i64,
                             progress: 0.0,
                             progress_known: false,

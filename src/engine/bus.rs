@@ -20,7 +20,8 @@ impl EngineDispatcher {
         self.runtime.block_on(async {
             let ledger =
                 OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
-            let rows = self.info_locked(&ledger);
+            // The sampler's presence checks are bounded; see saved::PRESENCE_TTL.
+            let rows = self.info_observed(&ledger, false);
             let mut details = HashMap::new();
             for hash in files {
                 let Some(record) = ledger.records.iter().find(|r| &r.hash == hash) else {

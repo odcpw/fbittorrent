@@ -56,6 +56,7 @@ pub(crate) mod disk;
 pub mod ops;
 mod restore;
 mod dormant;
+mod saved;
 mod dormant_delete;
 pub mod view;
 mod parked;
@@ -102,6 +103,8 @@ struct Inner {
     directory: PathBuf,
     default_folder: PathBuf,
     rechecks: recheck::Rechecks,
+    /// Parsed saved metainfo and sampled payload presence (see saved.rs).
+    saved: saved::SavedCache,
     resume: Arc<resume::Store>,
     resume_prepared: resume::Prepared,
     undo: std::sync::Mutex<Arc<undo::History>>,
@@ -211,6 +214,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         directory,
         default_folder,
         rechecks: Default::default(),
+        saved: Default::default(),
         resume, resume_prepared,
         undo: Default::default(),
         stopping: AtomicBool::new(false),

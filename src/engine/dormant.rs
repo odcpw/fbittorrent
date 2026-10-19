@@ -40,58 +40,30 @@ impl Inner {
         );
     }
 
+    /// The saved file list alone needs no payload presence check.
     pub(super) fn saved_files(&self, record: &Record) -> Result<Vec<TorrentFile>> {
-        Ok(self.saved_torrent(record)?.files)
+        let info = self
+            .saved
+            .info(record, &self.directory)?
+            .context("saved torrent metadata is unavailable")?;
+        Ok(info.selection(record).0)
     }
 
     pub(super) fn saved_torrent(&self, record: &Record) -> Result<SavedTorrent> {
-        let bytes = parked::parked_metadata(record, &self.directory)?
+        self.saved_torrent_observed(record, true)
+    }
+
+    /// `fresh` stats selected payload now; the sampler reuses a bounded one.
+    pub(super) fn saved_torrent_observed(&self, record: &Record, fresh: bool) -> Result<SavedTorrent> {
+        let info = self
+            .saved
+            .info(record, &self.directory)?
             .context("saved torrent metadata is unavailable")?;
-        let torrent = librqbit::torrent_from_bytes(&bytes)?;
-        let info = torrent.info.data.validate()?;
-        let lengths = info.lengths();
-        let mut selected_end = 0;
-        let mut selected_bytes = 0;
-        let mut selected_files_present = true;
-        let files = info
-            .iter_file_details_ext()
-            .enumerate()
-            .map(|(index, file)| {
-                let selected = record
-                    .only_files
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(&index));
-                // Match librqbit's compute_selected_pieces / hns.total(): the
-                // union of non-padding selected files' pieces, not file sizes.
-                // Metainfo order gives increasing ranges; count shared boundary
-                // pieces once and clip the final piece to its actual length.
-                let start = file.pieces.start.max(selected_end);
-                if selected && !file.details.attrs().padding && start < file.pieces.end {
-                    let piece_length = u64::from(lengths.default_piece_length());
-                    let end_bytes =
-                        (u64::from(file.pieces.end) * piece_length).min(lengths.total_length());
-                    selected_bytes += end_bytes - u64::from(start) * piece_length;
-                    selected_end = file.pieces.end;
-                }
-                if record.dormant_on_restore() && selected && !file.details.attrs().padding {
-                    selected_files_present &= std::fs::metadata(Path::new(&record.output_folder).join(file.details.filename.to_pathbuf()))
-                        .is_ok_and(|m| m.is_file() && m.len() == file.details.len);
-                }
-                TorrentFile {
-                    index: index as i64,
-                    name: file.details.filename.to_pathbuf().to_string_lossy().into(),
-                    size: file.details.len as i64,
-                    progress: if record.completion_on > 0 { 1.0 } else { 0.0 },
-                    // This is the saved completion claim, not a measurement of data.
-                    progress_known: false,
-                    priority: if selected { 1 } else { 0 },
-                }
-            })
-            .collect();
+        let (files, selected_bytes) = info.selection(record);
         Ok(SavedTorrent {
             files,
             selected_bytes,
-            selected_files_present,
+            selected_files_present: !record.dormant_on_restore() || self.saved.present(record, &info, fresh),
         })
     }
 
