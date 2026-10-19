@@ -37,7 +37,10 @@ class Swarm:
                 box,h,_,client,_=self.nodes[index]
                 metainfo=fixtures.torrent_fixture(box.root,[payload],tracker=http.base+'/'+path)
                 self.hash=metainfo.info_hash
-                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index==0))
+                # This owned swarm deliberately includes an uploading leecher.
+                # Upload is off by default, so give both payload sources an
+                # explicit opt-in; the observing client retains upload off.
+                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index in (0,1)))
                 if index==0:
                     h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent'])['state']=='seeding',json.dumps(row)),'local seed verifies real payload')
                     d.DaemonContract.throttle(client,self.hash,self.upload_bps)
