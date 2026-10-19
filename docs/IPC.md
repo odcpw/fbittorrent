@@ -365,7 +365,7 @@ fixture, not a legal server transcript. errors injects each representative
 failure; its invalid-ID and request-less failures are input-validation scenarios.
 
 
-**Live replay (P1-06, orchestrator ruling 3).** The hello/errors/torrents runner
+**Live replay (P1-06, orchestrator ruling 3).** Under the standing owner authority of 2026-10-19, computed `*_at`/`*_until` timestamps compare by type and validity; an undo deadline must be future and within ten seconds of the keep-files removal that created it. Contradictory fixture sequences are repaired minimally with exact before/after byte evidence; operation semantics and types remain unchanged. The hello/errors/torrents runner
 generates real payloads and metainfo from transcript names, sizes, files and
 selection, adds them through the API, and drives the available state/error
 preconditions. The test owns its literal /tmp/fbt-fixture paths and an isolated
@@ -422,6 +422,8 @@ validation failures are recorded without a new mask or deferral.
 | `/**/hash; /result/started/*; /result/stopped/*` | identity:hash | 40 lowercase hex; API-generated hashes bound to fixture identities |
 | `/ref; /result/ref` | identity:ref | at most 64 ASCII characters, consistent first-occurrence bijection |
 | `/ts; /result/torrent/added_at; /result/torrent/completed_at; /result/torrents/*/added_at; /result/torrents/*/completed_at` | timestamp | positive u64; presence preserved |
+| `/**/undo_until` | undo deadline | positive u64; future time at observation, at most 10 seconds after the originating keep-files remove reply; originating remove required |
+| `/**/*_at; /**/*_until` | timestamp | server-computed Unix seconds: positive u64; presence preserved |
 | `/result/dl_bps; /result/ul_bps; /result/torrent/dl_bps; /result/torrent/ul_bps; /result/torrents/*/dl_bps; /result/torrents/*/ul_bps` | u64 | nonnegative u64; presence preserved |
 | `/result/torrent/eta_s; /result/torrents/*/eta_s; /result/torrent/peers; /result/torrent/seeds; /result/torrents/*/peers; /result/torrents/*/seeds` | u64 | nonnegative u64; presence preserved |
 | `/result/session_downloaded; /result/session_uploaded; /result/uptime_s; /result/clients/*` | u64 | nonnegative u64; presence preserved |
