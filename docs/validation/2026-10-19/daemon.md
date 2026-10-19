@@ -312,8 +312,20 @@ shell syntax, whitespace and <=900 source-line checks pass. Single full locked
 Rust (`full-final/`): 371 passed, zero failed, three process bridges ignored.
 
 Do-step remainder: torrents.recheck belongs to Track B's canonical asynchronous
-P5-03 contract (hashes, pending, mutation.result), now on main but absent from this
-branch; it was not replaced with a conflicting synchronous route. Merge that
+P5-03 contract (hashes, pending, mutation.result), available on integration/Track B
+but absent from this branch; it was not replaced with a conflicting synchronous route. Merge that
 track before claiming all of Do 2. No fixture byte changes, all.sh run between
 track beads, or owner installation. Follow-up: reconcile/replay the P5-03 hook
-when main is merged.
+when the orchestrator merges that work.
+
+
+## Track dependency boundary
+
+Current branch is clean at the P1-16b checkpoint. Per the track skip rule:
+P5-04 and P5-07 await P2-03/P3-09; P6-09 awaits P3-15; P6-13 awaits P2-03.
+These dependencies have no implementing bead commits in this branch's ancestry.
+P2-03/P3-09 and canonical P5-03 are available on other track/integration refs;
+main itself remains at 3a4eba8. No agent merge/rebase/branch switch was performed.
+On integration, new operation-table rows also need P1-18's args/result catalogue
+metadata. Keep the canonical server layout and the dormant delete-files path.
+M1a installation has not been performed; owner paths/binary remain untouched.
