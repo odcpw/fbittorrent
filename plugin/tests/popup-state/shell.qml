@@ -51,6 +51,8 @@ ShellRoot {
     s.backendState="error";s.lastError="Engine restore failed";r=State.describe(s);check("states","engine failure preserves message",r,r.banner==="Engine restore failed" && r.urgent)
     s.backendState="running";s.store.summary={daemon:{upgrade_pending:true}};r=State.describe(s);check("states","upgrade pending",r,r.banner.indexOf("restarts when idle")>=0)
     s.store.summary={daemon:{idle_exit_in_s:240}};r=State.describe(s);check("states","optional idle countdown",r,r.idle==="Idle · stops in 4 min")
+    s.online=false;r=State.describe(s);check("states","offline omits the cached idle countdown",r,r.idle==="" && r.message.indexOf("stopped.")>=0)
+    s.online=true
     s.store.summary={};r=State.describe(s);check("states","idle countdown omitted when absent; empty message stays outside list",r,r.idle==="" && r.message.indexOf("Nothing here yet")===0)
     s.backendState="parked";s.store.summary={disk:{low:true,needed_bytes:104857600,free_bytes:67108864},network:{interface:"fixture0"}}
     r=State.describe(s);check("disk","disk warning takes priority and formats actual binary units",r,r.urgent && r.banner==="Not enough space for the running downloads: 100.0 MiB needed, 64.0 MiB free")

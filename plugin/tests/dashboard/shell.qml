@@ -63,8 +63,15 @@ ShellRoot {
   }
   TestCase {id:preferencesInput;name:"PreferencesPointer";when:false}
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
+  function texts(item){var out=[];if(typeof item.text==="string" && item.visible)out.push(item.text);for(var i=0;i<item.children.length;i++)out=out.concat(texts(item.children[i]));return out}
+  function tableRows(item){
+    if(item.hasCursor!==undefined && item.torrent!==undefined)return [{hash:item.torrent.hash,texts:texts(item)}]
+    var out=[];for(var i=0;i<item.children.length;i++)out=out.concat(tableRows(item.children[i]));return out
+  }
   IpcHandler {
     target:"fbt-dashboard"
+    function renderedRows():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.tableRows(dashboard.item.torrents) : [])}
+    function detailTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? root.texts(dashboard.item.torrents.pane) : [])}
     function setting(key:string,valueJson:string):string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.settingsSheet)return "refused"
       var sheet=dashboard.item.settingsSheet,item=sheet.row(key),value=JSON.parse(valueJson)

@@ -192,7 +192,10 @@ impl TuiApp {
             let hash=crate::api::Hash::new(details.hash.clone()).unwrap();
             if let Some((data,bits))=self.store.pieces.get(&hash) {
                 details.canvas.borrow_mut().render(data,bits,self.store.pieces_rev,rows[1],th,frame);
-            } else {Paragraph::new("Verified pieces unavailable until checking completes").style(th.dimmed()).render(rows[1],frame);}
+            } else {
+                let message=self.store.torrents.get(hash.as_str()).map(|row|crate::api::Pieces::unavailable_reason(row.state,row.checked)).unwrap_or("Waiting for a verified piece map from the daemon.");
+                Paragraph::new(message).style(th.dimmed()).render(rows[1],frame);
+            }
         } else if details.tab == DetailsTab::Files {
             self.view_file_contents(rows[1], frame);
         } else if let Some(t) = self.selected_torrent() {

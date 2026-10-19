@@ -32,6 +32,10 @@ ShellRoot {
   var count=writes.length,failure=null
   client.request("torrents.pieces",{hash:"a".repeat(40)},{callback:function(result,error){failure=error}})
   check("capability",writes.length===count && failure && failure.code==="unsupported","pieces read requires its negotiated capability",failure)
+  bar.torrent={state:"done",checked:false}
+  check("absent_map",PiecesModel.unavailable(bar.torrent).indexOf("Completed data is parked")===0 && PiecesModel.unavailable(bar.torrent).indexOf("Recheck")>=0,"completed data without a live bitfield offers Recheck without claiming a check is running",PiecesModel.unavailable(bar.torrent))
+  check("absent_map",PiecesModel.unavailable({state:"checking",checked:false}).indexOf("Checking data")===0 && PiecesModel.unavailable({state:"metadata"}).indexOf("Waiting for metadata")===0 && PiecesModel.unavailable({state:"paused",checked:true}).indexOf("checking")<0,"only an actual checking state claims a running check",["checking","metadata","paused"].map(function(s){return PiecesModel.unavailable({state:s})}))
+  console.log("FBTQS-PASS absent_map")
   bar.snapshot=data
   Qt.callLater(function(){
    check("pieces_bar",bar.children.length>=3 && bar.state.count===1000 && bar.state.have===257 && bar.state.playable_end===256 && bar.state.cells<=Math.floor(bar.width/Commons.Style.space(4)),"real component exposes count/have/priority/prefix and a width-bounded delegate count",bar.state)
