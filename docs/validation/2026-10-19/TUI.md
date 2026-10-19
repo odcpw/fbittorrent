@@ -47,3 +47,32 @@ Implementation commit: `c2269c1c49deddb42a5fd67cab9773b3a876e453` (16 files).
 Metadata deviation: its message body contains literal `\n` separators, so the
 co-author text is not a parsed trailer. History is preserved under the owner's
 no-rewrite rule; this receipt commit has the correctly formatted trailer.
+
+## P4-01 — fbt-p4-01-atf
+
+Moved the TUI into state, connection/quit actions, four screens, four modals,
+layout, mouse, footer, help, text, IMDb-card and motion modules. `mod.rs` is
+382 lines; the largest TUI source is the unchanged 605-line interaction-test
+module. The four intentionally empty modules requested for subsequent beads
+are declared. Public TUI paths remain re-exported. State field layout remains
+flat so every function body and initializer stays byte-identical; existing
+modal structs move with their modal. P1-15 can merge its connection/quit changes
+into `src/tui/connection.rs`; the unchanged Model glue remains in `mod.rs`.
+Neighbouring `.github/workflows/ci.yml` now runs the existing size gate on TUI
+as well as engine. No unrelated behavior or frozen contract changed.
+
+Evidence: `target/test-logs/fbt-p4-01-atf/`. Focused before/after command
+`cargo test --locked tui:: -- --nocapture` passes the same 68 named tests,
+including all 33 goldens at 80×24, 120×30 and 160×45 (`before_tui.*`,
+`after_tui.*`, `test-comparison.json`). `final-proof.json` proves all 165 moved
+function bodies and the entire interaction-test contents byte-identical, and
+records identical before/after SHA256s for every golden. The existing theme,
+poster, golden harness and native.py are unchanged. Before/after
+`python3 agent_ergonomics_audit/audit/regression_tests/native.py target/debug/fbittorrent --case file_modal_shows_help_80x24`
+both pass; all three raw tmux panes (120×30, 120×30, 80×24) are identical
+(`before-native/`, `after-native/`, `tmux-comparison.json`). `cargo check --locked`
+passes (`split_check.*`); `scripts/lint-sizes.sh --self-test src/engine src/tui`
+passes all 104 files (`sizes.*`). The bead's ONE full
+`cargo test --locked -- --nocapture` passes 282 tests/2 ignored (`full.*`),
+matching the preceding bead's count. All three acceptance criteria pass.
+No release/all.sh between beads. Continue with P4-02 on this branch.

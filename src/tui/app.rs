@@ -1,0 +1,224 @@
+//! Application state and construction.
+use super::*;
+
+impl From<Event> for Msg {
+    fn from(e: Event) -> Self { Msg::Raw(e) }
+}
+
+impl Screen {
+    pub(super) fn index(self) -> usize { match self { Screen::Torrents => 0, Screen::Search => 1, Screen::Shows => 2, Screen::Rss => 3 } }
+    pub(super) fn from_index(i: usize) -> Self { match i % 4 { 0 => Screen::Torrents, 1 => Screen::Search, 2 => Screen::Shows, _ => Screen::Rss } }
+}
+
+pub struct TuiApp {
+    pub(super) cfg: Config,
+    pub(super) lifecycle: Lifecycle,
+    pub(super) theme: Theme,
+    pub(super) screen: Screen,
+    pub(super) tabs: RefCell<TabsState>,
+    pub(super) show_help: bool,
+    pub(super) help_scroll: u16,
+    pub(super) online: bool,
+    pub(super) backend_error: String,
+    pub(super) torrents: Vec<Torrent>,
+    pub(super) transfer: TransferInfo,
+    pub(super) tor_list: RefCell<ListState>,
+    pub(super) poll_inflight: bool,
+    pub(super) tick: usize,
+    // search
+    pub(super) search_input: TextInput,
+    pub(super) search_focus_input: bool,
+    pub(super) search_results: Vec<SearchResult>,
+    pub(super) search_list: RefCell<ListState>,
+    pub(super) search_sub: Option<(SubId, String)>,
+    pub(super) search_running: bool,
+    pub(super) search_seq: u64,
+    pub(super) search_browse: bool,
+    pub(super) browse_entries: Vec<browse::Entry>,
+    pub(super) browse_list: RefCell<ListState>,
+    pub(super) browse_loading: Option<String>,
+    pub(super) files: Option<FilesModal>,
+    pub(super) providers: Option<ProvidersModal>,
+    pub(super) settings: Option<SettingsModal>,
+    pub(super) plugins: Vec<SearchPlugin>,
+    pub(super) ratings: Option<Arc<imdb::RatingsIndex>>,
+    pub(super) name_ids: HashMap<String, String>,
+    pub(super) ids_inflight: bool,
+    pub(super) status_at: std::time::Instant,
+    pub(super) theme_mtime: Option<std::time::SystemTime>,
+    pub(super) hover_key: Option<String>,
+    pub(super) hover_since: std::time::Instant,
+    pub(super) pointer_motion_on_start: bool,
+    pub(super) termination_signal: Option<i32>,
+    pub(super) marquee_key: Option<String>,
+    pub(super) marquee_since: std::time::Instant,
+    pub(super) last_bounds: Cell<Rect>,
+    pub(super) tab_rects: Cell<[Rect; 4]>,
+    pub(super) last_click: Option<(MouseList, String, std::time::Instant)>,
+    pub(super) kitty: Option<RefCell<KittyPlacer>>,
+    /// Set by view() when a poster was drawn this frame; used to clear stale placements.
+    pub(super) poster_drawn: std::cell::Cell<bool>,
+    // rss
+    pub(super) feeds: Vec<RssFeed>,
+    pub(super) feed_list: RefCell<ListState>,
+    pub(super) item_list: RefCell<ListState>,
+    pub(super) rss_focus_items: bool,
+    pub(super) rss_loaded: bool,
+    pub(super) rss_initial_refresh_pending: bool,
+    pub(super) rss_revision: u64,
+    pub(super) rss_busy: bool,
+    pub(super) rss_loading: bool,
+    pub(super) rss_retry_until: Option<std::time::Instant>,
+    pub(super) show_grabbing: HashSet<String>,
+    // shows
+    pub(super) shows: Shows,
+    pub(super) show_list: RefCell<ListState>,
+    pub(super) ep_list: RefCell<ListState>,
+    pub(super) shows_focus_eps: bool,
+    pub(super) shows_refreshing: HashSet<String>,
+    pub(super) inbox_rows: Vec<ShowReleaseTarget>,
+    /// Explicit undo restores the exact release last marked read in the inbox.
+    pub(super) inbox_last_read: Option<ShowReleaseTarget>,
+    pub(super) shows_rects: Cell<[Rect; 2]>,
+    // imdb
+    pub(super) imdb: HashMap<String, ImdbState>,
+    pub(super) prompt: Option<Prompt>,
+    pub(super) status: String,
+    pub(super) status_is_error: bool,
+}
+
+/// A row identity survives source reordering and the same episode key in another show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: String }
+
+pub enum Msg {
+    Raw(Event),
+    Poll,
+    Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
+    ActionDone(Result<String, String>),
+    Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
+    SearchBatch { id: SubId, results: Vec<SearchResult>, done: bool, error: Option<String> },
+    Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
+    RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
+    RssReload,
+    ShowGrab { imdb: String, episode: Episode, result: Result<(), String> },
+    Browse(String, Result<Vec<SearchResult>, String>),
+    /// Fast timer: look the highlighted title up once the cursor has rested on it.
+    Hover,
+    Files(String, Result<Vec<TorrentFile>, String>),
+    Plugins(Result<Vec<SearchPlugin>, String>),
+    Ratings(Result<Arc<imdb::RatingsIndex>, String>),
+    /// Resolved (release name, IMDb id) pairs for the ratings column.
+    Ids(Vec<(String, String)>),
+    /// Episode list for a followed show (by IMDb id).
+    Episodes(String, Result<shows::EpisodeCheck, String>),
+    /// A show the user asked to follow, resolved on IMDb.
+    Followed(Result<Title, String>),
+}
+
+pub enum ImdbState {
+    Loading,
+    Missing,
+    Ready(Box<Title>, Option<Poster>),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Screen { Torrents, Search, Shows, Rss }
+
+impl TuiApp {
+    pub(super) fn new(cfg: Config, screen: Screen, shows: Shows) -> Self {
+        Self::with_lifecycle(cfg, screen, shows, Lifecycle::default())
+    }
+
+    pub(super) fn with_lifecycle(cfg: Config, screen: Screen, shows: Shows, lifecycle: Lifecycle) -> Self {
+        let theme = Theme::load();
+        let mut search_input = TextInput::new()
+            .with_placeholder("search torrents, Enter to run")
+            .with_style(theme.text())
+            .with_cursor_style(Style::new().bg(theme.accent).fg(theme.selection));
+        search_input.set_focused(screen == Screen::Search);
+        let mut app = TuiApp {
+            cfg,
+            lifecycle,
+            theme,
+            screen,
+            tabs: RefCell::new(TabsState { active: screen.index(), offset: 0 }),
+            show_help: false,
+            help_scroll: 0,
+            online: true,
+            backend_error: String::new(),
+            torrents: vec![],
+            transfer: TransferInfo::default(),
+            tor_list: RefCell::new(ListState::default()),
+            poll_inflight: false,
+            tick: 0,
+            search_input,
+            search_focus_input: screen == Screen::Search,
+            search_results: vec![],
+            search_list: RefCell::new(ListState::default()),
+            search_sub: None,
+            search_running: false,
+            search_seq: 0,
+            search_browse: false,
+            browse_entries: browse::catalogue(),
+            browse_list: RefCell::new(ListState::default()),
+            browse_loading: None,
+            files: None,
+            providers: None,
+            settings: None,
+            plugins: vec![],
+            ratings: None,
+            name_ids: HashMap::new(),
+            ids_inflight: false,
+            status_at: std::time::Instant::now(),
+            theme_mtime: std::fs::metadata(theme::colors_path()).and_then(|m| m.modified()).ok(),
+            hover_key: None,
+            hover_since: std::time::Instant::now(),
+            pointer_motion_on_start: false,
+            termination_signal: None,
+            marquee_key: None,
+            marquee_since: std::time::Instant::now(),
+            last_bounds: Cell::new(Rect::new(0, 0, 0, 0)),
+            tab_rects: Cell::new([Rect::new(0, 0, 0, 0); 4]),
+            last_click: None,
+            kitty: if poster::kitty_supported() { Some(RefCell::new(KittyPlacer::default())) } else { None },
+            poster_drawn: std::cell::Cell::new(false),
+            feeds: vec![],
+            feed_list: RefCell::new(ListState::default()),
+            item_list: RefCell::new(ListState::default()),
+            rss_focus_items: false,
+            rss_loaded: false,
+            rss_initial_refresh_pending: true,
+            rss_revision: 0,
+            rss_busy: false,
+            rss_loading: false,
+            rss_retry_until: None,
+            show_grabbing: HashSet::new(),
+            shows,
+            show_list: RefCell::new(ListState::default()),
+            ep_list: RefCell::new(ListState::default()),
+            shows_focus_eps: true,
+            shows_refreshing: HashSet::new(),
+            inbox_rows: vec![],
+            inbox_last_read: None,
+            shows_rects: Cell::new([Rect::new(0, 0, 0, 0); 2]),
+            imdb: HashMap::new(),
+            prompt: None,
+            status: String::new(),
+            status_is_error: false,
+        };
+        app.show_list.borrow_mut().select(Some(0));
+        app.rebuild_inbox();
+        app
+    }
+
+    pub(super) fn set_status(&mut self, s: impl Into<String>, err: bool) {
+        self.status = s.into();
+        self.status_is_error = err;
+        self.status_at = std::time::Instant::now();
+    }
+}
+
+
+pub(super) const SPINNER: [&str; 4] = ["⠋", "⠙", "⠸", "⠴"];

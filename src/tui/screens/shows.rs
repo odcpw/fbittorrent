@@ -1,0 +1,369 @@
+//! Existing screens shows behavior.
+use super::*;
+
+impl TuiApp {
+    pub(super) fn shows_inbox(&self) -> bool { self.show_list.borrow().selected() == Some(0) }
+
+    pub(super) fn show_at(&self, index: usize) -> Option<&Show> {
+        index.checked_sub(1).and_then(|i| self.shows.shows.get(i))
+    }
+
+    pub(super) fn selected_show(&self) -> Option<&Show> {
+        self.show_list.borrow().selected().and_then(|i| self.show_at(i))
+    }
+
+    pub(super) fn episode_at(&self, index: usize) -> Option<(&Show, &Episode)> {
+        if self.shows_inbox() {
+            let target = self.inbox_rows.get(index)?;
+            let show = self.shows.get(&target.imdb)?;
+            Some((show, show.episode(&target.key)?))
+        } else {
+            let show = self.selected_show()?;
+            show.episodes.get(index).map(|episode| (show, episode))
+        }
+    }
+
+    pub(super) fn selected_episode(&self) -> Option<(&Show, &Episode)> {
+        self.ep_list.borrow().selected().and_then(|i| self.episode_at(i))
+    }
+
+    pub(super) fn selected_release_target(&self) -> Option<ShowReleaseTarget> {
+        if self.shows_inbox() {
+            self.ep_list.borrow().selected().and_then(|i| self.inbox_rows.get(i)).cloned()
+        } else {
+            self.selected_episode().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() })
+        }
+    }
+
+    pub(super) fn episode_count(&self) -> usize {
+        if self.shows_inbox() { self.inbox_rows.len() } else { self.selected_show().map_or(0, |s| s.episodes.len()) }
+    }
+
+    pub(super) fn rebuild_inbox(&mut self) {
+        let selected = self.shows_inbox().then(|| self.selected_release_target()).flatten();
+        let old_index = self.ep_list.borrow().selected().unwrap_or(0);
+        let mut releases: Vec<_> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
+            .filter(move |episode| show.is_new(&episode.key))
+            .map(move |episode| (show, episode))).collect();
+        releases.sort_by(|(a_show, a), (b_show, b)| b.released.cmp(&a.released)
+            .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
+        self.inbox_rows = releases.into_iter().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() }).collect();
+        self.ep_list.borrow_mut().hovered = None;
+        self.last_click = None;
+        if self.shows_inbox() {
+            let index = match selected {
+                Some(target) => self.inbox_rows.iter().position(|row| *row == target)
+                    .or_else(|| self.inbox_rows.len().checked_sub(1).map(|last| old_index.min(last))),
+                None => (!self.inbox_rows.is_empty()).then_some(0),
+            };
+            self.ep_list.borrow_mut().select(index);
+        }
+    }
+
+    pub(super) fn select_show_parent(&mut self, index: usize) {
+        self.shows_focus_eps = false;
+        self.show_list.borrow_mut().select(Some(index));
+        self.ep_list.borrow_mut().select(None);
+        self.rebuild_inbox();
+    }
+
+    pub(super) fn release_show(&self) -> Option<&Show> {
+        if self.shows_inbox() { self.selected_episode().map(|(show, _)| show) } else { self.selected_show() }
+    }
+
+    pub(super) fn save_shows(&mut self) -> bool {
+        if let Err(e) = self.shows.save() { self.set_status(format!("saving shows: {e:#}"), true); false } else { true }
+    }
+
+    /// Fetch the episode list of one followed show in the background.
+    pub(super) fn refresh_show(&mut self, imdb: String) -> Cmd<Msg> {
+        let Some(show) = self.shows.get(&imdb).cloned() else { return Cmd::none() };
+        if !self.shows_refreshing.insert(imdb.clone()) { return Cmd::none(); }
+        let quality = self.cfg.show_quality.clone();
+        Cmd::task(move || {
+            let r = shows::fetch_updates(&show, &quality).map_err(|e| format!("{e:#}"));
+            Msg::Episodes(imdb, r)
+        })
+    }
+
+    /// On launch and on `r`: refresh what is stale (or everything when forced).
+    pub(super) fn refresh_shows(&mut self, force: bool) -> Cmd<Msg> {
+        let now = shows::now();
+        let ids: Vec<String> = self.shows.shows.iter().filter(|s| force || s.is_stale(now)).map(|s| s.imdb.clone()).collect();
+        if ids.is_empty() { return Cmd::none(); }
+        if force { self.set_status(format!("checking {} show(s)…", ids.len()), false); }
+        Cmd::batch(ids.into_iter().map(|id| self.refresh_show(id)).collect())
+    }
+
+    /// Follow the show behind a release name (or a known IMDb id); resolved off-thread.
+    pub(super) fn follow(&mut self, query: String, id: Option<String>) -> Cmd<Msg> {
+        self.set_status(format!("looking up {}…", short(&query, 40)), false);
+        Cmd::task(move || {
+            let r = match id.filter(|i| i.starts_with("tt")) {
+                Some(i) => imdb::lookup_id(&i).map_err(|e| e.to_string()).and_then(|t| t.ok_or_else(|| format!("IMDb knows no title {i}"))),
+                None => shows::resolve_title(&query).map_err(|e| format!("{e:#}")),
+            };
+            Msg::Followed(r)
+        })
+    }
+
+    pub(super) fn on_shows_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+        let ns = self.shows.shows.len() + 1;
+        let ne = self.episode_count();
+        let navigation = match k.code {
+            KeyCode::Left | KeyCode::Char('h') => { self.shows_focus_eps = false; true }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.shows_focus_eps = true;
+                if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Up | KeyCode::Char('k') | KeyCode::Home | KeyCode::Char('g') | KeyCode::End | KeyCode::Char('G') => {
+                let state = if self.shows_focus_eps { &self.ep_list } else { &self.show_list };
+                let n = if self.shows_focus_eps { ne } else { ns };
+                let old = state.borrow().selected();
+                match k.code {
+                    KeyCode::Down | KeyCode::Char('j') => if n > 0 { state.borrow_mut().select_next(n); },
+                    KeyCode::Up | KeyCode::Char('k') => state.borrow_mut().select_previous(),
+                    KeyCode::Home | KeyCode::Char('g') => state.borrow_mut().select((n > 0).then_some(0)),
+                    _ => state.borrow_mut().select(n.checked_sub(1)),
+                }
+                if !self.shows_focus_eps {
+                    let selected = self.show_list.borrow().selected();
+                    if selected != old { if let Some(index) = selected { self.select_show_parent(index); } }
+                }
+                true
+            }
+            _ => false,
+        };
+        if navigation { return Cmd::none(); }
+        match k.code {
+            KeyCode::Char('n') | KeyCode::Char('+') => { self.open_prompt(PromptKind::FollowShow, "Follow show: title or IMDb id (tt…)", false); }
+            KeyCode::Char('x') => if let Some(s) = self.selected_show() {
+                let (imdb, title) = (s.imdb.clone(), s.label());
+                self.open_prompt(PromptKind::ConfirmUnfollow { imdb, title: title.clone() }, &format!("Unfollow '{title}'? y/N"), true);
+            },
+            KeyCode::Char('r') => return self.refresh_shows(true),
+            KeyCode::Char('R') => if let Some(s) = self.release_show() { let id = s.imdb.clone(); return self.refresh_show(id); },
+            KeyCode::Char('m') | KeyCode::Char(' ') => {
+                if !self.shows_focus_eps {
+                    self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
+                } else if let Some(label) = self.mark_selected_release() {
+                    if self.save_shows() { self.set_status(label, false); }
+                }
+            }
+            KeyCode::Char('u') if self.shows_inbox() => {
+                if let Some(label) = self.undo_inbox_read() {
+                    if self.save_shows() { self.set_status(label, false); }
+                }
+            }
+            KeyCode::Char('M') => {
+                if let Some(s) = self.selected_show() {
+                    let (imdb, title) = (s.imdb.clone(), s.title.clone());
+                    let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
+                    self.rebuild_inbox();
+                    self.save_shows();
+                    self.set_status(format!("{title}: {n} release(s) marked read"), false);
+                } else {
+                    self.set_status("Shift+M applies to one show. Select a followed show on the left first.", false);
+                }
+            }
+            KeyCode::Enter => {
+                if !self.shows_focus_eps {
+                    self.shows_focus_eps = true;
+                    if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
+                    return Cmd::none();
+                }
+                let picked = self.selected_episode().map(|(s, e)| (s.imdb.clone(), e.clone()));
+                if let Some((imdb, e)) = picked {
+                    let token = format!("{imdb}:{}", e.key);
+                    if !self.show_grabbing.insert(token) { return Cmd::none(); }
+                    let cfg = self.cfg.clone();
+                    let opts = self.add_opts();
+                    return Cmd::task(move || {
+                        let c = Client::from_config(&cfg);
+                        let result = c.login().and_then(|_| c.add_url(&e.magnet, &opts)).map_err(|err| err.to_string());
+                        Msg::ShowGrab { imdb, episode: e, result }
+                    });
+                }
+            }
+            KeyCode::Char('i') => if let Some(s) = self.release_show() {
+                let (name, id) = (s.label(), Some(s.imdb.clone()));
+                return self.open_imdb(name, id);
+            },
+            KeyCode::Char('w') => if let Some(s) = self.release_show() {
+                let (name, id) = (s.label(), Some(s.imdb.clone()));
+                return self.open_wiki(name, id);
+            },
+            KeyCode::Char('O') => if let Some(s) = self.release_show() {
+                let _ = std::process::Command::new("xdg-open").arg(format!("https://eztvx.to/search/{}", crate::qbt::urlencode(&s.title))).spawn();
+            },
+            _ => {}
+        }
+        Cmd::none()
+    }
+
+    pub(super) fn mark_selected_release(&mut self) -> Option<String> {
+        let target = self.selected_release_target()?;
+        let inbox = self.shows_inbox();
+        let show = self.shows.get_mut(&target.imdb)?;
+        let read = if inbox { show.seen.insert(target.key.clone()); true } else { show.toggle_seen(&target.key) };
+        let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (U)ndo" } else { "" });
+        if inbox { self.inbox_last_read = Some(target); }
+        self.rebuild_inbox();
+        Some(label)
+    }
+
+    pub(super) fn undo_inbox_read(&mut self) -> Option<String> {
+        let target = self.inbox_last_read.take()?;
+        let show = self.shows.get_mut(&target.imdb)?;
+        show.seen.remove(&target.key);
+        let label = format!("{} {} restored to unread", show.title, target.key);
+        self.rebuild_inbox();
+        self.ep_list.borrow_mut().select(self.inbox_rows.iter().position(|row| *row == target));
+        Some(label)
+    }
+
+    pub(super) fn view_shows(&self, area: Rect, frame: &mut Frame) {
+        let th = &self.theme;
+        let cols = Flex::horizontal().constraints([Constraint::Percentage(if area.width < 100 { 28.0 } else { 32.0 }), Constraint::Fill]).split(area);
+        let card_h = if cols[0].height >= 24 { 11 } else { 0 };
+        let left = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(card_h)]).split(cols[0]);
+        let unread = self.inbox_rows.len();
+        let title = format!(" Shows ({}) ", self.shows.shows.len());
+        let block = Block::bordered().border_type(BorderType::Rounded)
+            .border_style(if self.shows_focus_eps { th.border() } else { th.border_focused() }).title(&title);
+        let inner = block.inner(left[0]);
+        block.render(left[0], frame);
+        let w = inner.width.saturating_sub(2) as usize;
+        let selected = readable_index(&self.show_list);
+        let elapsed = self.marquee_elapsed();
+        let mut parents = vec![li(Line::from_spans([
+            Span::styled(cell("All unread", w.saturating_sub(dw(&unread.to_string()) + 1)), th.text().bold()),
+            Span::styled(format!(" {unread}"), th.accented()),
+        ]))];
+        parents.extend(self.shows.shows.iter().enumerate().map(|(i, show)| {
+            let n = show.new_count();
+            let busy = self.shows_refreshing.contains(&show.imdb);
+            let warning = show.error.is_some() || (show.last_checked > 0 && !show.catalogue_complete);
+            let tail = if busy { format!(" {}", SPINNER[self.tick % 4]) } else if warning { " !".into() } else if n > 0 { format!(" {n}") } else { String::new() };
+            let name = readable_cell(&show.label(), w.saturating_sub(dw(&tail)), (selected == Some(i + 1) && (!self.shows_focus_eps || self.show_list.borrow().hovered.is_some())).then_some(elapsed));
+            li(Line::from_spans([
+                Span::styled(name, if n > 0 { th.text().bold() } else { th.text() }),
+                Span::styled(tail, if warning && !busy { th.err() } else { th.accented() }),
+            ]))
+        }));
+        StatefulWidget::render(&List::new(parents).highlight_style(th.selected()).highlight_symbol("▌"), inner, frame, &mut self.show_list.borrow_mut());
+        if card_h > 0 {
+            let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border()).title(" IMDb ");
+            let inner = block.inner(left[1]);
+            block.render(left[1], frame);
+            if let Some(show) = self.release_show() { self.view_imdb_card(&show.label(), pad(inner), frame); }
+        }
+
+        let inbox = self.shows_inbox();
+        let title = if inbox { format!(" All unread · {unread} releases · newest first ") }
+            else if let Some(show) = self.selected_show() { format!(" {} · {} releases ", show.label(), show.episodes.len()) }
+            else { " Releases ".into() };
+        let block = Block::bordered().border_type(BorderType::Rounded)
+            .border_style(if self.shows_focus_eps { th.border_focused() } else { th.border() }).title(&title);
+        let right = block.inner(cols[1]);
+        block.render(cols[1], frame);
+        let summary = Rect::new(right.x, right.y, right.width, right.height.min(1));
+        let releases_inner = Rect::new(right.x, right.y.saturating_add(summary.height), right.width, right.height.saturating_sub(summary.height));
+        let warning = if inbox {
+            let warnings: Vec<String> = self.shows.shows.iter().filter_map(|show| {
+                if let Some(error) = &show.error { Some(format!("{}: {error}", show.title)) }
+                else if show.last_checked > 0 && !show.catalogue_complete { Some(format!("{}: history incomplete", show.title)) }
+                else { None }
+            }).collect();
+            (!warnings.is_empty()).then(|| format!("Source warnings · {} · (R) retry", warnings.join("; ")))
+        } else { self.selected_show().and_then(|show| show.error.clone().or_else(|| (show.last_checked > 0 && !show.catalogue_complete).then(|| "History incomplete".into()))).map(|error| format!("Check: {error} · (Shift+R) retry")) };
+        let summary_text = if inbox {
+            let checking = self.shows_refreshing.len();
+            let unchecked = self.shows.shows.iter().filter(|show| show.last_checked == 0).count();
+            if checking > 0 { format!("Checking {checking} show(s)… · cached releases") }
+            else if unchecked > 0 { format!("{unchecked} show(s) unchecked · (R) Check all") }
+            else { format!("Cached releases · (R) Check all · (←) Browse shows") }
+        } else if let Some(show) = self.selected_show() {
+            if self.shows_refreshing.contains(&show.imdb) { "Checking EZTV… · cached releases".into() }
+            else {
+                let checked = if show.last_checked > 0 { format!("checked {}", ago(show.last_checked)) } else { "never checked".into() };
+                format!("{checked} · prefers {}", show.quality.as_deref().unwrap_or(&self.cfg.show_quality))
+            }
+        } else { String::new() };
+        Paragraph::new(summary_text).style(th.dimmed()).wrap(WrapMode::None).render(summary, frame);
+        let rows = episode_rows(releases_inner, warning.is_some());
+        self.shows_rects.set([inner, rows[1]]);
+        if let Some(warning) = &warning { Paragraph::new(warning.clone()).style(th.err()).wrap(WrapMode::Word).render(rows[2], frame); }
+        if self.episode_count() == 0 {
+            let message = if self.shows.shows.is_empty() {
+                "No shows followed yet.\n\n(N) Follow a title or IMDb id\n(F)ollow a Search or RSS item\n(Shift+F) Follow a torrent\n\nChecks find releases. Enter downloads your choice."
+            } else if inbox {
+                if !self.shows_refreshing.is_empty() { "Checking for releases…\n\nNo unread cached releases." }
+                else if self.shows.shows.iter().any(|show| show.last_checked == 0) { "Not checked yet.\n\n(R) Check all shows." }
+                else if warning.is_some() { "No unread cached releases.\n\nSource warnings remain below.\n(←) Browse a show's full release history." }
+                else { "All caught up.\n\n(←) Browse a show's full release history.\n(R) Check for releases." }
+            } else if self.selected_show().is_some_and(|show| show.last_checked == 0) { "Not checked yet.\n(Shift+R) Check this show" }
+            else { "No cached releases for this show.\n(Shift+R) Check · (2) Search · (Shift+O) EZTV" };
+            Paragraph::new(message).style(th.dimmed()).wrap(WrapMode::Word).render(pad(rows[1]), frame);
+            return;
+        }
+        let w = rows[1].width.saturating_sub(2) as usize;
+        // At 80 columns the show name and release key carry the task; metadata is optional.
+        let metadata = if inbox && w < 80 { 0 } else { episode_metadata_width(w) };
+        let name_w = w.saturating_sub(11 + metadata);
+        let header = format!("   {:<7} {}{}", "RELEASE", cell(if inbox { "SHOW" } else { "TITLE" }, name_w), if metadata > 0 { episode_metadata(None, w) } else { String::new() });
+        Paragraph::new(header).style(th.dimmed()).wrap(WrapMode::None).render(Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), rows[0].height), frame);
+        let selected = readable_index(&self.ep_list);
+        let have: HashMap<(String, String), &Torrent> = self.torrents.iter().filter_map(|torrent| {
+            let parsed = crate::release::parse(&torrent.name);
+            Some(((parsed.title.to_ascii_lowercase(), parsed.episode?), torrent))
+        }).collect();
+        let releases: Vec<(&Show, &Episode)> = if inbox {
+            let catalogue: HashMap<(&str, &str), (&Show, &Episode)> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
+                .map(move |episode| ((show.imdb.as_str(), episode.key.as_str()), (show, episode)))).collect();
+            self.inbox_rows.iter().filter_map(|target| catalogue.get(&(target.imdb.as_str(), target.key.as_str())).copied()).collect()
+        } else { self.selected_show().map(|show| show.episodes.iter().map(|episode| (show, episode)).collect()).unwrap_or_default() };
+        let items: Vec<ListItem> = releases.into_iter().enumerate().map(|(index, (show, episode))| {
+            let unread = show.is_new(&episode.key);
+            let torrent = have.get(&(show.title.to_ascii_lowercase(), episode.key.clone()));
+            let (mark, style) = match torrent {
+                Some(t) if t.progress_known && t.progress >= 1.0 => ("✓", th.ok()),
+                Some(t) if matches!(t.state.as_str(), "queuedDL" | "waitingVPN") || !t.progress_known => ("…", th.dimmed()),
+                Some(t) if matches!(t.state.as_str(), "stoppedDL" | "pausedDL") => ("‖", th.dimmed()),
+                Some(_) => ("↓", th.accented()),
+                None if show.grabbed.contains_key(&episode.key) => ("+", th.dimmed()),
+                None => (" ", th.dimmed()),
+            };
+            let name = if inbox {
+                if w >= 80 { format!("{} · {}", show.label(), episode.title) } else { show.label() }
+            } else { episode.title.clone() };
+            let text_style = if unread { th.text().bold() } else { th.dimmed() };
+            li(Line::from_spans([
+                Span::styled(if unread { "●" } else { " " }, th.accented()),
+                Span::styled(format!("{mark} "), style),
+                Span::styled(format!("{:<7} ", episode.key), text_style),
+                Span::styled(readable_cell(&name, name_w, (selected == Some(index) && (self.shows_focus_eps || self.ep_list.borrow().hovered.is_some())).then_some(elapsed)), text_style),
+                Span::styled(if metadata > 0 { episode_metadata(Some(episode), w) } else { String::new() }, th.dimmed()),
+            ]))
+        }).collect();
+        StatefulWidget::render(&List::new(items).highlight_style(th.selected()).highlight_symbol("▌"), rows[1], frame, &mut self.ep_list.borrow_mut());
+    }
+}
+
+
+pub(super) fn episode_metadata_width(width: usize) -> usize {
+    if width >= 80 { 1 + 5 + 2 + 9 + 2 + 5 + 2 + 10 }
+    else if width >= 60 { 1 + 5 + 2 + 9 + 2 + 5 }
+    else { 1 + 5 + 2 + 5 }
+}
+
+pub(super) fn episode_metadata(episode: Option<&Episode>, width: usize) -> String {
+    let (quality, size, seeds, date) = match episode {
+        Some(e) => (e.quality.clone(), human_bytes(e.size), e.seeds.to_string(), if e.released > 0 { ymd(e.released) } else { String::new() }),
+        None => ("QUAL".into(), "SIZE".into(), "SEEDS".into(), "DATE".into()),
+    };
+    if width >= 80 { format!(" {quality:>5}  {size:>9}  {seeds:>5}  {date:>10}") }
+    else if width >= 60 { format!(" {quality:>5}  {size:>9}  {seeds:>5}") }
+    else { format!(" {quality:>5}  {seeds:>5}") }
+}
