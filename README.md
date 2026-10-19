@@ -30,9 +30,11 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
   a row to preview its full name; click selects it, double-click activates it,
   and the wheel moves the list under the pointer. Hover leaves the keyboard
-  target unchanged. Long hovered or selected names scroll after a short pause.
-  The bottom rows show contextual commands such as `(O)pen`, with `Shift`
-  spelled out where needed, and separate action feedback.
+  target unchanged. Selected names stay still. Hovered, unselected names scroll once after a
+  short pause, return to the start and stop. `reduce_motion = true` in the
+  config, or Reduce motion in Settings, disables hover scrolling.
+  The bottom rows show contextual commands such as `(o) Open`; uppercase keys
+  use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.
 - **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
   a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
@@ -353,3 +355,137 @@ test also needs the Omarchy shell running with the plugin enabled.
 - In legacy mode, search jobs in qBittorrent are bound to the WebUI session
   cookie; the client keeps one session per process for that reason.
 - Personal use is legal in Switzerland. Mind your local law elsewhere.
+
+## Keys
+
+<!-- keys:begin -->
+| Scope | Action | tui | dashboard | popup | Note |
+| --- | --- | --- | --- | --- | --- |
+| `global` | Torrents | `1` | `1` | — |  |
+| `global` | Search | `2` | `2` | — |  |
+| `global` | Shows | `3` | `3` | — |  |
+| `global` | RSS | `4` | `4` | — |  |
+| `global` | Next screen | `Tab` | `Tab` | — |  |
+| `global` | Previous screen | `Shift+Tab` | `Shift+Tab` | — |  |
+| `global` | Help | `?` | `?` | — |  |
+| `global` | Settings | `F6`, `,` | `,` | — |  |
+| `global` | Close this UI | `q`, `Ctrl+C` | `q`, `Ctrl+C` | `q`, `Esc` |  |
+| `global` | Stop fbittorrent | `Q` | `Q`, `Ctrl+Q` | `Q` |  |
+| `global` | Clipboard | `c` | — | — |  |
+| `global` | Refresh | `r` | `r` | — |  |
+| `pane:search.browse` | Load list | `Enter` | `Enter` | — |  |
+| `global` | Open dashboard | — | — | `w` | Popup: w opens the dashboard (exception 2). |
+| `global` | Open TUI | — | — | `t` |  |
+| `global` | Add from clipboard | — | `Ctrl+V` | — |  |
+| `global` | Add | `a` | `a` | `a` |  |
+| `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
+| `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
+| `screen:torrents` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:torrents` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:torrents` | Files | `Enter` | `Enter` | — |  |
+| `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
+| `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
+| `screen:torrents` | Seed on/off | `u` | `u` | `u` |  |
+| `screen:torrents` | Remove, keep files | `d`, `x`, `Delete` | `d`, `x`, `Delete` | `d`, `x`, `Delete` |  |
+| `screen:torrents` | Delete with files | `D` | `D` | — |  |
+| `screen:torrents` | IMDb | `i` | `i` | — |  |
+| `screen:torrents` | Wikipedia | `w` | `w` | — |  |
+| `screen:torrents` | Follow show | `f`, `F` | `f` | — | Native TUI; legacy uses F while f is first/last priority. |
+| `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
+| `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
+| `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:search` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:search` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:search` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:search` | Providers | `P` | `P` | — |  |
+| `screen:search` | Browse lists | `b` | `b` | — |  |
+| `screen:search` | Edit query | `/`, `e` | `/`, `e` | — |  |
+| `screen:search` | Stop search | `Esc` | `Esc` | — |  |
+| `pane:search.results` | Download | `Enter` | `Enter` | — |  |
+| `pane:search.results` | IMDb | `i` | `i` | — |  |
+| `pane:search.results` | Wikipedia | `w` | `w` | — |  |
+| `pane:search.results` | Source page | `O` | `O` | — |  |
+| `pane:search.results` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `pane:search.query` | Search | `Enter` | `Enter` | — |  |
+| `pane:search.query` | Leave query | `Esc`, `↓` | `Esc`, `↓` | — |  |
+| `screen:rss` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:rss` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:rss` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:rss` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:rss` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:rss` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:rss` | Parent pane | `h`, `←` | `h`, `←` | — |  |
+| `screen:rss` | Child pane | `l`, `→` | `l`, `→` | — |  |
+| `screen:rss` | Open/download | `Enter` | `Enter` | — |  |
+| `screen:rss` | New feed | `n` | `n` | — |  |
+| `screen:rss` | Remove feed | `x` | `x` | — |  |
+| `screen:rss` | Refresh | `r` | `r` | — |  |
+| `screen:rss` | Reload saved feeds | `R` | `R` | — |  |
+| `screen:rss` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
+| `screen:rss` | All read | `M` | `M` | — |  |
+| `screen:rss` | IMDb | `i` | `i` | — |  |
+| `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
+| `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
+| `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |
+| `screen:shows` | Last | `G`, `End` | `G`, `End` | — |  |
+| `screen:shows` | Page down | `PgDn` | `PgDn` | — |  |
+| `screen:shows` | Page up | `PgUp` | `PgUp` | — |  |
+| `screen:shows` | Parent pane | `h`, `←` | `h`, `←` | — |  |
+| `screen:shows` | Child pane | `l`, `→` | `l`, `→` | — |  |
+| `screen:shows` | Open/download | `Enter` | `Enter` | — |  |
+| `screen:shows` | Follow show | `n` | `n` | — |  |
+| `screen:shows` | Unfollow | `x` | `x` | — |  |
+| `screen:shows` | Refresh | `r` | `r` | — |  |
+| `screen:shows` | Check selected show | `R` | `R` | — |  |
+| `screen:shows` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
+| `screen:shows` | All read | `M` | `M` | — |  |
+| `screen:shows` | IMDb | `i` | `i` | — |  |
+| `screen:shows` | Wikipedia | `w` | `w` | — |  |
+| `screen:shows` | EZTV | `O` | `O` | — |  |
+| `screen:shows` | Undo read | `u` | `u` | — |  |
+| `modal:files` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:files` | Next | `j`, `↓` | — | — |  |
+| `modal:files` | Previous | `k`, `↑` | — | — |  |
+| `modal:files` | Include/skip | `Space` | — | — |  |
+| `modal:files` | All | `a` | — | — |  |
+| `modal:files` | None | `n` | — | — |  |
+| `modal:files` | Reload | `r` | — | — |  |
+| `modal:files` | First | `g`, `Home` | — | — |  |
+| `modal:files` | Last | `G`, `End` | — | — |  |
+| `modal:files` | Include | `1` | — | — |  |
+| `modal:files` | High (legacy) | `2` | — | — |  |
+| `modal:files` | Max (legacy) | `3` | — | — |  |
+| `modal:providers` | Close | `Esc`, `q`, `Enter` | — | — |  |
+| `modal:providers` | Next | `j`, `↓` | — | — |  |
+| `modal:providers` | Previous | `k`, `↑` | — | — |  |
+| `modal:providers` | Toggle | `Space` | — | — |  |
+| `modal:providers` | All | `a` | — | — |  |
+| `modal:providers` | None | `n` | — | — |  |
+| `modal:providers` | Reload | `r` | — | — |  |
+| `modal:providers` | Open site | `o` | — | — |  |
+| `modal:settings` | Cancel | `Esc` | — | — |  |
+| `modal:settings` | Save | `Enter` | — | — |  |
+| `modal:settings` | Next setting | `j`, `↓`, `Tab` | — | — |  |
+| `modal:settings` | Previous setting | `k`, `↑`, `Shift+Tab` | — | — |  |
+| `modal:settings` | Decrease | `h`, `←` | — | — |  |
+| `modal:settings` | Increase | `l`, `→`, `Space` | — | — |  |
+| `modal:help` | Close | `Esc`, `q`, `?` | — | — |  |
+| `modal:help` | Scroll down | `j`, `↓` | — | — |  |
+| `modal:help` | Scroll up | `k`, `↑` | — | — |  |
+| `modal:help` | Page down | `PgDn` | — | — |  |
+| `modal:help` | Page up | `PgUp` | — | — |  |
+| `modal:help` | First | `g`, `Home` | — | — |  |
+| `modal:help` | Last | `G`, `End` | — | — |  |
+| `prompt` | Remove | `y` | `y` | `y` |  |
+| `prompt` | Cancel | `Esc` | `Esc` | `Esc` |  |
+| `prompt` | Submit | `Enter` | `Enter` | — |  |
+| `prompt` | Sequential (legacy) | `F2` | — | — |  |
+| `prompt` | First/last (legacy) | `F3` | — | — |  |
+| `prompt` | Seed on/off | `F4` | — | — |  |
+<!-- keys:end -->

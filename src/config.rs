@@ -43,6 +43,8 @@ pub struct Config {
     pub backend_unit: String,
     /// Preferred release quality for followed shows ("2160p", "1080p", "720p", "480p").
     pub show_quality: String,
+    /// Disable hover-name motion; selected rows are always static.
+    pub reduce_motion: bool,
 }
 
 impl Default for Config {
@@ -67,6 +69,7 @@ impl Default for Config {
             idle_exit_secs: 300,
             backend_unit: "qbittorrent-nox.service".into(),
             show_quality: "1080p".into(),
+            reduce_motion: false,
         }
     }
 }
@@ -197,6 +200,19 @@ mod tests {
         assert_eq!(cfg.max_active_downloads, 3);
         assert_eq!(cfg.peer_encryption, "prefer");
         assert_eq!(cfg.network_interface, None);
+    }
+    #[test]
+    fn reduce_motion_defaults_false_and_roundtrips_in_private_config() {
+        let mut cfg:Config=toml::from_str("engine='native'").unwrap();
+        assert!(!cfg.reduce_motion);
+        cfg.reduce_motion=true;
+        let dir=std::env::temp_dir().join(format!("fbt-p406-motion-{}",std::process::id()));
+        let path=dir.join("config.toml");
+        cfg.save_to(&path).unwrap();
+        let saved:Config=toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.reduce_motion);
+        println!("reduce_motion=true persisted to {}",path.display());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn invalid_settings_leave_saved_file_intact() {

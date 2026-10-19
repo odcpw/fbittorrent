@@ -20,5 +20,5 @@
 ╭ Add magnet link or URL  · streaming automatic · F4 seed:off ─────────────────╮
 │ magnet:?xt=urn:btih:0000000000000000000000000000000000000001                 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Input] (Enter) Add                                                 (Esc) Cancel
-
+[Input] (Esc) Cancel  (Enter) Add  (F4) Seed on/off                     (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

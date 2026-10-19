@@ -8,6 +8,7 @@
 │                    │ ▌ Simultaneous downloads   3                                               │                    │
 │                    │   Peer encryption          Prefer encryption                               │                    │
 │                    │   VPN connection           Off · ordinary connection                       │                    │
+│                    │   Reduce motion            Off                                             │                    │
 │                    │ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          │                    │
 │                    │                                                                            │                    │
 │                    │ Extra downloads wait their turn. Encryption protects peer traffic; your IP │                    │
@@ -20,11 +21,10 @@
 │                    │ Changing encryption or VPN reopens the app's engine.                       │                    │
 │                    │                                                                            │                    │
 │                    │                                                                            │                    │
-│                    │                                                                            │                    │
 │                    ╰────────────────────────────────────────────────────────────────────────────╯                    │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Settings] (↑↓) Choose  (←→) Change  (Enter) Save                                                           (Esc) Cancel
-
+[Settings] (Esc) Cancel  (Enter) Save  (j) Next setting  (k) Previous setting  (h) Decrease  (l) Increase       (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

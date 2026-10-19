@@ -172,6 +172,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "config", aliases: &[], summary: "Effective configuration", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "settings", aliases: &[], summary: "Set simultaneous downloads, peer encryption and required VPN connection; --interfaces lists connections", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "capabilities", aliases: &[], summary: "This document", json: true, mutating: false, needs_backend: false },
+        CommandDoc { name: "robot-docs keys", aliases: &[], summary: "Keyboard catalogue; --surface tui|dashboard|popup|all, Markdown or --json", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "robot-docs", aliases: &["docs"], summary: "Agent handbook, plain text", json: false, mutating: false, needs_backend: false },
         CommandDoc { name: "setup", aliases: &[], summary: "Configure the download folder; --magnet registers desktop handlers; service setup only in explicit legacy mode", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "tui", aliases: &[], summary: "Interactive terminal UI (only useful on a TTY)", json: false, mutating: false, needs_backend: true },

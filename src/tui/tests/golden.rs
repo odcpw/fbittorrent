@@ -99,8 +99,8 @@ fn done_row_offers_seed_instead_of_resume() {
     let text = render(&app, 80, 24);
     let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
     println!("asserted footer: {footer}");
-    assert!(footer.contains("(U) Seed"));
-    assert!(!footer.contains("(P) Resume"));
+    assert!(footer.contains("(u) Seed"));
+    assert!(!footer.contains("(p) Resume"));
     assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('u'))), Cmd::Task(..)));
 }
 
@@ -113,7 +113,7 @@ fn resume_unknown_completion_timestamp_keeps_incomplete_controls() {
         let text = render(&app, 80, 24);
         let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
         println!("completion_on={completion_on}, asserted footer: {footer}");
-        assert!(footer.contains("(P) Resume"));
+        assert!(footer.contains("(p) Resume"));
         assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('p'))), Cmd::Task(..)));
     }
 }
@@ -142,4 +142,18 @@ fn one_character_label_change_produces_a_unified_diff() {
     let diff = compare("search-80x24.txt", expected, actual).unwrap_err();
     assert_eq!(diff, "--- search-80x24.txt\n+++ actual\n@@ -1,3 +1,3 @@\n border\n-Search\n+Searci\n border\n");
     assert!(compare("search-80x24.txt", expected, expected).is_ok());
+}
+
+#[test]
+fn footer_overflow_80x24() {
+    let app=fixture::app("torrents");
+    let enabled=app.footer_labels();
+    assert!(enabled.len()>=9,"fixture must enable nine or more actions");
+    let actual=render(&app,80,24);
+    let footer=actual.lines().nth(22).unwrap();
+    println!("nine-action overflow control: {footer}");
+    assert!(footer.contains('…') && footer.ends_with("(?) Help"));
+    let path="src/tui/tests/golden/footer-overflow-80x24.txt";
+    if std::env::var("FBT_UPDATE_GOLDEN").as_deref()==Ok("1") { fs::write(path,&actual).unwrap(); }
+    else { compare(path,&fs::read_to_string(path).unwrap(),&actual).unwrap_or_else(|diff|panic!("{diff}")); }
 }

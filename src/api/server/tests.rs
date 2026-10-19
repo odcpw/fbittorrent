@@ -104,7 +104,6 @@ pub(super) fn connection() -> (Connection, UnixStream) {
             read_done: AtomicBool::new(false),
             client: Mutex::new(ClientState::default()),
             pending: Mutex::new(BTreeMap::new()),
-            background: Mutex::new(BTreeMap::new()),
             sequence: AtomicU64::new(1),
             out: Mutex::new(Outbox::default()),
             ready: Condvar::new(),

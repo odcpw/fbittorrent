@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Files  (O)pen  (U) Seed  (D) Remove  (Shift+D) Delete files  (A)dd  (C)lipboard  (F6) Settings                                       (?) Help
-(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
+[Torrents] (Enter) Files  (o) Open  (u) Seed  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (k) Previous  (g) First  (G) Last …     (?) Help
+Sintel.2010.1080p

@@ -171,6 +171,22 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `subscribe` | `topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the "on change" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7) | `{sub: u64, topics: [str]}` | no | P1-08 |
 | `unsubscribe` | `sub: u64` | `{}` | no | P1-08 |
 
+## IMDb (P3-04)
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `imdb.lookup` | exactly one of `name: str` (1..1024 characters) or `id: str` (`tt` + 1..10 digits), `refresh: bool?` | `{card: ImdbCard?}` | no | P3-04 |
+
+`ImdbCard = {id: str, title: str, year: u16?, kind: str, rating: f64?,
+votes: u32?, stars: str?, blurb: str?, wiki_url: str?, url: str,
+poster_url: str?, poster_path: str?}`. Unknown ratings and unavailable posters
+are omitted. `poster_path` names a local atomic cache file; clients load it as
+`file://` without fetching network images. The index loads once per daemon;
+`refresh: true` redownloads and replaces it before the response. Suggestion and
+Wikipedia reads are capped at 2 MiB; posters at 8 MiB. Poster failure retains
+the card without `poster_path` and logs a typed `upstream` diagnostic. Other
+upstream failures return retryable `upstream` with `details.source`.
+
 ## P1 topics
 
 | Topic | Kind | Key | Item type | Default interval | Used by |
@@ -281,7 +297,7 @@ creates no second ledger record.
 | `Summary` | `dl_bps?`, `ul_bps?`, `counts: {total, downloading, stalled, metadata, checking, queued, paused, done, seeding, waiting_vpn, error, staged, ready}` (all `u64`), `alt: bool`, `limits: Limits`, `network: {state: enum(ready\|waiting\|off), message: str, interface: str?}`, `daemon: {state: enum(starting\|running\|parked\|stopping), idle_exit_in_s: u64?, busy_reasons: [open(downloading\|seeding\|parked_waiting\|interactive\|search\|mutation)], upgrade_pending: bool}`, `top: [{hash, name, state, progress?, dl_bps?, eta_s?, playable?}]` (≤ 5), `disk: {free_bytes: bytes?, needed_bytes: bytes, low: bool}` (P5-07; the one place free space lives), `history: [u64]?` (last 60 download samples, P6-03) |
 | `Limits` | `download_bps?`, `upload_bps?`, `alt_download_bps?`, `alt_upload_bps?` |
 | `NetworkState` | `selection: str?`, `interface: str?`, `ready: bool`, `message: str` |
-| `Settings` | `max_active_downloads: u64`, `peer_encryption: enum(off\|prefer\|require)`, `network_interface: str?`, `save_path: str`, `seed_by_default: bool`, `autostart: bool`, `idle_exit_secs: u64` (0 disables the idle net), `notify: bool`, `timeout_secs: u64`, `handler: enum(add\|confirm)`, `open_command: str` (default `xdg-open`), `clipboard_watch: bool`, `peer_port: u64`, `show_quality: str`, `download_limit_bps?`, `upload_limit_bps?`, `alt_download_limit_bps?`, `alt_upload_limit_bps?`, `alt_limits_on: bool` (the persisted turtle switch; `transfer.set_alt` writes it), `restart_class: [str]` (the keys whose change restarts the engine). Every key is also the `config.toml` key: one vocabulary for the file, the API and `fbittorrent settings` |
+| `Settings` | `max_active_downloads: u64`, `peer_encryption: enum(off\|prefer\|require)`, `network_interface: str?`, `save_path: str`, `seed_by_default: bool`, `autostart: bool`, `idle_exit_secs: u64` (0 disables the idle net), `notify: bool`, `timeout_secs: u64`, `handler: enum(add\|confirm)`, `open_command: str` (default `xdg-open`), `clipboard_watch: bool`, `reduce_motion?: bool` (absent = false), `peer_port: u64`, `show_quality: str`, `download_limit_bps?`, `upload_limit_bps?`, `alt_download_limit_bps?`, `alt_upload_limit_bps?`, `alt_limits_on: bool` (the persisted turtle switch; `transfer.set_alt` writes it), `restart_class: [str]` (the keys whose change restarts the engine). Every key is also the `config.toml` key: one vocabulary for the file, the API and `fbittorrent settings` |
 | `LogEntry` | `seq: u64`, `ts: ts`, `level: enum(error\|warn\|info\|debug)`, `source: open(daemon\|engine\|queue\|api\|search\|rss\|shows\|imdb\|notify\|network\|watch\|clipboard)`, `hash?`, `message: str` |
 
 ## Unknown values
@@ -371,11 +387,26 @@ positive measured chunk rate before the first piece verifies. Missing-file resto
 preconditions complete the payload, delete it, restart dormant history and
 explicitly activate it, preserving startup's lazy restore policy. The diagnostic
 remains `<name> restore failed: missing files`, with reason `missing_files`.
-The integrated receipt records the remaining active-check field mismatches and
-the frozen checker's rejection of changing completed-byte counts in a live
-precondition/query history. These remain failures; no comparison mask or new
-deferral is added. Previously approved capability/protocol/error deferrals remain
-listed individually, alongside P6-08's post-remove scenarios.
+Ruling 7 treats checking measurements as state-conditioned volatile values:
+when the live torrent is checking, completed_bytes must be a u64 no greater than
+size, and finite progress must equal completed_bytes/size within 1e-9 absolute
+(zero size requires both zero). Presence is preserved. Checked and size remain
+exact; other states still compare completed_bytes/progress exactly. P1-05d's
+fixture correction to checked=false for an active check is integrated.
+Live validation checks every original frame against the frozen types, bounds,
+capabilities and canonical round trips, and retains revision checks. Its
+cross-reply agreement still checks static sizes and file totals. For any hash
+observed checking, its measurements are excluded from that history's agreement,
+including earlier samples and later cancellation; their raw values remain
+validated and non-checking fixture comparisons remain exact. Fixture transcripts
+continue to use the unchanged strict whole-group agreement hook. Deferrals record
+file:line, pointer, class, target bead and reason. Capability/protocol deferrals
+apply only while that feature is unavailable; advertised features stay under
+active comparison. The receipt distinguishes undrivable catalogue frames from
+error codes that can be produced with a different shape and retains the bounded
+starting-window retry evidence. A retained missing-files restore error keeps its
+missing_files reason through Stop and retry until the error clears. Nonvolatile
+validation failures are recorded without a new mask or deferral.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
@@ -390,6 +421,7 @@ listed individually, alongside P6-08's post-remove scenarios.
 | `/result/server/pid` | timestamp | positive u64; presence preserved |
 | `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
 | `/result/server/version` | version | semantic version string; presence preserved |
+| `/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress` | checking only | live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals |
 | `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
 | `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 
@@ -399,7 +431,7 @@ listed individually, alongside P6-08's post-remove scenarios.
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
-`cargo test --locked api::fixtures` loads all six files. roundtrip deserializes
+`cargo test --locked api::fixtures` loads all seven files. roundtrip deserializes
 and reserializes every typed line and checks successful results using their
 request operation. no_sentinels enforces omission/sentinel rules. Coverage checks
 pin the bead's 20 operations literally, require every A.8 event and all 16 error
@@ -408,6 +440,22 @@ all ten torrent states. Documentation examples are parsed and compared to fixtur
 records, strict input, pointer errors and explicit null versus omission.
 This is contract proof. P1-06 adds real daemon replay; P2-02 adds Store reducer
 replay. A green typed fixture test alone is not live daemon or UI acceptance.
+
+
+P4-06 adds the optional boolean `Settings.reduce_motion` to the `settings` state
+object. Omission means `false`; `true` disables hover-name scrolling in the TUI,
+and `false` enables its single pass. A present value must be a JSON boolean
+(`null`, numbers and strings are invalid). This is the same `reduce_motion` key
+as `config.toml` and the TUI Settings toggle. It is a UI preference and never
+restarts the engine. No new capability is introduced: the field belongs to the
+existing `settings` capability, advertised when that service is implemented.
+Old clients can ignore it, and old daemons can omit it. Whole-state replacement
+with the field absent resets the preference to `false`, including after a true
+value. `settings-motion.ndjson` covers absent, true, false and absent again.
+
+```ndjson
+{"dir":"s2c","frame":{"data":{"alt_limits_on":false,"autostart":false,"clipboard_watch":false,"handler":"confirm","idle_exit_secs":300,"max_active_downloads":3,"notify":true,"open_command":"xdg-open","peer_encryption":"prefer","peer_port":6881,"reduce_motion":true,"restart_class":["network_interface","peer_port"],"save_path":"/tmp/fbt-fixture/downloads","seed_by_default":false,"show_quality":"1080p","timeout_secs":20},"ev":"state","rev":2,"sub":1,"topic":"settings"}}
+```
 
 ## Value validation
 
@@ -423,6 +471,10 @@ other validation. LogEntry examples in diagnostic error details exercise the
 specified object without introducing its later operation or topic.
 
 ## Changelog
+
+- **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
+  `ImdbCard` with optional local `poster_path`, and an additive IMDb transcript.
+
 
 - **v1 (P1-05):** establishes P1 envelopes, strict args, contextual result types,
   error/CLI-exit mapping, operation metadata, topic payloads, A.8 events and
@@ -452,3 +504,25 @@ For the planned v1 adapter, `torrents.set_upload_limit {hashes, bps?}` can retur
 wire compatibility. `torrents.set_seed` must use the same live setter for
 existing handles. The v1 adapter is not present in this checkout, so this entry
 does not advertise a new operation, capability or active NDJSON endpoint.
+
+### P7-09 — deferred adds while waiting for the VPN
+
+The `deferred_add` capability enables parked `torrents.add` for magnets and local
+`.torrent` paths. It saves the record and local metadata privately, keeps the
+requested run/pause and upload policies, appends to queue order, and returns
+`state:done`, the hash, and `deferred:true`. Rows remain `waiting_vpn` with unknown
+progress until the interface returns. Activation resolves metadata and restores
+the saved queue intent; the deferred marker clears after admission. Duplicate
+adds preserve the existing record. URL sources are refused while parked before
+fetching or returning a pending receipt. Characterization: `deferred-add.ndjson`;
+live cases: `deferred_add_saved_record` and opt-in `deferred_add`.
+
+### P4-06 — optional reduced motion
+
+Adds `Settings.reduce_motion?: bool` (absent = false), preserving all earlier
+fixture records and documentation examples. The new `settings-motion.ndjson`
+conversation covers both presence and omission. Strict boolean decoding rejects
+null and non-boolean values; explicit false remains present on a typed roundtrip.
+This extends the v1 object contract without adding an operation or advertising
+a not-yet-implemented service. The standalone TUI persists and applies the same
+preference from `config.toml`; API-client attachment consumes it in P4-03.

@@ -1,6 +1,6 @@
 //! Typed saved-history and durable-intent operations without a native session.
 use super::*;
-use ops::{EngineOp, EngineResult, QueueInfo};
+use ops::{AddedTorrent, EngineOp, EngineResult, QueueInfo};
 use view::TorrentView;
 
 // Preserve cross-request serialization for the legacy compatibility function as
@@ -96,12 +96,53 @@ impl ParkedLedger {
             | EngineOp::Start { .. }
             | EngineOp::Stop { .. }
             | EngineOp::Delete { .. } => {}
+            // Typed API additions save intent without constructing a session.
+            EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } => {}
             _ => bail!(
                 "connect ProtonVPN before changing downloads; saved downloads and settings remain available"
             ),
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if let EngineOp::AddMagnet(options) | EngineOp::AddSelected { options, .. } = &op {
+            let cfg = Config::load()?;
+            let folder = cfg.save_path.map(PathBuf::from).unwrap_or_else(|| {
+                dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads"))
+            });
+            let record = match &op {
+                EngineOp::AddSelected { files, .. } => Record::deferred_torrent(options, &folder, files.clone())?,
+                _ => Record::deferred_magnet(options, &folder)?,
+            };
+            if let Some(existing) = ledger.records.iter().find(|r| r.hash == record.hash) {
+                return Ok(EngineResult::Added(vec![AddedTorrent {
+                    hash: existing.hash.clone(), name: existing.name.clone(), duplicate: true,
+                    deferred: existing.deferred,
+                }]));
+            }
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&self.directory)?;
+            std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(0o700))?;
+            if let Some((_, bytes)) = &options.torrent {
+                use std::io::Write;
+                let temporary = self.directory.join(format!("{}.torrent.tmp", record.hash));
+                let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true)
+                    .custom_flags(libc::O_NOFOLLOW).mode(0o600).open(&temporary)?;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                file.write_all(bytes)?; file.sync_all()?; drop(file);
+                std::fs::rename(temporary, self.directory.join(format!("{}.torrent", record.hash)))?;
+            }
+            // Match live add's durable paused checkpoint before saving run intent.
+            let mut checkpoint = record.clone(); checkpoint.paused = true;
+            ledger.records.push(checkpoint);
+            save_parked_ledger(&self.directory, &ledger)?;
+            if !record.paused {
+                ledger.records.last_mut().unwrap().paused = false;
+                save_parked_ledger(&self.directory, &ledger)?;
+            }
+            return Ok(EngineResult::Added(vec![AddedTorrent {
+                hash: record.hash, name: record.name, duplicate: false, deferred: true,
+            }]));
+        }
         match &op {
             EngineOp::Queue => {
                 return Ok(EngineResult::Queue(QueueInfo {

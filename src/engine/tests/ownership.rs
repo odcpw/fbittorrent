@@ -237,6 +237,6 @@
             added_on: 1,
             completion_on: 0,
             paused: false,
-            resume_after_migration: false,
+            resume_after_migration: false, deferred: false,
         }
     }

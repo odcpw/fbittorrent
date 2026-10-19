@@ -15,6 +15,7 @@ import fcntl
 from contextlib import ExitStack, contextmanager
 import hashlib
 import json
+import math
 import os
 import pwd
 from pathlib import Path
@@ -1514,6 +1515,20 @@ def api_collection_cap(binary, systemd):
             harness.lock_free()
 
 
+def api_subscriptions_deferred(binary, systemd):
+    with api_owned("api_subscriptions_deferred", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = client.hello()["result"]
+        case.check(hello["caps"] == ["torrents", "files", "mutations", "deferred_add"], "P1-06, P1-09 and P7-09 advertise exactly their implemented capabilities", str(hello["caps"]))
+
+        case.check(hello["caps"] == ["torrents", "files", "imdb"], "daemon advertises exactly its implemented capabilities (P3-04 adds imdb)", str(hello["caps"]))
+        for op, args in [("subscribe", dict(topics=["torrents"])), ("unsubscribe", dict(sub=1)), ("torrents.lis", {})]:
+            frame = client.call(op, args, error="unknown_op")
+            nearest = ["torrents.list"] if op == "torrents.lis" else []
+            case.check(frame["error"]["details"]["nearest"] == nearest and bool(frame["error"].get("hint")),
+                       "unknown_op includes only implemented nearby names and a hint", str(frame))
+        client.call("app.info")
+
+
 def api_start_results(binary, systemd):
     with api_owned("api_start_results", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         client.hello()
@@ -1546,6 +1561,108 @@ def api_start_results(binary, systemd):
         bulk = client.call("torrents.start", dict(hashes=[complete.info_hash, partial.info_hash]))["result"]
         case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
                    "bulk start preserves completed and already-running skip reasons", str(bulk))
+
+
+def deferred_add_saved_record(binary, systemd):
+    with Case("daemon", "deferred_add_saved_record") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h:
+        config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        select_replay_interface(config, "fbmissing0")
+        process = h.start_serve()
+        try:
+            h.receive_ready(); h.wait_engine()
+            with ApiConn(h) as client:
+                hello = client.hello()["result"]
+                case.check(hello["state"] == "parked" and "deferred_add" in hello["caps"], "missing binding parks the daemon and advertises deferred_add", json.dumps(hello))
+                magnet = "magnet:?xt=urn:btih:" + "d1" * 20 + "&dn=Deferred%20fixture&tr=http%3A%2F%2F127.0.0.1%3A1%2Fannounce"
+                reply = client.call("torrents.add", dict(source=dict(magnet=magnet)), ref="deferred-magnet")["result"]
+                case.check(reply == dict(state="done", hash="d1" * 20, name="Deferred fixture", duplicate=False, deferred=True), "magnet add acknowledges its durable deferred intent", json.dumps(reply))
+                ledger = Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json"
+                record = json.loads(ledger.read_text())["records"][-1]
+                case.check(record["deferred"] and not record["paused"] and record["source"] == magnet, "physical transfer remains parked while the saved record retains run intent and trackers", json.dumps(record))
+                row = client.call("torrents.get", dict(hash=reply["hash"]))["result"]["torrent"]
+                case.check(row["state"] == "waiting_vpn" and row["intent"] == "run" and not row["checked"] and "progress" not in row, "deferred row reports waiting_vpn with unknown progress", json.dumps(row))
+                fixture = fixtures.two_file_fixture(sandbox.root)
+                added = client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stopped=True, files=[1]))["result"]
+                records = json.loads(ledger.read_text())["records"]
+                cached = ledger.parent / (fixture.info_hash + ".torrent")
+                case.check(added["deferred"] and added["state"] == "done" and records[-1]["paused"] and records[-1]["only_files"] == [1] and cached.read_bytes() == fixture.torrent.read_bytes(), "local metadata and explicit pause/selection are saved at the end of the ledger", json.dumps(dict(reply=added, records=records)))
+                case.check(cached.stat().st_mode & 0o777 == 0o600 and ledger.parent.stat().st_mode & 0o777 == 0o700, "deferred store and metainfo stay private", str(cached))
+                before = ledger.read_bytes()
+                duplicate = client.call("torrents.add", dict(source=dict(magnet=magnet), stopped=True, seed=True))["result"]
+                case.check(duplicate["duplicate"] and duplicate["deferred"] and ledger.read_bytes() == before, "duplicate deferred add preserves the original policy and ledger bytes", json.dumps(duplicate))
+                with fixtures.HttpFixture(sandbox.root, {"/never.torrent": dict(file=fixture.torrent.name)}) as http:
+                    client.call("torrents.add", dict(source=dict(url=http.base + "/never.torrent")), error="engine_unavailable")
+                    case.check(not http.requests and ledger.read_bytes() == before, "parked URL add is refused without fetching or saving anything", json.dumps(http.requests))
+            h.stop_serve(process)
+            h.notify.close()
+            process = h.start_serve()
+            h.receive_ready(); h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello()
+                row = client.call("torrents.get", dict(hash="d1" * 20))["result"]["torrent"]
+                case.check(ledger.read_bytes() == before and row["state"] == "waiting_vpn" and row["intent"] == "run", "daemon restart preserves the deferred records, queue order and saved intent exactly", json.dumps(row))
+        finally:
+            if process.child.poll() is None: h.stop_serve(process)
+            h.lock_free()
+
+
+def deferred_add(binary, systemd):
+    if os.environ.get("FBT_TEST_VPN") != "1":
+        raise RuntimeError("deferred_add requires the opt-in VPN namespace fixture (FBT_TEST_VPN=1)")
+    with Case("daemon", "deferred_add") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h, Sandbox() as seedbox, Harness(case, binary, seedbox) as seedh:
+        select_replay_interface(Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml", "fixture0")
+        select_replay_interface(Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml", None)
+        activation, activated = sandbox.root / "activate", sandbox.root / "activated.json"
+        info = sandbox.root / "namespace.json"
+        manifest = sandbox.root / "deferred-namespace.json"
+        seed_port = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())["peer_port"]
+        manifest.write_text(json.dumps(dict(main=DaemonContract.command(str(binary), 300, True), seed=DaemonContract.command(str(binary), 300, True), seed_env=seedbox.env,
+            seed_port=seed_port, info=str(info), cleanup=str(sandbox.root / "cleanup.json"), host_netns=os.readlink("/proc/self/ns/net"), activation=str(activation), activated=str(activated))))
+        process = h.spawn(["unshare", "-Urn", "--", sys.executable, str(Path(__file__).resolve()), "--replay-namespace-child", str(manifest)])
+        try:
+            h.wait_engine(); seedh.wait_engine()
+            if not h.wait_for(lambda: (info.exists(), str(info)), "owned namespace publishes its tracker"): raise RuntimeError("namespace fixture unavailable")
+            network = json.loads(info.read_text())
+            payload = seedbox.downloads / "deferred.bin"; payload.write_bytes(os.urandom(8 * fixtures.MIB))
+            fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=network["tracker"], piece_length=fixtures.MIB)
+            # BEP 27 private seeds refuse BEP 9 metadata exchange. This public
+            # fixture remains confined to the owned, loopback-only namespace.
+            fixture.info["private"] = 0
+            fixture.info_hash = hashlib.sha1(fixtures.bencode(fixture.info)).hexdigest()
+            fixture.torrent.write_bytes(fixtures.bencode(dict(info=fixture.info, announce=network["tracker"])))
+            fixture.magnet = "magnet:?" + urllib.parse.urlencode(dict(xt="urn:btih:" + fixture.info_hash, dn=payload.name, tr=network["tracker"]))
+            with ApiConn(seedh) as seed:
+                seed.hello(); seed.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), save_path=str(seedbox.downloads), seed=True))
+                seedh.wait_for(lambda: ((row := seed.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"])["state"] == "seeding", json.dumps(row)), "real seed finishes checking")
+                seed.call("torrents.set_upload_limit", dict(hashes=[fixture.info_hash], bps=32768))
+            with ApiConn(h) as client:
+                client.hello()
+                added = client.call("torrents.add", dict(source=dict(magnet=fixture.magnet)))["result"]
+                case.check(added["state"] == "done" and added["deferred"] and added["hash"] == fixture.info_hash, "missing interface saves the real magnet before any engine exists", json.dumps(added))
+                before = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+                case.check(before["state"] == "waiting_vpn" and not before["checked"], "record waits without fabricated metadata/progress", json.dumps(before))
+                local = fixtures.two_file_fixture(sandbox.root)
+                saved = client.call("torrents.add", dict(source=dict(path=str(local.torrent)), stopped=True, files=[1]))["result"]
+                case.check(saved["deferred"] and saved["hash"] == local.info_hash, "local metainfo also waits with its explicit paused selection", json.dumps(saved))
+                activation.write_text(str(time.time_ns()))
+                h.wait_for(lambda: (activated.exists(), str(activated)), "fixture interface appears inside the owned namespace")
+                case.check(True, "interface up/down timestamps", activated.read_text())
+                def receiving():
+                    row = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+                    return row["state"] == "downloading" and row.get("dl_bps", 0) > 0, json.dumps(row)
+                h.wait_for(receiving, "deferred metadata resolves and the saved run intent starts receiving", timeout=30)
+                records = json.loads((Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json").read_text())["records"]
+                record = next(row for row in records if row["hash"] == fixture.info_hash)
+                case.check(not record.get("deferred", False) and not record["paused"], "successful activation clears the deferred marker and preserves run intent", json.dumps(record))
+                def local_paused():
+                    row = client.call("torrents.get", dict(hash=local.info_hash))["result"]["torrent"]
+                    return row["state"] == "paused" and row["checked"] and row["intent"] == "pause", json.dumps(row)
+                h.wait_for(local_paused, "deferred local metainfo is admitted and checked without starting a paused record")
+                files = client.call("torrents.files", dict(hash=local.info_hash))["result"]["files"]
+                case.check([row["included"] for row in files] == [False, True], "local selection survives activation", json.dumps(files))
+                client.call("app.shutdown", dict(reason="deferred fixture complete")); process.wait()
+        finally:
+            if process.child.poll() is None: h.stop_serve(process)
 
 
 def api_missing_completed_payload(binary, systemd):
@@ -1599,7 +1716,7 @@ def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     if not validator or not Path(validator).is_file():
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
     output = case.path.with_suffix("." + kind + ".validation.log")
-    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace))
+    environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace), FBT_API_CONTRACT_KIND=kind)
     if optional:
         optional_path = case.path.with_suffix(".extra-optional.json")
         optional_path.write_text(json.dumps(optional, indent=2, sort_keys=True) + "\n")
@@ -1627,6 +1744,7 @@ REPLAY_NORMALIZATION = (
     ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
     ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
     ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress", "checking only", "live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals"),
     ("object member absent in fixture", "extra optional field", "live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C)"),
     ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
 )
@@ -1689,9 +1807,13 @@ class ReplayNormalizer:
         return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]+"), pointer) is not None
 
     def compare(self, expected, live):
-        def walk(wanted, got, pointer=""):
+        def walk(wanted, got, pointer="", checking=False):
+            if checking:
+                return got  # The complete checking tuple was validated below.
             rule = next((kind for patterns, kind, _ in REPLAY_NORMALIZATION
                          for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
+            if rule == "checking only":
+                rule = "exact"
             if rule.startswith("identity:"):
                 if wanted is None:  # Failure.id is the single nullable wire field.
                     if got is not None:
@@ -1713,10 +1835,22 @@ class ReplayNormalizer:
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
                     if key not in got:
                         raise ReplayMismatch(f"JSON pointer {here}: expected {wanted.get(key, '<missing>')!r}, observed {got.get(key, '<missing>')!r}")
+                is_torrent = pointer == "/result/torrent" or re.fullmatch(r"/result/torrents/[0-9]+", pointer)
+                active_check = is_torrent and got.get("state") == "checking"
+                if active_check and any(key in wanted for key in ("completed_bytes", "progress")):
+                    size, completed, progress = (got.get(key) for key in ("size", "completed_bytes", "progress"))
+                    if type(size) is not int or not 0 <= size < 2**64:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/size: checking requires a nonnegative u64 size")
+                    if type(completed) is not int or not 0 <= completed <= size:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/completed_bytes: checking requires 0 <= completed_bytes <= size")
+                    ratio = completed / size if size else 0.0
+                    if type(progress) not in (int, float) or not math.isfinite(progress) or not 0 <= progress <= 1 or abs(progress - ratio) > 1e-9:
+                        raise ReplayMismatch(f"JSON pointer {pointer}/progress: checking progress must equal completed_bytes/size within 1e-9")
                 for key in sorted(got.keys() - wanted.keys()):
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
                     self.extra_optional.append((here, got[key]))
-                result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
+                result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1"),
+                                    active_check and key in ("completed_bytes", "progress")) for key, value in wanted.items()}
                 result.update((key, value) for key, value in got.items() if key not in wanted)
                 return result
             if isinstance(wanted, list):
@@ -1739,8 +1873,12 @@ def replay_namespace_child(manifest_path):
     manifest = json.loads(Path(manifest_path).read_text())
     if os.readlink("/proc/self/ns/net") == manifest["host_netns"]:
         raise RuntimeError("refusing replay interface mutations outside the owned network namespace")
-    subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
-    subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
+    activation = manifest.get("activation")
+    if activation:
+        subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
+    else:
+        subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
+        subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
     compact = socket.inet_aton("127.0.0.1") + struct.pack("!H", manifest["seed_port"])
     tracker = fixtures.HttpFixture(Path(manifest_path).parent, {
         "/announce": dict(base64=base64.b64encode(fixtures.bencode(dict(interval=1, complete=1, incomplete=0, peers=compact))).decode())})
@@ -1751,6 +1889,16 @@ def replay_namespace_child(manifest_path):
                 child.terminate()
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, terminate)
+    control_stop, control = threading.Event(), None
+    def activate():
+        while not control_stop.wait(.05):
+            if Path(activation).exists():
+                down = time.time_ns()
+                subprocess.run(["ip", "link", "set", "lo", "down"], check=True)
+                subprocess.run(["ip", "link", "set", "lo", "name", "fixture0"], check=True)
+                subprocess.run(["ip", "link", "set", "fixture0", "up"], check=True)
+                Path(manifest["activated"]).write_text(json.dumps(dict(down_ns=down, up_ns=time.time_ns(), namespace=os.readlink("/proc/self/ns/net"))))
+                return
     try:
         seed = subprocess.Popen(manifest["seed"], env=manifest["seed_env"], stdin=subprocess.DEVNULL)
         children.append(seed)
@@ -1758,8 +1906,15 @@ def replay_namespace_child(manifest_path):
         children.append(main)
         Path(manifest["info"]).write_text(json.dumps(dict(namespace=os.readlink("/proc/self/ns/net"), tracker=tracker.base + "/announce",
             seed_port=manifest["seed_port"], seed_pid=seed.pid, main_pid=main.pid), sort_keys=True))
+        if activation:
+            control = threading.Thread(target=activate)
+            control.start()
         return main.wait()
     finally:
+        control_stop.set()
+        if control is not None:
+            control.join(timeout=2)
+            if control.is_alive(): raise RuntimeError("namespace activation thread did not stop")
         terminate()
         exits = []
         for child in children:
@@ -2100,6 +2255,42 @@ def api_replay_normalization(binary, systemd):
                 case.check(False, label + " fails comparison", "unexpected match")
             except ReplayMismatch as error:
                 case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
+        watch_frame = dict(result=dict(torrent=dict(playable=dict(ready=True))))
+        pending_frame = dict(result=dict(state="pending"))
+        undo_frame = dict(result=dict(torrent=dict(undo_until=123)))
+        for frame, op, cap in ((watch_frame, "torrents.get", "watch"),
+                               (pending_frame, "torrents.remove", "mutations"),
+                               (undo_frame, "torrents.get", "origin")):
+            absent = replay_frame_deferrals(frame, op)
+            present = replay_frame_deferrals(frame, op, {cap})
+            case.check(bool(absent) and not present, "advertised capability keeps the frame under active comparison",
+                       json.dumps(dict(cap=cap, absent=absent, present=present)))
+        checking = dict(state="checking", checked=False, size=100, completed_bytes=50, progress=.5)
+        sample = dict(checking, completed_bytes=25, progress=.25)
+        for wrap in (lambda row: dict(result=dict(torrent=row)), lambda row: dict(result=dict(torrents=[row]))):
+            normalizer.compare(wrap(checking), wrap(sample))
+            case.check(True, "checking-only measurement normalization accepts a valid live tuple", json.dumps(wrap(sample)))
+        zero = dict(checking, size=0, completed_bytes=0, progress=0.0)
+        normalizer.compare(dict(result=dict(torrent=zero)), dict(result=dict(torrent=zero)))
+        normalizer.compare(dict(result=dict(torrent=checking)), dict(result=dict(torrent=dict(sample, progress=.25 + 1e-10))))
+        case.check(True, "zero size and the declared 1e-9 tolerance are accepted", "zero/zero=0; in-tolerance tuple passes")
+        for label, wanted, got, pointer in [
+            ("over-size checked bytes", checking, dict(sample, completed_bytes=101), "/completed_bytes"),
+            ("negative checked bytes", checking, dict(sample, completed_bytes=-1), "/completed_bytes"),
+            ("boolean checked bytes", checking, dict(sample, completed_bytes=True), "/completed_bytes"),
+            ("nonfinite progress", checking, dict(sample, progress=float("nan")), "/progress"),
+            ("inconsistent progress", checking, dict(sample, progress=.5), "/progress"),
+            ("missing checked bytes", checking, {k: v for k, v in sample.items() if k != "completed_bytes"}, "/completed_bytes"),
+            ("changed static size", checking, dict(sample, size=200, progress=.125), "/size"),
+            ("changed checked flag", checking, dict(sample, checked=True), "/checked"),
+            ("paused is exact", dict(checking, state="paused"), dict(sample, state="paused"), "/completed_bytes"),
+            ("downloading is exact", dict(checking, state="downloading"), dict(sample, state="downloading"), "/completed_bytes"),
+        ]:
+            try:
+                normalizer.compare(dict(result=dict(torrent=wanted)), dict(result=dict(torrent=got)))
+                case.check(False, label + " fails comparison", "unexpected match")
+            except ReplayMismatch as error:
+                case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
 
 
 def replay_starting_window(client, harness, identifier, frames):
@@ -2145,7 +2336,7 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
     if code in ("invalid_message", "hello_required", "proto_unsupported"):
         with ApiConn(harness, timeout=8, trace=frames) as fresh:
             if code == "invalid_message":
-                fresh.socket.sendall(b"[]\n")
+                fresh.socket.sendall(b"x" * expected["error"]["details"]["bytes"])
                 deferred.append(("/id", "P1-18", "fatal malformed input has a request-less error event, not the fixture's ID-bearing failure"))
             elif code == "proto_unsupported":
                 fresh.send_frame(dict(id=identifier, op="hello", args=dict(proto=2, client=dict(name="fixture-test", version="0.2.0", kind="test"))))
@@ -2220,21 +2411,21 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
     return send(request), deferred
 
 
-def replay_frame_deferrals(expected, op):
+def replay_frame_deferrals(expected, op, caps=()):
     found = []
     def visit(value, pointer=""):
         if isinstance(value, dict):
             for key, child in value.items():
                 here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                if key == "playable" or (key == "ready" and pointer.startswith("/result/files/")):
+                if (key == "playable" or (key == "ready" and pointer.startswith("/result/files/"))) and "watch" not in caps:
                     found.append((here, "P5-05", "expected frame depends on the unadvertised watch capability"))
-                elif key == "undo_until":
+                elif key == "undo_until" and "origin" not in caps:
                     found.append((here, "P6-08", "expected frame depends on undo/origin restoration"))
                 visit(child, here)
         elif isinstance(value, list):
             for index, child in enumerate(value): visit(child, pointer + "/" + str(index))
     visit(expected)
-    if op in ("torrents.remove", "torrents.set_upload_limit") and expected.get("result", {}).get("state") == "pending":
+    if op in ("torrents.remove", "torrents.set_upload_limit") and expected.get("result", {}).get("state") == "pending" and "mutations" not in caps:
         found.append(("/result/state", "P1-09", "expected asynchronous mutation state requires the unadvertised mutations capability"))
     return found
 
@@ -2243,11 +2434,24 @@ CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-
                  queue="P6-05", origin="P6-08")
 
 
+def replay_deferral_class(bead, reason):
+    if bead == "ENVIRONMENT-CONDITIONAL":
+        return "environment-conditional"
+    if "proto-2" in reason:
+        return "protocol"
+    if "operation after preceding remove" in reason:
+        return "post-remove"
+    if "capability" in reason or "unadvertised" in reason or "undo/origin" in reason:
+        return "capability-conditioned"
+    return "undrivable-catalogue-frame"
+
+
 def contract_group(group, binary, systemd):
     path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     normalizer = ReplayNormalizer()
     deferred, frames, request, prepared, optional, driven = [], [], None, {}, [], None
+    available_caps = set()
     with replay_owned(group, binary, systemd) as (case, sandbox, harness, process, root):
         if group == "torrents":
             with ApiConn(harness) as setup:
@@ -2255,7 +2459,8 @@ def contract_group(group, binary, systemd):
                 prepared = replay_preconditions(lines, setup, normalizer, root)
         with ApiConn(harness, timeout=20, trace=frames) as client:
             def defer(number, pointer, bead, reason):
-                record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead, reason=reason)
+                record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead,
+                              reason=reason, **{"class": replay_deferral_class(bead, reason)})
                 deferred.append(record)
                 case.check(True, "record the exact deferred fixture field and owner", json.dumps(record, sort_keys=True))
             for number, line in enumerate(lines, 1):
@@ -2264,7 +2469,7 @@ def contract_group(group, binary, systemd):
                     driven = None
                     live_request = normalizer.request(request) if group != "errors" or request["op"] == "hello" else None
                     next_frame = lines[number].get("frame", {}) if number < len(lines) and lines[number]["dir"] == "s2c" else {}
-                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared and not replay_frame_deferrals(next_frame, request["op"]):
+                    if group == "torrents" and request["op"] == "torrents.get" and request["args"]["hash"] in prepared and not replay_frame_deferrals(next_frame, request["op"], available_caps):
                         driven = drive_replay_state(client, prepared, request["args"]["hash"], harness, live_request)
                     if live_request is not None and driven is None:
                         client.send_frame(live_request)
@@ -2300,10 +2505,16 @@ def contract_group(group, binary, systemd):
                         restore_replay_interface(client, harness)
                     # Frame-level deferral: its raw expected and live frame are
                     # both run through frozen P1-05 validation, never synthesized.
-                    owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
+                    if "caps" in actual.get("result", {}):
+                        available_caps = set(actual["result"]["caps"])
+                    owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
-                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39):
+                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39, 61) and "origin" not in available_caps:
+                        if number == 61:
+                            case.check(actual.get("error", {}).get("code") == "not_found",
+                                       "post-remove upload-limit fixture reaches the actual missing-record condition",
+                                       json.dumps(actual, sort_keys=True))
                         pointer = "/result/torrent/hash" if number == 39 else "/result"
                         owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
@@ -2311,6 +2522,9 @@ def contract_group(group, binary, systemd):
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
                         if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2:
+
+                        if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
+                    if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
                     if owners:
                         for pointer, bead, reason in owners: defer(number, pointer, bead, reason)
@@ -2973,6 +3187,433 @@ CASES = {function.__name__: function for function in
           idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay, state_watcher_cancellation_stress, subscribe_gap_recovery, structural_frame_within_100ms, detail_topic_released,
           engine_restart_keeps_connection, slow_client_closed_others_live, rev_soak_10min,
           fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+
+# P1-09: every mutation records its complete envelope, including resend identity.
+def mutation_request(client, op, args, ref=None, instance=None, error=None):
+    identifier = client.next_id
+    client.next_id += 1
+    frame = dict(id=identifier, op=op, args=args)
+    if ref is not None:
+        frame["ref"] = ref
+    if instance is not None:
+        frame["instance"] = instance
+    step = client.case.step(json.dumps(frame, sort_keys=True),
+                            "matching success envelope" if error is None else f"error.code == {error}")
+    client.send_frame(frame, typed=error is None)
+    while (reply := client.receive()) is not None:
+        if "ev" in reply:
+            client.pushed.append(reply)
+            continue
+        step.close(reply.get("id") == identifier and
+                   (reply.get("ok") is True if error is None else reply.get("error", {}).get("code") == error),
+                   json.dumps(reply, sort_keys=True))
+        return reply
+    step.fail("EOF before the matching response")
+    raise EOFError(op)
+
+
+def mutation_hello(client, name):
+    return mutation_request(client, "hello", dict(proto=1, client=dict(name=name, version="0", kind="test")))["result"]
+
+
+def mutation_outcome(client, reference):
+    for frame in client.events():
+        if frame.get("ev") == "mutation.result" and frame.get("ref") == reference:
+            client.case.check(frame.get("outcome") == "done", "pending mutation finishes with done", json.dumps(frame, sort_keys=True))
+            return frame
+    raise EOFError("mutation.result " + reference)
+
+
+def mutation_add_path(client, sandbox, name="payload"):
+    root = sandbox.root / name
+    root.mkdir()
+    fixture = fixtures.two_file_fixture(root)
+    # Keep a real incomplete torrent; completion does not race a stop assertion.
+    fixtures.corrupt_byte(fixture.files[0], 0)
+    args = dict(source=dict(path=str(fixture.torrent)), stopped=True, save_path=str(root))
+    reply = mutation_request(client, "torrents.add", args)
+    client.case.check(reply.get("result", {}).get("hash") == fixture.info_hash,
+                      "path add returns its exact durable hash", json.dumps(reply))
+    return fixture, args
+
+
+def ref_replay_remove(binary, systemd):
+    with api_owned("ref_replay_remove", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "ref-remove")
+        fixture, args = mutation_add_path(client, sandbox)
+        remove = dict(hashes=[fixture.info_hash], delete_files=False)
+        first = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        case.check(first.get("result") == replay.get("result"), "remove replay returns the stored first result", json.dumps(replay))
+        mutation_request(client, "torrents.add", args, ref="readd")
+        replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check(first.get("result") == replay.get("result") and [row["hash"] for row in rows] == [fixture.info_hash],
+                   "old remove ref does not remove a later add of the same hash", json.dumps(rows))
+
+
+def ref_per_client(binary, systemd):
+    with api_owned("ref_per_client", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as first, ApiConn(harness) as second:
+        mutation_hello(first, "client-one"); mutation_hello(second, "client-two")
+        inputs = []
+        for client, name in [(first, "one"), (second, "two")]:
+            fixture, args = mutation_add_path(client, sandbox, name)
+            inputs.append(fixture.info_hash)
+            mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash], delete_files=False), ref="same-ref")
+        case.check(len(set(inputs)) == 2 and first.call("torrents.list", {})["result"]["torrents"] == [],
+                   "distinct client names apply both independent removals with the same ref", str(inputs))
+
+
+def remove_requires_flag(binary, systemd):
+    with api_owned("remove_requires_flag", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "required-flag")
+        fixture, _ = mutation_add_path(client, sandbox)
+        failure = mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash]), ref="missing-flag", error="invalid_args")
+        case.check(failure["error"].get("details", {}).get("key") == "delete_files", "missing delete_files names the mandatory argument", json.dumps(failure))
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check([row["hash"] for row in rows] == [fixture.info_hash] and all(path.exists() for path in fixture.files),
+                   "invalid removal changes neither ledger nor payload", json.dumps(rows))
+
+
+@contextmanager
+def held_torrent_source(case, document):
+    import http.server
+    release, entered = threading.Event(), threading.Event()
+    requests = []
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+        def do_GET(self):
+            requests.append(self.path)
+            entered.set()
+            release.wait(10)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(document)))
+                self.end_headers()
+                self.wfile.write(document)
+            except OSError:
+                pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = False
+    thread = threading.Thread(target=server.serve_forever, kwargs=dict(poll_interval=.05))
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/legal.torrent", entered, release, requests
+    finally:
+        release.set(); server.shutdown(); server.server_close(); thread.join(2)
+        case.check(not thread.is_alive(), "held HTTP fixture joins", f"alive={thread.is_alive()}")
+
+
+def add_url_pending_then_result(binary, systemd):
+    with api_owned("add_url_pending_then_result", binary, systemd) as (case, sandbox, harness, process):
+        payload = sandbox.root / "Example e2.mkv"
+        payload.write_bytes(b"legal local mutation fixture\n" * 16384)
+        fixture = fixtures.torrent_fixture(sandbox.root, [payload], name="mutation-url")
+        trace = []
+        with held_torrent_source(case, fixture.torrent.read_bytes()) as (url, entered, release, requests), \
+                ApiConn(harness) as origin, ApiConn(harness, trace=trace) as replay:
+            hello = mutation_hello(origin, "url-reconnect")
+            mutation_hello(replay, "url-reconnect")
+            case.check("mutations" in hello["caps"], "hello advertises the mutation capability", json.dumps(hello))
+            args = dict(source=dict(url=url), save_path=str(sandbox.root), stopped=True)
+            first = mutation_request(origin, "torrents.add", args, ref="test-add", instance=hello["instance"])
+            case.check(entered.wait(2) and first["result"] == dict(state="pending", ref="test-add"),
+                       "URL pending is correlated and has no fabricated hash before the fetch", json.dumps(first))
+            again = mutation_request(replay, "torrents.add", args, ref="test-add", instance=hello["instance"])
+            case.check(again["result"] == first["result"], "in-flight replay receives the stored pending response", json.dumps(again))
+            # The worker is daemon-owned; losing its original connection does not
+            # discard the result or prevent delivery to a replaying connection.
+            origin.close()
+            release.set()
+            outcome = mutation_outcome(replay, "test-add")
+            case.check(outcome.get("result", {}).get("hash") == fixture.info_hash and outcome["result"]["duplicate"] is False
+                       and requests == ["/legal.torrent"], "one real URL fetch completes on the replaying connection after original disconnect", json.dumps(outcome))
+            frozen = [json.loads(line) for line in (REPO / "contracts/ipc/v1/mutations.ndjson").read_text().splitlines()]
+            normalizer = ReplayNormalizer()
+            normalizer.compare(frozen[4]["frame"], again)
+            normalizer.compare(dict(result=frozen[12]["frame"]["result"]), dict(result=outcome["result"]))
+            case.check(True, "pending and add result match the frozen mutation fixture using P1-06 normalization", json.dumps(outcome))
+            if os.environ.get("FBT_API_CONTRACT_VALIDATOR"):
+                validate_live_contract(case, sandbox, trace)
+                # The frozen result omits optional duplicate. Keep P1-06's
+                # extra-optional rule: both present and absent must validate.
+                absent = json.loads(json.dumps(trace))
+                for row in absent:
+                    if row.get("frame", {}).get("ev") == "mutation.result":
+                        row["frame"].get("result", {}).pop("duplicate", None)
+                validate_live_contract(case, sandbox, absent, kind="optional-absent")
+            # Reconnect after completion still gets the original pending receipt,
+            # followed by the retained complete outcome.
+            late = mutation_request(replay, "torrents.add", args, ref="test-add")
+            event = mutation_outcome(replay, "test-add")
+            case.check(late["result"] == first["result"] and event == outcome,
+                       "late replay returns the original receipt and the same outcome", json.dumps(event))
+
+
+def duplicate_add(binary, systemd):
+    with api_owned("duplicate_add", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "duplicate")
+        fixture, args = mutation_add_path(client, sandbox)
+        before = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        duplicate = mutation_request(client, "torrents.add", dict(args, seed=True, stopped=False, category="changed"), ref="duplicate-path")
+        after = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(duplicate["result"]["duplicate"] is True and duplicate["result"]["hash"] == fixture.info_hash
+                   and all(before[key] == after[key] for key in ("intent", "seed", "save_path")),
+                   "duplicate path add preserves existing transfer policy", json.dumps(duplicate))
+        with fixtures.HttpFixture(sandbox.root, {"/duplicate.torrent": dict(file=str(fixture.torrent.relative_to(sandbox.root)))}) as http:
+            mutation_request(client, "torrents.add", dict(source=dict(url=http.base + "/duplicate.torrent"), stopped=False, seed=True), ref="duplicate-url")
+            event = mutation_outcome(client, "duplicate-url")
+            case.check(event["result"]["duplicate"] is True and event["result"]["hash"] == fixture.info_hash,
+                       "URL duplicate is a successful correlated result", json.dumps(event))
+
+
+def ref_reused_different_args(binary, systemd):
+    with api_owned("ref_reused_different_args", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "ref-fingerprint")
+        fixture, _ = mutation_add_path(client, sandbox)
+        args = dict(hashes=[fixture.info_hash], delete_files=False)
+        mutation_request(client, "torrents.remove", args, ref="fingerprint")
+        for op, changed in [("torrents.remove", dict(args, delete_files=True)), ("torrents.stop", dict(hashes=[fixture.info_hash]))]:
+            failure = mutation_request(client, op, changed, ref="fingerprint", error="invalid_args")
+            case.check(failure["error"]["message"] == "ref reused for a different request" and failure["error"]["details"]["key"] == "ref",
+                       "ref fingerprint rejects changed operation or arguments", json.dumps(failure))
+        # Failures are receipts too: making the missing record exist must not
+        # convert a replay of its old error into a new application.
+        missing = "b" * 40
+        stop = dict(hashes=[missing])
+        failure = mutation_request(client, "torrents.stop", stop, ref="stored-error", error="not_found")
+        mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + missing), stopped=True))
+        replay = mutation_request(client, "torrents.stop", stop, ref="stored-error", error="not_found")
+        case.check(failure["error"] == replay["error"], "replay returns the stored error after state changes", json.dumps(replay))
+
+
+def stale_instance_remove_refused(binary, systemd):
+    with api_owned("stale_instance_remove_refused", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "stale-remove")
+        fixture, _ = mutation_add_path(client, sandbox)
+        stale = ("0" if hello["instance"][0] != "0" else "1") + hello["instance"][1:]
+        failure = mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash], delete_files=True), ref="old-remove", instance=stale, error="invalid_state")
+        case.check(failure["error"]["message"] == "daemon restarted since this request; check the list" and all(path.exists() for path in fixture.files),
+                   "stale destructive intent is refused before removing data", json.dumps(failure))
+        case.check(len(client.call("torrents.list", {})["result"]["torrents"]) == 1, "stale removal retains the record")
+
+
+def stale_instance_stop_applies(binary, systemd):
+    with api_owned("stale_instance_stop_applies", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "stale-stop")
+        fixture, _ = mutation_add_path(client, sandbox)
+        mutation_request(client, "torrents.start", dict(hashes=[fixture.info_hash]))
+        stale = ("0" if hello["instance"][0] != "0" else "1") + hello["instance"][1:]
+        reply = mutation_request(client, "torrents.stop", dict(hashes=[fixture.info_hash]), ref="old-stop", instance=stale)
+        row = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(reply["result"]["state"] == "done" and row["intent"] == "pause", "stale idempotent stop still applies durable pause intent", json.dumps(reply))
+
+
+def hashes_cap_257(binary, systemd):
+    with api_owned("hashes_cap_257", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "hash-bound")
+        case.check(hello["limits"]["hashes"] == 256, "hello publishes the authoritative hash cap", json.dumps(hello["limits"]))
+        for hashes in [[], ["a" * 40] * 257]:
+            for op, extra in [("torrents.start", {}), ("torrents.stop", {}), ("torrents.remove", dict(delete_files=False)),
+                              ("torrents.set_seed", dict(on=True)), ("torrents.set_upload_limit", dict(bps=32768))]:
+                failure = mutation_request(client, op, dict(hashes=hashes, **extra), error="invalid_args")
+                case.check(failure["error"].get("details", {}).get("key") == "hashes", "out-of-bounds hash list identifies hashes", json.dumps(failure))
+
+
+def mutation_magnets_and_file_removal(binary, systemd):
+    with api_owned("mutation_magnets_and_file_removal", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "magnet-controls")
+        digest = "c1" * 20
+        base32 = base64.b32encode(bytes.fromhex(digest)).decode()
+        result = mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + base32 + "&dn=Local%20name")), ref="base32")
+        case.check(result["result"]["hash"] == digest and result["result"]["name"] == "Local name" and result["result"]["state"] == "pending",
+                   "base32 magnet immediately has its lowercase hash and display name", json.dumps(result))
+        row = client.call("torrents.get", dict(hash=digest))["result"]["torrent"]
+        case.check(row["state"] == "metadata" and "size" not in row and "progress" not in row, "unresolved magnet has a truthful metadata row", json.dumps(row))
+        duplicate = mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btih:" + digest + "&dn=Changed"), stopped=True), ref="duplicate-magnet")
+        case.check(duplicate["result"]["duplicate"] is True and duplicate["result"]["name"] == "Local name", "duplicate magnet preserves its saved name and intent", json.dumps(duplicate))
+        mutation_request(client, "torrents.stop", dict(hashes=[digest]))
+        ledger = json.loads((Path(sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine/torrents.json").read_text())
+        case.check(next(row for row in ledger["records"] if row["hash"] == digest)["paused"], "stop of metadata persists pause before responding")
+        mutation_request(client, "torrents.add", dict(source=dict(magnet="magnet:?xt=urn:btmh:1220" + "ab" * 32)), error="unsupported")
+        fixture, _ = mutation_add_path(client, sandbox)
+        args = dict(hashes=[fixture.info_hash], delete_files=True)
+        pending = mutation_request(client, "torrents.remove", args)
+        reference = pending["result"]["ref"]
+        case.check(pending["result"]["state"] == "pending" and re.fullmatch("srv-" + hello["instance"][:8] + r"-\d+", reference),
+                   "file deletion is pending with a server-generated instance ref", json.dumps(pending))
+        mutation_outcome(client, reference)
+        case.check(not any(path.exists() for path in fixture.files), "file-removal done follows real payload deletion")
+        replay = mutation_request(client, "torrents.remove", args, ref=reference)
+        case.check(replay["result"] == pending["result"], "generated ref is replayable", json.dumps(replay))
+        mutation_outcome(client, reference)
+
+
+def mutation_url_input_bounds(binary, systemd):
+    with api_owned("mutation_url_input_bounds", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        mutation_hello(client, "url-bounds")
+        payload = sandbox.root / "input.bin"
+        payload.write_bytes(b"only local fixture bytes")
+        fixture = fixtures.torrent_fixture(sandbox.root, [payload])
+        (sandbox.root / "invalid.torrent").write_bytes(b"not bencoded torrent metadata")
+        padding = b"x" * (16 * fixtures.MIB)
+        (sandbox.root / "oversized.torrent").write_bytes(b"d7:comment" + str(len(padding)).encode() + b":" + padding + fixture.torrent.read_bytes()[1:])
+        with fixtures.HttpFixture(sandbox.root) as http:
+            for filename in ["invalid.torrent", "oversized.torrent"]:
+                reference = filename.split(".")[0]
+                reply = mutation_request(client, "torrents.add", dict(source=dict(url=http.base + "/" + filename)), ref=reference)
+                case.check(reply["result"] == dict(state="pending", ref=reference), "URL input is acknowledged before fetching", json.dumps(reply))
+                for event in client.events():
+                    if event.get("ev") == "mutation.result" and event.get("ref") == reference:
+                        case.check(event.get("outcome") == "failed" and event.get("error", {}).get("code") == "upstream",
+                                   "invalid or oversized URL metainfo fails before admission", json.dumps(event))
+                        break
+            case.check(client.call("torrents.list", {})["result"]["torrents"] == [], "rejected URL bodies create no torrent records")
+
+
+def ref_survives_engine_restart(binary, systemd):
+    with api_owned("ref_survives_engine_restart", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
+        hello = mutation_hello(client, "engine-slot-replay")
+        fixture, args = mutation_add_path(client, sandbox)
+        remove = dict(hashes=[fixture.info_hash], delete_files=False)
+        first = mutation_request(client, "torrents.remove", remove, ref="before-slot-restart")
+        mutation_request(client, "torrents.add", args)
+        mutation_request(client, "app.restart", dict(scope="engine"), ref="slot-restart")
+        def restarted():
+            info = client.call("app.info")["result"]
+            return info["state"] == "running" and info["engine_epoch"] > hello["engine_epoch"], json.dumps(info)
+        harness.wait_for(restarted, "engine slot restarts within the same daemon instance")
+        replay = mutation_request(client, "torrents.remove", remove, ref="before-slot-restart", instance=hello["instance"])
+        rows = client.call("torrents.list", {})["result"]["torrents"]
+        case.check(first["result"] == replay["result"] and [row["hash"] for row in rows] == [fixture.info_hash],
+                   "engine replacement retains the daemon-owned ref ring", json.dumps(replay))
+
+
+MUTATION_CASES = (ref_replay_remove, ref_per_client, remove_requires_flag, add_url_pending_then_result,
+                  duplicate_add, ref_reused_different_args, stale_instance_remove_refused,
+                  stale_instance_stop_applies, hashes_cap_257, mutation_magnets_and_file_removal, mutation_url_input_bounds, ref_survives_engine_restart)
+
+@contextmanager
+def imdb_owned(name, binary, systemd, oversized=False):
+    """Real daemon + local IMDb HTTP endpoints in one private cache tree."""
+    import gzip
+    import shutil
+    with Case("daemon", name) as case, Sandbox() as sandbox:
+        directory = sandbox.root / "imdb-http"
+        shutil.copytree(fixtures.HERE / "fixtures/imdb", directory)
+        (directory / "ratings.tsv.gz").write_bytes(gzip.compress((directory / "ratings.tsv").read_bytes(), mtime=0))
+        if oversized:
+            # Generated locally rather than checking an 8 MiB padding blob into git.
+            poster = directory / "poster-oversized.jpg"
+            poster.write_bytes((directory / "poster.jpg").read_bytes() + b"x" * (8 * 1024 * 1024))
+            routes = json.loads((directory / "routes.json").read_text())
+            routes["/poster.jpg"]["file"] = poster.name
+            (directory / "routes.json").write_text(json.dumps(routes))
+        cache = Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent"
+        (cache / "title.ratings.tsv").write_bytes((directory / "ratings.tsv").read_bytes())
+        with fixtures.imdb_server(directory) as source:
+            sandbox.env["FBT_IMDB_BASE_URL"] = source.base
+            with Harness(case, binary, sandbox, systemd) as harness:
+                process = harness.start_serve()
+                if not (harness.receive_ready() and harness.wait_engine()):
+                    raise RuntimeError("private IMDb daemon did not start")
+                try:
+                    yield case, sandbox, harness, source, directory, cache
+                finally:
+                    harness.stop_serve(process)
+                    harness.lock_free()
+
+
+def imdb_index_loaded_once(binary, systemd):
+    import gzip
+    with imdb_owned("imdb_index_loaded_once", binary, systemd) as (case, sandbox, harness, source, directory, cache):
+        with ApiConn(harness) as client:
+            hello = client.hello()
+            case.check("imdb" in hello["result"]["caps"], "daemon advertises implemented IMDb capability", str(hello))
+            first = client.call("imdb.lookup", dict(name="Local Fixture"))["result"]["card"]
+            second = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+            count = harness.stderr().count("imdb index loaded")
+            case.check(count == 1 and first == second and first["rating"] == 8.2 and first["kind"] == "tvSeries",
+                       "two lookups reuse one lazy index", f"imdb index loaded count={count}; cards={first!r}, {second!r}")
+            poster = Path(first["poster_path"])
+            case.check(poster == cache / "posters/tt1234001.jpg" and 0 < poster.stat().st_size < 8 * 1024 * 1024,
+                       "poster_path is an existing bounded local id cache file", f"path={poster}; bytes={poster.stat().st_size}")
+            changed = b"tconst\taverageRating\tnumVotes\ntt1234001\t9.1\t4321\n"
+            (directory / "ratings.tsv.gz").write_bytes(gzip.compress(changed, mtime=0))
+            refreshed = client.call("imdb.lookup", dict(id="tt1234001", refresh=True))["result"]["card"]
+            case.check(refreshed["rating"] == 9.1 and refreshed["votes"] == 4321 and harness.stderr().count("imdb index loaded") == 2,
+                       "forced refresh redownloads and replaces a live daemon index", str(refreshed))
+            (directory / "ratings.tsv.gz").write_bytes(gzip.compress(b"tconst\taverageRating\tnumVotes\n", mtime=0))
+            unknown = client.call("imdb.lookup", dict(id="tt1234001", refresh=True))["result"]["card"]
+            case.check("rating" not in unknown and "votes" not in unknown,
+                       "ratings absent at source remain absent after refresh", str(unknown))
+            source.routes["/title.ratings.tsv.gz"] = dict(status=503, json={})
+            client.call("imdb.lookup", dict(id="tt1234001", refresh=True), error="upstream")
+            for args in ({}, dict(id="tt1234001", name="Local Fixture"), dict(id="tt../../unsafe"), dict(name=" ")):
+                client.call("imdb.lookup", args, error="invalid_args")
+
+
+def imdb_poster_cap(binary, systemd):
+    with imdb_owned("imdb_poster_cap", binary, systemd, oversized=True) as (case, sandbox, harness, source, directory, cache):
+        with ApiConn(harness) as client:
+            client.hello()
+            card = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+            errors = [json.loads(line.split("WARN imdb poster ", 1)[1]) for line in harness.stderr().splitlines() if "WARN imdb poster " in line]
+            size = (directory / "poster-oversized.jpg").stat().st_size
+            case.check(size > 8 * 1024 * 1024 and "poster_path" not in card and not (cache / "posters/tt1234001.jpg").exists()
+                       and errors and errors[-1]["code"] == "upstream" and errors[-1]["retryable"] and errors[-1]["details"]["source"] == "imdb.poster",
+                       "oversized poster is refused, typed upstream diagnostic retained, card remains usable",
+                       f"fixture bytes={size}; card={card!r}; error envelope={errors!r}")
+            # Distinct ids avoid title-cache hits and exercise each JSON read cap.
+            for route, title_id in (("/suggestion/t/tt1234002.json", "tt1234002"), ("/w/api.php", "tt1234003"),
+                                    ("/api/rest_v1/page/summary/Local_Fixture", "tt1234004")):
+                suggestion = json.loads((directory / "suggest.json").read_text())
+                suggestion["d"][0]["id"] = title_id
+                source.routes["/suggestion/t/" + title_id + ".json"] = dict(json=suggestion)
+                old = source.routes.get(route)
+                source.routes[route] = dict(json={"padding": "x" * (2 * 1024 * 1024)})
+                failure = client.call("imdb.lookup", dict(id=title_id), error="upstream")
+                case.check(failure["error"]["retryable"] and failure["error"]["details"]["source"] == "imdb",
+                           "2 MiB JSON cap returns typed upstream", f"route={route}; envelope={failure!r}")
+                if old is None: source.routes.pop(route, None)
+                else: source.routes[route] = old
+
+
+def imdb_poster_atomic(binary, systemd):
+    with imdb_owned("imdb_poster_atomic", binary, systemd) as (case, sandbox, harness, source, directory, cache):
+        path = cache / "posters/tt1234001.jpg"
+        final = (directory / "poster.jpg").read_bytes()
+        stop, started, seen_final = threading.Event(), threading.Event(), threading.Event()
+        observations = []
+        artifact = case.path.with_suffix(".reader-sizes.jsonl")
+        def reader():
+            with artifact.open("w") as output:
+                while not stop.is_set():
+                    try: data = path.read_bytes()
+                    except FileNotFoundError: data = b""
+                    observations.append(len(data))
+                    output.write(json.dumps(dict(bytes=len(data))) + "\n"); output.flush()
+                    started.set()
+                    if data == final: seen_final.set()
+                    stop.wait(.001)
+        thread = threading.Thread(target=reader)
+        thread.start()
+        try:
+            if not started.wait(2): raise TimeoutError("poster reader did not start")
+            with ApiConn(harness) as client:
+                client.hello()
+                card = client.call("imdb.lookup", dict(id="tt1234001"))["result"]["card"]
+                completed = seen_final.wait(2)
+        finally:
+            stop.set(); thread.join(2)
+        step = case.step("observe local poster during HTTP lookup", "concurrent reader sees only absent or complete atomic poster")
+        step.close(completed and not thread.is_alive() and set(observations) == {0, len(final)} and path.read_bytes() == final,
+                   f"every observed size={observations}; final bytes={len(final)}; card={card!r}", [artifact])
+
+
+CASES = {function.__name__: function for function in
+         (imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,
@@ -2984,7 +3625,11 @@ CASES = {function.__name__: function for function in
           ninth_inflight_busy, api_quiesce_bye, api_torrent_operations, dispatch_queue_busy,
           api_concurrent_adds, api_collection_cap, api_replay_normalization, api_start_results,
           api_missing_completed_payload, api_loopback_seed_receives,
+
+          api_concurrent_adds, api_collection_cap, api_subscriptions_deferred, api_replay_normalization, api_start_results,
+          api_missing_completed_payload, api_loopback_seed_receives, deferred_add_saved_record, deferred_add,
           contract_hello, contract_errors, contract_torrents)}
+CASES.update((function.__name__, function) for function in MUTATION_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",
@@ -2996,6 +3641,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("binary", nargs="?", type=Path, default=REPO / "target/debug/fbittorrent")
     parser.add_argument("--list", action="store_true", help="list named cases without starting processes")
+    parser.add_argument("--mutations", action="store_true", help="run the P1-09 mutation cases")
     parser.add_argument("--case", choices=CASES,
                         help="run one named case; systemd_without_bus_address requires --systemd")
     parser.add_argument("--contract-validator", type=Path,
@@ -3008,13 +3654,15 @@ def main():
         os.environ["FBT_API_CONTRACT_VALIDATOR"] = str(args.contract_validator.resolve())
     if args.case == "install_atomic" and os.environ.get("FBT_TEST_INSTALL") != "1":
         parser.error("install_atomic requires FBT_TEST_INSTALL=1 and the outer release-lock/memory-scope wrapper")
+    if args.case == "deferred_add" and os.environ.get("FBT_TEST_VPN") != "1":
+        parser.error("deferred_add requires FBT_TEST_VPN=1 (owned VPN namespace fixture)")
     if args.case in SYSTEMD_CASES and not args.systemd:
         parser.error(f"{args.case} requires --systemd")
     if args.list:
         print("\n".join(CASES))
         return 0
     started = time.monotonic()
-    for name in ([args.case] if args.case else [name for name in CASES if name != "install_atomic" and (args.systemd or name not in SYSTEMD_CASES)]):
+    for name in ([args.case] if args.case else [function.__name__ for function in MUTATION_CASES] if args.mutations else [name for name in CASES if name != "install_atomic" and (name != "deferred_add" or os.environ.get("FBT_TEST_VPN") == "1") and (args.systemd or name not in SYSTEMD_CASES)]):
         CASES[name](args.binary.resolve(), args.systemd)
     print(f"daemon harness: {time.monotonic() - started:.3f} seconds")
     return suite_status("daemon")

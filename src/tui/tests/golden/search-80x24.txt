@@ -20,5 +20,5 @@
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Results] (Enter) Download  (Shift+O) Source  (F)ollow show  (/) Query  (?) Help
-(1–4) Screens  (Tab/Shift+Tab) Switch screen  (↑↓) Move
+[Results] (Enter) Download  (P) Providers  (a) Add  (i) IMDb …          (?) Help
+Sintel

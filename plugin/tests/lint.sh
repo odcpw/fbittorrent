@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# P0-11 guard; P2-04 can extend this with the remaining plugin lint rules.
+# Plugin invariants, including the P0-07 and P0-11 regressions.
 set -euo pipefail
-model="$(dirname "$0")/../oliver.torrents/Model.js"
+root="${FBT_PLUGIN_SOURCE:-$(dirname "$0")/../oliver.torrents}"
+model="$root/Model.js"
+python3 "$(dirname "$0")/check-structure.py" "$root"
+python3 "$(dirname "$0")/../../scripts/check-widget-online.py" --self-test "$root/Service.qml"
 if rg -n 'num_seeds\s*\+\s*["\x27]s["\x27]' "$model"; then
   echo 'Unknown native seed counts must not become an s-suffixed widget count.' >&2
   exit 1
@@ -10,8 +13,11 @@ node - "$model" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const model = {};
-vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8').replace(/^\.pragma library\s*/, ''), model);
+const source = p => fs.readFileSync(p, 'utf8').replace(/^\.(?:pragma|import).*$/gm, '');
+const glyphs = {};
+vm.runInNewContext(source(require('node:path').join(require('node:path').dirname(process.argv[2]), 'Glyphs.js')), glyphs);
+const model = {Glyphs:glyphs};
+vm.runInNewContext(source(process.argv[2]), model);
 const torrent = {state: 'downloading', progress: 0.42, size: 1024 * 1024,
   dlspeed: 2048, upspeed: 0, eta: 65, num_seeds: 0, num_leechs: 7,
   ratio: 0, up_limit: 32768, tags: '', seq_dl: false, f_l_piece_prio: false};

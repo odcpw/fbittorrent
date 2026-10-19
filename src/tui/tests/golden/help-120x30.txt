@@ -1,30 +1,30 @@
 [ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮0 KiB/s  default
 ╭ Torrents (3) ───│                                                                                  │─────────────────╮
-│                 │ GLOBAL   (1) Torrents · (2) Search · (3) Shows · (4) RSS                         │                 │
-│   NAME          │          (Tab/Shift+Tab) Next/previous screen                                    │PEED     ETA SFU │
-│ ▌ The Diplomat S│          (?) Help · (Esc) Leave input, close a dialog or return                  │B/s   4m57s SF·  │
-│   Sintel.2010.10│          Letters in parentheses use lowercase; Shift is explicit.                │GiB         SF·  │
-│   Other.Movie.20│          (F6) Download queue, encryption and VPN (native engine)                 │s      0s SF·    │
-│                 │          (Q)uit and stop the engine · Shift+Q also quits                         │                 │
-│                 │          (A)dd URL/magnet · F4 toggles seeding in the add prompt                 │                 │
-│                 │          (C)lipboard · arrows or j/k move · g/Shift+G first/last                 │                 │
+│                 │ GLOBAL                                                                           │                 │
+│   NAME          │   (1) Torrents                                                                   │PEED     ETA SFU │
+│ ▌ The Diplomat S│   (2) Search                                                                     │B/s   4m57s SF·  │
+│   Sintel.2010.10│   (3) Shows                                                                      │GiB         SF·  │
+│   Other.Movie.20│   (4) RSS                                                                        │s      0s SF·    │
+│                 │   (Tab) Next screen                                                              │                 │
+│                 │   (Shift+Tab) Previous screen                                                    │                 │
+│                 │   (?) Help                                                                       │                 │
+│                 │   (F6/,) Settings                                                                │                 │
+│                 │   (q/Ctrl+C) Close this UI                                                       │                 │
+│                 │   (Q) Stop fbittorrent                                                           │                 │
+│                 │   (c) Clipboard                                                                  │                 │
+│                 │   (r) Refresh                                                                    │                 │
+│                 │   (a) Add                                                                        │                 │
 │                 │                                                                                  │                 │
-│                 │ TORRENTS (Enter) Files · (O)pen downloaded file/folder                           │                 │
-│                 │          (P)ause/resume · (U) Allow/stop seeding                                 │                 │
-│                 │          (D) Remove, keep files · (Shift+D) Delete with files                    │                 │
-│                 │          (I) IMDb · (W)ikipedia · (Shift+F) Follow this show                     │                 │
-│                 │          Streaming priority is automatic; file selection supports include/skip.  │                 │
-│                 │                                                                                  │                 │
-│                 │ SEARCH   Query: type + (Enter) Search; empty query browses lists                 │                 │
-│                 │          (Down/Esc) Leave query · (/) Edit query from results                    │                 │
-│                 │          Results: (Enter) Download · (Shift+O) Source page                       │                 │
-│                 │          (S) Providers · (B)rowse lists · (F)ollow show                          │                 │
-│                 │          (I) IMDb · (W)ikipedia; press Esc before ? in the query                 │                 │
-│                 │                                                                                  │                 │
-│                 │ BROWSE   (Enter) Load selected list or open a browser-only site                  │                 │
-│                 │          (Esc) Results · (/) Query                                               │                 │
-│                 │                                                                                  │                 │
-│                 │ PROVIDERS (Space) Toggle · (A)ll · (N)one · (O)pen site                          │                 │
-╰─────────────────│ j/k ↑/↓ wheel scroll · PgUp/PgDn · Esc or click close                            │─────────────────╯
-[Help] (↑↓) Scroll│                                                                                  │       (Esc) Close
-                  ╰──────────────────────────────────────────────────────────────────────────────────╯
+│                 │ SCREEN:TORRENTS                                                                  │                 │
+│                 │   (j/↓) Next                                                                     │                 │
+│                 │   (k/↑) Previous                                                                 │                 │
+│                 │   (g/Home) First                                                                 │                 │
+│                 │   (G/End) Last                                                                   │                 │
+│                 │   (PgDn) Page down                                                               │                 │
+│                 │   (PgUp) Page up                                                                 │                 │
+│                 │   (Enter) Files                                                                  │                 │
+│                 │   (o) Open                                                                       │                 │
+│                 │   (p/Space) Pause/resume                                                         │                 │
+╰─────────────────│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │─────────────────╯
+[Help] (Esc) Close│                                                                                  │ast       (?) Help
+The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

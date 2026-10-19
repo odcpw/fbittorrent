@@ -4,21 +4,27 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
+import "components"
+import "components" as Components
 import qs.Ui
 import qs.Ui as Ui
 import "Model.js" as Model
+import "Glyphs.js" as Glyphs
 
-Panel {
+Ui.Panel {
   id: root
   moduleName: "oliver.torrents"
   ipcTarget: "oliver.torrents"
   manageIpc: false
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  property var shell: bar && bar.shell ? bar.shell : null
+  readonly property var svc: shell ? shell.serviceFor("oliver.torrents") : null
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
+  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color barIconColor: svc.online && (svc.activeTorrents.length > 0 || svc.transferring) ? barForeground : Qt.darker(barForeground, 1.55)
+  readonly property color barIconColor: svc && svc.online && (svc.activeTorrents.length > 0 || svc.transferring) ? barForeground : Qt.darker(barForeground, 1.55)
   readonly property string tuiCommand: String(setting("tuiCommand", "omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"))
 
   // Cursor model: one highlight across header actions and torrent rows.
@@ -29,8 +35,8 @@ Panel {
   readonly property int headerCount: 4
   // The widget only exists while the backend runs: launching fbittorrent brings
   // it up, stopping the backend makes it leave the bar again.
-  visible: svc.online
-  readonly property var rows: svc.activeTorrents.concat(svc.otherTorrents)
+  visible: !!svc && (svc.online || setting("showWhenStopped",false) || root.opened || svc.stoppedRecently || svc.reconnecting)
+  readonly property var rows: svc ? svc.torrents : []
   property var pendingRemoval: null
 
   function requestRemoval(t) {
@@ -116,8 +122,9 @@ Panel {
   implicitHeight: button.implicitHeight
 
   onOpenedChanged: {
+    if (!svc) return
     pendingRemoval = null
-    svc.opened = opened
+    if (svc) svc.updatePopup()
     if (opened) {
       cursorActive = false
       focusSection = rows.length > 0 ? "rows" : "header"
@@ -136,10 +143,13 @@ Panel {
     ensureCursor()
   }
 
-  Service {
-    id: svc
-    settings: root.settings
-  }
+  onSettingsChanged: if (svc) svc.settings = settings
+  onSvcChanged: if (svc) { svc.registerWidget(root); svc.settings = root.settings }
+  Component.onDestruction: if (svc) svc.unregisterWidget(root)
+
+  Loader {
+    active: !!root.svc && root.svc.ipcOwner === root
+    sourceComponent: Component {
 
   IpcHandler {
     target: root.ipcTarget
@@ -153,24 +163,34 @@ Panel {
     function tui(): string { root.openTui(); return "ok" }
     // Test hook: where the keyboard cursor is. Lets a script verify key handling
     // without screenshots (see agent_ergonomics_audit/audit/regression_tests/widget_keys.sh).
+    function state(): string { return svc.stateJson() }
+    function useRuntimeDir(path: string): string { return svc.useRuntimeDir(path) }
     function cursor(): string {
       return JSON.stringify({ section: root.focusSection, row: root.rowIndex, header: root.headerIndex, active: root.cursorActive, rows: root.rows.length, opened: root.opened,
         hashes: root.rows.map(function(t) { return t.hash }), confirming: !!root.pendingRemoval, confirmFocused: cancelRemoval.activeFocus ? "cancel" : "other", pendingHash: root.pendingRemoval ? root.pendingRemoval.hash : "" })
     }
   }
+    }
+  }
 
-  BarIconButton {
+  function barClick(buttonCode) {
+    if (!svc) return
+    if (buttonCode===Qt.RightButton) { root.open(); svc.addFromClipboard() }
+    else if (buttonCode===Qt.MiddleButton) {
+      if (root.setting("middleClick","dashboard")==="tui") root.openTui()
+      else svc.openDashboard("torrents")
+    } else {
+      if (!svc.online && root.setting("showWhenStopped",false)) {svc.startDaemon();root.open()}
+      else root.toggle()
+    }
+  }
+  Components.BarIndicator {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: svc.online && svc.activeTorrents.length > 0 ? "󰇚" : "󰕒"
-    foreground: root.barIconColor
-    tooltipText: svc.online ? Model.heroMeta(svc.status) : "fbittorrent is closed"
-    onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) svc.addFromClipboard()
-      else if (buttonCode === Qt.MiddleButton) root.openTui()
-      else root.toggle()
-    }
+    service: svc
+    showRates: !!root.setting("showRates",false)
+    onPressed: function(buttonCode) { root.barClick(buttonCode) }
   }
 
   KeyboardPanel {
@@ -191,10 +211,11 @@ Panel {
         if (!root.cursorActive) { root.cursorActive = true; return }
         root.moveCursor(dx, dy)
       }
-      onActivateRequested: { if (root.pendingRemoval) root.cancelRemove(); else if (root.cursorActive) root.activateCursor() }
-      onCloseRequested: { if (root.pendingRemoval) root.cancelRemove(); else root.close() }
+      onActivateRequested: { if (svc.clipboardOffer) svc.acceptOffer(); else if (root.pendingRemoval) root.cancelRemove(); else if (root.cursorActive) root.activateCursor() }
+      onCloseRequested: { if (svc.clipboardOffer) svc.cancelOffer(); else if (root.pendingRemoval) root.cancelRemove(); else root.close() }
       onTabRequested: function(direction) { if (!root.pendingRemoval) root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (svc.clipboardOffer) { if (t==="y" || t==="Y") svc.acceptOffer(); return }
         if (root.pendingRemoval) { if (t === "y" || t === "Y") root.confirmRemove(); return }
         if (t === "a" || t === "A") svc.addFromClipboard()
         else if (t === "t" || t === "T") root.openTui()
@@ -226,15 +247,15 @@ Panel {
             id: hero
             width: parent.width
             title: "Torrents"
-            meta: Model.heroMeta(svc.status)
-            detail: Model.detailPill(svc.status)
+            meta: Model.heroMeta(svc ? svc.status : {ok:false})
+            detail: Model.detailPill(svc ? svc.status : {ok:false})
             foreground: root.foreground
             fontFamily: root.fontFamily
-            iconOpacity: svc.online ? 1.0 : 0.5
+            iconOpacity: svc && svc.online ? 1.0 : 0.5
             iconComponent: Component {
               Text {
                 textFormat: Text.PlainText
-                text: svc.activeTorrents.length > 0 ? "󰇚" : "󰕒"
+                text: svc && svc.activeTorrents.length > 0 ? Glyphs.download : Glyphs.upload
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
@@ -243,13 +264,15 @@ Panel {
             trailingControl: Component {
               Row {
                 spacing: Style.space(4)
-                HeaderAction { index: 0; iconText: "󰐕"; tooltipText: "Add magnet from clipboard (a)"; onClicked: svc.addFromClipboard() }
-                HeaderAction { index: 1; iconText: "󰆍"; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
-                HeaderAction { index: 2; iconText: "󰑐"; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
-                HeaderAction { index: 3; iconText: "󰐥"; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
+                HeaderAction { host: root; index: 0; iconText: Glyphs.add; tooltipText: "Add magnet from clipboard (a)"; onClicked: svc.addFromClipboard() }
+                HeaderAction { host: root; index: 1; iconText: Glyphs.terminal; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
+                HeaderAction { host: root; index: 2; iconText: Glyphs.refresh; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
+                HeaderAction { host: root; index: 3; iconText: Glyphs.power; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
               }
             }
           }
+
+          ClipboardOffer { width:parent.width; service:root.svc }
 
           Column {
             visible: !!root.pendingRemoval
@@ -279,7 +302,7 @@ Panel {
                 objectName: "confirm-removal"
                 text: "Remove"
                 bordered: true
-                enabled: !svc.busy
+                enabled: !!svc && !svc.busy
                 onClicked: root.confirmRemove()
               }
             }
@@ -288,10 +311,10 @@ Panel {
           Text {
             id: actionText
             textFormat: Text.PlainText
-            visible: svc.actionStatus !== "" || svc.lastError !== ""
+            visible: !!svc && (svc.actionStatus !== "" || svc.lastError !== "")
             width: parent.width
-            text: svc.actionStatus !== "" ? svc.actionStatus : svc.lastError
-            color: svc.lastError !== "" && svc.actionStatus === "" ? root.urgent : root.dim
+            text: svc ? (svc.actionStatus !== "" ? svc.actionStatus : svc.lastError) : ""
+            color: svc && svc.lastError !== "" && svc.actionStatus === "" ? root.urgent : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
@@ -307,7 +330,7 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: !svc.online
+            visible: !svc || !svc.online
             width: parent.width
             text: "fbittorrent is closed."
             color: root.dim
@@ -319,9 +342,9 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: svc.online && root.rows.length === 0
+            visible: svc && svc.online && root.rows.length === 0
             width: parent.width
-            text: "Nothing here yet.\nCopy a magnet link and press a."
+            text: svc && svc.status.loaded === false ? "Loading torrents…" : "Nothing here yet.\nCopy a magnet link and press a."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -330,24 +353,25 @@ Panel {
           }
 
           PanelSeparator {
-            visible: svc.online && root.rows.length > 0
+            visible: svc && svc.online && root.rows.length > 0
             foreground: root.foreground
           }
 
           Column {
             id: rowColumn
             objectName: "torrent-rows"
-            visible: svc.online && root.rows.length > 0
+            visible: svc && svc.online && root.rows.length > 0
             width: parent.width
             spacing: Style.space(6)
 
             Repeater {
-              model: root.rows
+              model: svc ? svc.torrentModel : null
               TorrentRow {
-                required property var modelData
+                host: root
+                required property var model
                 required property int index
                 width: rowColumn.width
-                torrent: modelData
+                torrent: model
                 rowIdx: index
               }
             }
@@ -357,168 +381,5 @@ Panel {
     }
   }
 
-  component HeaderAction: PanelActionButton {
-    property int index: 0
-    foreground: root.foreground
-    fontFamily: root.fontFamily
-    bordered: true
-    hasCursor: root.cursorActive && root.focusSection === "header" && root.headerIndex === index
-    onHovered: function(on) { if (on) root.setHeaderCursor(index) }
-  }
 
-  component FullTextTip: PanelToolTip {
-    id: tip
-    delay: 500
-    width: panelFlick.width
-    x: 0
-    y: parent ? parent.height + Style.space(6) : 0
-    fontFamily: root.fontFamily
-    contentItem: Text {
-      textFormat: Text.PlainText
-      text: tip.text
-      color: tip.panelForeground
-      font.family: tip.fontFamily
-      font.pixelSize: tip.fontSize
-      wrapMode: Text.Wrap
-      leftPadding: Border.left(tip.panelBorderSpec) + Style.spacing.controlPaddingX
-      rightPadding: Border.right(tip.panelBorderSpec) + Style.spacing.controlPaddingX
-      topPadding: Border.top(tip.panelBorderSpec) + Style.spacing.controlPaddingY
-      bottomPadding: Border.bottom(tip.panelBorderSpec) + Style.spacing.controlPaddingY
-    }
-  }
-
-  component TorrentRow: CursorSurface {
-    id: row
-    property var torrent: null
-    property int rowIdx: 0
-    readonly property bool active: torrent ? Model.isActive(torrent) : false
-    readonly property bool stopped: torrent ? Model.isStopped(torrent) : false
-    readonly property real progress: torrent ? Math.max(0, Math.min(1, Number(torrent.progress))) : 0
-
-    hasCursor: root.cursorActive && root.focusSection === "rows" && root.rowIndex === rowIdx
-    foreground: root.foreground
-    implicitHeight: content.implicitHeight + Style.spacing.rowPaddingX
-
-    MouseArea {
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      acceptedButtons: Qt.LeftButton | Qt.MiddleButton
-      onEntered: root.setRowCursor(row.rowIdx)
-      onClicked: function(mouse) {
-        if (mouse.button === Qt.MiddleButton) svc.toggleTorrent(row.torrent)
-        else svc.openTorrent(row.torrent)
-      }
-    }
-
-    RowLayout {
-      id: content
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
-      anchors.rightMargin: Style.space(6)
-      spacing: Style.space(8)
-
-      Text {
-        textFormat: Text.PlainText
-        text: row.torrent ? Model.glyph(row.torrent) : ""
-        color: row.active ? root.foreground : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.icon
-        Layout.alignment: Qt.AlignVCenter
-      }
-
-      ColumnLayout {
-        Layout.fillWidth: true
-        spacing: Style.space(3)
-
-        Text {
-          id: nameText
-          textFormat: Text.PlainText
-          Layout.fillWidth: true
-          text: row.torrent ? row.torrent.name : ""
-          color: row.stopped ? root.dim : root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          elide: Text.ElideMiddle
-          HoverHandler { id: nameHover }
-          FullTextTip {
-            parent: nameText
-            visible: nameHover.hovered && nameText.truncated
-            text: nameText.text + "\n" + metaText.text
-          }
-        }
-
-        // Thin progress rule, only while there is progress worth showing.
-        Item {
-          Layout.fillWidth: true
-          implicitHeight: Style.space(3)
-          visible: row.progress < 1 || row.active
-          Rectangle {
-            anchors.fill: parent
-            radius: height / 2
-            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
-          }
-          Rectangle {
-            width: parent.width * row.progress
-            height: parent.height
-            radius: height / 2
-            color: row.active ? root.foreground : root.dim
-            Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-          }
-        }
-
-        Text {
-          id: metaText
-          textFormat: Text.PlainText
-          Layout.fillWidth: true
-          text: row.torrent ? Model.stateLabel(row.torrent) + " · " + Model.meta(row.torrent) : ""
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
-          HoverHandler { id: metaHover }
-          FullTextTip {
-            parent: metaText
-            visible: metaHover.hovered && metaText.truncated
-            text: nameText.text + "\n" + metaText.text
-          }
-        }
-      }
-
-      PanelActionButton {
-        objectName: "toggle-" + (row.torrent ? row.torrent.hash : "")
-        visible: !(row.torrent && Number(row.torrent.completion_on || 0) > 0
-                   && Number(row.torrent.ratio_limit) === 0)
-        iconText: row.stopped ? "󰐊" : "󰏤"
-        tooltipText: row.stopped ? "Start (p)" : "Stop (p)"
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-        enabled: !svc.busy
-        Layout.alignment: Qt.AlignVCenter
-        onClicked: svc.toggleTorrent(row.torrent)
-      }
-      PanelActionButton {
-        iconText: "󰝰"
-        tooltipText: "Open the file, or the folder (o)"
-        foreground: root.foreground
-        fontFamily: root.fontFamily
-        enabled: !svc.busy
-        Layout.alignment: Qt.AlignVCenter
-        onClicked: svc.openTorrent(row.torrent)
-      }
-      PanelActionButton {
-        objectName: "trash-" + (row.torrent ? row.torrent.hash : "")
-        iconText: "󰆴"
-        tooltipText: "Remove torrent, keep files (d)"
-        foreground: root.foreground
-        hoverColor: root.urgent
-        fontFamily: root.fontFamily
-        enabled: !svc.busy
-        Layout.alignment: Qt.AlignVCenter
-        onClicked: root.requestRemoval(row.torrent)
-      }
-    }
-  }
 }

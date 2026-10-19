@@ -202,6 +202,7 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    ImdbLookup(ImdbLookupResult),
     Hello(HelloResult),
     AppInfo(AppInfo),
     AppClient(EmptyResult),
@@ -226,6 +227,7 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
             "hello" => serde_json::from_value(result).map(Self::Hello),
             "app.info" => serde_json::from_value(result).map(Self::AppInfo),
             "app.client" => serde_json::from_value(result).map(Self::AppClient),
@@ -259,4 +261,10 @@ impl Reply {
     pub fn to_value(&self) -> Result<Value, serde_json::Error> {
         serde_json::to_value(self)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImdbLookupResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub card: Option<ImdbCard>,
 }

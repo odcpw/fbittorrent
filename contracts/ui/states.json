@@ -1,0 +1,155 @@
+[
+  {
+    "state": "metadata",
+    "qml_glyph": "U+F01D8",
+    "text_glyph": "◌",
+    "word": "Metadata",
+    "short": "Meta",
+    "secondary": "elapsed"
+  },
+  {
+    "state": "checking",
+    "qml_glyph": "U+F04E6",
+    "text_glyph": "⟳",
+    "word": "Checking",
+    "short": "Check",
+    "secondary": "percent checked"
+  },
+  {
+    "state": "downloading",
+    "qml_glyph": "U+F01DA",
+    "text_glyph": "↓",
+    "word": "Downloading",
+    "short": "Down",
+    "secondary": "rate · eta · peers"
+  },
+  {
+    "state": "stalled",
+    "qml_glyph": "U+F051F",
+    "text_glyph": "~",
+    "word": "Stalled",
+    "short": "Stall",
+    "secondary": "no peers or no data"
+  },
+  {
+    "state": "queued",
+    "qml_glyph": "U+F0150",
+    "text_glyph": "…",
+    "word": "Queued",
+    "short": "Queue",
+    "secondary": "slots busy"
+  },
+  {
+    "state": "paused",
+    "qml_glyph": "U+F03E4",
+    "text_glyph": "‖",
+    "word": "Paused",
+    "short": "Pause",
+    "secondary": "percent"
+  },
+  {
+    "state": "done",
+    "qml_glyph": "U+F012C",
+    "text_glyph": "✓",
+    "word": "Done",
+    "short": "Done",
+    "secondary": "size"
+  },
+  {
+    "state": "seeding",
+    "qml_glyph": "U+F0552",
+    "text_glyph": "↑",
+    "word": "Seeding",
+    "short": "Seed",
+    "secondary": "rate · ratio"
+  },
+  {
+    "state": "waiting_vpn",
+    "qml_glyph": "U+F099D",
+    "text_glyph": "⏚",
+    "word": "Waiting for VPN",
+    "short": "VPN",
+    "secondary": "interface name"
+  },
+  {
+    "state": "error",
+    "qml_glyph": "U+F0026",
+    "text_glyph": "!",
+    "word": "Error",
+    "short": "Error",
+    "secondary": "the message"
+  },
+  {
+    "state": "disk_full",
+    "qml_glyph": "U+F0026",
+    "text_glyph": "!",
+    "word": "Disk full",
+    "short": "Disk",
+    "secondary": "free and needed bytes"
+  },
+  {
+    "state": "ready",
+    "qml_glyph": "U+F040D",
+    "text_glyph": "▶",
+    "word": "Ready to watch",
+    "short": "Ready",
+    "secondary": "buffered or may stall"
+  },
+  {
+    "state": "added_before",
+    "qml_glyph": "U+F0415",
+    "text_glyph": "+",
+    "word": "Added before",
+    "short": "n/a",
+    "secondary": ""
+  },
+  {
+    "state": "in_list",
+    "qml_glyph": "U+F0415",
+    "text_glyph": "+",
+    "word": "In your list",
+    "short": "n/a",
+    "secondary": ""
+  },
+  {
+    "state": "unread",
+    "qml_glyph": "U+25CF",
+    "text_glyph": "●",
+    "word": "Unread",
+    "short": "n/a",
+    "secondary": ""
+  },
+  {
+    "state": "pending",
+    "qml_glyph": "U+F03E4",
+    "text_glyph": "‖",
+    "word": "Pending",
+    "short": "",
+    "secondary": "",
+    "verbs": [
+      "pausing…",
+      "resuming…",
+      "removing…",
+      "adding…",
+      "checking…"
+    ]
+  },
+  {
+    "state": "reason",
+    "qml_glyph": "U+F0026",
+    "text_glyph": "!",
+    "word": "Reason",
+    "short": "Why",
+    "secondary": "",
+    "phrases": {
+      "user": "paused by you",
+      "queue_full": "waiting for a download slot",
+      "complete_no_seed": "complete; seeding is off",
+      "vpn_down": "waiting for <interface>",
+      "restore_failed": "could not restore: <error>",
+      "metadata_timeout": "no peers answered",
+      "missing_files": "files are missing",
+      "disk_full": "disk full"
+    }
+  }
+]

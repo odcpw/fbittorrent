@@ -32,6 +32,38 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+#[cfg(test)]
+#[path = "server/admission_tests.rs"]
+mod admission_tests;
+#[cfg(test)]
+#[path = "server/argument_tests.rs"]
+mod argument_tests;
+#[cfg(test)]
+#[path = "server/chunk_tests.rs"]
+mod chunk_tests;
+#[path = "server/framing.rs"]
+mod framing;
+#[cfg(test)]
+#[path = "server/tests.rs"]
+mod tests;
+use framing::*;
+#[path = "server/dispatch.rs"]
+mod dispatch;
+use dispatch::*;
+#[path = "server/mutation_flow.rs"]
+mod mutation_flow;
+use mutation_flow::*;
+#[path = "server/connection.rs"]
+mod connection;
+use connection::*;
+
+#[derive(Debug)]
+struct Invalid {
+    id: Option<u64>,
+    error: Error,
+    close: bool,
+}
+
 const CONNECTIONS: usize = 32;
 const INFLIGHT: usize = 8;
 const DISPATCH: usize = 8;
@@ -40,16 +72,24 @@ const OUTGOING: usize = 512;
 const HELLO: Duration = Duration::from_secs(5);
 
 type Frame = Value;
-mod wire;
-use wire::*;
-
+// P1-09: mutation execution outlives any particular client connection.
+#[derive(Clone)]
+enum Confirmation {
+    Worker,
+    Metadata(Reply),
+    Engine(u64),
+}
+#[derive(Clone)]
 struct Background {
-    deadline: Instant,
-    reference: MutationRef,
+    ticket: mutations::Ticket,
+    op: String,
+    deadline: Option<Instant>,
+    confirmation: Option<Confirmation>,
 }
 struct Pending {
     generation: u64,
     deadline: Instant,
+    no_timeout: bool,
     after: u64,
 }
 #[derive(Default)]
@@ -73,159 +113,16 @@ struct Connection {
     read_done: AtomicBool,
     client: Mutex<ClientState>,
     pending: Mutex<BTreeMap<u64, Pending>>,
-    background: Mutex<BTreeMap<u64, Background>>,
     sequence: AtomicU64,
     out: Mutex<Outbox>,
     ready: Condvar,
     emission: Mutex<()>,
 }
-impl Connection {
-    fn send(&self, frame: Frame) {
-        let mut out = self.out.lock().unwrap();
-        if out.ending {
-            return;
-        }
-        if out.frames.len() >= OUTGOING {
-            let client = self.client.lock().unwrap();
-            if let Some(client) = &client.client {
-                eprintln!(
-                    "WARN api slow client kind={} name={} queued=512",
-                    serde_json::to_value(client.kind).unwrap(),
-                    serde_json::to_string(&client.name).unwrap()
-                );
-            }
-            out.frames.clear();
-            out.ending = true;
-            out.terminal = Some(bye(ByeReason::SlowClient));
-            let _ = self.stream.shutdown(Shutdown::Read);
-        } else {
-            out.frames.push_back(frame);
-        }
-        self.ready.notify_one();
-    }
-    fn finish(&self, reason: ByeReason) {
-        let mut out = self.out.lock().unwrap();
-        if !out.ending {
-            out.ending = true;
-            out.terminal = Some(bye(reason));
-        }
-        self.ready.notify_one();
-    }
-    fn protocol(&self, failure: Error, reason: ByeReason) {
-        self.send(json!({"ev":"error","error":failure}));
-        self.finish(reason);
-    }
-    fn reserve(&self, request: &Request) -> Result<u64, Invalid> {
-        self.expire();
-        let id = request.id.get();
-        let mut pending = self.pending.lock().unwrap();
-        if pending.contains_key(&id) {
-            return Err(Invalid {
-                id: None,
-                error: error(
-                    ErrorCode::InvalidArgs,
-                    "id is already in flight",
-                    Some("id"),
-                ),
-                close: false,
-            });
-        }
-        if pending.len() >= INFLIGHT {
-            return Err(Invalid {
-                id: Some(id),
-                error: busy("inflight"),
-                close: false,
-            });
-        }
-        let generation = self.sequence.fetch_add(1, Ordering::Relaxed);
-        let after = if matches!(request.call, Call::TorrentsAdd { .. }) {
-            95
-        } else {
-            15
-        };
-        pending.insert(
-            id,
-            Pending {
-                generation,
-                deadline: Instant::now() + Duration::from_secs(after),
-                after,
-            },
-        );
-        Ok(generation)
-    }
-    fn complete(&self, id: u64, generation: u64, result: ApiResult<Reply>) -> bool {
-        let mut pending = self.pending.lock().unwrap();
-        if !pending
-            .get(&id)
-            .is_some_and(|entry| entry.generation == generation)
-        {
-            return false;
-        }
-        let entry = pending.remove(&id).unwrap();
-        drop(pending);
-        let timely = entry.deadline > Instant::now();
-        let result = if !timely {
-            let mut failure = error(
-                ErrorCode::Timeout,
-                "operation timed out; outcome is unknown",
-                None,
-            );
-            failure.details = Some(serde_json::Map::from_iter([(
-                "after_s".into(),
-                json!(entry.after),
-            )]));
-            Err(failure)
-        } else {
-            result
-        };
-        let frame = match result {
-            Ok(result) => json!({"id":id,"ok":true,"result":result}),
-            Err(failure) => response(Some(id), failure),
-        };
-        // A collection that cannot fit is a request failure, not malformed
-        // client input. Keep its ID and the connection usable (P1-06 ruling 2).
-        let frame = if encode_frame(&frame).is_err() {
-            let mut failure = error(
-                ErrorCode::InvalidMessage,
-                "response exceeds the 1048576-byte frame cap",
-                None,
-            );
-            failure.hint =
-                Some("request a smaller collection; chunked subscriptions follow in P1-08".into());
-            response(Some(id), failure)
-        } else {
-            frame
-        };
-        self.send(frame);
-        timely
-    }
-    fn expire(&self) {
-        let mut pending = self.pending.lock().unwrap();
-        let expired: Vec<_> = pending
-            .iter()
-            .filter(|(_, entry)| entry.deadline <= Instant::now())
-            .map(|(id, entry)| (*id, entry.after))
-            .collect();
-        for (id, after) in expired {
-            pending.remove(&id);
-            let mut failure = error(
-                ErrorCode::Timeout,
-                "operation timed out; outcome is unknown",
-                None,
-            );
-            failure.details = Some(serde_json::Map::from_iter([(
-                "after_s".into(),
-                json!(after),
-            )]));
-            self.send(response(Some(id), failure));
-        }
-    }
-}
 struct Job {
     connection: Arc<Connection>,
     request: Request,
     generation: u64,
-    _activity: Option<crate::daemon::policy::Mutation>,
+    mutation: Option<mutations::Ticket>,
 }
 #[derive(Default)]
 struct Work {
@@ -237,214 +134,19 @@ struct Pool {
     work: Mutex<Work>,
     changed: Condvar,
 }
-impl Pool {
-    fn submit(&self, job: Job) -> Result<(), Job> {
-        let mut work = self.work.lock().unwrap();
-        if work.closed || work.jobs.len() >= QUEUE {
-            return Err(job);
-        }
-        work.jobs.push_back(job);
-        self.changed.notify_one();
-        Ok(())
-    }
-    fn next(&self) -> Option<Job> {
-        let mut work = self.work.lock().unwrap();
-        while work.jobs.is_empty() && !work.closed {
-            work = self.changed.wait(work).unwrap();
-        }
-        work.jobs.pop_front()
-    }
-    fn close(&self) {
-        self.work.lock().unwrap().closed = true;
-        self.changed.notify_all();
-    }
-}
 struct Shared {
     daemon: Arc<Daemon>,
-    bus: Arc<bus::Bus>,
     pool: Pool,
     clients: Mutex<HashMap<u64, Arc<Connection>>>,
     counts: Mutex<ClientCounts>,
     began: Instant,
     stopping: AtomicBool,
-}
-impl Shared {
-    fn presence(&self, connection: &Connection) {
-        let client = connection.client.lock().unwrap();
-        let interactive = client.interactive && client.client.as_ref()
-            .is_some_and(|c| c.kind != ClientKind::Bar);
-        let glance = client.glance;
-        drop(client);
-        self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
-        self.bus.refresh();
-    }
-    fn url_outcome(
-        &self,
-        connection: &Connection,
-        reference: MutationRef,
-        result: ApiResult<Reply>,
-    ) {
-        let (outcome, error, result) = match result {
-            Ok(reply) => (
-                MutationOutcome::Done,
-                None,
-                Some(reply.to_value().unwrap().as_object().unwrap().clone()),
-            ),
-            Err(error) => (
-                if error.code == ErrorCode::Timeout {
-                    MutationOutcome::Timeout
-                } else {
-                    MutationOutcome::Failed
-                },
-                Some(error),
-                None,
-            ),
-        };
-        connection.send(
-            self.bus.publish(
-                serde_json::to_value(Event::MutationResult {
-                    seq: 0, // Assigned once by the instance-wide bus ring below.
-                    ts: now(),
-                    reference,
-                    op: "torrents.add".into(),
-                    outcome,
-                    error,
-                    result,
-                })
-                .unwrap(),
-            ),
-        );
-    }
-    fn expire_background(&self, connection: &Connection) {
-        let mut background = connection.background.lock().unwrap();
-        let expired: Vec<_> = background
-            .iter()
-            .filter(|(_, task)| task.deadline <= Instant::now())
-            .map(|(generation, _)| *generation)
-            .collect();
-        for generation in expired {
-            let task = background.remove(&generation).unwrap();
-            self.url_outcome(connection, task.reference, Err(add_timeout()));
-        }
-    }
-    fn dispatch(&self, job: Job) {
-        if !job
-            .connection
-            .pending
-            .lock()
-            .unwrap()
-            .get(&job.request.id.get())
-            .is_some_and(|p| p.generation == job.generation)
-        {
-            return;
-        }
-        let reference = job
-            .request
-            .reference
-            .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| format!("api-{}-{}", job.connection.number, job.generation));
-        if !self.daemon.is_stopping() {
-            if let Call::TorrentsAdd { args } = &job.request.call {
-                if matches!(args.source, AddSource::Url(_)) {
-                    if let Err(failure) = ops::torrents::validate_url_add(args) {
-                        job.connection
-                            .complete(job.request.id.get(), job.generation, Err(failure));
-                        return;
-                    }
-                    let Some(deadline) = job
-                        .connection
-                        .pending
-                        .lock()
-                        .unwrap()
-                        .get(&job.request.id.get())
-                        .filter(|entry| entry.generation == job.generation)
-                        .map(|entry| entry.deadline)
-                    else {
-                        return;
-                    };
-                    let reference = MutationRef::new(reference).unwrap();
-                    if !job.connection.complete(
-                        job.request.id.get(),
-                        job.generation,
-                        Ok(Reply::TorrentsAdd(AddResult {
-                            status: MutationResult::Pending {
-                                reference: reference.clone(),
-                            },
-                            hash: None,
-                            name: None,
-                            duplicate: None,
-                            deferred: None,
-                        })),
-                    ) {
-                        return;
-                    }
-                    job.connection.background.lock().unwrap().insert(
-                        job.generation,
-                        Background {
-                            deadline,
-                            reference,
-                        },
-                    );
-                    let result = ops::torrents::dispatch(&self.daemon, &job.request.call);
-                    if let Some(task) = job
-                        .connection
-                        .background
-                        .lock()
-                        .unwrap()
-                        .remove(&job.generation)
-                    {
-                        let result = if task.deadline <= Instant::now() {
-                            Err(add_timeout())
-                        } else {
-                            result
-                        };
-                        self.url_outcome(&job.connection, task.reference, result);
-                    }
-                    return;
-                }
-            }
-        }
-        let result = if self.daemon.is_stopping() {
-            Err(stopping())
-        } else {
-            match &job.request.call {
-                Call::AppInfo { .. }
-                | Call::AppNetwork { .. }
-                | Call::AppShutdown { .. }
-                | Call::AppRestart { .. } => ops::app::dispatch(
-                    &self.daemon,
-                    &job.request.call,
-                    &reference,
-                    serde_json::to_value(&*self.counts.lock().unwrap()).unwrap(),
-                    self.began.elapsed().as_secs(),
-                    self.bus.counts(),
-                ),
-                Call::Subscribe { args } => {
-                    self.bus.subscribe(EventSink(job.connection.clone()), args)
-                }
-                Call::Unsubscribe { args } => {
-                    Ok(self.bus.unsubscribe(job.connection.number, args.sub))
-                }
-                Call::TransferInfo { .. } => ops::transfer::info(&self.daemon),
-                _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
-            }
-        };
-        let activate = match &result {
-            Ok(Reply::Subscribe(sub)) => Some(sub.sub),
-            _ => None,
-        };
-        let timely = job
-            .connection
-            .complete(job.request.id.get(), job.generation, result);
-        if let Some(sub) = activate {
-            if timely {
-                self.bus.activate(job.connection.number, sub);
-            } else {
-                self.bus.unsubscribe(job.connection.number, sub);
-            }
-        }
-    }
+    event_sequence: AtomicU64,
+    mutation_ring: Mutex<mutations::Ring>,
+    mutation_sequence: AtomicU64,
+    mutation_active: Mutex<HashMap<(u64, u64), Background>>,
+    mutation_events: Mutex<VecDeque<Event>>,
+    mutation_changed: Condvar,
 }
 pub struct Server {
     path: PathBuf,
@@ -452,7 +154,7 @@ pub struct Server {
     accept: Option<JoinHandle<()>>,
     connections: Arc<Mutex<Vec<JoinHandle<()>>>>,
     dispatch: Vec<JoinHandle<()>>,
-    bus_worker: Option<JoinHandle<()>>,
+    mutation_observer: Option<JoinHandle<()>>,
     _lock: Arc<InstanceLock>,
 }
 impl Server {
@@ -470,10 +172,8 @@ impl Server {
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        let bus = bus::Bus::new(daemon.clone());
         let shared = Arc::new(Shared {
             daemon,
-            bus: bus.clone(),
             pool: Pool::default(),
             clients: Mutex::new(HashMap::new()),
             counts: Mutex::new(ClientCounts {
@@ -485,6 +185,12 @@ impl Server {
             }),
             began: Instant::now(),
             stopping: AtomicBool::new(false),
+            event_sequence: AtomicU64::new(1),
+            mutation_ring: Mutex::new(mutations::Ring::default()),
+            mutation_sequence: AtomicU64::new(1),
+            mutation_active: Mutex::new(HashMap::new()),
+            mutation_events: Mutex::new(VecDeque::new()),
+            mutation_changed: Condvar::new(),
         });
         let connections = Arc::new(Mutex::new(Vec::new()));
         // Own partially-created workers too: an OS thread-spawn failure must
@@ -495,9 +201,30 @@ impl Server {
             accept: None,
             connections: connections.clone(),
             dispatch: Vec::new(),
-            bus_worker: Some(bus.start()?),
+            mutation_observer: None,
             _lock: lock,
         };
+        let observer = shared.clone();
+        server.mutation_observer = Some(
+            thread::Builder::new()
+                .name("fbt-api-mutations".into())
+                .spawn(move || loop {
+                    let mut active = observer.mutation_active.lock().unwrap();
+                    while active.is_empty() && !observer.stopping.load(Ordering::Acquire) {
+                        active = observer.mutation_changed.wait(active).unwrap();
+                    }
+                    if observer.stopping.load(Ordering::Acquire) {
+                        break;
+                    }
+                    drop(active);
+                    observer.observe_mutations();
+                    let active = observer.mutation_active.lock().unwrap();
+                    let _guard = observer
+                        .mutation_changed
+                        .wait_timeout(active, Duration::from_millis(25))
+                        .unwrap();
+                })?,
+        );
         for index in 0..DISPATCH {
             let state = shared.clone();
             server.dispatch.push(
@@ -564,7 +291,6 @@ impl Server {
                         read_done: AtomicBool::new(false),
                         client: Mutex::new(ClientState::default()),
                         pending: Mutex::new(BTreeMap::new()),
-                        background: Mutex::new(BTreeMap::new()),
                         sequence: AtomicU64::new(1),
                         out: Mutex::new(Outbox::default()),
                         ready: Condvar::new(),
@@ -624,11 +350,11 @@ impl Server {
     }
 
     pub fn stop_accepting(&mut self) {
-        self.shared.bus.stop();
-        if let Some(thread) = self.bus_worker.take() {
-            let _ = thread.join();
+        {
+            let _active = self.shared.mutation_active.lock().unwrap();
+            self.shared.stopping.store(true, Ordering::Release);
+            self.shared.mutation_changed.notify_all();
         }
-        self.shared.stopping.store(true, Ordering::Release);
         if let Some(thread) = self.accept.take() {
             let _ = thread.join();
         }
@@ -636,6 +362,9 @@ impl Server {
     pub fn drain(&mut self, reason: StopReason) {
         self.stop_accepting();
         self.shared.pool.close();
+        if let Some(observer) = self.mutation_observer.take() {
+            let _ = observer.join();
+        }
         for thread in self.dispatch.drain(..) {
             let _ = thread.join();
         }
@@ -665,24 +394,168 @@ impl Drop for Server {
     }
 }
 
-mod transport;
-use transport::*;
-
-#[cfg(test)]
-#[path = "server/tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "server/admission_tests.rs"]
-mod admission_tests;
-
-#[cfg(test)]
-#[path = "server/argument_tests.rs"]
-mod argument_tests;
-
-mod events;
-pub(crate) use events::EventSink;
-
-#[cfg(test)]
-#[path = "server/chunk_tests.rs"]
-mod chunk_tests;
+/// Subscription producers use the same queue, capability checks and frame cap
+/// as replies. One emission guard keeps a snapshot's revision sequence atomic.
+#[derive(Clone)]
+pub(crate) struct EventSink(Arc<Connection>);
+impl EventSink {
+    pub fn id(&self) -> u64 {
+        self.0.number
+    }
+    fn checked(&self, event: Event) -> ApiResult<()> {
+        event
+            .validate()
+            .map_err(|_| error(ErrorCode::Internal, "invalid server event", None))?;
+        { self.0.client.lock().unwrap().caps.event(&event) }.map_err(|_| {
+            error(
+                ErrorCode::Internal,
+                "event requires an unnegotiated capability",
+                None,
+            )
+        })?;
+        self.0.send(serde_json::to_value(event).unwrap());
+        Ok(())
+    }
+    pub fn send(&self, event: Event) -> ApiResult<()> {
+        let _emission = self.0.emission.lock().unwrap();
+        self.checked(event)
+    }
+    pub fn snapshot(
+        &self,
+        sub: u64,
+        topic: Topic,
+        previous: u64,
+        items: Vec<Item>,
+        reason: SnapshotReason,
+    ) -> ApiResult<u64> {
+        let _emission = self.0.emission.lock().unwrap();
+        let count = items.len() as u64;
+        let mut chunks = Vec::new();
+        let mut chunk = Vec::new();
+        let mut bytes = 0;
+        // Topic and numeric envelope overhead is below 1024 bytes. Both the
+        // item-count and byte limits apply; UTF-8/escaping can exceed estimates
+        // based solely on the 1024-character torrent-name limit.
+        for item in items {
+            let size = serde_json::to_vec(&item).unwrap().len() + 1;
+            if size > LINE_OUT - 1024 {
+                return Err(error(
+                    ErrorCode::InvalidMessage,
+                    "one subscription item exceeds the frame cap",
+                    None,
+                ));
+            }
+            if chunk.len() == MAX_CHUNK_ITEMS || bytes + size > LINE_OUT - 1024 {
+                chunks.push(std::mem::take(&mut chunk));
+                bytes = 0;
+            }
+            bytes += size;
+            chunk.push(item);
+        }
+        if !chunk.is_empty() {
+            chunks.push(chunk);
+        }
+        let final_rev = previous
+            .checked_add(chunks.len() as u64 + 2)
+            .ok_or_else(|| error(ErrorCode::Internal, "subscription revision exhausted", None))?;
+        // Validate every payload before publishing the begin marker.
+        for items in &chunks {
+            let event = Event::SnapshotChunk {
+                sub,
+                topic: topic.clone(),
+                rev: 1,
+                items: items.clone(),
+            };
+            event.validate().map_err(|_| {
+                error(
+                    ErrorCode::Internal,
+                    "snapshot payload does not match topic",
+                    None,
+                )
+            })?;
+            self.0
+                .client
+                .lock()
+                .unwrap()
+                .caps
+                .event(&event)
+                .map_err(|_| {
+                    error(
+                        ErrorCode::Internal,
+                        "snapshot requires an unnegotiated capability",
+                        None,
+                    )
+                })?;
+        }
+        let mut rev = previous + 1;
+        self.checked(Event::SnapshotBegin {
+            sub,
+            topic: topic.clone(),
+            rev,
+            count,
+            reason,
+            oldest_seq: None,
+        })?;
+        for items in chunks {
+            rev += 1;
+            self.checked(Event::SnapshotChunk {
+                sub,
+                topic: topic.clone(),
+                rev,
+                items,
+            })?;
+        }
+        self.checked(Event::SnapshotEnd {
+            sub,
+            topic,
+            rev: final_rev,
+        })?;
+        Ok(final_rev)
+    }
+    pub fn added(&self, sub: u64, topic: Topic, previous: u64, items: Vec<Item>) -> ApiResult<u64> {
+        let _emission = self.0.emission.lock().unwrap();
+        let mut rev = previous;
+        let mut chunk = Vec::new();
+        let mut bytes = 0;
+        for item in items {
+            let size = serde_json::to_vec(&item).unwrap().len() + 1;
+            if size > LINE_OUT - 1024 {
+                return Err(error(
+                    ErrorCode::InvalidMessage,
+                    "one delta item exceeds the frame cap",
+                    None,
+                ));
+            }
+            if chunk.len() == MAX_CHUNK_ITEMS || bytes + size > LINE_OUT - 1024 {
+                rev = rev.checked_add(1).ok_or_else(|| {
+                    error(ErrorCode::Internal, "subscription revision exhausted", None)
+                })?;
+                self.checked(Event::Delta {
+                    sub,
+                    topic: topic.clone(),
+                    rev,
+                    changed: None,
+                    added: Some(std::mem::take(&mut chunk)),
+                    removed: None,
+                })?;
+                bytes = 0;
+            }
+            bytes += size;
+            chunk.push(item);
+        }
+        if !chunk.is_empty() {
+            rev = rev.checked_add(1).ok_or_else(|| {
+                error(ErrorCode::Internal, "subscription revision exhausted", None)
+            })?;
+            self.checked(Event::Delta {
+                sub,
+                topic,
+                rev,
+                changed: None,
+                added: Some(chunk),
+                removed: None,
+            })?;
+        }
+        Ok(rev)
+    }
+}

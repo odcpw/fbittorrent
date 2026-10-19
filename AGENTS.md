@@ -21,8 +21,11 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
   7 minutes; run `cargo build --release --locked` only when a bead's acceptance needs the release
   binary (TUI smoke tests, `native.py`).
 - Build cadence: do not build after every small edit. Finish a whole step or a coherent group of
-  changes, then `cargo check` once; run `cargo test --locked` and the e2e scripts when a feature is
-  complete. A handful of builds per bead, not dozens; the build path is shared.
+  changes, then `cargo check` once. While iterating, run only the tests that cover what you changed
+  (the bead's own cases, the touched module's unit tests). Run the full `cargo test --locked` once,
+  right before the report, and the wrapped `all.sh` once per bead only when the bead touches a shared
+  surface (daemon, engine, API server, harness); fixture-only or test-only beads skip `all.sh`. A
+  handful of builds per bead, not dozens; the build path is shared.
 - Memory: a release build of this crate peaks above 11 GB and systemd-oomd kills whole scopes when
   the desktop slice is under pressure (it killed the first swarm on 2026-10-18). Run every release
   build or `all.sh` as
@@ -44,8 +47,9 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
    your pane, with its full text in the marching orders. In a worktree never run `br` at all
    (each checkout would grow its own database and the JSONL would diverge); read the bead text
    you were sent. Never work on a bead you were not sent.
-3. Stay inside the bead's owned files. If you must touch a file another bead owns, stop and
-   report the exact file and reason instead of editing it.
+3. Stay inside the bead's owned files. If a neighbouring file must change for your bead to work,
+   make the smallest additive change and list it in your report; stop and ask only when a frozen
+   contract (fixtures, plan decisions) would have to change.
 4. Real code plus real tests in the same change. Acceptance criteria are frozen: never weaken a
    test, never turn a fixture into "live proof", never leave `todo!()`/placeholder code behind a
    passing syntax gate. If a criterion cannot be met, say so in your report and leave it unmet.
