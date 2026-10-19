@@ -976,3 +976,30 @@ cargo check --locked --tests, regression Python compilation, daemon case listing
 and size lint pass. Focused tests: agent 6, API fixtures 30, bus 6, server argument
 validation 10 (one existing harness-only ignore), watch 7; 59 passed, no failures.
 No full suite, release build or live native gate was re-run by the integrator.
+
+
+### Gate7 integration regressions (P5-03 / P3-06 / P7-02)
+
+Reconciled authorized main `027886f` with the services track, retaining disk/inhibitor/RSS/Shows/dashboard presence and watch sampling; capability bookkeeping is unioned at CLI 1.2.25 (search provenance 1.2.24, watch 1.2.25). The Torznab implementation is preserved in compiling checkpoint `3e93460`; its live acceptance remains pending. Recheck refusal now creates the staged record through `torrents.add {stage:true}` and proves its durable paused intent and unchecked visibility in the same daemon lifetime; daemon startup deliberately discards staged records (IPC staging section). Duplicate `stage:false` now requires successful `duplicate:true`, the original hash and preserved policy, matching IPC's explicit duplicate-success contract. Move's private, trackerless local-file fixture explicitly disables binding and verifies `app.network.ready=true` plus a running engine before admission. The reported transient `Waiting for lo` was not reproduced: the supplied release binary and previous debug binary both reported loopback ready in foreground/systemd probes; no unsupported causal claim is made. Deferred CLI helper imports remove the watch/catalogue registration cycle. Main's Log tab is added to the two watch goldens without changing readiness expectations.
+
+`python3 target/test-logs/track-B-regressions/run-cases.py {foreground,systemd}-release /home/oliver/Projects/odcpw/fbittorrent-gate/target/release/fbittorrent recheck_staged_invalid_state api_torrent_operations move_verb`: all three pass in each mode; logs `target/test-logs/track-B-regressions/{foreground,systemd}-release/{daemon,agent_contract}/*.jsonl`. The same three plus `staged_discarded_at_restart`, `recheck_dormant`, `playable_two_file_mid_piece` pass on the merged debug binary in each mode, under `{foreground,systemd}-debug/` (12 cases). `cargo check --locked --tests`, `cargo build --locked`, the size ratchet, and catalogue `api_list_matches` pass (`check.*`, `debug.*`, `sizes.*`, `catalogue/`). The first full root test run passed 534 tests and exposed two integration-only assertions: missing patch-history documentation and the watch golden's missing Log tab. After correcting them, focused `cargo test --locked -p fbittorrent agent:: -- --nocapture` passes 7/7 (`merged-agent.*`) and the watch golden test passes (`merged-watch.*`); the failed full attempt is retained in `full.*`. No release build or all.sh was repeated for this requested focused repair.
+
+Final merged-tree `cargo test --locked`: **536 passed, 0 failed, 3 ignored** in 9.38 s (`target/test-logs/track-B-regressions/full-final.{log,jsonl}`); this second invocation only reran the now-cached suite after the first run identified the two repaired integration assertions. The requested three regression fixes are met. Follow-up: capture the actual kernel readiness error if the transient loopback failure recurs; existing logs showed only its waiting label.
+
+### Integration of the gate fixes and Torznab checkpoint (2026-10-19)
+
+Merged services tip b5ae95a, including the authorized partial P7-01 checkpoint
+3e93460, onto f086ed9. The checkpoint stays open: this integration does not
+claim live Torznab qualification. Current peers/download-limit capabilities,
+disk/inhibitor/watch ordering, and the actual IMDb replacement-daemon cleanup
+are preserved. The additive Torznab CLI/provider surface receives unique contract
+patch 1.2.28; preceding patches 1.2.26 and 1.2.27 remain unchanged.
+
+Integration evidence: target/test-logs/integration/batch13-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests pass: search 27 (including four Torznab controls),
+agent 6, API fixtures 30, watch rendering 1; 64 passed, no failures. The owner's
+retained foreground/systemd debug JSONL for recheck_staged_invalid_state,
+api_torrent_operations and move_verb was inspected: all six cases passed. Those
+are owner-run evidence, not new live runs by the integrator. No full suite, release
+build or all.sh was run for integration.

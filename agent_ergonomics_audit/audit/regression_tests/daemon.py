@@ -1356,7 +1356,11 @@ def api_torrent_operations(binary, systemd):
         after_restore=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
         case.check(duplicate_restore["duplicate"] and all(before_restore.get(key)==after_restore.get(key) for key in ("seed","origin","save_path","upload_policy")),
                    "P6-08 restore of an existing row is an idempotent duplicate preserving policy",json.dumps(dict(reply=duplicate_restore,before=before_restore,after=after_restore)))
-        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
+        explicit_duplicate = client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False))["result"]
+        unchanged = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(explicit_duplicate["duplicate"] is True and explicit_duplicate["hash"] == fixture.info_hash
+                   and all(before_restore.get(key) == unchanged.get(key) for key in ("seed", "origin", "save_path", "upload_policy", "staged")),
+                   "stage:false is an ordinary successful duplicate preserving the existing record", json.dumps(dict(reply=explicit_duplicate, row=unchanged)))
         link = sandbox.root / "symlink.torrent"
         link.symlink_to(fixture.torrent)
         client.call("torrents.add", dict(source=dict(path=str(link))), error="invalid_args")
@@ -3624,7 +3628,8 @@ def imdb_owned(name, binary, systemd, oversized=False, with_process=False):
                     values = (case, sandbox, harness, source, directory, cache)
                     yield (*values, process) if with_process else values
                 finally:
-                    harness.stop_serve(harness.imdb_process)
+                    if harness.imdb_process.child.poll() is None:
+                        harness.stop_serve(harness.imdb_process)
                     harness.lock_free()
 
 
@@ -4086,18 +4091,21 @@ def recheck_restart_fixture(name,binary,systemd,staged=False):
         try:
             with ApiConn(h) as client:
                 client.hello()
-                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
-                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
-            h.stop_serve(process); h.notify.close()
-            ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
-            if staged:
-                record=json.loads(ledger.read_text());record["records"][0].update(staged=True,paused=True)
-                ledger.write_text(json.dumps(record))
-            process=h.start_serve();h.receive_ready();h.wait_engine()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),stage=staged))
+                if staged:
+                    ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+                    record=next(row for row in json.loads(ledger.read_text())["records"] if row["hash"]==fixture.info_hash)
+                    case.check(record["staged"] and record["paused"], "API staging durably saves paused intent before recheck", json.dumps(record))
+                else:
+                    h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
+            if not staged:
+                h.stop_serve(process); h.notify.close()
+                process=h.start_serve();h.receive_ready();h.wait_engine()
             with ApiConn(h) as client:
                 client.hello()
                 before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
                 if staged:
+                    case.check(before["staged"] and before["checked"] is False, "live staged record remains visible without payload validation", json.dumps(before))
                     refusal=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),error="invalid_state")
                     case.check(refusal["error"].get("details",{}).get("reason")=="staged",
                                "a real saved staged record is refused with invalid_state/exit-1 code",json.dumps(refusal))

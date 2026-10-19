@@ -232,6 +232,12 @@ pub(super) enum Cmd {
         /// Install a search plugin from a URL (repeatable), then exit
         #[arg(long = "install-url")]
         install_url: Vec<String>,
+        /// Install a native Jackett/Prowlarr endpoint (credentials stay in a private file)
+        #[arg(long, value_name="URL",conflicts_with_all=["install","install_url","plugins"])]
+        install_torznab:Option<String>,
+        /// Existing 0600 API-key file; the key itself never belongs on argv
+        #[arg(long,value_name="PATH",requires="install_torznab")]
+        key_file:Option<std::path::PathBuf>,
         /// List installed providers, then exit
         #[arg(long)]
         plugins: bool,

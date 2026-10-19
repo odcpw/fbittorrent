@@ -25,7 +25,7 @@ pub fn dispatch(daemon: &Daemon, owner: u64, call: &Call) -> ApiResult<Reply> {
                 .into_iter()
                 .map(|p| Provider {
                     name: p.name,
-                    kind: ProviderKind::Nova,
+                    kind: if p.kind=="torznab" {ProviderKind::Torznab}else{ProviderKind::Nova},
                     enabled: p.enabled,
                     full_name: (!p.full_name.is_empty()).then_some(p.full_name),
                     url: (!p.url.is_empty()).then_some(p.url),

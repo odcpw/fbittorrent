@@ -8,9 +8,15 @@ import socket
 import threading
 import time
 
-import agent_contract as a
 import daemon as d
 from daemon_search import groups, live
+
+
+def cli(*args, **kwargs):
+    # daemon registers these cases while importing; load the CLI helper only
+    # when a case runs so direct agent_stream imports remain acyclic.
+    from agent_contract import cli as run
+    return run(*args, **kwargs)
 
 
 def engines(box, names=('shape',)):
@@ -44,7 +50,7 @@ def cli_search_both_paths_identical(binary,systemd):
         with d.ApiConn(h) as observer:
             observer.hello();observer.call('subscribe',dict(topics=['events']))
             for args in commands:
-                _,result=a.cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
+                _,result=cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
                 up.append(result.stdout)
             def owned_events():
                 observer.call('app.info',{})
@@ -55,7 +61,7 @@ def cli_search_both_paths_identical(binary,systemd):
             case.check(info['subscriptions']['total']==1,'CLI releases every temporary search/events subscription',json.dumps(info['subscriptions']))
         h.stop_serve(process)
         for args,expected in zip(commands,up):
-            _,result=a.cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
+            _,result=cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
             equal(case,args,expected,result.stdout)
         case.check(not h.engine_path.exists(),'local search never starts a daemon',str(h.engine_path))
         # The golden is the actual pre-P3-07 output; only the planned providers[] is new.
@@ -70,12 +76,12 @@ def cli_search_both_paths_identical(binary,systemd):
 def cli_search_dedupe_both_paths(binary,systemd):
     with d.api_owned('cli_search_dedupe_both_paths',binary,systemd) as (case,box,h,process):
         engines(box,('alpha','beta'))
-        value,up=a.cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
+        value,up=cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
         row=value['results'][0]
         case.check(value['complete'] is True and value['count']==1 and row['fileName']=='辛特尔' and row['nbSeeders']==9 and row['providers']==['alpha','beta'] and row['engineName']=='beta',
                    'shared normalization repairs text, dedupes before limit and keeps the winning provider',json.dumps(value,ensure_ascii=False))
         h.stop_serve(process)
-        _,down=a.cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
+        _,down=cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
         equal(case,['--json'],up.stdout,down.stdout)
 
 
@@ -84,7 +90,7 @@ def cli_search_timeout_cleans_provider(binary,systemd):
         runtime=engines(box,('alpha',))
         for mode in ['daemon','local']:
             if mode=='local':h.stop_serve(process)
-            value,result=a.cli(case,box,binary,'search','hold-cli','--wait','1','--json')
+            value,result=cli(case,box,binary,'search','hold-cli','--wait','1','--json')
             case.check(value['complete'] is False and value['count']==1,'bounded wait returns partial results in '+mode,result.stdout)
             h.wait_for(lambda:(bool(groups(runtime)) and all(not live(g['pgid']) for g in groups(runtime)),json.dumps(groups(runtime))),
                        'CLI cleans its entire provider process group in '+mode)
@@ -99,7 +105,7 @@ def cli_search_parked_fallback(binary,systemd):
             h.receive_ready();h.wait_engine()
             with d.ApiConn(h) as observer:
                 hello=observer.hello()['result'];case.check(hello['state']=='parked','owner is really parked before fallback',json.dumps(hello))
-                value,_=a.cli(case,box,binary,'search','Sintel','--wait','5','--json')
+                value,_=cli(case,box,binary,'search','Sintel','--wait','5','--json')
                 case.check(value['count']==3,'search works in-process with a parked daemon',json.dumps(value))
                 sub=observer.call('subscribe',dict(topics=['events']))['result']['sub']
                 from daemon_bus import RevisionStream
@@ -122,7 +128,7 @@ def cli_search_silent_hello_fallback(binary,systemd):
             with connection:stop.wait(5)
         thread=threading.Thread(target=silent);thread.start()
         try:
-            began=time.monotonic();value,_=a.cli(case,box,binary,'search','Sintel','--wait','5','--json')
+            began=time.monotonic();value,_=cli(case,box,binary,'search','Sintel','--wait','5','--json')
             elapsed=time.monotonic()-began
             case.check(value['count']==3 and elapsed<2,'silent hello falls back after its 200 ms probe instead of waiting for an engine',json.dumps(dict(elapsed_s=elapsed,value=value)))
         finally:stop.set();listener.close();thread.join(6);path.unlink(missing_ok=True)
@@ -134,19 +140,19 @@ def cli_imdb_both_paths_identical(binary,systemd):
         commands=[['imdb','Local Fixture','--json'],['imdb','Local Fixture'],['imdb','tt1234001','--json']]
         outputs=[]
         for args in commands:
-            _,result=a.cli(case,box,binary,*args,valid='--json' in args);outputs.append(result.stdout)
+            _,result=cli(case,box,binary,*args,valid='--json' in args);outputs.append(result.stdout)
         case.check(h.stderr().count('imdb index loaded')==1,'CLI lookups use the daemon index once',h.stderr())
         # The original helper owns this process; close it before local runs.
         h.stop_serve(original)
         for args,expected in zip(commands,outputs):
-            _,result=a.cli(case,box,binary,*args,valid='--json' in args);equal(case,args,expected,result.stdout)
+            _,result=cli(case,box,binary,*args,valid='--json' in args);equal(case,args,expected,result.stdout)
         h.notify.close();process=h.start_serve();h.receive_ready();h.wait_engine()
         try:
-            a.cli(case,box,binary,'imdb','tt1234001','--json')
+            cli(case,box,binary,'imdb','tt1234001','--json')
             before=h.stderr().count('imdb index loaded')
             changed=b'tconst\taverageRating\tnumVotes\ntt1234001\t9.1\t4321\n'
             (directory/'ratings.tsv.gz').write_bytes(gzip.compress(changed,mtime=0))
-            refreshed,result=a.cli(case,box,binary,'imdb','tt1234001','--refresh','--json')
+            refreshed,result=cli(case,box,binary,'imdb','tt1234001','--refresh','--json')
             case.check(abs(refreshed['rating']-9.1)<.00001 and refreshed['votes']==4321 and h.stderr().count('imdb index loaded')==before+1,
                        '--refresh replaces the running daemon index exactly once',json.dumps(dict(result=refreshed,index_loads_before=before,index_loads_after=h.stderr().count('imdb index loaded'))))
         finally:
@@ -172,7 +178,7 @@ def cli_search_install_waits(binary,systemd):
                 for mode in ('daemon','local'):
                     if mode=='local':h.stop_serve(process)
                     began=time.monotonic()
-                    _,result=a.cli(case,box,binary,'search','--install-url',url,'--json',code=5)
+                    _,result=cli(case,box,binary,'search','--install-url',url,'--json',code=5)
                     elapsed=time.monotonic()-began
                     case.check(elapsed>=.45 and elapsed<15,'installation waits for the real upstream failure in '+mode,f'elapsed={elapsed:.3f}s; stdout={result.stdout}')
                     outputs.append(result.stdout)

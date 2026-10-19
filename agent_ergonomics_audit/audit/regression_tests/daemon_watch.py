@@ -11,9 +11,15 @@ import tomllib
 import daemon as d
 import daemon_notify as notify
 import fixtures
-import agent_contract as a
 
 MIB=1024*1024
+
+def cli(*args, **kwargs):
+    # daemon registers these cases while importing; load the CLI helper only
+    # when a case runs so direct agent_stream imports remain acyclic.
+    from agent_contract import cli as run
+    return run(*args, **kwargs)
+
 
 def header():
     return bytes.fromhex('1a45dfa38018538067ff1549a9668b448988')+__import__('struct').pack('>d',64000.)
@@ -85,7 +91,7 @@ def playable_before_complete(binary,systemd):
         peer.call('transfer.set_limits',dict(upload_bps=4*MIB))
         h.wait_for(lambda:((v:=row(client,item.info_hash))['playable'].get('stall_free') is True,json.dumps(v)),'faster link flips stall_free true',timeout=2)
         peer.call('transfer.set_limits',dict(upload_bps=MIB))
-        a.cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','2','--json')
+        cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','2','--json')
         client.call('torrents.stop',dict(hashes=[item.info_hash]))
         before=row(client,item.info_hash)
         case.check(before['state']=='paused' and before['playable']['ready'],'pause preserves verified readiness',json.dumps(before))
@@ -124,8 +130,8 @@ def playable_never_for_iso(binary,systemd):
             return v.get('progress')==1.,json.dumps(v)
         h.wait_for(complete,'real ISO transfer completes without a playable event',timeout=25)
         case.check(not any(e['ev']=='torrent.playable' for e in history(client)),'ISO has no torrent.playable event',json.dumps(history(client)))
-        a.cli(case,box,binary,'wait',item.info_hash,'--until','playable','--timeout','1','--json',code=8)
-        a.cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','1','--json',code=8)
+        cli(case,box,binary,'wait',item.info_hash,'--until','playable','--timeout','1','--json',code=8)
+        cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','1','--json',code=8)
 
 
 def playable_two_file_mid_piece(binary,systemd):
@@ -149,8 +155,8 @@ def playable_two_file_mid_piece(binary,systemd):
         case.check(play['file']==1 and play['prefix_bytes']==32*MIB+MIB//2,'mid-piece video prefix clips both the first and final verified boundary',json.dumps(captured[0]))
         files=client.call('torrents.files',dict(hash=item.info_hash))['result']['files']
         case.check('ready' not in files[0] and files[1]['ready'] is True,'only the chosen video gets its per-file readiness dot',json.dumps(files))
-        a.cli(case,box,binary,'wait',item.info_hash,'--until','playable','--json')
-        a.cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','1','--json',code=8)
+        cli(case,box,binary,'wait',item.info_hash,'--until','playable','--json')
+        cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','1','--json',code=8)
 
 
 CASES=(playable_before_complete,playable_never_for_iso,playable_two_file_mid_piece)

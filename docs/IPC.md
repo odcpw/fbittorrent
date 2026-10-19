@@ -910,7 +910,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.27**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.28**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -947,6 +947,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.25` | `playable` |
 | `1.2.26` | `list[].num_seeds` |
 | `1.2.27` | `download_limit_bps` |
+| `1.2.28` | `search.install_torznab` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1115,3 +1116,10 @@ CLI `limit <sel> --down N[K|M]` or `--down none` starts on demand, expands all
 client-side in batches of 256 and emits `{ok,action:"limit",hashes,download_limit_bps}`
 (the last field is null when explicitly cleared). Below-floor/overflow syntax
 is exit 2. Dashboard rendering is deferred to track C/D; no new TUI control.
+
+### P7-01: native Torznab catalogue surface (contract 1.2.28)
+
+`search --install-torznab URL [--key-file PATH]` installs an indexer whose
+credentials remain in a private file. Provider listings distinguish `kind`
+`nova` and `torznab`; the existing search capability and normalized result
+shapes are shared by both provider kinds. Invalid configuration exits 2.

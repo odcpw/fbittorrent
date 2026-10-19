@@ -1,5 +1,5 @@
 ╭ Watch fixture.mkv ───────────────────────────────────────────────────────────╮
-│ [Overview]  Files    [ / ] tabs                                              │
+│ [Overview]  Files  Log    [ / ] tabs                                         │
 │                                                                              │
 │ state     ▶ Ready · playable · may stall                                     │
 │ ready     Playable · may stall · 30s buffered · finishes in 18m00s · (o) Ope │
