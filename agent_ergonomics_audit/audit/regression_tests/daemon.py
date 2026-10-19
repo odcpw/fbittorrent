@@ -3142,8 +3142,12 @@ def setup_desktop_handlers(binary, systemd):
         h.cli("setup", "--magnet")
         apps = Path(sandbox.env["XDG_DATA_HOME"]) / "applications"
         app, magnet = [(apps / name).read_text() for name in ("fbittorrent.desktop", "fbittorrent-magnet.desktop")]
-        case.check(" dashboard\n" in app and " add %u\n" in magnet and "Terminal=false" in magnet,
+        case.check(" dashboard\n" in app and " add --origin handler %u\n" in magnet and "Terminal=false" in magnet,
                    "setup writes dashboard and direct headless magnet desktop entries", app + magnet)
+        icon = Path(sandbox.env["XDG_DATA_HOME"]) / "icons/hicolor/scalable/apps/fbittorrent.svg"
+        case.check("Icon=fbittorrent" in app and "Icon=fbittorrent" in magnet and
+                   icon.read_text() == (REPO / "assets/fbittorrent.svg").read_text(),
+                   "both desktop entries and the private hicolor SVG use fbittorrent's download glyph", str(icon))
         calls = [json.loads(line) for line in (sandbox.root / "shims/xdg-mime.log").read_text().splitlines()]
         case.check(len(calls) == 2 and all(call[:2] == ["default", "fbittorrent-magnet.desktop"] for call in calls),
                    "both magnet and torrent-file MIME registrations use the direct add handler", str(calls))
