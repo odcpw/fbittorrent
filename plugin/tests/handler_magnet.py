@@ -37,9 +37,7 @@ def run(binary,early=False):
         for index in range(2):
             box=stack.enter_context(fixtures.Sandbox())
             if index==1:
-                notify.config(box,notify=True);notify.shims(box)
-                config=Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
-                config.write_text(config.read_text()+'\nseed_by_default = true\n')
+                notify.config(box,notify=True,upload="on");notify.shims(box)
             h=stack.enter_context(daemon.Harness(case,binary,box,False))
             p=h.start_serve(idle_exit_secs=0);assert h.receive_ready() and h.wait_engine()
             c=stack.enter_context(daemon.ApiConn(h));hello=c.hello()['result'];nodes.append((box,h,c))

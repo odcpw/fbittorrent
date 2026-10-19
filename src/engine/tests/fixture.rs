@@ -227,7 +227,7 @@ impl EngineOp {
                     .arg("ratioLimit")
                     .map(str::parse::<f64>)
                     .transpose()?
-                    .unwrap_or(if upload_limit == NO_UPLOAD_LIMIT {
+                    .unwrap_or(if !body.arg("tags").unwrap_or("").split(',').any(|tag| tag.trim()==SEED_TAG) {
                         0.0
                     } else {
                         -2.0

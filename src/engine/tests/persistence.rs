@@ -201,7 +201,7 @@
     #[test]
     fn restoring_downloads_preserves_upload_policy() {
         let record = Record {
-            display_name:None,
+            upload: None, display_name:None,
             hash: "abc".into(),
             name: "fixture".into(),
             source: String::new(),
@@ -220,10 +220,8 @@
         let stored = serde_json::to_vec(&record).unwrap();
         let restored: Record = serde_json::from_slice(&stored).unwrap();
         let options = restored.options(restored.paused).unwrap();
-        assert_eq!(
-            options.ratelimits.upload_bps.unwrap().get(),
-            NO_UPLOAD_LIMIT as u32
-        );
+        assert!(options.ratelimits.upload_bps.is_none());
+        assert!(options.upload_enabled.is_none(), "inherits the default-off session");
         assert_eq!(options.only_files, Some(vec![1]));
         assert!(!options.paused);
         assert!(restored.stop_on_complete());
@@ -354,16 +352,9 @@
             assert!(OwnedMutexGuard::lock(app.dispatcher.inner.ledger.clone(), &test_cx())
                 .await.unwrap().records[0].completion_on > 0);
             assert!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].completion_on > 0);
-            assert_eq!(
-                record
-                    .options(record.paused)
-                    .unwrap()
-                    .ratelimits
-                    .upload_bps
-                    .unwrap()
-                    .get(),
-                32 * 1024
-            );
+            let options=record.options(record.paused).unwrap();
+            assert!(options.ratelimits.upload_bps.is_none());
+            assert!(!handle.upload_enabled(), "restored defaults refuse payload independently of an unlimited rate");
             assert_eq!(
                 rqbit_runtime::fs::read(downloads.join("fixture.txt"))
                     .await

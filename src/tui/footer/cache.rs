@@ -44,6 +44,7 @@ impl TuiApp {
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
             self.seed_allowed(torrent).hash(&mut hash);
+            self.store.torrents.get(&torrent.hash).map(|row|row.upload_enabled).hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);

@@ -124,19 +124,22 @@ pub(crate) struct ManagedTorrentOptions {
     pub ratelimits: Limits,
     pub initial_peers: Vec<SocketAddr>,
     pub peer_limit: Option<usize>,
+    pub session_upload_enabled: Arc<std::sync::atomic::AtomicBool>,
+    // 0 inherits the session, 1 refuses payload, 2 explicitly permits it.
+    pub upload_override: std::sync::atomic::AtomicU8,
     #[cfg(feature = "disable-upload")]
     pub _disable_upload: bool,
 }
 
 impl ManagedTorrentOptions {
-    #[cfg(feature = "disable-upload")]
     pub fn disable_upload(&self) -> bool {
-        self._disable_upload
-    }
-
-    #[cfg(not(feature = "disable-upload"))]
-    pub const fn disable_upload(&self) -> bool {
-        false
+        #[cfg(feature = "disable-upload")]
+        if self._disable_upload { return true; }
+        match self.upload_override.load(std::sync::atomic::Ordering::Acquire) {
+            1 => true,
+            2 => false,
+            _ => !self.session_upload_enabled.load(std::sync::atomic::Ordering::Acquire),
+        }
     }
 }
 
@@ -291,6 +294,20 @@ impl ManagedTorrent {
         let limits = &self.shared.options.ratelimits;
         if limits.get_upload_bps() != limit { limits.set_upload_bps(limit); }
         Ok(())
+    }
+
+    /// Permission is independent of rate. Updating a cap never opts into upload.
+    pub fn set_upload_enabled(&self, enabled: Option<bool>) {
+        let value = match enabled {None=>0,Some(false)=>1,Some(true)=>2};
+        if self.shared.options.upload_override.swap(value, std::sync::atomic::Ordering::AcqRel) != value {
+            self.refresh_upload_policy();
+        }
+    }
+
+    pub fn upload_enabled(&self) -> bool { !self.shared.options.disable_upload() }
+
+    pub(crate) fn refresh_upload_policy(&self) {
+        if let Some(live) = self.live() { live.refresh_upload_policy(); }
     }
 
     /// Replace the download bucket in place; no handle/storage/state transition.

@@ -64,14 +64,14 @@ def tui_everyday(binary, systemd):
             ui.keys(target,'Enter',literal=False)
             def settings_saved():
                 settings=client.call('app.settings.get')['result']
-                return settings['save_path']==str(destination) and settings['seed_by_default'] and settings['idle_exit_secs']==0,json.dumps(settings)
-            h.wait_for(settings_saved,'destination, seed default and disabled idle exit persist through API Settings')
+                return settings['save_path']==str(destination) and settings['upload']=='on' and settings['idle_exit_secs']==0,json.dumps(settings)
+            h.wait_for(settings_saved,'destination, upload permission and disabled idle exit persist through API Settings')
             ui.keys(target,'F6',literal=False);ui.assert_pane(target,'Disabled (0)');ui.assert_pane(target,str(destination))
             ui.keys(target,'Escape',literal=False)
-            ui.keys(target,'1');ui.keys(target,'a');ui.keys(target,'magnet:?xt=urn:btih:'+'d'*40+'&dn=New.Defaults');ui.assert_pane(target,'seed:on');ui.keys(target,'Enter',literal=False)
+            ui.keys(target,'1');ui.keys(target,'a');ui.keys(target,'magnet:?xt=urn:btih:'+'d'*40+'&dn=New.Defaults');ui.assert_pane(target,'streaming automatic');ui.keys(target,'Enter',literal=False)
             h.wait_for(lambda:('d'*40 in [r['hash']for r in d.undo_rows(client)],ui.capture(target)),'new add uses the saved defaults')
             added=client.call('torrents.get',dict(hash='d'*40))['result']['torrent']
-            case.check(added['save_path']==str(destination) and added['seed'],'new torrent inherits native destination and seed policy',json.dumps(added))
+            case.check(added['save_path']==str(destination) and not added['seed'] and added['upload_enabled'],'new torrent inherits destination and upload permission without completion seeding',json.dumps(added))
             client.call('app.settings.set',dict(network_interface='fbt_no_vpn'))
             ui.assert_pane(target,'Waiting for VPN')
             ui.tmux('resize-window','-t',target,'-x','80','-y','24')

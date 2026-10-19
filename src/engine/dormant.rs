@@ -230,8 +230,8 @@ impl EngineDispatcher {
                         let index = ledger.records.iter().position(|r| r.hash == hash).unwrap();
                         if ledger.records[index].staged {return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());}
                         let mut changed = ledger.records[index].clone();
+                        changed.upload = Some(*on);
                         changed.ratio_limit = if *on { -2.0 } else { 0.0 };
-                        changed.upload_limit = if *on { 0 } else { NO_UPLOAD_LIMIT };
                         let mut tags: Vec<_> = changed
                             .tags
                             .split(',')
@@ -269,6 +269,7 @@ impl EngineDispatcher {
                             // for existing and newly admitted dormant handles.
                             // Queue reconciliation owns pause/resume; neither a
                             // cap change nor a seed toggle needs another check.
+                            handle.set_upload_enabled(Some(*on));
                             let limit = ledger.records[index].upload_limit;
                             handle.set_upload_bps((limit != 0).then_some(limit as u64))?;
                         } else if *on {

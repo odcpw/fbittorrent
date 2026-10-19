@@ -15,6 +15,7 @@ pub fn run(
     handler: Option<String>,
     clipboard: Option<bool>,
     port: Option<u16>,
+    upload: Option<String>,
 ) -> Result<Code> {
     anyhow::ensure!(cfg.native(), "these settings require the native engine");
     let mut patch = Map::new();
@@ -42,6 +43,7 @@ pub fn run(
     if let Some(v) = port {
         patch.insert("peer_port".into(), json!(v));
     }
+    if let Some(v) = upload { patch.insert("upload".into(), json!(v)); }
     let (settings, ack, running) = match api::client::Client::connect(cfg, json_mode) {
         Ok(client) => {
             let ack = if patch.is_empty() {
@@ -94,6 +96,7 @@ pub fn run(
             "Peer encryption: {}",
             settings["peer_encryption"].as_str().unwrap()
         );
+        println!("Upload: {}", settings["upload"].as_str().unwrap_or("off"));
         println!("VPN: {}", crate::network_app::state(&current).message);
         if let Some(names) = available {
             println!("Connections: {}", names.join(", "));

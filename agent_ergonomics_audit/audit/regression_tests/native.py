@@ -1621,7 +1621,7 @@ def run_cases():
                 cli("stop", expected_hash)
                 details = cli("show", expected_hash)
                 case.check(details["files"][0]["name"] == name, 'The native file list preserves the full fixture filename.')
-                case.check(details["up_limit"] == 32768, 'The native upload cap is 32768 bytes per second.')
+                case.check(details.get("upload_enabled") is False, 'Default upload permission is off independently of the rate limit.')
                 case.check(details["state"] == "stoppedDL", 'The explicitly stopped torrent remains stopped.')
                 cli("delete", expected_hash, "--files", code=3)
             if options.case == "native_cli_fields_and_deletion_safety":
@@ -1784,7 +1784,7 @@ def run_cases():
                 wait_for(lambda: "3 Shows (1)" in capture(), "reopened TUI restores unread Shows badge")
                 case.check("3 Shows (1)" in capture(), 'The current screen displays a Shows badge with one unread release.')
                 restored = cli("show", expected_hash)
-                case.check(restored["state"] == "stoppedDL" and restored["up_limit"] == 32768, 'Restart preserves both the manual pause and upload cap.')
+                case.check(restored["state"] == "stoppedDL" and restored.get("upload_enabled") is False, 'Restart preserves the manual pause and upload off.')
                 case.check(next(item for item in cli("rss", "items", "Local feed")["items"]
                             if item["id"] == "episode-2")["isRead"], 'Restart preserves the RSS episode-two read marker.')
                 cli("down")

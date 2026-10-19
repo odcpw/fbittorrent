@@ -2,6 +2,7 @@
 var fields=[
  {key:"max_active_downloads",label:"Active downloads",kind:"number"},
  {key:"save_path",label:"Download folder",kind:"text"},
+ {key:"upload",label:"Upload",kind:"choice",options:["off","on"]},
  {key:"idle_exit_secs",label:"Idle exit (seconds;0 disables)",kind:"number"},
  {key:"peer_encryption",label:"Peer encryption",kind:"choice",options:["off","prefer","require"]},
  {key:"network_interface",label:"Network binding",kind:"interface"},

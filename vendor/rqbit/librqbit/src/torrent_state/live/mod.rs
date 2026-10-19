@@ -445,7 +445,7 @@ impl TorrentStateLive {
     ) -> crate::Result<()> {
         while let Ok((tx, ci)) = rx.recv(cx).await {
             cx.checkpoint()?;
-            if tx.is_closed() {
+            if tx.is_closed() || self.shared.options.disable_upload() {
                 continue;
             }
             self.shared.options.ratelimits
@@ -457,7 +457,7 @@ impl TorrentStateLive {
                     .prepare_for_upload(cx, NonZeroU32::new(ci.size).unwrap())
                     .await?;
             }
-            if !tx.is_closed() {
+            if !tx.is_closed() && !self.shared.options.disable_upload() {
                 let _ = tx.send(WriterRequest::ReadChunkRequest(ci));
             }
         }
@@ -967,6 +967,14 @@ impl TorrentStateLive {
         }
     }
 
+    pub(crate) fn refresh_upload_policy(&self) {
+        for peer in self.peers.states.iter() {
+            if let PeerState::Live(live) = peer.value().get_state() {
+                let _ = live.tx.send(WriterRequest::UploadPolicyChanged);
+            }
+        }
+    }
+
     pub(crate) fn reconnect_all_not_needed_peers(&self) {
         self.peers
             .states
@@ -1217,6 +1225,8 @@ impl PeerConnectionHandler for &'_ PeerHandler {
         trace!("sending: {:?}, length={}", &msg, len);
         Ok(len)
     }
+
+    fn upload_enabled(&self) -> bool { !self.state.shared.options.disable_upload() }
 
     fn on_handshake(&self, handshake: Handshake, ckind: ConnectionKind) -> anyhow::Result<()> {
         self.state.set_peer_live(self.addr, handshake, ckind);

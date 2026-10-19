@@ -6,11 +6,12 @@ const LIMIT_NAMES: [&str; 4] = [
     "Turtle download limit",
     "Turtle upload limit",
 ];
-pub(super) const SETTINGS_ROWS: usize = 12;
+pub(super) const SETTINGS_ROWS: usize = 13;
 pub(super) const DESTINATION_ROW: usize = 9;
-pub(super) const IDLE_ROW: usize = 10;
-pub(super) const CLIPBOARD_ROW: usize = 11;
 pub(super) const PORT_ROW: usize = 8;
+pub(super) const UPLOAD_ROW: usize = 10;
+pub(super) const IDLE_ROW: usize = 11;
+pub(super) const CLIPBOARD_ROW: usize = 12;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
     match index {
         0 => cfg.download_limit_bps,
@@ -30,6 +31,7 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     let mut patch = serde_json::Map::new();
     for key in [
         "save_path",
+        "upload",
         "idle_exit_secs",
         "clipboard_watch",
         "peer_port",
@@ -49,11 +51,11 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     patch.into()
 }
 pub(super) fn native_settings(cfg: &mut Config, settings: &crate::api::Settings) -> Result<()> {
-    cfg.save_path=Some(settings.save_path.clone());
-    cfg.seed_by_default=settings.seed_by_default;
-    cfg.idle_exit_secs=settings.idle_exit_secs;
-    cfg.clipboard_watch=settings.clipboard_watch;
-    cfg.show_quality=settings.show_quality.clone();
+    cfg.clipboard_watch = settings.clipboard_watch;
+    cfg.save_path = Some(settings.save_path.clone());
+    cfg.upload = settings.upload.clone();
+    cfg.idle_exit_secs = settings.idle_exit_secs;
+    cfg.show_quality = settings.show_quality.clone();
     cfg.peer_port = u16::try_from(settings.peer_port)?;
     cfg.max_active_downloads = usize::try_from(settings.max_active_downloads)?;
     cfg.peer_encryption = match settings.peer_encryption {

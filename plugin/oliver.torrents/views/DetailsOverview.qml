@@ -47,7 +47,7 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;label:"Undo until";visible:root.torrent.undo_until!==undefined;value:Model.when(root.torrent.undo_until)}
     RowLayout {
       Text {Layout.fillWidth:true;text:DetailText.policy(root.torrent)+" (u)";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-      Ui.ToggleSwitch {checked:root.torrent.seed===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
+      Ui.ToggleSwitch {checked:root.torrent.upload_enabled===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
     }
     Components.DetailField {Layout.fillWidth:true;label:"Queue position";visible:root.torrent.queue_pos!==undefined;value:String(root.torrent.queue_pos)}
     Components.DetailField {Layout.fillWidth:true;label:"Files · Pieces";value:Model.count(root.torrent.file_count)+" · "+Model.count(root.torrent.piece_count)+" × "+Model.size(root.torrent.piece_size,false)}

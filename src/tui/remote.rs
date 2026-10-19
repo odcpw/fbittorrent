@@ -210,7 +210,7 @@ mod tests {
         }
         .upload();
         assert!(
-            upload.contains("64") && upload.contains("cap") && !upload.contains("seeding allowed"),
+            upload.contains("Upload: off") && upload.contains("64") && upload.contains("cap") && !upload.contains("seeding allowed"),
             "{upload}"
         );
     }

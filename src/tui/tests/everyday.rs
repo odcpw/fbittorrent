@@ -319,16 +319,23 @@ fn settings_destination_and_idle_are_validated_cancelable_minimal_drafts() {
         .unwrap()
         .list
         .borrow_mut()
+        .select(Some(settings_fields::UPLOAD_ROW));
+    app.on_key(KeyEvent::new(KeyCode::Right));
+    app.settings
+        .as_ref()
+        .unwrap()
+        .list
+        .borrow_mut()
         .select(Some(settings_fields::CLIPBOARD_ROW));
     app.on_key(KeyEvent::new(KeyCode::Right));
     let draft = &app.settings.as_ref().unwrap().cfg;
     assert_eq!(draft.save_path.as_deref(), Some("/private/new downloads"));
     assert_eq!(draft.idle_exit_secs, 0);
-    assert!(!draft.seed_by_default, "Settings cannot opt new downloads into upload");
+    assert_eq!(draft.upload,"on");
     let original = &app.settings.as_ref().unwrap().original;
     assert_eq!(
         settings_fields::settings_patch(original, draft),
-        serde_json::json!({"save_path":"/private/new downloads","idle_exit_secs":0,"clipboard_watch":true})
+        serde_json::json!({"save_path":"/private/new downloads","idle_exit_secs":0,"upload":"on","clipboard_watch":true})
     );
     for bad in ["", "-1", "29", "18446744073709551616"] {
         app.apply_idle_exit(bad);
@@ -343,15 +350,16 @@ fn settings_destination_and_idle_are_validated_cancelable_minimal_drafts() {
         let text = crate::tui::golden::render(&app, w, h);
         for field in [
             "Download destination",
+            "Upload: on",
             "Idle exit",
             "Clipboard offers",
         ] {
             assert!(text.contains(field), "{field} in {text}");
         }
-        assert!(!text.contains("Seed by default"), "upload opt-in belongs in Details");
+        assert!(!text.contains("Seed by default"), "the obsolete seed-by-default setting stays absent");
     }
     app.on_key(KeyEvent::new(KeyCode::Escape));
-    assert!(!app.cfg.seed_by_default);
+    assert_eq!(app.cfg.upload,"off");
     assert_eq!(app.cfg.idle_exit_secs, 300);
 }
 #[test]

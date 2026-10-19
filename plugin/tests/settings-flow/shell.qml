@@ -6,13 +6,16 @@ import "Plugin/SettingsSchema.js" as Schema
 import "Plugin/Store.js" as Store
 import "Plugin/HelpModel.js" as Help
 import "Plugin/LogModel.js" as Log
+import "Plugin/DetailText.js" as Details
 ShellRoot {
  FileView {id:fixture;blockLoading:true;blockAllReads:true;preload:false}
  function check(name,expect,value,ok){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"exercise settings/log/help model",expect:expect,observed:JSON.stringify(value),ok:!!ok,ms:0}))}
  function rejected(key,value){try{Schema.parse(Schema.field(key),value);return false}catch(error){return true}}
  Component.onCompleted:{
-  var expected=["max_active_downloads","peer_encryption","network_interface","save_path","autostart","idle_exit_secs","notify","timeout_secs","handler","open_command","clipboard_watch","reduce_motion","peer_port","show_quality","download_limit_bps","upload_limit_bps","alt_download_limit_bps","alt_upload_limit_bps","alt_limits_on"].sort()
+  var expected=["max_active_downloads","peer_encryption","network_interface","save_path","upload","autostart","idle_exit_secs","notify","timeout_secs","handler","open_command","clipboard_watch","reduce_motion","peer_port","show_quality","download_limit_bps","upload_limit_bps","alt_download_limit_bps","alt_upload_limit_bps","alt_limits_on"].sort()
   check("coverage","all20 current writable keys have controls",Schema.fields.map(function(f){return f.key}).sort(),JSON.stringify(expected)===JSON.stringify(Schema.fields.map(function(f){return f.key}).sort()))
+  check("validation","upload is explicit off/on; arbitrary values are rejected",null,Schema.parse(Schema.field("upload"),"off")==="off" && Schema.parse(Schema.field("upload"),"on")==="on" && rejected("upload","unlimited"))
+  check("validation","Details uses effective upload permission even without completion seeding",null,Details.policy({seed:false,upload_enabled:true})==="Upload: on" && Details.policy({seed:true,upload_enabled:false})==="Upload: off")
   check("limits","K/M values use binary bytes, empty/zero clears",null,Schema.parse(Schema.field("download_limit_bps"),"16K")===16384 && Schema.parse(Schema.field("alt_upload_limit_bps"),"4M")===4194304 && Schema.parse(Schema.field("upload_limit_bps"),"")===null && Schema.parse(Schema.field("upload_limit_bps"),"0")===null)
   check("limits","limits bounds reject subminimum,overflow and fractional syntax",null,rejected("upload_limit_bps","16383") && rejected("download_limit_bps","4096M") && rejected("download_limit_bps","1.5M") && Schema.parse(Schema.field("upload_limit_bps"),"4294967295")===4294967295)
   check("validation","port, idle and ordinary integer boundaries are enforced",null,rejected("peer_port","65536") && Schema.parse(Schema.field("peer_port"),"65535")===65535 && rejected("idle_exit_secs","29") && Schema.parse(Schema.field("idle_exit_secs"),"30")===30 && rejected("max_active_downloads","0") && rejected("timeout_secs","-1"))
