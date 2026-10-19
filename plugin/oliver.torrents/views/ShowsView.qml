@@ -9,13 +9,18 @@ FocusScope {
   readonly property var flow:service.showsFlow
   readonly property int revision:service.showsRevision
   readonly property var model:revision>=0 ? flow.snapshot() : ({shows:[],rows:[]})
-  readonly property bool editing:followInput.activeFocus
-  readonly property bool dialogOpen:model.panel!==""
+  readonly property bool editing:followInput.activeFocus || controls.popupOpen
+  readonly property bool dialogOpen:model.panel!=="" || controls.popupOpen
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:({shows:model,focus:editing ? "follow" : model.focus,unfollowCancel:confirmation.cancelFocused})
+  readonly property var viewState:({shows:model,controls:controls.state,focus:followInput.activeFocus ? "follow" : controls.popupOpen ? "controls" : model.focus,unfollowCancel:confirmation.cancelFocused})
   signal changed()
   signal focusRequested()
+  Item {id:resultsFocus;focus:true}
+  Connections {target:controls;function onPopupOpenChanged(){if(controls.popupOpen)root.service.cancelFocusTarget(root)}}
+  function focusResults(){followInput.focus=false;resultsFocus.forceActiveFocus();root.focusRequested()}
   function handleKey(event){
+    if(controls.popupOpen)return false
+    if(event.text==="=" && !root.dialogOpen){controls.openPreference();return true}
     if(model.panel==="follow"){
       if(event.key===Qt.Key_Escape){flow.cancel();root.forceActiveFocus();return true}
       if(event.key===Qt.Key_Return){flow.follow(followInput.text);return true}
@@ -47,7 +52,7 @@ FocusScope {
   Keys.onPressed:function(event){if(handleKey(event))event.accepted=true}
   onViewStateChanged:changed()
   property string previousPanel:""
-  onModelChanged:{if(model.panel!==previousPanel){previousPanel=model.panel;Qt.callLater(function(){if(model.panel==="follow")followInput.forceActiveFocus();else if(model.panel==="remove")confirmation.reset();else {root.service.cancelFocusTarget(followInput);followInput.focus=false;root.forceActiveFocus();root.focusRequested()}})}}
+  onModelChanged:{if(model.panel!==previousPanel){previousPanel=model.panel;Qt.callLater(function(){if(model.panel==="follow")followInput.forceActiveFocus();else if(model.panel==="remove")confirmation.reset();else {root.service.cancelFocusTarget(followInput);root.focusResults()}})}}
   Component.onCompleted:flow.mount()
   Component.onDestruction:flow.hide()
   ColumnLayout {
@@ -61,6 +66,7 @@ FocusScope {
       Item {Layout.fillWidth:true}
       Text {textFormat:Text.PlainText;text:root.model.busy ? "Working…" : "Enter review · m read/unread · M all read";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall}
     }
+    ShowsControls {id:controls;Layout.fillWidth:true;flow:root.flow;model:root.model;defaultQuality:root.service.store.settings.show_quality || "1080p";onFocusRequested:root.focusResults()}
     Text {visible:root.model.error!=="";text:root.model.error;textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;color:Commons.Color.urgent;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
     RowLayout {
       Layout.fillWidth:true;Layout.fillHeight:true;spacing:Commons.Style.spacing.panelGap
@@ -79,7 +85,7 @@ FocusScope {
       }
       ColumnLayout {
         visible:!root.narrow || root.model.focus==="releases";Layout.fillWidth:true;Layout.fillHeight:true
-        Text {textFormat:Text.PlainText;text:root.model.selected==="inbox" ? "Unread releases" : "Releases · read state / transfer state";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title}
+        Text {textFormat:Text.PlainText;text:root.model.selected==="inbox" ? (root.model.readFilter==="all" ? "All releases" : root.model.readFilter==="read" ? "Read releases" : "Unread releases") : "Releases · read state / transfer state";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title}
         ListView {
           id:releases;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;model:root.model.rows;currentIndex:root.model.cursor
           onCurrentIndexChanged:positionViewAtIndex(currentIndex,ListView.Contain)
@@ -95,7 +101,7 @@ FocusScope {
             MouseArea {anchors.fill:parent;onClicked:{root.flow.pane(true);root.flow.move(0,parent.index);root.forceActiveFocus()} onDoubleClicked:root.flow.primary()}
           }
         }
-        Text {visible:root.model.rows.length===0;textFormat:Text.PlainText;text:root.model.selected==="inbox" ? "No unread releases. Check for updates, or select a show to see read releases." : "No releases yet. Press R to check this show.";wrapMode:Text.Wrap;Layout.fillWidth:true;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
+        Text {visible:root.model.rows.length===0;textFormat:Text.PlainText;text:root.model.loading ? "Loading releases…" : root.model.readFilter==="unread" && !root.model.qualityFilter ? "No unread releases. Check for updates, or change the filters to see read releases." : "No releases match these filters.";wrapMode:Text.Wrap;Layout.fillWidth:true;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       }
     }
   }

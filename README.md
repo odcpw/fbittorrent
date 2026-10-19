@@ -607,6 +607,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:rss` | All read | `M` | `M` | — |  |
 | `screen:rss` | IMDb | `i` | `i` | — |  |
 | `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `screen:shows` | Show quality | `=` | `=` | — |  |
+| `screen:shows` | Inbox filters | `F` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |

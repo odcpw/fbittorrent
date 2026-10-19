@@ -84,6 +84,11 @@ ShellRoot {
       var button=root.find(dashboard.item.logView,"log-"+kind+"-"+(value || "all"));if(!button)return false
       preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
     }
+    function showsDropdown(name:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.shows || ["read","quality","preference"].indexOf(name)<0)return false
+      var dropdown=root.find(dashboard.item.shows,"shows-"+name);if(!dropdown)return false
+      preferencesInput.mouseClick(dropdown,dropdown.width/2,dropdown.height-Commons.Style.spacing.controlHeight/2,Qt.LeftButton);return true
+    }
     function detailTab(name:string):bool {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.torrents)return false
       var button=root.find(dashboard.item.torrents.pane,"details-tab-"+name);if(!button)return false

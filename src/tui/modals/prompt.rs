@@ -20,6 +20,8 @@ pub(super) enum PromptKind {
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
+    ShowQuality {imdb:String},
+    ShowFilters,
     Shutdown,
     ConfirmUnfollow { imdb: String, title: String },
 }
@@ -94,6 +96,8 @@ impl TuiApp {
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
+                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
+                if kind==PromptKind::ShowFilters {return self.apply_show_filters(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

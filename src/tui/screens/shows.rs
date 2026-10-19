@@ -42,8 +42,10 @@ impl TuiApp {
     pub(super) fn rebuild_inbox(&mut self) {
         let selected = self.shows_inbox().then(|| self.selected_release_target()).flatten();
         let old_index = self.ep_list.borrow().selected().unwrap_or(0);
+        let read=self.show_controls.read;let quality=self.show_controls.quality.as_deref();
         let mut releases: Vec<_> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
-            .filter(move |episode| show.is_new(&episode.key))
+             .filter(move |episode| (read==ReadFilter::All || show.is_new(&episode.key)==(read==ReadFilter::Unread))
+                && quality.is_none_or(|quality|quality==episode.quality))
             .map(move |episode| (show, episode))).collect();
         releases.sort_by(|(a_show, a), (b_show, b)| b.released.cmp(&a.released)
             .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
@@ -157,7 +159,7 @@ impl TuiApp {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
                 } else if self.cfg.native(){
-                    if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
+                    if let Some(target)=self.selected_release_target(){let read=!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
                 } else if let Some(label) = self.mark_selected_release() {
                     if self.save_shows() { self.set_success(label); }
                 }
@@ -221,9 +223,9 @@ impl TuiApp {
         let target = self.selected_release_target()?;
         let inbox = self.shows_inbox();
         let show = self.shows.get_mut(&target.imdb)?;
-        let read = if inbox { show.seen.insert(target.key.clone()); true } else { show.toggle_seen(&target.key) };
+        let read = show.toggle_seen(&target.key);
         let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (U)ndo" } else { "" });
-        if inbox { self.inbox_last_read = Some(target); }
+        if inbox && read { self.inbox_last_read = Some(target); }
         self.rebuild_inbox();
         Some(label)
     }
@@ -384,7 +386,8 @@ impl TuiApp {
         }
         let inbox = self.shows_inbox();
         let title = if inbox {
-            format!(" Shows › All unread · {unread} releases · newest first ")
+            if self.show_controls.read==ReadFilter::Unread && self.show_controls.quality.is_none() {format!(" Shows › All unread · {unread} releases · newest first ")}
+            else {format!(" Shows › {} {} · {} releases ",self.show_controls.read.label(),self.show_controls.quality.as_deref().unwrap_or("qualities"),self.inbox_rows.len())}
         } else if let Some(show) = self.selected_show() {
             format!(
                 " Shows › {} · {} releases ",
@@ -439,7 +442,7 @@ impl TuiApp {
                 })
                 .map(|error| format!("Check: {error} · (Shift+R) retry"))
         };
-        let summary_text = if inbox {
+        let summary_text = if inbox && self.show_controls.inflight.is_some() {"Loading inbox filter…".into()} else if inbox {
             let checking = self.shows_refreshing.len();
             let unchecked = self
                 .shows

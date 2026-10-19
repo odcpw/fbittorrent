@@ -1,5 +1,7 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("shows.quality",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('='))],"Show quality",45,|a|a.release_show().is_some(),Some(|a|a.open_show_quality()),TD,None,None,None),
+    action!("shows.filters",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('F'))],"Inbox filters",95,|_|true,Some(|a|a.open_show_filters()),T,None,None,None),
     action!(
         "shows.next",
         Scope::Screen(Screen::Shows),

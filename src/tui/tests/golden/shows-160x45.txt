@@ -41,5 +41,5 @@
 │                                 ││                                                                       ││                                                  │
 │                                 ││                                                                       ││                                                  │
 ╰─────────────────────────────────╯╰───────────────────────────────────────────────────────────────────────╯╰──────────────────────────────────────────────────╯
-[Unread] (Enter) Download  (m) Mark read  (v) Card  (n) Follow show  (r) Check all  (a) Add  (j) Next  (k) Previous  (g) First  (G) Last  (h) Shows …   (?) Help
+[Unread] (Enter) Download  (m) Mark read  (v) Card  (n) Follow show  (r) Check all  (a) Add  (=) Show quality  (j) Next  (k) Previous  (g) First …      (?) Help
 Breaking Bad.S05E16.1080p.WEB-DL · Breaking Bad
