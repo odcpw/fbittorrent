@@ -2,6 +2,7 @@
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
 use super::{objects::*, scalar::*};
 use super::rss::*;
+use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -210,6 +211,7 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
     RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
     RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
@@ -244,6 +246,9 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
+            "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
+            "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
             "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),
             "rss.remove"=>serde_json::from_value(result).map(Self::RssRemove), "rss.refresh"=>serde_json::from_value(result).map(Self::RssRefresh),
             "rss.items"=>serde_json::from_value(result).map(Self::RssItems), "rss.set_read"=>serde_json::from_value(result).map(Self::RssSetRead),

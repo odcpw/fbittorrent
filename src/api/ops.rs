@@ -9,6 +9,15 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
+    Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
+    Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },
+    Operation { name:"shows.check",mutating:true,idempotent:false,since:"P3-03",args:"`imdb?: str`",result:"`{state: \"pending\", ref: str}`, then `shows.checked` and `mutation.result {new}`" },
+    Operation { name:"shows.releases",mutating:false,idempotent:false,since:"P3-03",args:"`imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str`",result:"`{releases: [Release]}`" },
+    Operation { name:"shows.set_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`, `key: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"shows.mark_show_read",mutating:true,idempotent:true,since:"P3-03",args:"`imdb: str`",result:"`{count: u64}`" },
+    Operation { name:"shows.undo_read",mutating:true,idempotent:false,since:"P3-03",args:"none",result:"`{restored?: {imdb: str, key: str}}`" },
+    Operation { name:"shows.grab",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`, `key: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
     Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
     Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
     Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
@@ -77,6 +86,7 @@ pub const TABLE: &[Operation] = &[
 
 pub mod app;
 pub mod rss;
+pub mod shows;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

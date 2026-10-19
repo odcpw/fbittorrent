@@ -2,6 +2,7 @@
 //! partial delta uses arbitrary JSON values (including null for field deletion).
 use super::{objects::*, response::Error, scalar::*};
 use super::rss::{Feed,FeedItem};
+use super::shows::{Show,Release};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -9,6 +10,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Item {
+    Show(Show),Release(Release),
     Feed(Feed), FeedItem(FeedItem),
     Log(LogEntry),
     Torrent(Torrent),

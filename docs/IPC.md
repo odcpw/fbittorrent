@@ -157,6 +157,15 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
+| `shows.follow` | `query?: str`, `imdb?: str`, `quality?: str` | `{show: Show}` | yes | P3-03 |
+| `shows.unfollow` | `imdb: str` | `{}` | yes | P3-03 |
+| `shows.check` | `imdb?: str` | `{state: "pending", ref: str}`, then `shows.checked` and `mutation.result {new}` | yes | P3-03 |
+| `shows.releases` | `imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str` | `{releases: [Release]}` | no | P3-03 |
+| `shows.set_read` | `imdb: str`, `key: str`, `read: bool` | `{}` | yes | P3-03 |
+| `shows.mark_show_read` | `imdb: str` | `{count: u64}` | yes | P3-03 |
+| `shows.undo_read` | none | `{restored?: {imdb: str, key: str}}` | yes | P3-03 |
+| `shows.grab` | `imdb: str`, `key: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-03 |
 | `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
 | `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
 | `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
@@ -442,7 +451,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss","shows"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -753,3 +762,28 @@ never adds a torrent. rss.grab uses the item's magnet/torrent URL with origin
 rss, and marks read/grabbed only after a successful ledger add. Existing
 in-process CLI paths and atomic store merge/rename behaviour remain available.
 Hello/error fixture caps now exactly include rss; rss.ndjson covers every op.
+
+### P3-03: daemon Shows (contract 1.2.11)
+
+Capability shows adds the shows.* operations above, `shows` snapshots keyed by
+imdb and `shows.releases:<imdb|inbox>` keyed by release key (imdb/key in inbox
+changes/removals). Release.key itself stays S02E03/S02; show_imdb disambiguates.
+Read state is independent of transfer: none/downloading/queued/paused/done/
+added_before comes from live ledger btih and saved grab history. Releases sort
+by published time descending then key; shows by title. Unknown optional source
+facts are omitted. Inbox defaults to unread-only; explicit unread_only overrides.
+
+A new interactive client checks only shows older than Show::is_stale's 30-minute
+boundary. Bar and idle activity do not fetch; one owned worker coalesces opens.
+Explicit check returns pending with ref, then shows.checked {imdb?,new,warnings}
+and mutation.result {new}, or upstream/eztv if all selected checks fail. Checks
+never add torrents. Drain cancels between pages; an in-flight fetch is bounded
+by the existing ten-second per-request / 30-second catalogue budget. All EZTV
+calls (including browse) honor FBT_EZTV_BASE_URL in isolated environments.
+
+The shared store's inode/size/mtime invalidates reads and on-change topics for
+in-process CLI edits. set_read changes only seen intent; mark_show_read preserves
+the one-level undo target; undo_read restores the last individual read mark to
+unread, and the next undo is empty. Grab marks read/grabbed only after a successful
+ledger add with origin shows. The new transcript covers every operation and
+inbox identity; existing hello/error arrays exactly include the shows cap.

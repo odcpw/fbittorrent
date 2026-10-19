@@ -2,6 +2,7 @@
 //! capabilities, path opening and mutation refs) belong to the server.
 use super::scalar::*;
 use super::rss::*;
+use super::shows::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -293,6 +294,15 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="shows.list")] ShowsList {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
+    #[serde(rename="shows.follow")] ShowsFollow {args:ShowFollowArgs},
+    #[serde(rename="shows.unfollow")] ShowsUnfollow {args:ShowArgs},
+    #[serde(rename="shows.check")] ShowsCheck {#[serde(skip_serializing_if="Option::is_none")] args:Option<ShowCheckArgs>},
+    #[serde(rename="shows.releases")] ShowsReleases {args:ShowReleasesArgs},
+    #[serde(rename="shows.set_read")] ShowsSetRead {args:ShowReadArgs},
+    #[serde(rename="shows.mark_show_read")] ShowsMarkShowRead {args:ShowArgs},
+    #[serde(rename="shows.undo_read")] ShowsUndoRead {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
+    #[serde(rename="shows.grab")] ShowsGrab {args:ShowGrabArgs},
     #[serde(rename="rss.feeds")]
     RssFeeds { #[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs> },
     #[serde(rename="rss.add")] RssAdd { args:FeedAddArgs },
@@ -377,6 +387,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
+            Self::ShowsReleases {..}=>"shows.releases",Self::ShowsSetRead {..}=>"shows.set_read",Self::ShowsMarkShowRead {..}=>"shows.mark_show_read",Self::ShowsUndoRead {..}=>"shows.undo_read",Self::ShowsGrab {..}=>"shows.grab",
             Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
             Self::RssItems { .. }=>"rss.items", Self::RssSetRead { .. }=>"rss.set_read", Self::RssMarkFeedRead { .. }=>"rss.mark_feed_read", Self::RssGrab { .. }=>"rss.grab",
             Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",

@@ -210,7 +210,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 ));
             }
             let origin = args.origin.as_deref().unwrap_or("manual");
-            if !matches!(origin, "manual" | "handler" | "agent" | "clipboard" | "rss") {
+            if !matches!(origin, "manual" | "handler" | "agent" | "clipboard" | "rss" | "shows") {
                 return Err(error(InvalidArgs, "unsupported origin", Some("origin")));
             }
             let cfg = crate::config::Config::load().map_err(engine_error)?;
@@ -625,7 +625,7 @@ pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
     if args
         .origin
         .as_deref()
-        .is_some_and(|value| !matches!(value, "manual" | "handler" | "agent" | "clipboard" | "rss"))
+        .is_some_and(|value| !matches!(value, "manual" | "handler" | "agent" | "clipboard" | "rss" | "shows"))
     {
         return Err(error(
             ErrorCode::InvalidArgs,

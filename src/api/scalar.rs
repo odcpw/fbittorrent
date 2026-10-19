@@ -144,6 +144,7 @@ closed_enum!(ByeReason {
 /// should ignore unsupported topics rather than inventing a store shape.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Topic {
+    Shows,ShowReleases(String),
     RssFeeds, RssItems(String),
     Log,
     Summary,
@@ -156,6 +157,7 @@ pub enum Topic {
 impl Topic {
     pub fn as_str(&self) -> String {
         match self {
+            Self::Shows=>"shows".into(),Self::ShowReleases(id)=>format!("shows.releases:{id}"),
             Self::RssFeeds=>"rss.feeds".into(), Self::RssItems(id)=>format!("rss.items:{id}"),
             Self::Log => "log".into(),
             Self::Summary => "summary".into(),
@@ -176,6 +178,8 @@ impl<'de> Deserialize<'de> for Topic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         match s.as_str() {
+            "shows"=>Ok(Self::Shows),
+            _ if s.starts_with("shows.releases:")&&s.len()>15&&s.len()<=143=>Ok(Self::ShowReleases(s[15..].into())),
             "rss.feeds"=>Ok(Self::RssFeeds),
             _ if s.starts_with("rss.items:") && s.len()>10 && s.len()<=138=>Ok(Self::RssItems(s[10..].into())),
             "log" => Ok(Self::Log),

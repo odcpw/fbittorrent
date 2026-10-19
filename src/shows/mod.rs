@@ -542,14 +542,25 @@ fn fetch_eztv(
     boundary: Option<i64>,
     complete_before: bool,
 ) -> Result<EpisodeCheck> {
+    fetch_eztv_inner(imdb,quality,boundary,complete_before,None)
+}
+pub(crate) fn fetch_updates_cancelled(show:&Show, quality:&str, cancelled:&std::sync::atomic::AtomicBool)->Result<EpisodeCheck> {
+    let boundary=show.episodes.iter().map(|e|e.released).filter(|&v|v>0).max();
+    fetch_eztv_inner(&show.imdb,show.quality.as_deref().unwrap_or(quality),boundary,show.catalogue_complete,Some(cancelled))
+}
+pub(crate) fn eztv_endpoint(query:&str)->String {
+    let base=std::env::var("FBT_EZTV_BASE_URL").unwrap_or_else(|_|"https://eztv.re".into());
+    format!("{}/api/get-torrents?{query}",base.trim_end_matches('/'))
+}
+fn fetch_eztv_inner(imdb:&str,quality:&str,boundary:Option<i64>,complete_before:bool,cancelled:Option<&std::sync::atomic::AtomicBool>)->Result<EpisodeCheck> {
     let digits = imdb.trim_start_matches("tt");
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .user_agent("fbittorrent/0.1 (show feed)")
         .build()
         .into();
     fetch_pages(quality, boundary, complete_before, |page, remaining| {
-        let url =
-            format!("https://eztv.re/api/get-torrents?imdb_id={digits}&limit=100&page={page}");
+        anyhow::ensure!(!cancelled.is_some_and(|c|c.load(Ordering::Acquire)),"show check cancelled");
+        let url = eztv_endpoint(&format!("imdb_id={digits}&limit=100&page={page}"));
         let mut response = agent
             .get(&url)
             .config()

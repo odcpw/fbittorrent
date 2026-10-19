@@ -117,7 +117,7 @@ struct EztvItem {
 }
 
 fn eztv_latest() -> Result<Vec<SearchResult>> {
-    let r: EztvResp = get_json("https://eztv.re/api/get-torrents?limit=100&page=1")?;
+    let r: EztvResp = get_json(&crate::shows::eztv_endpoint("limit=100&page=1"))?;
     let mut out: Vec<SearchResult> = r.torrents.into_iter().map(|t| SearchResult {
         file_name: t.title,
         file_url: t.magnet_url,

@@ -12,6 +12,7 @@ pub(super) fn state_event(sub: u64, topic: &Topic, rev: u64, value: Value) -> Ap
 fn key_field(topic:&Topic)->&'static str {
     match topic {
         Topic::RssFeeds | Topic::RssItems(_)=>"id",
+        Topic::Shows=>"imdb",Topic::ShowReleases(_)=>"key",
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
         Topic::Events | Topic::Log => "seq",
@@ -19,6 +20,7 @@ fn key_field(topic:&Topic)->&'static str {
     }
 }
 fn key(topic: &Topic, value: &Value) -> String {
+    if matches!(topic,Topic::ShowReleases(id) if id=="inbox") {return format!("{}/{}",value["show_imdb"].as_str().unwrap(),value["key"].as_str().unwrap());}
     let v = &value[key_field(topic)];
     v.as_str()
         .map(str::to_owned)
@@ -72,8 +74,7 @@ pub(super) fn diff(topic: &Topic, old: &Value, new: &Value) -> (Changed, Vec<Val
         for (k, v) in before {
             if !after.contains_key(&k) {
                 removed.push(
-                    v[key_field(topic)]
-                    .clone(),
+                    if matches!(topic,Topic::ShowReleases(id) if id=="inbox"){json!(k)}else{v[key_field(topic)].clone()},
                 );
             }
         }

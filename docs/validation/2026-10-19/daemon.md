@@ -532,3 +532,44 @@ Logs are under `target/test-logs/fbt-p3-02-n95/`, mirrored under
 `/tmp/fbt-track-a-evidence/fbt-p3-02-n95/`. No all.sh between track beads.
 Follow-up: the existing legacy error replay still records its older capability/
 operation deferrals; this bead adds no new comparison mask or deferral.
+
+## P3-03 — Shows daemon/API (fbt-p3-03-oyg)
+
+Moved src/shows.rs mechanically into shows/mod.rs plus tests.rs (Git detects
+69% rename; production prefix/test-body identity in `split-proof.json`; all
+15 `shows::` tests pass). Applied the isomorphic skill's byte-preservation/API
+path discipline within the owner's scoped move/test cadence; no separate
+workspace, tracker ceremony, benchmarks or compile-memory claim. Added typed
+Shows operations/views, keyed show/release topics (compound imdb/key inbox
+identities), one stale-on-interactive worker, inode/size/mtime reload, cancellation
+between bounded EZTV pages, and FBT_EZTV_BASE_URL shared by Shows and browse.
+Read intent stays independent of ledger transfer state; paused intent takes
+precedence for unresolved magnets. Single read marks establish one undo target;
+bulk marking preserves it; undo consumes it; explicit grab alone adds and marks
+read/grabbed with shows origin. Fresh interactive opens do not rewrite/check
+history. Contract 1.2.11 adds shows cap/changes and shows.ndjson, with exact
+hello/error caps. Minimal neighbours: types/catalogue/dispatch/presence/drain,
+bus/diff, origin validation, browse endpoint, typed TUI API mirror (no renderer
+completion claimed) and the CLI test helper's optional pre-log exit timestamp.
+
+`FBT_BEAD=fbt-p3-03-oyg python3 /tmp/fbt-track-a-run.py check`, `api`,
+`units tui::store::`, `build` pass (89 API tests; 12 mirror tests).
+One full `cargo test --locked -- --nocapture` passes **382/0/3 ignored**
+(`full-final/`), also confirming P3-02's RSS mirror integration is green.
+`cases shows_inbox_semantics shows_check_never_downloads shows_cli_edit_visible
+shows_check_only_when_asked` passes foreground (final inbox/check/CLI in
+`final-foreground/`, idle in `live-foreground/`) and systemd (inbox/check/idle in
+`final-systemd/`). Each idle case records **60 one-second zero-hit observations**,
+then one stale interactive check, no fresh reconnect fetch and a deliberate
+explicit check. Four unread releases are newest first; m/M/u semantics,
+one-level undo, Shows-origin grab and independent paused transfer pass. CLI
+follow through the in-process path appears in the topic; an independent socket
+reader timestamps receipt against the CLI exit before JSONL writes, retaining
+the exact <=2 s assertion: **85.7/94.2 ms** foreground/systemd
+(`timed-cli-{foreground,systemd}/`). The previous poll-based systemd run timed
+out after one observation under load; it remains retained, not counted green.
+Final `cases contract_hello contract_errors` passes both modes (`caps-*/`).
+Evidence: `target/test-logs/fbt-p3-03-oyg/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p3-03-oyg/`. UI rendering stays with C/D; no all.sh
+between track beads. Follow-up: legacy EZTV episodes do not distinguish a missing
+source seed/size from zero; API omits nonpositive legacy values conservatively.
