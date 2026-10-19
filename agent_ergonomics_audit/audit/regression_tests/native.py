@@ -396,7 +396,13 @@ class NativeHarness:
         path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
         if getattr(self, "serve", None) is not None and self.serve.poll() is None:
             return
-        root = Path(self.env["XDG_RUNTIME_DIR"]).parent
+        if not Path(self.binary).exists():
+            # Logging-contract fixtures pass a placeholder binary; they exercise tmux and logs, never a daemon.
+            return
+        # The sandbox root: fixtures that keep the real XDG_RUNTIME_DIR (/run/user/<uid>) must not
+        # derive scratch paths from it, so use the sandboxed data dir's parent, else a private tempdir.
+        data = self.env.get("XDG_DATA_HOME")
+        root = Path(data).parent if data and os.access(Path(data).parent, os.W_OK) else Path(tempfile.mkdtemp(prefix="fbt-native-"))
         # These foreground cases never control the user's service manager.
         self.env["FBITTORRENT_UNIT"] = "fbt-native-" + str(os.getpid()) + ".service"
         self.env["HOME"] = str(root / "home")
