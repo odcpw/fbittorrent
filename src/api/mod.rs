@@ -15,6 +15,8 @@ pub mod rss;
 pub mod shows;
 pub mod peers;
 pub mod history;
+pub mod stats;
+pub use stats::*;
 pub use history::*;
 pub mod ops;
 pub mod request;

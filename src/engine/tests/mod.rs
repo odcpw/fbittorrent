@@ -78,6 +78,7 @@
         let inner = Arc::new(Inner {
             session,
             bus_changed: rqbit_runtime::sync::Notify::new(),
+            completed_count: Default::default(),
             completions: Default::default(),
             ledger: Arc::new(Mutex::new(ledger)),
             additions: Arc::new(Mutex::new(())),

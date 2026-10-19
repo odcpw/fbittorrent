@@ -162,7 +162,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
 | `torrents.queue_move` | `hash: hash`, `to: enum(top\|up\|down\|bottom)` | `{state: "done", queue_pos: u64}` | yes | P6-05 |
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
-| `app.stats` | `history?: bool` | `{active_clients: ClientCounts, connections: ClientCounts, history?: RateHistory}`; current clients, cumulative connections, optional 600 samples | no | P1-14 |
+| `app.stats` | `history?: bool` | `{active_clients: ClientCounts, connections: ClientCounts, session: SessionTotals, all_time: AllTimeTotals, history?: RateHistory}`; current clients, cumulative connections, session/all-time totals, optional 600 samples | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
 | `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
@@ -954,6 +954,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.28` | `search.install_torznab` |
 | `1.2.30` | `shows.quality` |
 | `1.2.31` | `status.history` |
+| `1.2.32` | `status.all_time` |
 | `1.2.29` | `trackers.edit` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
@@ -1167,3 +1168,20 @@ topic sends `state {data:{history:...}}` initially and at most every 5,000 ms,
 independent of subscriber count. No per-torrent rings or on-disk history exist.
 Hello capability lists in existing fixtures are updated exactly per the owner
 cap-bookkeeping ruling; all other existing fixture values remain unchanged.
+
+### P6-04: session and all-time statistics (contract 1.2.32)
+
+`app.stats` and the `stats` topic add `session: {downloaded, uploaded, started_at}`
+and `all_time: {downloaded, uploaded, completed}` under the existing `history`
+capability. Bytes and completion counts are unsigned integers; `started_at` is
+the daemon's Unix start time in seconds. Session bytes accumulate actual engine
+network counters across engine restarts, independent of verified on-disk bytes.
+Restoring completed data does not recount it. A daemon restart resets session
+bytes, preserving all-time totals. History remains opt-in on the operation.
+
+`status --json` includes `all_time`, including while stopped without autostart.
+Only the three all-time totals are stored in `$XDG_STATE_HOME/fbittorrent/stats.json`
+(default `~/.local/state/fbittorrent/stats.json`), mode 0600. Updates use a unique
+same-directory temporary, file fsync, atomic rename and directory fsync; saves
+occur only on change, at most every 30 seconds, and at drain after the engine's
+final counters. Session values, history and per-client counters are not persisted.

@@ -900,3 +900,39 @@ Final `cargo test --locked -- --nocapture` passed 553/0 with three existing
 opt-in ignores (`full-green/development_full/`); the corrected negative control
 also passed in isolation (`negative-corrected/`). Python compile, diff check,
 source-size gate and exact non-cap fixture preservation audit passed.
+
+## P6-04 — session and all-time statistics
+
+Actual engine network byte counters accumulate across engine epochs; a separate
+monotonic completion counter cannot lose events to notification queue eviction.
+Final counters are collected after the existing bounded engine drain, outside
+the slot lock. `app.stats`, the pushed `stats` state and `status --json` expose
+session/all-time totals; stopped status reads durable totals without autostart.
+Only `{downloaded,uploaded,completed}` persist in private state `stats.json`,
+0600 through unique temporary, fsync/rename/directory-fsync, on change every 30 s
+and at final drain. A save failure cannot override panic exit 70. Contract 1.2.32
+adds `status.all_time`, a new statistics transcript and docs/catalogue row under
+the existing history capability; every existing fixture byte stays unchanged.
+Minimal neighbours: engine atomic completion counter/synchronous totals accessor,
+existing drain visibility, and the test engine initializer's new field. Settings
+Stats rendering and the TUI Log footer remain deferred to C/D. Private-XDG logs
+under `target/test-logs/fbt-p6-04-ag3/`: `stats-unit/` passed
+`cargo test --locked --bin fbittorrent stats::tests -- --nocapture`, printing save
+seconds `[30,60,61]` (last is forced drain), validating epoch accumulation, 0600,
+exact three-key JSON and refusal to replace the prior file in an unwritable
+directory. `api-fixed/` passed 108 tests/one existing opt-in ignore, including
+new transcript roundtrip and exact catalogue/docs agreement. `build-final/`
+passed debug build. `daemon.py ... --case stats_persist` passed foreground and
+systemd (`{foreground,systemd}/processes/daemon/stats_persist.jsonl`), 466 steps
+each in 15.200/15.282 s: actual downloaded totals 8,388,608 before and after daemon
+restart; new session starts at zero; second local transfer yields 8,912,896 bytes
+and two completions, matching status and final persisted file. Engine-only
+restart preserves session/start time with no verification recount; independent
+seed uploads and pushed stats agree. Both daemon acceptance criteria met.
+Initial check caught the engine test initializer's missing counter; initial API
+checks caught missing transcript topics and wording disagreement; all corrected
+without relaxed expectations. Full-suite result follows. No umbrella run between
+track beads and no hosted Actions.
+Final `cargo test --locked -- --nocapture` passed 554/0 with three existing
+opt-in ignores (`full/development_full/`, 8.28 s test runtime). Python compile,
+diff check, changed-source size gate and existing-fixture preservation passed.

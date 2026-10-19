@@ -623,15 +623,17 @@ fn status(
     let Some(c) = c else {
         emit(
             json_mode,
-            json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,"total":rows.len()}),
+            json!({"ok":true,"running":false,"app_open":false,"backend":"stopped","engine":cfg.engine,"total":rows.len(),"all_time":crate::daemon::stats::read(&crate::daemon::stats::path())?}),
         );
         return Ok(());
     };
     let info = c.call("app.info", json!({}))?;
     let transfer = c.call("transfer.info", json!({}))?;
+    let stats = c.call("app.stats", json!({}))?;
     let mut value = counts(rows);
     value["ok"] = json!(true);
     value["running"] = json!(true);
+    value["all_time"] = stats["all_time"].clone();
     value["connection"] = json!("api");
     value["backend"] = json!("native");
     value["engine"] = json!(cfg.engine);

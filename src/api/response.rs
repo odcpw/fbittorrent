@@ -376,6 +376,8 @@ pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }
 pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StatsResult {
+    #[serde(skip_serializing_if="Option::is_none")] pub session:Option<super::SessionTotals>,
+    #[serde(skip_serializing_if="Option::is_none")] pub all_time:Option<super::AllTimeTotals>,
     pub active_clients: ClientCounts, pub connections: ClientCounts,
     #[serde(skip_serializing_if="Option::is_none")] pub history:Option<super::RateHistory>,
 }

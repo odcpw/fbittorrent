@@ -30,6 +30,7 @@ pub fn dispatch(
     uptime: u64,
     subscriptions: Subscriptions,
 ) -> ApiResult<Reply> {
+    let totals=matches!(call,Call::AppStats {..}).then(||daemon.statistics());
     Ok(match call {
         Call::AppClipboardDismiss { args } => {
             daemon.clipboard.dismiss(args.hash.as_str());
@@ -37,6 +38,7 @@ pub fn dispatch(
         }
         Call::AppLog { args } => Reply::AppLog(daemon.logs.query(&args.clone().unwrap_or_default())),
         Call::AppStats { args } => Reply::AppStats(StatsResult {
+            session:Some(totals.as_ref().unwrap().0.clone()),all_time:Some(totals.unwrap().1),
             connections: serde_json::from_value(counts).unwrap(),
             active_clients: serde_json::from_value(active_counts).unwrap(),
             history:args.as_ref().filter(|a|a.history==Some(true)).map(|_|daemon.history.lock().unwrap().snapshot()),

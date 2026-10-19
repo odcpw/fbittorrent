@@ -469,9 +469,10 @@ impl Bus {
         for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
             if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
         }
+        let (session,all_time)=self.daemon.statistics();
         let (history,stats)={let mut ring=self.daemon.history.lock().unwrap();
             ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
-            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot()})}else{Value::Null})};
+            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
             history,stats,
             peers,

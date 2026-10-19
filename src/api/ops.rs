@@ -77,7 +77,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
         args: "`since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error|warn|info|debug)`, `source?: str`, `hash?: hash`", result: "`{entries: [LogEntry], next_seq: u64}`" },
     Operation { name: "app.stats", mutating: false, idempotent: false, since: "P1-14",
-        args: "`history?: bool`", result: "`{active_clients: ClientCounts, connections: ClientCounts, history?: RateHistory}`; current clients, cumulative connections, optional 600 samples" },
+        args: "`history?: bool`", result: "`{active_clients: ClientCounts, connections: ClientCounts, session: SessionTotals, all_time: AllTimeTotals, history?: RateHistory}`; current clients, cumulative connections, session/all-time totals, optional 600 samples" },
     Operation { name: "app.settings.get", mutating: false, idempotent: false, since: "P3-05",
         args: "none", result: "`Settings`" },
     Operation { name: "app.settings.set", mutating: true, idempotent: true, since: "P3-05",

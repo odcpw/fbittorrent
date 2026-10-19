@@ -389,7 +389,7 @@ impl NegotiatedCaps {
     pub fn reply(&self, value: &Reply) -> Checked {
         match value {
             Reply::AppLog(_) => require(self.log, "result", "requires the log capability"),
-            Reply::AppStats(result) => {require(self.log,"result","requires the log capability")?;require(result.history.is_none()||self.history,"history","requires the history capability")},
+            Reply::AppStats(result) => {require(self.log,"result","requires the log capability")?;require((result.history.is_none()&&result.session.is_none()&&result.all_time.is_none())||self.history,"history/session/all_time","requires the history capability")},
             Reply::TorrentsList(result) => {
                 for torrent in &result.torrents {
                     self.torrent(torrent)?;

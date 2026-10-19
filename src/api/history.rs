@@ -5,7 +5,10 @@ use serde::{Serialize,Deserialize};
 pub struct RateHistory {pub download:Vec<u64>,pub upload:Vec<u64>,pub interval_s:u64}
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SampledStats {pub history:RateHistory}
+pub struct SampledStats {pub history:RateHistory,
+    #[serde(skip_serializing_if="Option::is_none")] pub session:Option<super::SessionTotals>,
+    #[serde(skip_serializing_if="Option::is_none")] pub all_time:Option<super::AllTimeTotals>,
+}
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatsArgs {#[serde(skip_serializing_if="Option::is_none")]pub history:Option<bool>}
@@ -26,7 +29,7 @@ impl super::validation::Validate for RateHistory {
         history.download=vec![0;601];history.upload=vec![0;601];assert!(history.validate().is_err());
         history.download.clear();history.upload.clear();history.interval_s=2;assert!(history.validate().is_err());
         history.interval_s=1;
-        let frame=api::Event::State {sub:1,topic:api::Topic::Stats,rev:1,data:api::StateData::Stats(SampledStats {history})};
+        let frame=api::Event::State {sub:1,topic:api::Topic::Stats,rev:1,data:api::StateData::Stats(SampledStats {history,session:None,all_time:None})};
         frame.validate().unwrap();assert!(NegotiatedCaps::default().event(&frame).is_err());
         let hello:serde_json::Value=include_str!("../../contracts/ipc/v1/hello.ndjson").lines().map(|l|serde_json::from_str::<serde_json::Value>(l).unwrap()).find(|r|r["frame"]["result"].get("caps").is_some()).unwrap();
         let hello:api::HelloResult=serde_json::from_value(hello["frame"]["result"].clone()).unwrap();
