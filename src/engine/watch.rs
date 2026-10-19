@@ -60,10 +60,12 @@ impl EngineDispatcher {
                     path: handle.output_folder().join(&file.relative_filename),
                     size: file.len,
                     prefix,
+                    verified_bytes: stats.progress_bytes,
                     last,
                     dl_bps: rate,
                     downloading: active && rate.is_some_and(|v| v > 0),
                     active,
+                    download_limit: handle.effective_download_bps(),
                 });
             }
             Ok(result)

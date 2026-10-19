@@ -1091,7 +1091,7 @@ class ApiConn:
             text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://[^?\s"<>]+)\?[^\s"<>]*', r'\1?…', text)
         return text
 
-    def call(self, op, args=None, ref=None, error=None):
+    def call(self, op, args=None, ref=None, error=None, confirm=True):
         step = self.case.step("API " + op + " " + self.diagnostic(args),
                               "matching success reply" if error is None else "matching " + error + " failure")
         identifier = self.send(op, args, ref)
@@ -1106,6 +1106,24 @@ class ApiConn:
             if frame.get("id") != identifier:
                 step.fail(f"Unexpected response ID: {frame!r}")
                 raise ValueError("response ID mismatch")
+            # These intents acknowledge admission before engine I/O. Ordinary
+            # behaviour cases need the confirmed result before their next step;
+            # transport/deadline cases use confirm=False to inspect admission.
+            if confirm and frame.get("result", {}).get("state") == "pending" and (
+                    (op == "torrents.remove" and (args or {}).get("delete_files") is False)
+                    or (op == "torrents.add" and "restore" in (args or {}).get("source", {}))):
+                reference = frame["result"]["ref"]
+                admission = self.case.step("observe mutation admission", "pending carries this request's correlation ref")
+                admission.close(ref is None or reference == ref, self.diagnostic(frame))
+                while True:
+                    outcome = self.receive()
+                    if outcome is None:
+                        raise EOFError("EOF before mutation confirmation " + reference)
+                    self.pushed.append(outcome)
+                    if outcome.get("ev") == "mutation.result" and outcome.get("ref") == reference:
+                        frame = dict(id=identifier, ok=outcome["outcome"] == "done")
+                        frame["result" if frame["ok"] else "error"] = outcome.get("result", {}) if frame["ok"] else outcome["error"]
+                        break
             ok = frame.get("ok") is True if error is None else frame.get("error", {}).get("code") == error
             step.close(ok, self.diagnostic(frame))
             if frame.get("ok") is True and op in ("hello","app.info"):
@@ -3349,8 +3367,13 @@ def ref_replay_remove(binary, systemd):
         fixture, args = mutation_add_path(client, sandbox)
         remove = dict(hashes=[fixture.info_hash], delete_files=False)
         first = mutation_request(client, "torrents.remove", remove, ref="remove-once")
+        case.check(first.get("result") == dict(state="pending", ref="remove-once"),
+                   "keep-files remove acknowledges its ref before engine execution", json.dumps(first))
+        outcome = mutation_outcome(client, "remove-once")
         replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
-        case.check(first.get("result") == replay.get("result"), "remove replay returns the stored first result", json.dumps(replay))
+        replayed_outcome = mutation_outcome(client, "remove-once")
+        case.check(first.get("result") == replay.get("result") and outcome == replayed_outcome,
+                   "remove replay returns the stored acknowledgement and confirmed result", json.dumps(replay))
         mutation_request(client, "torrents.add", args, ref="readd")
         replay = mutation_request(client, "torrents.remove", remove, ref="remove-once")
         rows = client.call("torrents.list", {})["result"]["torrents"]
@@ -3366,6 +3389,7 @@ def ref_per_client(binary, systemd):
             fixture, args = mutation_add_path(client, sandbox, name)
             inputs.append(fixture.info_hash)
             mutation_request(client, "torrents.remove", dict(hashes=[fixture.info_hash], delete_files=False), ref="same-ref")
+            mutation_outcome(client, "same-ref")
         case.check(len(set(inputs)) == 2 and first.call("torrents.list", {})["result"]["torrents"] == [],
                    "distinct client names apply both independent removals with the same ref", str(inputs))
 
@@ -4973,6 +4997,8 @@ CASES["staged_not_busy"] = staged_not_busy
 from daemon_torznab import CASES as TORZNAB_CASES
 CASES.update((function.__name__,function) for function in TORZNAB_CASES)
 from daemon_watch import CASES as WATCH_CASES
+from daemon_remove_delay import CASES as REMOVE_DELAY_CASES
+CASES.update((function.__name__, function) for function in REMOVE_DELAY_CASES)
 from daemon_catalog import CASES as CATALOG_CASES
 CASES.update((function.__name__,function) for function in CATALOG_CASES)
 from daemon_cli_catalogues import CASES as CLI_CATALOGUE_CASES
