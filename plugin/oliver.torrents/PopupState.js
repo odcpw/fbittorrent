@@ -32,3 +32,5 @@ function meta(t,parked) {
 function verb(action) {
   return {"torrents.stop":"pausing…","torrents.start":"starting…","torrents.remove":"removing…","torrents.set_seed":"setting seed policy…"}[action.op] || "working…"
 }
+
+function dashboardFilter(group) {return group==="live" ? "downloading" : group==="other" ? "all" : group}

@@ -57,6 +57,7 @@ ShellRoot {
     check("rows","parked omits progress",State.meta(row,true),State.meta(row,true).indexOf("42%")<0)
     check("rows","unknown peers and ETA omitted",State.meta({state:"metadata"},false),State.meta({state:"metadata"},false)==="Metadata")
     check("rows","error message and action verb",State.meta({state:"error",error:"Missing files"},false),State.meta({state:"error",error:"Missing files"},false)==="Missing files" && State.verb({op:"torrents.stop"})==="pausing…")
+    check("states","popup group keys map to real dashboard filters",["live","queued","paused","done","other"].map(State.dashboardFilter),JSON.stringify(["live","queued","paused","done","other"].map(State.dashboardFilter))===JSON.stringify(["downloading","queued","paused","done","all"]))
     console.log("FBTQS-PASS states");console.log("FBTQS-PASS rows")
 
   }
