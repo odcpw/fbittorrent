@@ -8,8 +8,8 @@ Canvas {
   property color foreground:Commons.Color.foreground
   readonly property var points:Array.isArray(samples) ? samples.slice(-60) : []
   readonly property real maximum:Math.max(1,...points)
-  implicitWidth:180
-  implicitHeight:24
+  implicitWidth:Commons.Style.font.bodySmall*15
+  implicitHeight:Commons.Style.font.bodySmall*2
   Accessible.name:"Download speed history"
   onPointsChanged:requestPaint()
   onForegroundChanged:requestPaint()

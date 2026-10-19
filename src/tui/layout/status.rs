@@ -13,25 +13,27 @@ impl TuiApp {
             |n| n.ready,
         );
         let status = if parked {
-            if width < 100 {
+            if width < 100 || s.network.message.is_empty() {
                 "Waiting for VPN".into()
             } else {
-                s.network.message.clone()
+                format!("Waiting for VPN · {}", s.network.message)
             }
         } else if s.dl_bps == Some(0) && s.ul_bps == Some(0) {
-            if !s.daemon.busy_reasons.is_empty() {
+            if let Some(seconds) = s.daemon.idle_exit_in_s {
+                if seconds >= 60 {
+                    format!("Idle · stops in {} min", seconds.div_ceil(60))
+                } else {
+                    format!("Idle · stops in {seconds}s")
+                }
+            } else if s.counts.error > 0 {
+                format!("! {} error{}", s.counts.error, if s.counts.error == 1 {""} else {"s"})
+            } else if !s.daemon.busy_reasons.is_empty() {
                 if s.daemon.busy_reasons.iter().any(|r| r == "interactive")
                     && s.daemon.busy_reasons.len() == 1
                 {
                     "Idle · UI open".into()
                 } else {
                     format!("Busy · {}", s.daemon.busy_reasons.join(", "))
-                }
-            } else if let Some(seconds) = s.daemon.idle_exit_in_s {
-                if seconds >= 60 {
-                    format!("Idle · stops in {} min", seconds.div_ceil(60))
-                } else {
-                    format!("Idle · stops in {seconds}s")
                 }
             } else if self
                 .store

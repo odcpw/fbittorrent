@@ -22,25 +22,15 @@ function bytes(n) {
   return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]
 }
 
-function legacyRate(n) { return n === undefined || n === null ? "—" : bytes(n) + "/s" }
 function rate(n, compact) { return Formats.rate(n,!!compact) }
 
-function legacyEta(secs) {
-  secs = Number(secs)
-  if (!(secs >= 0) || secs >= 8640000) return "—"
-  var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60)
-  if (h > 0) return h + "h" + (m < 10 ? "0" : "") + m + "m"
-  if (m > 0) return m + "m" + (s < 10 ? "0" : "") + s + "s"
-  return s + "s"
-}
-
 function isActive(t) {
-  return ["metadata", "checking", "stalled", "downloading", "metaDL", "forcedDL", "stalledDL", "checkingDL", "allocating", "forcedMetaDL"].indexOf(t.state) >= 0
+  return ["metadata", "checking", "stalled", "downloading"].indexOf(t.state) >= 0
 }
 function isStopped(t) {
-  return ["paused", "done", "stoppedDL", "stoppedUP", "pausedDL", "pausedUP"].indexOf(t.state) >= 0
+  return ["paused", "done"].indexOf(t.state) >= 0
 }
-function isDone(t) { return t.state === "done" || t.state === "seeding" || (t.progress_known !== false && Number(t.progress) >= 1) }
+function isDone(t) { return t.state === "done" || t.state === "seeding" }
 
 var words={metadata:"Metadata",checking:"Checking",downloading:"Downloading",stalled:"Stalled",queued:"Queued",paused:"Paused",done:"Done",seeding:"Seeding",waiting_vpn:"Waiting for VPN",error:"Error",disk_full:"Disk full",ready:"Ready to watch",added_before:"Added before",in_list:"In your list",unread:"Unread",pending:"Pending",reason:"Reason"}
 var stateRoles={metadata:"metadata",checking:"checking",downloading:"download",stalled:"stalled",queued:"queued",paused:"paused",done:"done",seeding:"upload",waiting_vpn:"vpn",error:"error",disk_full:"error",ready:"ready",added_before:"add",in_list:"add",unread:"unread",pending:"paused",reason:"error"}
@@ -51,22 +41,7 @@ function stateLabel(t) {
   }
   if (t.state==="error" && t.reason==="disk_full") return "Disk full"
   if (words[t.state]) return words[t.state]
-  switch (t.state) {
-    case "downloading": case "forcedDL": return "Downloading"
-    case "metadata": case "metaDL": case "forcedMetaDL": return "Fetching metadata"
-    case "stalled": case "stalledDL": return "Stalled"
-    case "queued": case "queuedDL": return "Queued"
-    case "waiting_vpn": case "waitingVPN": return "Waiting for VPN"
-    case "checking": case "checkingDL": case "checkingUP": case "checkingResumeData": return "Checking"
-    case "seeding": case "uploading": case "forcedUP": return "Seeding"
-    case "stalledUP": return "Seeding · idle"
-    case "queuedUP": return "Queued · seed"
-    case "paused": case "stoppedDL": case "pausedDL": return "Stopped"
-    case "done": case "stoppedUP": case "pausedUP": return "Done"
-    case "error": return "Error"
-    case "missingFiles": return "Missing files"
-    default: return t.state || "?"
-  }
+  return t.state || "?"
 }
 
 function glyph(t) {
@@ -74,53 +49,33 @@ function glyph(t) {
   if (stateRoles[t.state]) return Glyphs.glyph(stateRoles[t.state])
   if (isStopped(t)) return isDone(t) ? Glyphs.done : Glyphs.paused
   if (isActive(t)) return Glyphs.download
-  if (t.state === "error" || t.state === "missingFiles") return Glyphs.error
+  if (t.state === "error") return Glyphs.error
   return Glyphs.upload
+}
+
+// Counts describe connected peers only. An absent bitfield-derived seed count
+// stays unknown even when the connected-peer count is known zero.
+function peerCount(t,compact) {
+  var peers=t.peers,seeds=t.seeds
+  var hasPeers=typeof peers==="number" && isFinite(peers) && peers>=0
+  var hasSeeds=typeof seeds==="number" && isFinite(seeds) && seeds>=0
+  if(compact)return (hasSeeds ? String(seeds) : "—")+"/"+(hasPeers ? String(peers) : "—")
+  if(hasSeeds && hasPeers)return seeds+" seeds / "+peers+" peers connected"
+  if(hasPeers)return peers+" peers connected · seeds unknown"
+  if(hasSeeds)return seeds+" seeds · connected peers unknown"
+  return "Connected peers unknown"
 }
 
 // One-line meta under the torrent name.
 function meta(t) {
-  if (t.intent !== undefined) {
-    var values = []
-    if (t.progress !== undefined && t.progress !== null) values.push(percent(t.progress,t.state==="done" || t.state==="seeding"))
-    if (t.dl_bps !== undefined && t.dl_bps !== null) values.push(rate(t.dl_bps))
-    if (t.eta_s !== undefined && t.eta_s !== null) values.push(Formats.eta(t.eta_s,false))
-    if (!values.length && t.size !== undefined && t.size !== null) values.push(Formats.size(t.size,false))
-    values.push(t.seed ? "seeding allowed" : "seed off")
-    return values.join(" · ")
-  }
-  var pct = (Number(t.progress) * 100).toFixed(pctDigits(t))
-  var parts = []
-  if (t.progress_known === false) return stateLabel(t) + " · progress checked after connection"
-  if (t.state === "queuedDL") {
-    parts.push("Queued")
-    parts.push(pct + "%")
-    parts.push(bytes(t.size))
-  } else if (isActive(t)) {
-    parts.push(pct + "%")
-    parts.push(legacyRate(t.dlspeed))
-    parts.push(legacyEta(t.eta))
-  } else if (isStopped(t)) {
-    parts.push(pct + "%")
-    parts.push(bytes(t.size))
-  } else {
-    parts.push(bytes(t.size))
-    if (Number(t.upspeed) > 0) parts.push("↑ " + legacyRate(t.upspeed))
-    parts.push("ratio " + Number(t.ratio || 0).toFixed(2))
-  }
-  var flags = (t.seq_dl ? "S" : "") + (t.f_l_piece_prio ? "F" : "")
-  if (flags !== "" && !isDone(t)) parts.push(flags)
-  parts.push(seedAllowed(t) ? "seeding allowed" : "seed off")
-  return parts.join(" · ")
+  var values=[]
+  if(t.progress!==undefined && t.progress!==null)values.push(percent(t.progress,t.state==="done" || t.state==="seeding"))
+  if(t.dl_bps!==undefined && t.dl_bps!==null)values.push(rate(t.dl_bps))
+  if(t.eta_s!==undefined && t.eta_s!==null)values.push(Formats.eta(t.eta_s,false))
+  if(!values.length && t.size!==undefined && t.size!==null)values.push(Formats.size(t.size,false))
+  values.push(t.seed ? "seeding allowed" : "seed off")
+  return values.join(" · ")
 }
-
-function seedAllowed(t) {
-  if (typeof t.seed === "boolean") return t.seed
-  var tags = String(t.tags || "").split(",").map(function(s) { return s.trim() })
-  return tags.indexOf("seed") >= 0 || Number(t.up_limit) !== 32768
-}
-
-function pctDigits(t) { return Number(t.progress) < 0.1 ? 2 : 1 }
 
 function heroMeta(s) {
   if (!s.ok) return "Backend offline"

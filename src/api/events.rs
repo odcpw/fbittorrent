@@ -17,11 +17,13 @@ pub enum Item {
     File(File),
     Search(super::SearchItem),
     Peer(super::Peer),
+    Tracker(Tracker),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum StateData {
+    Pieces(super::Pieces),
     Stats(super::SampledStats),
     Summary(Summary),
     Network(NetworkState),

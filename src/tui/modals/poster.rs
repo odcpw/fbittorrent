@@ -23,6 +23,8 @@ impl TuiApp {
         };
         self.poster_target = Some((name.clone(), id.clone()));
         self.poster_open = true;
+        // Opening a cached card is local, including while its daemon is disconnected.
+        if self.presence.as_ref().is_none_or(|c|!c.alive()){return Cmd::none();}
         self.lookup_imdb(name, id)
     }
     pub(super) fn close_poster(&mut self) -> Cmd<Msg> {

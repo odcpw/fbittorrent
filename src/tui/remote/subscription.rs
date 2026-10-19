@@ -19,7 +19,7 @@ impl Subscription<Msg> for ApiSub {
             // backpressure without delaying each individual frame by a UI poll.
             let (ack, consumed) = std::sync::mpsc::sync_channel(1);
             if sender
-                .send(Msg::Api {
+                .send(Msg::ApiBatch {
                     connection: self.connection.id,
                     updates,
                     ack,
@@ -49,6 +49,7 @@ impl TuiApp {
         let Some(connection)=self.presence.clone()else{return Cmd::none();};
         Cmd::task(move||{
             let mut topics=vec!["summary","torrents","network"];
+            if connection.hello.caps.iter().any(|cap|cap=="clipboard") {topics.push("events");}
             for (topic,cap) in [("stats","history"),("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
                 if connection.hello.caps.iter().any(|c|c==cap){topics.push(topic);}
             }
@@ -56,6 +57,7 @@ impl TuiApp {
                 // Each topic has its own sub/revision so a gap can replace only that topic.
                 for topic in topics {
                     let mut args=json!({"topics":[topic]});
+                    // Leave room for transport/render latency inside the one-second UI budget.
                     if topic=="summary" {args["interval_ms"]=json!(500);}
                     connection.request("subscribe",args)?;
                 }
@@ -117,6 +119,8 @@ impl TuiApp {
                     }
                     _ => {}
                 }
+                self.clipboard_event(&event);
+                if self.store.settings.as_ref().is_some_and(|settings|!settings.clipboard_watch) {self.clipboard.offer=None;}
                 if matches!(&event,api::Event::SnapshotEnd {topic:api::Topic::Search(_)|api::Topic::Events,..}
                     |api::Event::Delta {topic:api::Topic::Search(_)|api::Topic::Events,..}|api::Event::SearchDone {..}) {
                     self.sync_native_search();
@@ -125,6 +129,7 @@ impl TuiApp {
                 let committed=matches!(&event,api::Event::SnapshotEnd{..}|api::Event::Delta{..}|api::Event::State{..});
                 if committed {
                     match &event {
+                        api::Event::SnapshotEnd{topic:api::Topic::Trackers(_),..}|api::Event::Delta{topic:api::Topic::Trackers(_),..}=>self.sync_tracker_panel(),
                         api::Event::SnapshotEnd{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}|api::Event::Delta{topic:api::Topic::RssFeeds|api::Topic::RssItems(_),..}=>self.sync_native_feeds(),
                         api::Event::SnapshotEnd{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}|api::Event::Delta{topic:api::Topic::Shows|api::Topic::ShowReleases(_),..}=>self.sync_native_shows(),
                         api::Event::State{data:api::StateData::Settings(settings),..}=>{if let Err(e)=settings_fields::native_settings(&mut self.cfg,settings){self.set_status(e.to_string(),true);}},
@@ -141,6 +146,7 @@ impl TuiApp {
                         _=>{}
                     }
                 }
+                if committed {self.sync_activity_label();}
                 if rows_changed {
                     let rows = self
                         .store

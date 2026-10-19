@@ -8,7 +8,6 @@ pub(super) struct Prompt {
     pub(super) yes_no: bool,
     /// Per-add overrides for the magnet prompt: (sequential, first/last, allow upload).
     pub(super) add_flags: (bool, bool, bool),
-    pub(super) native_streaming: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +20,8 @@ pub(super) enum PromptKind {
     SettingIdleExit,
     ShowQuality {imdb:String},
     AddFeed,
+    AddTracker { hash:String },
+    ConfirmRemoveTracker { hash:String,url:String },
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
@@ -39,10 +40,11 @@ impl TuiApp {
         if kind==PromptKind::SettingIdleExit {input=input.with_max_length(20);}
         if kind==PromptKind::SettingDestination {input=input.with_max_length(4096);}
         if matches!(kind,PromptKind::ShowQuality {..}) {input=input.with_max_length(16);}
+        if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
-        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags, native_streaming: self.cfg.native() });
+        let add_flags = (true, true, self.cfg.seed_by_default);
+        self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 
     pub(super) fn rename_prompt(&mut self)->Cmd<Msg> {
@@ -73,28 +75,13 @@ impl TuiApp {
                     self.close_prompt();
                     return match kind {
                         PromptKind::Shutdown => self.shutdown_daemon(),
-                        PromptKind::ConfirmDeleteTorrent { hash, files } if self.cfg.native() =>
-                            self.service_action("torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":files}),if files {"deleted with files"}else{"removed · U undo (10 s)"}),
+                        PromptKind::ConfirmRemoveTracker{hash,url}=>self.edit_tracker(&hash,&url,false),
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
-                            self.action(if files { "deleted with files" } else { "removed" }, move |c| c.delete(&[hash], files)),
+                            self.service_action("torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":files}),if files {"deleted with files"}else{"removed · U to undo"}),
                         PromptKind::ConfirmRemoveFeed { name } => {
-                            if self.cfg.native(){return self.native_feed_action("rss.remove",&name,None,None,format!("removed feed {name}"));}
-                            self.rss_action(format!("removed feed {name}"), move |c| c.rss_remove(&name))
+                            self.native_feed_action("rss.remove",&name,None,None,format!("removed feed {name}"))
                         }
-                        PromptKind::ConfirmUnfollow { imdb, title } => {
-                            if self.cfg.native(){return self.service_action("shows.unfollow",serde_json::json!({"imdb":imdb}),format!("unfollowed {title}"));}
-                            self.shows.unfollow(&imdb);
-                            if self.inbox_last_read.as_ref().is_some_and(|target| target.imdb == imdb) { self.inbox_last_read = None; }
-                            let saved=self.save_shows();
-                            let n = self.shows.shows.len() + 1;
-                            let mut st = self.show_list.borrow_mut();
-                            match st.selected() { Some(i) if i < n => {}, _ => st.select(n.checked_sub(1)) }
-                            drop(st);
-                            self.ep_list.borrow_mut().select(None);
-                            self.rebuild_inbox();
-                            if saved {self.set_success(format!("unfollowed {title}"));}
-                            Cmd::none()
-                        }
+                        PromptKind::ConfirmUnfollow { imdb, title } => self.service_action("shows.unfollow",serde_json::json!({"imdb":imdb}),format!("unfollowed {title}")),
                         _ => Cmd::none(),
                     };
                 }
@@ -103,8 +90,6 @@ impl TuiApp {
         }
         match intent {
             actions::Intent::Cancel => { self.close_prompt(); Cmd::none() }
-            actions::Intent::Sequential if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.0 = !p.add_flags.0; Cmd::none() }
-            actions::Intent::FirstLast if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
             actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             actions::Intent::Primary => {
                 let raw=p.input.value().to_string();
@@ -132,10 +117,10 @@ impl TuiApp {
                     }
                     PromptKind::AddFeed => {
                         let name = crate::host_of(&value);
-                        if self.cfg.native(){return self.service_action("rss.add",serde_json::json!({"url":value,"name":name}),"feed added");}
-                        self.rss_action("feed added", move |c| c.rss_add_feed(&value, name.as_deref()))
+                        self.service_action("rss.add",serde_json::json!({"url":value,"name":name}),"feed added")
                     }
                     PromptKind::FollowShow => self.follow(value, None),
+                    PromptKind::AddTracker{hash}=>self.edit_tracker(&hash,&value,true),
                     _ => Cmd::none(),
                 }
             }
@@ -149,11 +134,6 @@ impl Prompt {
     /// Title with the live flag state, so the toggles are discoverable while typing.
     pub(super) fn title(&self) -> String {
         if self.kind != PromptKind::AddMagnet { return self.label.clone(); }
-        let (s, f, u) = self.add_flags;
-        if self.native_streaming {
-            return format!("{} · streaming automatic · F4 seed:{} ", self.label, if u { "on" } else { "off" });
-        }
-        format!("{}  ·  F2 sequential:{}  F3 first/last:{}  F4 upload:{} ", self.label,
-            if s { "on" } else { "off" }, if f { "on" } else { "off" }, if u { "on" } else { "off" })
+        format!("{} · streaming automatic · F4 seed:{} ", self.label, if self.add_flags.2 { "on" } else { "off" })
     }
 }

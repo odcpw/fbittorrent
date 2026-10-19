@@ -6,14 +6,13 @@ impl TuiApp {
         let Some(field) = column.sort_field() else {
             return Cmd::none();
         };
+        let descending=if self.torrent_sort==field { !self.torrent_descending } else { !matches!(field,TorrentSort::Name|TorrentSort::State) };
+        self.apply_torrent_sort(field,descending,if field==TorrentSort::Added {"added"} else {column.label()})
+    }
+    fn apply_torrent_sort(&mut self, field: TorrentSort, descending: bool, label: &str) -> Cmd<Msg> {
         let selected = self.selected_torrent().map(|t| t.hash.clone());
-        self.torrent_descending = if self.torrent_sort == field {
-            !self.torrent_descending
-        } else {
-            !matches!(field, TorrentSort::Name | TorrentSort::State)
-        };
-        self.torrent_sort = field;
-        if self.cfg.native() && !self.store.torrents.is_empty() {
+        self.torrent_sort=field;self.torrent_descending=descending;
+        if !self.store.torrents.is_empty() {
             self.torrents = self
                 .store
                 .sorted_torrents(field, self.torrent_descending)
@@ -22,7 +21,7 @@ impl TuiApp {
                 .collect();
         } else {
             self.torrents.sort_by(|left, right| {
-                store::legacy_order(left, right, field, self.torrent_descending)
+                store::display_order(left, right, field, self.torrent_descending)
             });
         }
         self.tor_list
@@ -31,7 +30,7 @@ impl TuiApp {
         self.set_status(
             format!(
                 "Sorted by {} {}",
-                if field==TorrentSort::Added {"added".into()}else{column.label().to_lowercase()},
+                label.to_lowercase(),
                 if self.torrent_descending {
                     "↓"
                 } else {
@@ -83,7 +82,7 @@ impl TuiApp {
         } else {
             let mut rows = std::mem::take(&mut self.search_results);
             rows.sort_by(|a, b| {
-                store::legacy_search_order(
+                store::display_search_order(
                     a,
                     b,
                     (self.rating_for(a), self.rating_for(b)),

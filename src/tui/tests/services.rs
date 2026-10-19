@@ -104,3 +104,52 @@ fn feed_identity_and_selected_item_survive_pushed_reordering() {
         .collect::<Vec<_>>();
     assert!(!ids.contains(&1), "no periodic data poll: {ids:?}");
 }
+
+#[test]
+fn release_projection_discards_previously_visited_parents() {
+    let mut app=TuiApp::new(Config::default(),Screen::Shows,Shows::default());
+    let first=show();
+    let mut second=first.clone();second.imdb="tt1234002".into();second.title="Second Show".into();
+    app.store.shows.insert(first.imdb.clone(),first.clone());
+    app.store.shows.insert(second.imdb.clone(),second.clone());
+    for current in [&first,&second,&first,&second] {
+        app.store.releases_topic=Some(current.imdb.clone());
+        app.store.show_releases.clear();
+        for n in 0..100 {
+            let mut row=release(&format!("S01E{n:03}"),false);row.show_imdb=current.imdb.clone();
+            app.store.show_releases.insert(row.key.clone(),row);
+        }
+        app.sync_native_shows();
+        assert_eq!(app.shows.shows.iter().map(|s|s.episodes.len()).sum::<usize>(),100);
+        assert_eq!(app.shows.get(&current.imdb).unwrap().episodes.len(),100);
+        assert!(app.shows.shows.iter().filter(|s|s.imdb!=current.imdb).all(|s|s.episodes.is_empty()));
+        assert_eq!(app.shows_unread(),4,"unread badge comes from all show metadata, independently of loaded parent");
+    }
+}
+
+#[test]
+fn ui_clock_advances_without_scheduling_data_reads() {
+    let mut app=TuiApp::new(Config::default(),Screen::Search,Shows::default());
+    for _ in 0..7 {app.update(Msg::Hover);}
+    assert_eq!(app.tick,7,"spinner and theme checks retain their UI-only clock");
+    assert!(!app.poll_inflight,"hover clock must not schedule a data read");
+    assert_eq!(Model::subscriptions(&app).iter().map(|s|s.id()).collect::<Vec<_>>(),[2]);
+}
+
+#[test]
+fn disconnect_dims_cached_service_rows_until_confirmed_again() {
+    let mut app=TuiApp::new(Config::default(),Screen::Rss,Shows::default());
+    let mut pool=ftui::GraphemePool::new();
+    let area=Rect::new(0,0,30,2);
+    let mut frame=Frame::new(30,2,&mut pool);
+    app.view_rows(MouseList::Feeds,area,1,|_|1,|_|Line::styled("Fixture feed",app.theme.text()),&mut frame);
+    assert_eq!(frame.buffer.get(2,0).unwrap().fg,app.theme.fg);
+    let initial=app.list_tables.borrow()[MouseList::Feeds as usize].builds;
+    app.recovery.connected("0.1.0","0.1.0");app.connection_lost(false);
+    app.view_rows(MouseList::Feeds,area,1,|_|1,|_|Line::styled("Fixture feed",app.theme.text()),&mut frame);
+    assert_eq!(frame.buffer.get(2,0).unwrap().fg,app.theme.dim,"last-known service rows are visibly stale");
+    assert_eq!(app.list_tables.borrow()[MouseList::Feeds as usize].builds,initial+1,"disconnect invalidates the row cache");
+    app.store.stale=false;
+    app.view_rows(MouseList::Feeds,area,1,|_|1,|_|Line::styled("Fixture feed",app.theme.text()),&mut frame);
+    assert_eq!(frame.buffer.get(2,0).unwrap().fg,app.theme.fg);
+}

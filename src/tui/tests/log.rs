@@ -144,6 +144,8 @@ fn log_modal_golden_120x30() {
         super::golden::compare(path, expected.split_once('\n').unwrap().1, actual.split_once('\n').unwrap().1)
             .unwrap_or_else(|diff| panic!("{diff}"));
     }
+    assert_eq!(app.feedback.log.borrow().viewer.len(),2,"daemon and local failures share the viewer");
+    assert_eq!(actual.lines().count(),30);
 }
 
 #[test]

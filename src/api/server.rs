@@ -429,6 +429,10 @@ impl EventSink {
         Self(Arc::new(tests::connection().0))
     }
     #[cfg(test)]
+    pub(crate) fn testing_negotiate(&self,hello:&HelloResult) {
+        self.0.client.lock().unwrap().caps=validation::NegotiatedCaps::from_hello(hello);
+    }
+    #[cfg(test)]
     pub(crate) fn testing_with_hello() -> Self {
         let sink=Self::testing();
         let frame:Value=include_str!("../../contracts/ipc/v1/hello.ndjson").lines().map(|l|serde_json::from_str::<Value>(l).unwrap()).find(|v|v["frame"]["result"].get("caps").is_some()).unwrap();

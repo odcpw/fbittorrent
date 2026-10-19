@@ -84,6 +84,11 @@ ShellRoot {
       var button=root.find(dashboard.item.logView,"log-"+kind+"-"+(value || "all"));if(!button)return false
       preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
     }
+    function detailTab(name:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || !dashboard.item.torrents)return false
+      var button=root.find(dashboard.item.torrents.pane,"details-tab-"+name);if(!button)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
     function gridState():string {
       var view=dashboard.item ? dashboard.item.search : null
       return JSON.stringify(view ? {grid:view.gridShowing ? view.viewState.grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
@@ -92,6 +97,38 @@ ShellRoot {
     function searchFocus():string {
       var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null
       return JSON.stringify({search:!!view,active:view ? view.activeFocus : null,visible:view ? view.visible : null,query:query ? {active:query.activeFocus,focus:query.focus,text:query.text,visible:query.visible} : null,state:service.dashboardState})
+    }
+    function trackerRows():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return "[]"
+      var view=root.find(dashboard.item.torrents,"tracker-view");return JSON.stringify(view ? view.renderedRows() : [])
+    }
+    function trackerReannounce():bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var button=root.find(dashboard.item.torrents,"trackers-reannounce");if(!button || !button.enabled)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function trackerButton(kind:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item || ["add","remove","add-cancel","add-submit"].indexOf(kind)<0)return false
+      var button=root.find(dashboard.item.torrents,kind.indexOf("add-")===0 ? "tracker-"+kind : "trackers-"+kind)
+      if(!button || !button.enabled)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function trackerEditorState():string {
+      var editor=dashboard.item ? root.find(dashboard.item.torrents,"tracker-editor") : null,input=editor ? root.find(editor,"tracker-url-input") : null
+      return JSON.stringify(editor ? {mode:editor.mode,cancelFocused:editor.cancelFocused,masked:input ? input.password : false,display:input ? input.displayText : "",length:input ? input.text.length : 0} : {})
+    }
+    function clickDetailTab(tab:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var button=root.find(dashboard.item.torrents,"details-tab-"+tab);if(!button)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function peerCountCell():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused"
+      var cell=root.find(dashboard.item ? dashboard.item.torrents : null,"connected-peer-count");return cell ? cell.renderedText : ""
+    }
+    function peerRows():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "[]"
+      var list=root.find(dashboard.item ? dashboard.item.torrents : null,"peer-list");return JSON.stringify(list ? list.renderedRows() : [])
     }
     function fileEditing():bool{return dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? dashboard.item.torrents.pane.editing : false}
     function logEntries():string{return JSON.stringify(service.store.logEntries(service.detailFlow ? service.detailFlow.hash : ""))}

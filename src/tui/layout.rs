@@ -22,12 +22,11 @@ impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let cols = Flex::horizontal().constraints([Constraint::Fill, Constraint::FitContent]).split(area);
-        let new = self.shows_unread();
-        let shows_tab = format!(" 3 Shows ({new}) ");
-        let unread_rss:usize=if self.store.hello.is_some() {self.store.rss_feeds.values().map(|f|f.unread as usize).sum()}
-            else {self.feeds.iter().map(|f|self.feed_counts(f).0).sum()};
-        let rss_tab=if unread_rss>0 {format!(" 4 RSS({unread_rss}) ")}else{" 4 RSS ".into()};
-        let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab, rss_tab];
+        let shows_tab=if self.shows.shows.is_empty()&&self.store.shows.is_empty() {" 3 Shows ".to_string()}else{format!(" 3 Shows ({}) ",self.shows_unread())};
+        let rss_tab=if self.store.rss_feeds.is_empty() {
+            if self.feeds.is_empty() {" 4 RSS ".to_string()}else{format!(" 4 RSS ({}) ",self.feeds.iter().flat_map(|f|&f.articles).filter(|a|!a.is_read).count())}
+        }else{format!(" 4 RSS ({}) ",self.store.rss_feeds.values().map(|f|f.unread).sum::<u64>())};
+        let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab.clone(), rss_tab.clone()];
         let mut x = area.x;
         let regions = labels.each_ref().map(|label| {
             // Tabs wraps each title with two visible bracket/space cells.
@@ -88,7 +87,7 @@ pub(super) fn providers_area(b: Rect, count: usize) -> Rect {
 
 pub(super) fn settings_area(b: Rect) -> Rect {
     let width = b.width.min(78);
-    let height = b.height.min(21);
+    let height = b.height.min(22);
     Rect::new(b.x + b.width.saturating_sub(width) / 2, b.y + b.height.saturating_sub(height) / 2, width, height)
 }
 

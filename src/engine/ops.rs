@@ -1,8 +1,6 @@
-//! Typed engine operations; legacy route parsing lives at the transport boundary.
+//! Typed operations executed by the engine.
 use super::*;
-mod parser;
 mod types;
-pub use parser::{Route, LEGACY_ROUTES};
 pub use types::*;
 
 impl EngineDispatcher {
@@ -41,14 +39,6 @@ impl EngineDispatcher {
             librqbit::torrent_from_bytes(&bytes)?;
             Ok(bytes)
         })
-    }
-    /// Legacy compatibility entry point. All execution below takes typed data.
-    pub fn dispatch(&self, request: &Request) -> Option<Result<String>> {
-        match EngineOp::parse(&request.path, request) {
-            Ok(Some(op)) => Some(self.execute(op).and_then(|result| result.to_legacy_json())),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        }
     }
     pub fn execute(&self, op: EngineOp) -> Result<EngineResult> {
         op.validate()?;
@@ -526,7 +516,7 @@ impl EngineDispatcher {
             unreachable!()
         };
         self.add_typed(cx, &options, None).await?;
-        EngineResult::Acknowledged.to_legacy_json()
+        EngineResult::Acknowledged.to_cli_json()
     }
     async fn add_typed(
         &self,
@@ -668,6 +658,7 @@ impl EngineDispatcher {
         Ok(added)
     }
 }
+#[cfg(test)]
 pub(super) fn required<'a>(request: &'a Request, key: &str) -> Result<&'a str> {
     request
         .arg(key)
@@ -748,7 +739,7 @@ pub(crate) fn parked_get(
         .into_iter()
         .find(|row| row.hash == hash)
         .context("torrent record not found")?;
-    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_legacy_json()?)?;
+    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_cli_json()?)?;
     torrent.name = legacy["name"]
         .as_str()
         .context("saved name is unavailable")?

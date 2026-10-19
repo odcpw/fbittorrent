@@ -26,6 +26,7 @@ pub struct TuiApp {
     pub(super) help_scroll: u16,
     pub(super) online: bool,
     pub(super) backend_error: String,
+    pub(super) activity_text: Option<String>,
     pub(super) torrents: Vec<Torrent>,
     pub(super) transfer: TransferInfo,
     pub(super) tor_list: RefCell<ListState>,
@@ -62,7 +63,6 @@ pub struct TuiApp {
     pub(super) plugins: Vec<SearchPlugin>,
     pub(super) ratings: Option<Arc<imdb::RatingsIndex>>,
     pub(super) name_ids: HashMap<String, String>,
-    pub(super) ids_inflight: bool,
     pub(super) status_at: std::time::Instant,
     pub(super) theme_mtime: Option<std::time::SystemTime>,
     pub(super) hover_key: Option<String>,
@@ -85,7 +85,6 @@ pub struct TuiApp {
     pub(super) rss_sort:super::rss_sort::RssSort,
     pub(super) rss_descending:bool,
     pub(super) rss_loaded: bool,
-    pub(super) rss_initial_refresh_pending: bool,
     pub(super) rss_revision: u64,
     pub(super) rss_busy: bool,
     pub(super) rss_loading: bool,
@@ -113,6 +112,7 @@ pub struct TuiApp {
     pub(super) status_is_error: bool,
     pub(super) status_success: bool,
     pub(super) feedback:super::feedback::Feedback,
+    pub(super) clipboard:super::clipboard::ClipboardState,
     pub(super) log_open:bool,
     pub(super) statistics_footer:RefCell<super::statistics::Footer>,
     pub(super) alt_busy:bool,
@@ -129,7 +129,7 @@ pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: S
 pub enum Msg {
     Raw(Event),
     Poll,
-    Api {connection:u64,updates:Vec<super::attach::ApiUpdate>,ack:std::sync::mpsc::SyncSender<()>},
+    ApiBatch {connection:u64,updates:Vec<super::attach::ApiUpdate>,ack:std::sync::mpsc::SyncSender<()>},
     ApiRead {connection:Option<u64>,result:Result<super::remote::ReadSnapshot,String>},
     Attached(Result<Arc<super::attach::Presence>,super::attach::Failure>),
     OwnerShutdown(Result<(),String>),
@@ -146,23 +146,17 @@ pub enum Msg {
     SearchBatch { id: SubId, results: Vec<SearchResult>, done: bool, error: Option<String> },
     Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
-    RssReload,
     TopicsSelected{connection:u64,active:Vec<(u64,crate::api::Topic)>,result:Result<(),String>},
     ServiceDone{connection:Option<u64>,op:&'static str,args:serde_json::Value,label:String,result:Result<serde_json::Value,String>},
-    ShowGrab { imdb: String, episode: Episode, result: Result<(), String> },
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
     Files(String, Result<Vec<TorrentFile>, String>),
+    ApiDetail {connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>},
+    Trackers {connection:Option<u64>,hash:String,request:u64,forced:bool,result:Result<Vec<crate::api::Tracker>,String>},
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
-    Ratings(Result<Arc<imdb::RatingsIndex>, String>),
-    /// Resolved (release name, IMDb id) pairs for the ratings column.
-    Ids(Vec<(String, String)>),
-    /// Episode list for a followed show (by IMDb id).
-    Episodes(String, Result<shows::EpisodeCheck, String>),
-    /// A show the user asked to follow, resolved on IMDb.
-    Followed(Result<Title, String>),
+
 }
 
 pub enum ImdbState {
@@ -190,11 +184,13 @@ impl TuiApp {
             theme,
             footer_cache: RefCell::new(None),
             screen,
+            removal_undo: None,
             tabs: RefCell::new(TabsState { active: screen.index(), offset: 0 }),
             show_help: false,
             help_scroll: 0,
             online: true,
             backend_error: String::new(),
+            activity_text: None,
             torrents: vec![],
             transfer: TransferInfo::default(),
             tor_list: RefCell::new(ListState::default()),
@@ -204,7 +200,6 @@ impl TuiApp {
             torrent_revision:0,
             torrent_sort:super::store::TorrentSort::Added,
             torrent_descending:true,
-            removal_undo:None,
             poll_inflight: false,
             tick: 0,
             search_input,
@@ -230,7 +225,6 @@ impl TuiApp {
             plugins: vec![],
             ratings: None,
             name_ids: HashMap::new(),
-            ids_inflight: false,
             status_at: std::time::Instant::now(),
             theme_mtime: std::fs::metadata(theme::colors_path()).and_then(|m| m.modified()).ok(),
             hover_key: None,
@@ -251,7 +245,6 @@ impl TuiApp {
             rss_sort:super::rss_sort::RssSort::Date,
             rss_descending:true,
             rss_loaded: false,
-            rss_initial_refresh_pending: true,
             rss_revision: 0,
             rss_busy: false,
             rss_loading: false,
@@ -274,7 +267,7 @@ impl TuiApp {
             prompt: None,
             status: String::new(),
             status_is_error: false,
-            status_success:false,feedback:Default::default(),statistics_footer:Default::default(),log_open:false,alt_busy:false,service_busy:false,settings_loading:false,follow_target:None,topic_selection:Default::default(),
+            status_success:false,feedback:Default::default(),statistics_footer:Default::default(),clipboard:Default::default(),log_open:false,alt_busy:false,service_busy:false,settings_loading:false,follow_target:None,topic_selection:Default::default(),
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();

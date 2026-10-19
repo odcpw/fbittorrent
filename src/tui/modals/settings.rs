@@ -81,9 +81,10 @@ impl TuiApp {
                         let count = modal.connections.len();
                         modal.cfg.network_interface = modal.connections[(index + if forward { 1 } else { count - 1 }) % count].clone();
                     }
-                    settings_fields::CLIPBOARD_ROW=>modal.cfg.clipboard_watch=!modal.cfg.clipboard_watch,
+                    3 => modal.cfg.reduce_motion = !modal.cfg.reduce_motion,
                     settings_fields::SEED_ROW=>modal.cfg.seed_by_default=!modal.cfg.seed_by_default,
-                    _ => modal.cfg.reduce_motion = !modal.cfg.reduce_motion,
+                    settings_fields::CLIPBOARD_ROW=>modal.cfg.clipboard_watch=!modal.cfg.clipboard_watch,
+                    _=>{},
                 }
                 modal.error.clear();
             }

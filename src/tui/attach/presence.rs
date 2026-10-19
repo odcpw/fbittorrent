@@ -157,14 +157,9 @@ impl Presence {
                 .unwrap_or_else(|error| error.into_inner()),
         );
         match result {
-            Ok(update) => Ok(Some(update)),
-            Err(mpsc::RecvTimeoutError::Timeout) if self.alive() => Ok(None),
-            Err(_) => bail!(
-                "{}",
-                self.reason
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-            ),
+            Ok(updates)=>Ok(Some(updates)),
+            Err(mpsc::RecvTimeoutError::Timeout) if self.alive()=>Ok(None),
+            Err(_)=>bail!("{}",self.reason.lock().unwrap_or_else(|error|error.into_inner())),
         }
     }
     pub(in crate::tui) fn close(&self) {
@@ -234,5 +229,23 @@ mod tests {
             update_batch(&receiver),
             Err(mpsc::RecvTimeoutError::Disconnected)
         ));
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    #[test]
+    fn snapshot_backlog_drains_in_bounded_ordered_batches() {
+        let (sender,receiver)=mpsc::sync_channel(128);
+        for n in 0..68 {sender.send(Update::Closed(n.to_string())).unwrap();}
+        drop(sender);
+        let mut seen=Vec::new();
+        for count in [32,32,4] {
+            let batch=update_batch(&receiver).unwrap();assert_eq!(batch.len(),count);
+            for row in batch {let Update::Closed(text)=row else{panic!("unexpected update")};seen.push(text);}
+        }
+        assert_eq!(seen,(0..68).map(|n|n.to_string()).collect::<Vec<_>>());
+        assert!(matches!(update_batch(&receiver),Err(mpsc::RecvTimeoutError::Disconnected)));
     }
 }

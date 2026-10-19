@@ -2,6 +2,25 @@
 use super::*;
 
 impl TuiApp {
+    pub(super) fn activity_label(&self)->Option<&str> {
+        if self.store.network.as_ref().is_some_and(|n|!n.ready) {Some("Waiting for VPN")}else{self.activity_text.as_deref()}
+    }
+    pub(super) fn sync_activity_label(&mut self) {self.activity_text=self.compute_activity_label();}
+    fn compute_activity_label(&self)->Option<String> {
+        if self.store.network.as_ref().is_some_and(|n|!n.ready) || self.store.summary.as_ref().is_some_and(|s|s.network.state==crate::api::NetworkReadiness::Waiting) {
+            return Some("Waiting for VPN".into());
+        }
+        let summary=self.store.summary.as_ref()?;
+        if summary.dl_bps.is_some_and(|rate|rate>0)||summary.ul_bps.is_some_and(|rate|rate>0) {return None;}
+        if matches!(summary.daemon.state,crate::api::DaemonState::Starting) {return Some("Starting…".into());}
+        if let Some(seconds)=summary.daemon.idle_exit_in_s {return Some(format!("Idle · stops in {}",human_eta(seconds.min(i64::MAX as u64) as i64)));}
+        if summary.daemon.busy_reasons.iter().any(|r|r=="search") {return Some("Searching…".into());}
+        let counts=&summary.counts;
+        if counts.error>0 {return Some(format!("! {} error{}",counts.error,if counts.error==1 {""}else{"s"}));}
+        if counts.downloading+counts.metadata+counts.checking+counts.stalled+counts.queued+counts.seeding==0 && summary.daemon.busy_reasons.iter().all(|r|r=="interactive") {return Some("Idle".into());}
+        None
+    }
+
     pub(super) fn keyboard_torrent_sort(&mut self, reverse: bool) -> Cmd<Msg> {
         let columns = [
             Column::Name,
@@ -75,13 +94,7 @@ impl TuiApp {
             );
             return Cmd::none();
         };
-        Cmd::task(move || {
-            Msg::ActionDone(
-                write_clipboard(&magnet)
-                    .map(|()| "copied magnet".into())
-                    .map_err(|e| format!("Copy magnet: {e:#}")),
-            )
-        })
+        copy(Some(magnet))
     }
     pub(super) fn removal_undo_available(&self) -> bool {
         self.online
@@ -110,6 +123,7 @@ impl TuiApp {
             );
             return Cmd::none();
         }
+        self.removal_undo = None;
         self.service_action(
             "torrents.add",
             serde_json::json!({"source":{"restore":hash}}),
@@ -160,17 +174,43 @@ impl TuiApp {
         }
     }
 }
-fn write_clipboard(value: &str) -> Result<()> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("wl-copy")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let write = child.stdin.take().unwrap().write_all(value.as_bytes());
-    let status = child.wait()?;
-    write?;
-    anyhow::ensure!(status.success(), "wl-copy exited {status}");
-    Ok(())
+fn copy(source:Option<String>)->Cmd<Msg> {
+    Cmd::task(move||{
+        let result=(||->Result<()> {
+            use std::io::Write;
+            use std::process::{Command,Stdio};
+            let source=source.filter(|s|s.starts_with("magnet:")&&s.len()<=32768&&crate::magnet_hash(s).is_some()).ok_or_else(||anyhow::anyhow!("No magnet is available for this row"))?;
+            // Clipboard data goes through stdin, never argv or status/history.
+            let mut child=Command::new("wl-copy").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|_|anyhow::anyhow!("Could not start wl-copy"))?;
+            let deadline=std::time::Instant::now()+Duration::from_secs(2);
+            let mut input=child.stdin.take().unwrap();
+            use std::os::fd::AsRawFd;
+            let flags=unsafe {libc::fcntl(input.as_raw_fd(),libc::F_GETFL)};
+            if flags<0 || unsafe {libc::fcntl(input.as_raw_fd(),libc::F_SETFL,flags|libc::O_NONBLOCK)}<0 {
+                let _=child.kill();let _=child.wait();anyhow::bail!("Could not open a bounded clipboard pipe");
+            }
+            let mut offset=0;
+            while offset<source.len() {
+                let written=input.write(&source.as_bytes()[offset..]);
+                match written {
+                    Ok(n) if n>0=>offset+=n,
+                    Err(error) if matches!(error.kind(),std::io::ErrorKind::WouldBlock|std::io::ErrorKind::Interrupted)=>{},
+                    _=>{let _=child.kill();let _=child.wait();anyhow::bail!("Could not write the selected magnet to the clipboard");},
+                }
+                if std::time::Instant::now()>=deadline {let _=child.kill();let _=child.wait();anyhow::bail!("Clipboard copy timed out");}
+                if offset<source.len() {std::thread::sleep(Duration::from_millis(20));}
+            }
+            drop(input);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status))=>{anyhow::ensure!(status.success(),"wl-copy could not copy the selected magnet");return Ok(());},
+                    Ok(None)=>{},
+                    Err(_)=>{let _=child.kill();let _=child.wait();anyhow::bail!("Could not finish clipboard copy");},
+                }
+                if std::time::Instant::now()>=deadline {let _=child.kill();let _=child.wait();anyhow::bail!("Clipboard copy timed out");}
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        })();
+        Msg::ActionDone(result.map(|_|"Magnet copied".into()).map_err(|e|e.to_string()))
+    })
 }

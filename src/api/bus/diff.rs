@@ -17,6 +17,7 @@ fn key_field(topic:&Topic)->&'static str {
         Topic::Files(_) => "index",
         Topic::Search(_) => "key",
         Topic::Peers(_) => "addr",
+        Topic::Trackers(_) => "url",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
     }
@@ -119,6 +120,7 @@ pub(super) fn structural_projection(topic: &Topic, old: &Value, new: &Value) -> 
         }
         return v;
     }
+    if matches!(topic,Topic::Pieces(_)) {return old.clone();}
     if !matches!(topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_)) {
         return new.clone();
     }

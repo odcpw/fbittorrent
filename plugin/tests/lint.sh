@@ -22,14 +22,13 @@ for (const name of ['Glyphs', 'Formats', 'Palette']) {
   if (fs.existsSync(file)) {model[name]={}; vm.runInNewContext(source(file),model[name]);}
 }
 vm.runInNewContext(source(process.argv[2]), model);
-const torrent = {state: 'downloading', progress: 0.42, size: 1024 * 1024,
-  dlspeed: 2048, upspeed: 0, eta: 65, num_seeds: 0, num_leechs: 7,
-  ratio: 0, up_limit: 32768, tags: '', seq_dl: false, f_l_piece_prio: false};
-assert.equal(model.meta(torrent), '42.0% · 2.0 KiB/s · 1m05s · seed off');
-// Removing only a literal 0 would leave other fabricated seed counts intact.
-assert.equal(model.meta({...torrent, num_seeds: 91}), model.meta(torrent));
-assert.equal(model.meta({...torrent, progress_known: false, state: 'waitingVPN'}),
-  'Waiting for VPN · progress checked after connection');
-assert.equal(model.meta({...torrent, state: 'queuedDL'}), 'Queued · 42.0% · 1.0 MiB · seed off');
-console.log('Widget metadata omits seed counts and retains rates, ETA, queue and VPN information.');
+const torrent = {state:'downloading', progress:0.42, dl_bps:2048, eta_s:65, seed:false};
+assert.equal(model.meta(torrent), '42% · 2.0 KB/s · 1 min · seed off');
+assert.equal(model.peerCount(torrent,true), '—/—');
+assert.equal(model.peerCount({...torrent,peers:7},false), '7 peers connected · seeds unknown');
+assert.equal(model.peerCount({...torrent,peers:7,seeds:1},true), '1/7');
+assert.equal(model.peerCount({...torrent,peers:0,seeds:0},true), '0/0');
+assert.equal(model.meta({state:'waiting_vpn',seed:false}), 'seed off');
+assert.equal(model.isDone({state:'downloading',progress:1}),false);
+console.log('Native widget formatting retains unknown observations and uses only real connected seed/peer counts.');
 JS

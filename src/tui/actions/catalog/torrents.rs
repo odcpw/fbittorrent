@@ -1,9 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
     action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort torrents",90,
-        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(false)),T,None,None,None),
+        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(false)),TD,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
     action!("torrents.reverse_sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse torrent sort",90,
-        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(true)),T,None,None,None),
+        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(true)),TD,Some(&[KeyChord::plain(KeyCode::Char('S'))]),None,None),
     action!("torrents.copy_magnet",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
         |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),T,None,None,None),
     action!("torrents.undo_remove",Scope::Global,&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",30,
@@ -227,45 +227,6 @@ pub(super) const ACTIONS: &[Action] = &[
         TD,
         Some(&[KeyChord::plain(KeyCode::Char('f'))]),
         None,
-        Some("Native TUI; legacy uses F while f is first/last priority.")
-    ),
-    action!(
-        "legacy.follow",
-        Scope::Screen(Screen::Torrents),
-        &[KeyChord::plain(KeyCode::Char('F'))],
-        "Follow show (legacy)",
-        90,
-        |a| !a.cfg.native() && a.selected_torrent().is_some(),
-        Some(|a| a.on_torrents_action(Intent::Follow)),
-        T,
-        None,
-        None,
         None
-    ),
-    action!(
-        "legacy.sequential",
-        Scope::Screen(Screen::Torrents),
-        &[KeyChord::plain(KeyCode::Char('s'))],
-        "Sequential (legacy)",
-        90,
-        |a| !a.cfg.native() && a.selected_torrent().is_some(),
-        Some(|a| a.on_torrents_action(Intent::Sequential)),
-        T,
-        None,
-        None,
-        Some("Legacy qBittorrent only; native streaming priority is automatic.")
-    ),
-    action!(
-        "legacy.first_last",
-        Scope::Screen(Screen::Torrents),
-        &[KeyChord::plain(KeyCode::Char('f'))],
-        "First/last priority (legacy)",
-        90,
-        |a| !a.cfg.native() && a.selected_torrent().is_some(),
-        Some(|a| a.on_torrents_action(Intent::FirstLast)),
-        T,
-        None,
-        None,
-        Some("Legacy qBittorrent only; native streaming priority is automatic.")
     ),
 ];

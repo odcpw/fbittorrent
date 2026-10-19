@@ -29,7 +29,7 @@ pub(in crate::tui) fn search_order(
     };
     order.then(a.name.cmp(&b.name)).then(a.key.cmp(&b.key))
 }
-pub(in crate::tui) fn legacy_search_order(
+pub(in crate::tui) fn display_search_order(
     a: &crate::qbt::SearchResult,
     b: &crate::qbt::SearchResult,
     ratings: (Option<f32>, Option<f32>),

@@ -40,38 +40,6 @@ pub(super) const ACTIONS: &[Action] = &[
         None
     ),
     action!(
-        "prompt.sequential",
-        Scope::Prompt,
-        &[KeyChord::plain(KeyCode::F(2))],
-        "Sequential (legacy)",
-        40,
-        |a| a
-            .prompt
-            .as_ref()
-            .is_some_and(|p| p.kind == PromptKind::AddMagnet && !p.native_streaming),
-        Some(|a| a.on_prompt_action(Intent::Sequential)),
-        T,
-        None,
-        None,
-        None
-    ),
-    action!(
-        "prompt.first_last",
-        Scope::Prompt,
-        &[KeyChord::plain(KeyCode::F(3))],
-        "First/last (legacy)",
-        40,
-        |a| a
-            .prompt
-            .as_ref()
-            .is_some_and(|p| p.kind == PromptKind::AddMagnet && !p.native_streaming),
-        Some(|a| a.on_prompt_action(Intent::FirstLast)),
-        T,
-        None,
-        None,
-        None
-    ),
-    action!(
         "prompt.seed",
         Scope::Prompt,
         &[KeyChord::plain(KeyCode::F(4))],

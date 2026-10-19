@@ -19,13 +19,19 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
   P0-05 lands).
 - Prefer `cargo check` and `cargo test` (debug) while developing. The release build takes about
   7 minutes; run `cargo build --release --locked` only when a bead's acceptance needs the release
-  binary (TUI smoke tests, `native.py`).
-- Build cadence: do not build after every small edit. Finish a whole step or a coherent group of
-  changes, then `cargo check` once. While iterating, run only the tests that cover what you changed
-  (the bead's own cases, the touched module's unit tests). Run the full `cargo test --locked` once,
-  right before the report, and the wrapped `all.sh` once per bead only when the bead touches a shared
-  surface (daemon, engine, API server, harness); fixture-only or test-only beads skip `all.sh`. A
-  handful of builds per bead, not dozens; the build path is shared.
+  binary (optimized performance checks or the full milestone gate). The fast gate's native/TUI
+  cases run against a debug binary.
+- Build cadence: while iterating, run focused tests for the behavior you changed. Run
+  `scripts/gate-fast.sh` once before reporting; it includes `cargo test --locked` and the small
+  set of real user-workflow smoke cases with a debug binary. Do not run the full suite after
+  each edit. `scripts/gate-full.sh` (also `all.sh`) is for nightly/milestone checks; it owns the
+  release lock and memory scope, and also accepts the existing outer wrapper. A failed case
+  gets one isolated retry: a passing retry is reported as FLAKY, with both attempts retained.
+  Rust test binaries have a 120-second hang guard; workflows have a 180-second guard (long
+  opt-in measurements have explicit longer limits). A hung Rust test is named and retried
+  alone; no test or compiler step waits indefinitely. See `--help` for timeout overrides.
+  Wall time is reported, not used to fail a shared-machine run. No hand-written JSONL or
+  receipt is required; keep logs that the tests already produce and report actual behavior.
 - Memory: a release build of this crate peaks above 11 GB and systemd-oomd kills whole scopes when
   the desktop slice is under pressure (it killed the first swarm on 2026-10-18). Run every release
   build or `all.sh` as
@@ -54,11 +60,12 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 3. Stay inside the bead's owned files. If a neighbouring file must change for your bead to work,
    make the smallest additive change and list it in your report; stop and ask only when a frozen
    contract (fixtures, plan decisions) would have to change.
-4. Real code plus real tests in the same change. Acceptance criteria are frozen: never weaken a
-   test, never turn a fixture into "live proof", never leave `todo!()`/placeholder code behind a
-   passing syntax gate. If a criterion cannot be met, say so in your report and leave it unmet.
-5. Run the bead's tests and keep their JSONL logs (`target/test-logs/<bead-id>/...` or the path
-   the bead names). Run `cargo test --locked` for anything touching `src/`.
+4. Test behavior, not exact output bytes, counts or contract versions. Preserve coverage of
+   real behavior. Keep strict checks for private XDG/live-data isolation (including Downloads),
+   file deletion/data safety, the stop rule and privacy. Never turn a fixture into "live proof"
+   or leave `todo!()`/placeholder code behind a passing syntax gate. Report untested behavior.
+5. Run focused behavior tests and `scripts/gate-fast.sh` once before reporting. Keep generated
+   test logs; do not create a receipt or JSONL report just to satisfy process requirements.
 6. Commit when the bead's tests pass: `git add <explicit paths>` (never `-A`), one commit per
    bead (or a few logical commits), message `<area>: <what> (<bead-id>)`, body with the
    acceptance evidence, last line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
@@ -75,10 +82,10 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"        # this box has 8 cores s
 
 ## Honest credit
 
-Process artifacts are not progress. A receipt, a log, or a document counts only if a named
-acceptance criterion requires it. Refusal-only or guard-only changes never close a
-positive-capability bead. Commits are not a metric. A report that says "done" without the
-evidence rows is treated as not done.
+Process artifacts are not progress. Report what behavior was tested, what failed, and what
+remains unproven. Refusal-only or guard-only changes never close a
+positive-capability bead. Commits are not a metric. A passing gate does not prove untested
+desktop or public-network behavior.
 
 ## Where things are
 

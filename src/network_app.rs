@@ -1,9 +1,9 @@
 //! App controls and the no-network waiting state around the native engine.
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 use std::ffi::CString;
 
-use crate::{config::Config, daemon::lifecycle::{Lifecycle, RestartReason}, ipc::{InstanceLock, Request, Server}};
+use crate::{config::Config, daemon::lifecycle::{Lifecycle, RestartReason}};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NetworkState {
@@ -57,33 +57,6 @@ pub fn check_transition(cfg: &Config, lifecycle: &Lifecycle) -> bool {
         }
     }
     false
-}
-
-pub fn controls(request: &Request, snapshot: &NetworkState, lifecycle: &Lifecycle) -> Option<Result<String>> {
-    use crate::engine::ops::{EngineOp, Route};
-    let route = Route::from_name(&request.path)?;
-    if !route.is_control() || (matches!(route, Route::Restart | Route::Shutdown) && request.method != "POST") { return None; }
-    match EngineOp::parse(&request.path, request) {
-        Ok(Some(op)) => op.control(snapshot, lifecycle).map(|result| result.and_then(|result| result.to_legacy_json())),
-        Ok(None) => None, Err(error) => Some(Err(error)),
-    }
-}
-
-pub struct ParkedEngine {
-    // Drop the listener and joined handlers before releasing the instance lock.
-    _server: Server,
-    _instance: InstanceLock,
-}
-impl ParkedEngine {
-    pub fn start(cfg: &Config, snapshot: NetworkState, lifecycle: Lifecycle) -> Result<Self> {
-        let instance = InstanceLock::acquire()?;
-        let ledger = crate::engine::ParkedLedger::new(crate::config::data_dir().join("engine"), lifecycle.clone());
-        let server = Server::start(cfg, &instance, move |request| {
-            controls(request, &snapshot, &lifecycle).or_else(|| ledger.dispatch(request))
-                .unwrap_or_else(|| Err(anyhow::anyhow!("{}; connect the selected VPN before this action", snapshot.message)))
-        }).context("opening the app while waiting for its VPN")?;
-        Ok(Self { _server: server, _instance: instance })
-    }
 }
 
 #[cfg(test)]

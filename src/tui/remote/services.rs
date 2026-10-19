@@ -64,8 +64,10 @@ impl TuiApp {
         self.show_grabbing.clear();
         match result {
             Ok(value) => {
-                if op == "torrents.remove" && args["delete_files"] == false {
-                    self.removal_undo = args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(h,t)|(h.into(),t));
+                if op == "torrents.remove" {
+                    self.removal_undo = if args["delete_files"] == false {
+                        args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(h,t)|(h.into(),t))
+                    } else { None };
                 }
                 if op == "torrents.add" && args["source"]["restore"].is_string() {
                     self.removal_undo = None;
@@ -241,7 +243,7 @@ impl TuiApp {
         screens_shows::episode_metadata(Some(episode), width)
     }
     pub(in crate::tui) fn shows_unread(&self) -> usize {
-        if self.store.hello.is_some() {
+        if self.store.hello.is_some() || !self.store.shows.is_empty() {
             self.store.shows.values().map(|s| s.unread as usize).sum()
         } else {
             self.shows.new_total()
@@ -257,10 +259,6 @@ impl TuiApp {
         let parent = self.selected_show().map(|s| s.imdb.clone());
         let selected = self.selected_release_target();
         let old_index = self.ep_list.borrow().selected().unwrap_or(0);
-        let old = std::mem::take(&mut self.shows.shows)
-            .into_iter()
-            .map(|s| (s.imdb.clone(), s))
-            .collect::<std::collections::BTreeMap<_, _>>();
         self.shows_refreshing = self
             .store
             .shows
@@ -273,7 +271,7 @@ impl TuiApp {
             .shows
             .values()
             .map(|s| {
-                let mut show = old.get(&s.imdb).cloned().unwrap_or_default();
+                let mut show = Show::default();
                 show.imdb = s.imdb.clone();
                 show.title = s.title.clone();
                 show.year = s.year.and_then(|n| n.try_into().ok());

@@ -29,12 +29,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
 use crate::daemon::lifecycle::{Lifecycle, StopReason};
-use crate::ipc::{InstanceLock, Request, Server};
+use crate::ipc::InstanceLock;
+#[cfg(test)]
+use tests::fixture::{Request, Route};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
 pub(crate) mod rename;
 pub(crate) mod staging;
+pub(crate) mod pieces;
 mod bus;
 mod watch;
 pub(crate) mod peers;
@@ -56,19 +59,12 @@ mod dormant;
 mod dormant_delete;
 pub mod view;
 mod parked;
-mod legacy_import;
 
 use ledger::{Record, Ledger, read_ledger, save_parked_ledger};
 use ops::{mutation_hashes, json, now};
-#[cfg(test)]
-use parked::dispatch_parked_in;
-#[allow(unused_imports)] // Preserve the old compatibility entry point for P1-10.
-pub use parked::{dispatch_parked, ParkedLedger};
+pub use parked::ParkedLedger;
 pub use ledger::LedgerGeneration;
 pub use dormant::InvalidTorrentState;
-pub(crate) use legacy_import::migrate_legacy;
-#[cfg(test)]
-pub(crate) use legacy_import::LegacyMigration;
 
 static RESTORE_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
@@ -135,7 +131,6 @@ pub struct EngineDispatcher {
 pub struct AppEngine {
     dispatcher: EngineDispatcher,
     runtime: Option<NativeRuntime>,
-    server: Option<Server>,
     // Released only after the socket, workers, session and runtime have stopped.
     instance: Arc<InstanceLock>,
 }
@@ -259,7 +254,6 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     Ok(AppEngine {
         dispatcher,
         runtime: Some(runtime),
-        server: None,
         instance,
     })
 }
@@ -284,17 +278,6 @@ impl AppEngine {
     pub fn dispatcher(&self) -> EngineDispatcher {
         self.dispatcher.clone()
     }
-    pub fn serve(
-        &mut self,
-        cfg: &Config,
-        handler: impl Fn(&Request) -> Result<String> + Send + Sync + 'static,
-    ) -> Result<()> {
-        if self.server.is_some() {
-            bail!("native engine socket is already open");
-        }
-        self.server = Some(Server::start(cfg, &self.instance, handler)?);
-        Ok(())
-    }
 }
 
 // Debug quoting escapes newline/control characters in chained error details.
@@ -317,9 +300,6 @@ impl AppEngine {
         self.dispatcher.inner.rechecks.cancel.cancel();
         for restore in self.dispatcher.inner.restores.lock().unwrap().values() {
             restore.cancel.cancel();
-        }
-        if let Some(server) = self.server.as_mut() {
-            server.stop_accepting();
         }
         let mut drained = true;
         if let Some(runtime) = self.runtime.take() {
@@ -379,7 +359,6 @@ impl AppEngine {
                     result=>{self.dispatcher.inner.resume.abandon_clean();eprintln!("WARN resume clean snapshot unavailable result={result:?}");},
                 }
             }
-            self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
                 drained = false;
                 crate::native_runtime::log_teardown(drain_failure(

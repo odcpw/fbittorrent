@@ -86,10 +86,15 @@ ShellRoot {
     console.log("FBTQS-PASS subscriptions")
     s=session();s.hello();var firstSubscribe=JSON.parse(s.writes[s.writes.length-1])
     s.c.visibility(false,true,["torrent:"+"a".repeat(40)+".files"])
-    var requested=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="subscribe"})
-    check("detail_subscriptions",requested[requested.length-1].args.topics.join(",")==="torrent:"+"a".repeat(40)+".files","each selected detail topic has its own subscribe call",requested)
     s.reply({sub:91,topics:["summary"]},firstSubscribe.id)
     check("detail_subscriptions",!s.c.subs[91] && s.writes.some(function(w){var f=JSON.parse(w);return f.op==="unsubscribe" && f.args.sub===91}),"late subscription reply is immediately unsubscribed after visibility generation changes",s.writes)
+    // Retire the late group before admitting the latest base/detail pair.
+    var retirement=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="unsubscribe" && f.args.sub===91}).slice(-1)[0]
+    s.reply({state:"done"},retirement.id)
+    var baseRequest=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="subscribe" && s.c.pending[f.id]}).slice(-1)[0]
+    s.reply({sub:92,topics:baseRequest.args.topics},baseRequest.id)
+    var requested=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="subscribe"})
+    check("detail_subscriptions",requested[requested.length-1].args.topics.join(",")==="torrent:"+"a".repeat(40)+".files","each selected detail topic has its own subscribe call",requested)
     console.log("FBTQS-PASS detail_subscriptions")
     s=session(); s.hello()
     ref=s.c.request("torrents.add",{source:{url:"https://example.invalid/legal.torrent"}},{mutating:true})

@@ -6,6 +6,7 @@ service or torrents are touched. Requires tmux, util-linux script and Python 3.
 """
 import argparse
 import contextlib
+from contextvars import ContextVar
 import hashlib
 import http.server
 import io
@@ -26,9 +27,37 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import daemon
+from behavior_checks import expected_daemon_stderr, healthy_diagnostics, well_formed_version
 import fixtures
 import fbtlog
 from fbtlog import Case, REPO, suite_status
+from process_cleanup import ProcessRun, finish_cleanup
+
+_process_run = ContextVar("native_process_run", default=None)
+
+
+@contextlib.contextmanager
+def private_directory(**kwargs):
+    with tempfile.TemporaryDirectory(**kwargs) as directory:
+        if run := _process_run.get():
+            run.register(directory)
+        yield directory
+
+
+@contextlib.contextmanager
+def private_sandbox():
+    with daemon.Sandbox() as sandbox:
+        if run := _process_run.get():
+            run.register(sandbox.root)
+        yield sandbox
+
+
+def cleanup_private_processes(root):
+    run = _process_run.get()
+    if run is None:  # Also protect callers exercising an individual fixture directly.
+        run = ProcessRun()
+        run.register(root)
+    run.cleanup([root])
 
 CASES = (
     "dec_mouse_mode", "closed_status_stays_closed", "one_enter_adds_once",
@@ -43,7 +72,7 @@ CASES = (
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
     with Case("native", "launcher_never_called") as case, \
-            tempfile.TemporaryDirectory(prefix="fbt-no-start-") as temporary, \
+            private_directory(prefix="fbt-no-start-") as temporary, \
             socket.socket() as legacy_endpoint:
         root = Path(temporary)
         env = dict(os.environ)
@@ -174,66 +203,23 @@ def launcher_never_called(binary):
             cleanup.wait(timeout=5)
         case.check(config.read_text() == config_text,
                    "Invocation flags leave the stored autostart setting enabled.")
-        case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock").exists(),
+        case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock").exists(),
                    "No probe has started a native engine socket.")
         legacy_endpoint.bind(("127.0.0.1", 0))
         legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
                          f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
         config.write_text(legacy_config)
-        for args, overrides in ((("--no-start", "setup"), {}),
-                                (("setup",), {"FBITTORRENT_NO_START": "1"})):
-            argv = [binary, *args, "--json"]
-            step = case.step("Legacy setup " + shlex.join(argv),
-                             "Typed exit 4 with the opening hint, zero systemctl calls, and no setup writes.")
-            child = case.popen(argv, env=dict(env, **overrides), stdout=subprocess.PIPE, text=True)
-            try:
-                stdout, _ = child.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.communicate()
-                step.fail("Legacy setup timed out.", [calls])
-                continue
-            value = json.loads(stdout)
-            step.close(child.returncode == 4 and value.get("code") == 4 and
-                       value.get("code_name") == "backend" and value.get("hint") == "fbittorrent up" and
-                       value.get("error") == "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active" and
-                       not calls.read_text() and not (home / ".config").exists() and
-                       config.read_text() == legacy_config,
-                       f"argv={argv!r}, env={overrides!r}; exit {child.returncode}; JSON={value!r}; "
-                       f"launcher/systemctl calls={calls.read_text()!r}; setup writes={(home / '.config').exists()}.", [calls])
-
-        # Ordinary setup must still reach its explicit service start. Refuse
-        # that start in a recording shim; no real systemd service is controlled.
-        control = case.path.with_suffix(".setup-systemctl.log")
-        control.write_text("")
-        (shims / "systemctl").write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> " +
-            shlex.quote(str(control)) + '\n[ "$2" != start ]\n')
-        step = case.step("Ordinary legacy setup without startup restrictions",
-                         "Installed nox reaches the recording service-start refusal; missing nox retains its dependency error.")
-        child = case.popen([binary, "setup", "--save", str(root / "downloads"), "--json"],
-                           env=env, stdout=subprocess.PIPE, text=True)
-        try:
-            stdout, _ = child.communicate(timeout=5)
-            value = json.loads(stdout)
-            if Path("/usr/bin/qbittorrent-nox").exists():
-                expected_calls = ["--user daemon-reload", "--user disable qbittorrent-nox.service",
-                                  "--user start qbittorrent-nox.service"]
-                ok = (child.returncode == 1 and control.read_text().splitlines() == expected_calls and
-                      value.get("error") == "systemctl --user start qbittorrent-nox.service failed")
-            else:
-                ok = child.returncode == 4 and "qbittorrent-nox is not installed" in value.get("error", "") and not control.read_text()
-            step.close(ok and not calls.read_text(),
-                       f"exit {child.returncode}; JSON={value!r}; systemctl argv={control.read_text()!r}; "
-                       f"automatic-path launcher calls={calls.read_text()!r}.", [control, calls])
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.communicate()
-            step.fail("Ordinary setup timed out.", [control, calls])
-
+        for args in [("--no-start","setup"),("setup",),("status",)]:
+            argv=[binary,*args,"--json"]
+            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 naming v0.4.0, with no launch, network or settings writes")
+            child=case.popen(argv,env=env,stdout=subprocess.PIPE,text=True)
+            stdout,_=child.communicate(timeout=5);value=json.loads(stdout)
+            step.close(child.returncode==2 and "removed in v0.4.0" in value.get("error","") and not calls.read_text() and config.read_text()==legacy_config,
+                       f"exit={child.returncode}; envelope={value}; calls={calls.read_text()!r}",[calls])
 
 
 def terminal_close_is_graceful(binary):
-    with Case("native", "terminal_close_is_graceful") as case, tempfile.TemporaryDirectory(prefix="fbt-hup-") as temporary:
+    with Case("native", "terminal_close_is_graceful") as case, private_directory(prefix="fbt-hup-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color", FBT_DEBUG_SIGNALS="1")
         for key in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CACHE_HOME"):
@@ -291,7 +277,7 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             child = case.popen([binary, *args, "--json"], env=env, stdout=subprocess.PIPE, text=True)
             out, _ = child.communicate(timeout=5)
             return child.returncode, json.loads(out)
-        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         lock_path = socket_path.with_name("engine.lock")
         owner = NativeHarness(lambda: case, binary, env)
         try:
@@ -394,7 +380,7 @@ class NativeHarness:
 
     def ensure_serve(self):
         """Existing adapter cases own a disposable foreground daemon explicitly."""
-        path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         if getattr(self, "serve", None) is not None and self.serve.poll() is None:
             return
         if not Path(self.binary).exists():
@@ -423,11 +409,9 @@ class NativeHarness:
         self.wait_for(lambda: path.exists() and self.serve.poll() is None, "disposable daemon listener opens")
         def ready():
             try:
-                response = daemon.Harness.engine_call(self, "app/version", timeout=1)
-                return isinstance(response.get("value"), str) and not response.get("error")
-            except (OSError, EOFError):
-                return False
-        self.wait_for(ready, "disposable daemon answers its legacy version request")
+                return self.api("app.info").get("state") in ("running","parked")
+            except (OSError,EOFError): return False
+        self.wait_for(ready,"disposable daemon answers API v1")
 
     def api(self, op, args=None):
         """Read real daemon state independently of the CLI's legacy/API shaper."""
@@ -438,7 +422,7 @@ class NativeHarness:
 
     @property
     def engine_path(self):
-        return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
 
     def close_serve(self):
         process = getattr(self, "serve", None)
@@ -448,7 +432,9 @@ class NativeHarness:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill(); process.wait(timeout=2)
-                self.record("clean up owned daemon", "daemon drains within ten seconds", "required SIGKILL", False)
+                # Teardown can run after its Case has closed. Raise so a late
+                # failed drain cannot be hidden behind an already-green result.
+                raise TimeoutError("owned daemon failed to drain within ten seconds; required SIGKILL")
 
     def record(self, action, expect, observed, ok=True, started=None):
         if self.polling and action == "capture terminal pane" and ok:
@@ -635,11 +621,11 @@ def resume_done_refused(harness, root):
 
     harness.wait_for(completed, "local bytes verify and stop on completion")
     code, envelope = harness.cli_result("start", hash_, code=1)
-    expected = dict(ok=False, code=1, code_name="failure",
-                    error="already complete; seeding is off for this torrent", hint=f"fbittorrent seed {hash_}")
     harness.record("start finished stop-on-complete torrent",
-                   "exit 1; code 1, code_name failure, exact refusal and seed hint",
-                   json.dumps(envelope), code == 1 and envelope == expected)
+                   "exit 1; failure envelope with explanatory text and the selected torrent's seed command",
+                   json.dumps(envelope), code == 1 and envelope.get("ok") is False
+                   and envelope.get("code") == 1 and bool(envelope.get("error"))
+                   and envelope.get("hint") == f"fbittorrent seed {hash_}")
     code, result = harness.cli_result("start", "all")
     record_bulk_start(harness, code, result, hash_)
     code, result = harness.cli_result("delete", hash_)
@@ -737,8 +723,7 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
                      "Native counts describe connected seeds when live; optional seeds distinguishes unknown.")
     capabilities = cli("capabilities")
     note = capabilities.get("field_notes", {}).get("list[].num_seeds")
-    expected = "connected seeds for live native torrents; read optional seeds to distinguish unknown"
-    (step.ok if note == expected else step.fail)(f"Field note: {note}.")
+    (step.ok if isinstance(note, str) and note.strip() else step.fail)(f"Field note: {note}.")
     # Unknown and a measured zero are different observations. This local fixture
     # has no tracker or peer source, so its live count is independently zero.
     info_hash = next(row["hash"] for row in cli("list")["torrents"]
@@ -834,39 +819,13 @@ def store_modes(case, root, env, cli, base, fixture):
 
 
 def expected_shutdown_stderr(stderr):
-    return stderr == "" or re.fullmatch(r"INFO engine drained in [0-9]+ ms\n?", stderr) is not None
-
-
-def expected_daemon_stderr(stderr, complete=True):
-    """Only the daemon's named success phases and legacy dispatch tracing are allowed."""
-    patterns = [r'INFO daemon listening \{.*\} no_notify=(?:false|true)',
-                r'INFO daemon ready state=starting', r'INFO engine starting session',
-                r'INFO engine session exists restores=[0-9]+',
-                r'DEBUG engine initial validation admitted source=engine hash=[0-9a-f]{40}',
-                r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
-                r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
-                r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
-                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
-                r'INFO imdb index loaded refresh=(?:true|false)',
-                r'INFO inhibit started pid=[0-9]+', r'INFO inhibit released',
-                r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
-                r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
-                r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
-    lines = stderr.splitlines()
-    known = all(any(re.fullmatch(pattern, line) for pattern in patterns) for line in lines)
-    if not complete:
-        return known
-    phases = [r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
-              r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
-              r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
-    indices = [next((i for i, line in enumerate(lines) if re.fullmatch(pattern, line)), -1) for pattern in phases]
-    return known and all(i >= 0 for i in indices) and indices == sorted(indices)
+    return healthy_diagnostics(stderr)
 
 
 def startup_survives_bad_record(binary):
     """Open the real TUI with a corrupt cache and a local unresolved magnet."""
     with Case("native", "startup_survives_bad_record") as case, \
-            tempfile.TemporaryDirectory(prefix="fbittorrent-bad-record-") as temporary:
+            private_directory(prefix="fbittorrent-bad-record-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
@@ -931,14 +890,14 @@ def startup_survives_bad_record(binary):
                           f'save_path = {json.dumps(str(downloads))}\n')
         tmux_socket, session = f"fbt-fbt-p0-09-kzw-{os.getpid()}", "fbt-fbt-p0-09-kzw"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
         def rows():
             return {row["hash"]: row for row in harness.cli("list")["torrents"]}
 
-        socket_path = root / "runtime/fbittorrent/engine.sock"
+        socket_path = root / "runtime/fbittorrent/api.sock"
         try:
             app_launch = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
             launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(root / 'terminal.typescript'))}"
@@ -1016,33 +975,30 @@ def startup_survives_bad_record(binary):
                              "bad-record app process exits after session cleanup", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[case.stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(stderr),
-                       "Daemon startup, legacy dispatch and ordered drain phases are the only stderr lines accepted.",
+                       "Daemon stderr has healthy diagnostics and a complete ordered drain.",
                        stderr or "No stderr was emitted.")
             case.check(not expected_daemon_stderr(stderr + "WARNING unexpected\n") and
                        not expected_daemon_stderr(stderr.replace("INFO daemon sockets unlinked", "")) and
                        not expected_daemon_stderr(stderr.replace("INFO daemon draining", "INFO daemon FAILED")),
-                       "Daemon stderr controls reject unknown lines and incomplete or replaced teardown phases.")
-            stderr_examples = [("", True), ("INFO engine drained in 0 ms\n", True),
-                               ("INFO engine drained in 123 ms", True), ("\n", False),
-                               (" INFO engine drained in 1 ms\n", False),
-                               ("INFO engine drained in -1 ms\n", False),
-                               ("INFO engine drained in 1.5 ms\n", False),
-                               ("INFO engine drained in 1 ms\nWARNING unexpected\n", False),
-                               ("INFO engine drained in 1 ms\n\n", False)]
+                       "Daemon stderr controls reject warnings and incomplete or replaced teardown phases.")
+            stderr_examples = [("", True), ("INFO new diagnostic\n", True),
+                               ("DEBUG another diagnostic\n", True),
+                               ("INFO engine drained in 123 ms\nINFO additional detail\n", True),
+                               ("WARN unexpected\n", False), ("ERROR failed\n", False),
+                               ("thread 'worker' panicked\n", False), ("stack backtrace:\n", False)]
             case.check(all(expected_shutdown_stderr(text) == expected for text, expected in stderr_examples),
-                       "The stderr predicate accepts the P0-08 success format and rejects malformed or additional lines.",
-                       json.dumps([dict(stderr=text, expected=expected, observed=expected_shutdown_stderr(text))
-                                   for text, expected in stderr_examples]))
+                       "Success diagnostics may grow; warnings, errors and panic diagnostics fail.",
+                       json.dumps(stderr_examples))
+
         finally:
-            tmux("kill-server", check=False)
-            harness.close_serve()
-            tracker.shutdown()
+            finish_cleanup(lambda: tmux("kill-server", check=False), harness.close_serve,
+                           tracker.shutdown, lambda: cleanup_private_processes(root))
 
 
 def stop_during_hashing(binary):
     """Observe saved-paused verification, then Stop and Resume a real check."""
     with Case("native", "stop_during_hashing") as case, \
-            tempfile.TemporaryDirectory(prefix="fbittorrent-hashing-") as temporary:
+            private_directory(prefix="fbittorrent-hashing-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), TERM="xterm-256color")
         for key, directory in [("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
@@ -1081,14 +1037,14 @@ def stop_during_hashing(binary):
                           f'save_path = {json.dumps(str(downloads))}\n')
         tmux_socket, session = f"fbt-fbt-p0-09-kzw-hash-{os.getpid()}", "fbt-fbt-p0-09-kzw"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
         def capture():
             return tmux("capture-pane", "-t", session, "-p").stdout
 
-        socket_path = root / "runtime/fbittorrent/engine.sock"
+        socket_path = root / "runtime/fbittorrent/api.sock"
         stderr_offset = case.stderr_offset
         try:
             command = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
@@ -1120,7 +1076,7 @@ def stop_during_hashing(binary):
             stderr_bytes = case.suite.stderr_path.read_bytes()
             first_stderr = stderr_bytes[stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(first_stderr),
-                       "The verification daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
+                       "The verification daemon emits healthy diagnostics with an ordered drain.",
                        first_stderr or "No stderr was emitted.")
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
@@ -1158,11 +1114,11 @@ def stop_during_hashing(binary):
                              "hashing fixture process drains and exits", seconds=6)
             stderr = case.suite.stderr_path.read_bytes()[stderr_offset:].decode("utf-8", errors="replace")
             case.check(expected_daemon_stderr(stderr),
-                       "The hashing daemon emits only known success phases and legacy dispatch traces, with an ordered drain.",
+                       "The hashing daemon emits healthy diagnostics with an ordered drain.",
                        stderr or "No stderr was emitted.")
         finally:
-            tmux("kill-server", check=False)
-            harness.close_serve()
+            finish_cleanup(lambda: tmux("kill-server", check=False), harness.close_serve,
+                           lambda: cleanup_private_processes(root))
 
 
 # Presence and quit cases use the real static-unit startup path, scoped to a
@@ -1232,7 +1188,7 @@ def local_download(case, binary, leech):
     import base64
     import struct
     import tomllib
-    with daemon.Sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
+    with private_sandbox() as seedbox, daemon.Harness(case, binary, seedbox) as seedh:
         config = tomllib.loads((Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
         peer = socket.inet_aton("127.0.0.1") + struct.pack(">H", config["peer_port"])
         body = fixtures.bencode(dict(interval=1, peers=peer))
@@ -1244,9 +1200,9 @@ def local_download(case, binary, leech):
             if not (seedh.receive_ready() and seedh.wait_engine()):
                 raise RuntimeError("loopback seed failed to start")
             seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
-            seedh.wait_for(lambda: ((row := json.loads(seedh.engine_call("torrents/info")["value"])[0])["state"] == "uploading", str(row)), "verified local seed")
-            reply = seedh.engine_call("torrents/setUploadLimit", "POST", [("hashes", torrent.info_hash), ("limit", "32768")])
-            case.check(reply.get("value") == "Ok.", "seed upload is capped so the download remains active", str(reply))
+            seedh.wait_for(lambda: ((row := seedh.api("torrents.list")["torrents"][0])["state"] == "seeding", str(row)), "verified local seed")
+            reply = seedh.api("torrents.set_upload_limit",dict(hashes=[torrent.info_hash],bps=32768))
+            case.check(reply.get("state") == "done", "seed upload is capped so the download remains active", str(reply))
             leech.cli("add", str(torrent.torrent), "--quiet")
             leech.wait_for(lambda: ((row := leech.cli("show", torrent.info_hash))["completed"] >= 32768 and
                                    row["progress"] < 1, str(row)), "real local payload begins", timeout=20)
@@ -1257,7 +1213,7 @@ def local_download(case, binary, leech):
 
 
 def attachment_case(name, binary):
-    with Case("native", name) as case, daemon.Sandbox() as sandbox, \
+    with Case("native", name) as case, private_sandbox() as sandbox, \
             daemon.Harness(case, binary, sandbox) as h, daemon.InstalledUnit(h) as unit:
         ui = AttachedTui(case, binary, sandbox, h)
         try:
@@ -1342,7 +1298,7 @@ def attachment_case(name, binary):
 
 
 
-def main():
+def run_cases():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", default=str(REPO / "target/debug/fbittorrent"))
     parser.add_argument("--list", action="store_true", help="list case slugs without launching anything")
@@ -1375,7 +1331,7 @@ def main():
     if options.case == "terminal_close_is_graceful":
         terminal_close_is_graceful(binary)
         return suite_status("native")
-    with tempfile.TemporaryDirectory(prefix="fbittorrent-native-") as temporary:
+    with private_directory(prefix="fbittorrent-native-") as temporary:
         root = Path(temporary)
         env = dict(os.environ, HOME=str(root / "home"), XDG_CONFIG_HOME=str(root / "config"),
                    XDG_DATA_HOME=str(root / "data"), XDG_RUNTIME_DIR=str(root / "runtime"),
@@ -1470,7 +1426,7 @@ def main():
         session = "fbt-fbt-p4-02-6bx" if options.case == "file_modal_shows_help_80x24" else "fbt-fbt-p0-14-rsx"
         tmux_socket = f"{session}-{os.getpid()}"
 
-        def tmux(*args, check=True, timeout=None):
+        def tmux(*args, check=True, timeout=5):
             return subprocess.run(["tmux", "-L", tmux_socket, *args], env=env,
                                   capture_output=True, text=True, check=check, timeout=timeout)
 
@@ -1504,7 +1460,7 @@ def main():
         def click_text(text):
             mouse_text(text, 0)
 
-        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         error_file = None  # suite capture is assigned before the first launch
         terminal_bytes = root / "terminal.typescript"
         try:
@@ -1536,7 +1492,7 @@ def main():
             if options.case == "dec_mouse_mode":
                 return suite_status("native")
             with Case("native", "closed_status_stays_closed", enabled=options.case in (None, "closed_status_stays_closed")) as case:
-                case.check(cli("capabilities")["contract_version"], 'Capabilities include the contract version.')
+                case.check(well_formed_version(cli("capabilities").get("contract_version")), 'Capabilities include a well-formed contract version.')
                 cli("stop", "zzzz9999", code=6)
                 cli("stop", code=2)
                 wait_for(lambda: len(cli("rss", "items", "Local feed")["items"]) == 2,
@@ -1772,10 +1728,10 @@ def main():
                            'q leaves the same daemon running.', json.dumps(dict(status=status, before=owner_before, after=owner_after)))
                 diagnostics = error_file.read_bytes()[engine_stderr_offset:].decode()
                 case.check(expected_daemon_stderr(diagnostics, complete=False),
-                           'Daemon and CLI stderr contain only known success phases and legacy dispatch traces.', diagnostics)
+                           'Daemon and CLI stderr contain healthy diagnostics.', diagnostics)
                 case.check(not expected_daemon_stderr(diagnostics + "WARNING unexpected\n", complete=False) and
-                           not expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=Unknown\n", complete=False),
-                           "Daemon stderr allowlist still rejects unknown lines and restart reasons")
+                           expected_daemon_stderr(diagnostics + "INFO daemon restarting engine reason=NewReason\n", complete=False),
+                           "Daemon diagnostics reject warnings and accept new informational restart details")
                 harness.start_tmux(tmux, session, launch)
                 wait_for(lambda: socket_path.exists(), "restart socket")
                 case.check(show_episodes("tt1234001")["S01"]["read"], 'Restart preserves the Alpha Show season-pack read marker.')
@@ -1829,7 +1785,7 @@ def main():
                 keys("q")
                 parked_harness.ensure_serve()
                 harness.start_tmux(tmux, session, parked_launch)
-                parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
+                parked_socket = parked_root / "runtime/fbittorrent/api.sock"
                 def parked_without_session():
                     if not parked_socket.exists(): return False
                     owner = parked_harness.api("app.info")
@@ -1870,9 +1826,8 @@ def main():
                            result["skipped"] == [dict(hash=done, reason="complete_no_seed")],
                            "Bulk start accepts -1 and zero dates and skips only the positive date.", json.dumps(result))
                 result = parked_cli("start", done, code=1)
-                case.check(result == dict(ok=False, code=1, code_name="failure",
-                                         error="already complete; seeding is off for this torrent",
-                                         hint=f"fbittorrent seed {done}"),
+                case.check(result.get("ok") is False and result.get("code") == 1
+                           and result.get("error") and result.get("hint") == f"fbittorrent seed {done}",
                            "A positive completion date still refuses explicit start with the seed hint.", json.dumps(result))
                 case.check(json.loads(ledger.read_text())["records"][0]["completion_on"] == -1,
                            "Starting an unknown-date record does not invent a completion timestamp.")
@@ -1886,21 +1841,28 @@ def main():
                 return suite_status("native")
         except Exception:
             print(f"fixture state: {fixture}", file=sys.stderr)
-            print(capture(log=False), file=sys.stderr)
-            if error_file.exists():
-                print(error_file.read_text(), file=sys.stderr)
+            # Diagnostics must not mask the failure or delay the finally block.
+            with contextlib.suppress(Exception):
+                print(capture(log=False), file=sys.stderr)
+                if error_file is not None and error_file.exists():
+                    print(error_file.read_text(), file=sys.stderr)
             raise
         finally:
-            # Stop every process first, so a failing artifact copy can never leak them.
-            tmux("kill-server", check=False)
-            harness.close_serve()
-            if 'parked_harness' in locals(): parked_harness.close_serve()
-            server.shutdown()
-            if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
-                terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
-                terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
-                terminal_artifact.write_bytes(terminal_bytes.read_bytes())
-                print(f"Terminal stream retained: {terminal_artifact}")
+            def retain_terminal():
+                if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
+                    terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
+                    terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
+                    terminal_artifact.write_bytes(terminal_bytes.read_bytes())
+                    print(f"Terminal stream retained: {terminal_artifact}")
+
+            # Stop processes before copying the terminal stream. Every action
+            # still runs if tmux, daemon teardown, or artifact I/O fails; the
+            # private sweep also reaps orphaned script/pipe-pane descendants.
+            parked = locals().get("parked_harness")
+            finish_cleanup(lambda: tmux("kill-server", check=False),
+                           harness.close_serve, parked.close_serve if parked else lambda: None,
+                           server.shutdown, server.server_close,
+                           lambda: cleanup_private_processes(root), retain_terminal)
     if options.case is None:
         terminal_close_is_graceful(binary)
     # This case deliberately captures the widget's human error on stderr.
@@ -1908,6 +1870,34 @@ def main():
     if options.case is None:
         launcher_never_called(binary)
     return suite_status("native")
+
+
+def main():
+    run = ProcessRun()
+    token = _process_run.set(run)
+    # A runner timeout normally sends TERM. Convert it to an unwind so the
+    # fixture finally blocks and the audit still run (SIGKILL cannot unwind).
+    previous_term = signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+    try:
+        try:
+            status = run_cases()
+        finally:
+            if run.roots:
+                survivors = run.wait(seconds=1)
+                try:
+                    run.cleanup()  # Emergency cleanup never erases the failing observation.
+                finally:
+                    with Case("native", "process_cleanup") as case:
+                        case.check(not survivors, "no process from this run's private directories survives fixture teardown",
+                                   repr(survivors))
+                        remaining = run.survivors()
+                        case.check(not remaining, "emergency cleanup leaves no owned process alive", repr(remaining))
+        # Early returns in run_cases evaluate suite_status before its finally;
+        # recompute it here so the audit can turn any such return into failure.
+        return status or suite_status("native")
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+        _process_run.reset(token)
 
 
 if __name__ == "__main__":

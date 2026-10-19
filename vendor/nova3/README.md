@@ -24,3 +24,10 @@ included, and the repository `NOTICE` names them.
 | `novaprinter.py` | BSD-3-Clause (header) | none (no author line) |
 | `socks.py` | BSD-3-Clause (header, PySocks 1.7.1) | "Copyright 2006 Dan-Haim. All rights reserved." |
 | `README.md` | this note (fbittorrent, MIT) | n/a |
+
+fbittorrent P3-07: spawned pool workers reset SIGTERM to SIG_DFL before provider
+code runs. Python retires these workers with SIGTERM on normal pool exit; Nova's
+parent alone retains the group-killing handler for cancellation and parent death.
+Workers retain their parent-death SIGKILL. The local `shape` provider's empty
+query asserts this signal policy, and CLI source-agreement/cancellation cases
+exercise the actual multiprocessing pool.

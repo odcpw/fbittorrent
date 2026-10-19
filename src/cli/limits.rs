@@ -61,7 +61,6 @@ pub fn run(
     }
     let (settings, running) = match api::client::Client::connect(cfg, json_mode) {
         Ok(client) => {
-            super::native::warn(&client, json_mode);
             if !api::ops::transfer::limits_patch(&args).is_empty() {
                 client.call("transfer.set_limits", serde_json::to_value(&args)?)?;
             }

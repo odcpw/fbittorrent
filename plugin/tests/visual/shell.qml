@@ -58,6 +58,12 @@ ShellRoot {
   IpcHandler {
     target:"fbt-visual"
     function confirmed(hash:string):string{return JSON.stringify(service.store.torrents[hash] || null)}
+    function peerLabels():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "[]"
+      var labels=[]
+      function visit(item){if(!item)return;if(item.objectName==="popup-row-meta")labels.push(item.text);for(var i=0;i<item.children.length;i++)visit(item.children[i])}
+      visit(widget.popupItem());return JSON.stringify(labels)
+    }
     function offer():string {return JSON.stringify(service.clipboardOffer)}
     function clickPower():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;var button=root.find(widget.popupItem(),"popup-power");if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
     function clickClipboard(action:string):bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || ["add","dismiss"].indexOf(action)<0)return false;var button=root.find(widget.popupItem(),"clipboard-"+action);if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}

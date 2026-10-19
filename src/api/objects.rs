@@ -232,6 +232,10 @@ pub struct TopTorrent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eta_s: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub peers: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seeds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub playable: Option<Playable>,
 }
 

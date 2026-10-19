@@ -107,4 +107,4 @@ pub fn try_increase_nofile_limit() -> anyhow::Result<u64> {
     Ok(rlimit::increase_nofile_limit(1024 * 1024)?)
 }
 
-pub use tracker_comms::{TrackerStat, TrackerStatus};
+pub use tracker_comms::{TrackerStat, TrackerStatus, redact_url as redact_tracker_url, sanitize as sanitize_tracker_message};

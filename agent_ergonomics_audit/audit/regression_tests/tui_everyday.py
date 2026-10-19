@@ -68,7 +68,7 @@ def main():
                     case.check(len(c.call('torrents.list',{})['result']['torrents'])==1,'Enter on destructive confirmation keeps the safe No default','one torrent still present')
                     ui.keys(target,'d');ui.keys(target,'y')
                     assert h.wait_for(lambda:((rows:=c.call('torrents.list',{})['result']['torrents'])==[],json.dumps(rows)),'confirmed removal disappears from daemon')
-                    assert ui.assert_pane(target,'U undo')
+                    assert ui.assert_pane(target,'(U) Undo removal')
                     ui.keys(target,'U')
                     assert h.wait_for(lambda:(len(rows:=c.call('torrents.list',{})['result']['torrents'])==1 and rows[0]['hash']==item.info_hash,json.dumps(rows)),'U restores the exact removed hash')
                     case.check(fingerprint()==before,'remove and undo preserve actual payload inode length and SHA256',repr(dict(before=before,after=fingerprint())))

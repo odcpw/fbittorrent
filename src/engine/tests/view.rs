@@ -151,7 +151,7 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
     assert_eq!(normalized["intent"], "run");
     assert_eq!(normalized["upload_policy"], "default_cap");
     assert_eq!(normalized["seed"], false);
-    let legacy: Torrent = serde_json::from_str(&view.to_legacy_json().unwrap()).unwrap();
+    let legacy: Torrent = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
     assert_eq!(legacy.completion_on, -1);
     assert_eq!(legacy.eta, 8640000);
     assert_eq!(legacy.name, record.name);
@@ -167,7 +167,7 @@ fn normalized_unknowns_are_absent_and_legacy_sentinels_stay_at_the_boundary() {
     assert!(normalized.get("progress").is_none());
     record.paused = true;
     let parked = TorrentView::parked(&record, None);
-    let legacy: Torrent = serde_json::from_str(&parked.to_legacy_json().unwrap()).unwrap();
+    let legacy: Torrent = serde_json::from_str(&parked.to_cli_json().unwrap()).unwrap();
     assert_eq!(legacy.state, "stoppedDL");
     assert_eq!(parked.state, TorrentState::WaitingVpn);
 }
@@ -234,7 +234,7 @@ fn retained_missing_files_error_keeps_its_reason_after_stop_and_during_retry() {
         assert_eq!(view.error.as_deref(), Some(message.as_str()));
         let wire: crate::api::Torrent = serde_json::from_value(serde_json::to_value(&view).unwrap()).unwrap();
         wire.validate().unwrap();
-        let legacy: Torrent = serde_json::from_str(&view.to_legacy_json().unwrap()).unwrap();
+        let legacy: Torrent = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
         assert_eq!(legacy.state, legacy_state);
         assert_eq!(legacy.error_message.as_deref(), Some(message.as_str()));
     }
