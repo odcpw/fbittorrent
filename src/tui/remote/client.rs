@@ -179,7 +179,7 @@ impl ScreenClient {
         if self.cfg.native() {
             let connection=self.connection.as_ref().ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?;
             let result:api::ProvidersResult=request(connection,"search.providers",json!({}))?;
-            return Ok(result.providers.into_iter().map(|p|SearchPlugin {name:p.name,full_name:p.full_name.unwrap_or_default(),url:p.url.unwrap_or_default(),version:p.version.unwrap_or_default(),enabled:p.enabled}).collect());
+            return Ok(result.providers.into_iter().map(|p|SearchPlugin {kind:if p.kind==api::ProviderKind::Torznab {"torznab"}else{"nova"}.into(),name:p.name,full_name:p.full_name.unwrap_or_default(),url:p.url.unwrap_or_default(),version:p.version.unwrap_or_default(),enabled:p.enabled}).collect());
         }
         self.local.search_plugins()
     }

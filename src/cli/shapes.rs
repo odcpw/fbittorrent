@@ -73,7 +73,7 @@ pub(crate) fn search(item:&api::SearchItem,providers:&[api::Provider]) -> Value 
     value
 }
 pub(crate) fn providers(values:&[api::Provider]) -> Vec<qbt::SearchPlugin> {
-    values.iter().map(|p|qbt::SearchPlugin {name:p.name.clone(),full_name:p.full_name.clone().unwrap_or_default(),
+    values.iter().map(|p|qbt::SearchPlugin {kind:if p.kind==api::ProviderKind::Torznab {"torznab"}else{"nova"}.into(),name:p.name.clone(),full_name:p.full_name.clone().unwrap_or_default(),
         enabled:p.enabled,url:p.url.clone().unwrap_or_default(),version:p.version.clone().unwrap_or_default()}).collect()
 }
 

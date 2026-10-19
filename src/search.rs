@@ -257,7 +257,14 @@ struct PluginCache {
 static PLUGINS: OnceLock<Mutex<Option<PluginCache>>> = OnceLock::new();
 
 pub fn plugins() -> Result<Vec<SearchPlugin>> {
-    plugins_in(&ProviderStore::default())
+    let store=ProviderStore::default();
+    let mut rows=plugins_in(&store)?;
+    let preferences=store.load()?;
+    rows.extend(torznab::indexers()?.into_iter().map(|i|SearchPlugin {
+        enabled:preferences.enabled.get(&i.name).copied().unwrap_or(true),
+        full_name:i.name.clone(),name:i.name,url:i.url,version:String::new(),kind:"torznab".into(),
+    }));
+    rows.sort_by(|a,b|a.name.cmp(&b.name));Ok(rows)
 }
 
 fn plugins_in(store: &ProviderStore) -> Result<Vec<SearchPlugin>> {
@@ -291,10 +298,11 @@ fn plugins_in(store: &ProviderStore) -> Result<Vec<SearchPlugin>> {
         .as_ref()
         .is_none_or(|cache| cache.runtime != store.runtime() || cache.stamp != files);
     if changed {
-        let mut command = python(&store.runtime());
-        command.arg("nova2.py").arg("--capabilities");
-        let output = capture(command, Duration::from_secs(10))?;
-        let mut available = parse_capabilities(&output)?;
+        let mut available=if files.is_empty(){Vec::new()}else {
+            let mut command = python(&store.runtime());
+            command.arg("nova2.py").arg("--capabilities");
+            parse_capabilities(&capture(command, Duration::from_secs(10))?)?
+        };
         // Nova omits scripts that fail import. Keep them discoverable, with an
         // explicit unavailable label, instead of silently losing providers.
         for (name, _, _) in &files {
@@ -400,7 +408,11 @@ fn parse_capabilities(bytes: &[u8]) -> Result<Vec<SearchPlugin>> {
 }
 
 pub fn set_enabled(name: &str, enabled: bool) -> Result<()> {
-    ProviderStore::default().set_enabled(name, enabled)
+    let store=ProviderStore::default();
+    if torznab::indexers()?.iter().any(|i|i.name==name) {
+        let _lock=store.lock()?;let mut prefs=store.load()?;prefs.enabled.insert(name.into(),enabled);return store.save(&prefs);
+    }
+    store.set_enabled(name, enabled)
 }
 
 pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
@@ -413,6 +425,9 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
     let mut failures = Vec::new();
     for source in sources {
         let result = (|| -> Result<()> {
+            if url::Url::parse(source).is_ok_and(|u|!u.path().ends_with(".py")) {
+                torznab::install(source,None)?;return Ok(());
+            }
             if !source.starts_with("https://") {
                 bail!("provider download must use https");
             }
@@ -473,6 +488,7 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
 mod download;
 pub(crate) mod normalize;
 pub(crate) mod service;
+pub(crate) mod torznab;
 mod jobs;
 mod process;
 #[cfg(test)]

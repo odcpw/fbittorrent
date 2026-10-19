@@ -8,6 +8,11 @@ pub(super) fn python(directory: &Path) -> Command {
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::null());
+    isolated(&mut command);
+    command
+}
+
+pub(super) fn isolated(command:&mut Command) {
     let parent = unsafe { libc::getpid() };
     // Every child gets its own process group. kill(-pid) reaches Nova's pool,
     // its resource tracker, and any provider subprocesses together.
@@ -36,7 +41,6 @@ pub(super) fn python(directory: &Path) -> Command {
             Ok(())
         });
     }
-    command
 }
 
 pub(super) struct ProcessGroup {
@@ -55,7 +59,7 @@ impl ProcessGroup {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("search requires a working Python 3 installation (python3)")?;
+            .context("starting search provider worker")?;
         let pid = child.id() as i32;
         // Track metadata/compile runners too, before shutdown can acquire the
         // mutex. Search-job registration may happen after the worker is created.

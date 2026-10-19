@@ -99,6 +99,7 @@ impl std::error::Error for AppError {}
 /// Turn any error into (code, message, hint). Typed errors keep their code;
 /// client errors are classified by what they say.
 pub fn classify(e: &anyhow::Error) -> (Code, String, Option<String>) {
+    if let Some(invalid)=e.downcast_ref::<crate::search::torznab::Invalid>() {return (Code::Usage,invalid.to_string(),None);}
     if let Some(ae) = e.downcast_ref::<AppError>() {
         return (ae.code, ae.message.clone(), ae.hint.clone());
     }

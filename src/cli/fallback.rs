@@ -8,7 +8,7 @@ pub(crate) fn providers() -> Result<Vec<api::Provider>> {
         .into_iter()
         .map(|p| api::Provider {
             name: p.name,
-            kind: api::ProviderKind::Nova,
+            kind: if p.kind=="torznab" {api::ProviderKind::Torznab}else{api::ProviderKind::Nova},
             enabled: p.enabled,
             full_name: (!p.full_name.is_empty()).then_some(p.full_name),
             url: (!p.url.is_empty()).then_some(p.url),

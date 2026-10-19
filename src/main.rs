@@ -39,6 +39,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn main() {
+    if let Some(code)=search::torznab::run_worker(){std::process::exit(code);}
+
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
@@ -461,7 +463,13 @@ fn run(cli: Cli) -> Result<Code> {
             rss(&c, sub, json, &cfg)
         }
         Cmd::Shows(sub) => shows_cmd(&cfg, &c, sub, json),
-        Cmd::Search { query, wait, limit, install, install_url, plugins } => {
+        Cmd::Search { query, wait, limit, install, install_url, plugins, install_torznab,key_file } => {
+            if let Some(url)=install_torznab {
+                let key_file=key_file.map(|p|if p.is_absolute(){Ok(p)}else{std::env::current_dir().map(|dir|dir.join(p))}).transpose()?;
+                let name=search::torznab::install(&url,key_file)?;
+                emit(json,serde_json::json!({"ok":true,"action":"install-torznab","name":name,"url":url,"kind":"torznab"}),||println!("Torznab indexer installed: {name}"));
+                return Ok(Code::Ok);
+            }
             if cfg.native() {return cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json);}
             if !cfg.native() { connect(&cfg, &c)?; }
             if plugins {
