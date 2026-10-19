@@ -9,8 +9,30 @@ fn sample(prefix: u64) -> Sample {
         prefix,
         last: true,
         downloading: true,
+        active: true,
         dl_bps: Some(MIB),
     }
+}
+#[test]
+fn only_active_video_samples_keep_the_background_clock_running() {
+    let path = std::env::temp_dir().join(format!("fbt-watch-clock-{}.json", std::process::id()));
+    let mut watch = Watch::open(path);
+    assert!(!watch.needs_tick());
+    let mut paused = sample(0);
+    paused.active = false;
+    paused.downloading = false;
+    paused.dl_bps = None;
+    assert!(watch.sample(vec![paused]).is_empty());
+    assert!(!watch.needs_tick(), "paused video remains readable without periodic rescans");
+    assert_eq!(watch.file_ready(&"a".repeat(40), 1), Some(false));
+    let mut stalled = sample(0);
+    stalled.downloading = false;
+    stalled.dl_bps = Some(0);
+    watch.sample(vec![stalled]);
+    assert!(watch.needs_tick(), "an unpaused stalled video can receive pieces later");
+    watch.sample(Vec::new());
+    assert!(!watch.needs_tick());
+    assert_eq!(watch.file_ready(&"a".repeat(40), 1), Some(false));
 }
 #[test]
 fn prefix_from_bitfield() {
@@ -143,6 +165,7 @@ fn once_pause_ack_restart_and_lost_prefix() {
     w.acknowledge(Some(&"a".repeat(40)));
     assert!(w.rows[&"a".repeat(40)].value.acked);
     let mut paused = sample(40 * MIB);
+    paused.active = false;
     paused.downloading = false;
     paused.dl_bps = None;
     assert!(w.sample(vec![paused]).is_empty());
