@@ -289,7 +289,7 @@ class ManagedProcess:
 class Harness:
     def __init__(self, case, binary, sandbox, systemd=False):
         self.case, self.binary, self.sandbox, self.systemd = case, str(binary), sandbox, systemd
-        case.check(True, "private process environment verified before any launch", private_environment(sandbox))
+        private_environment(sandbox)
         self.resources = ExitStack()
         self.names = {}
 
@@ -1660,7 +1660,6 @@ def deferred_add(binary, systemd):
                 case.check(saved["deferred"] and saved["hash"] == local.info_hash, "local metainfo also waits with its explicit paused selection", json.dumps(saved))
                 activation.write_text(str(time.time_ns()))
                 h.wait_for(lambda: (activated.exists(), str(activated)), "fixture interface appears inside the owned namespace")
-                case.check(True, "interface up/down timestamps", activated.read_text())
                 def receiving():
                     row = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
                     return row["state"] == "downloading" and row.get("dl_bps", 0) > 0, json.dumps(row)
@@ -2026,7 +2025,6 @@ def replay_owned(group, binary, systemd):
                 if not harness.seed_harness.wait_engine():
                     raise RuntimeError("real loopback seed daemon did not answer")
                 shutil.copyfile(harness.replay_namespace_info, case.path.with_suffix(".namespace.json"))
-                case.check(True, "VPN namespace fixture availability", json.dumps(dict(opt_in=os.environ.get("FBT_TEST_VPN") == "1", **harness.replay_network), sort_keys=True))
             with ApiConn(harness) as ready:
                 ready.hello()
                 harness.wait_for(lambda: ((info := ready.call("app.info")["result"])["state"] == "running", json.dumps(info)), "replay owner is running before transcript")
@@ -2102,9 +2100,6 @@ def replay_preconditions(lines, client, normalizer, root):
         # the measured rate before the first piece finishes verification.
         default_piece = fixtures.MIB if row["state"] == "downloading" and row.get("completed_bytes") == 0 else 1024
         fixture = fixtures.torrent_fixture(directory, payloads, name=row["name"], piece_length=detail.get("piece_size", default_piece))
-        client.case.check(True, "record generated transcript payload geometry",
-                          json.dumps(dict(fixture_hash=fixture_hash, bytes=sum(size for _, size, _ in specs),
-                                          piece_size=fixture.info["piece length"]), sort_keys=True))
         fixture.info["private"] = int(detail.get("private", False))
         document = dict(info=fixture.info)
         tracker_count=detail.get("tracker_count",int(row["state"]=="downloading"))
@@ -2154,8 +2149,6 @@ def replay_preconditions(lines, client, normalizer, root):
         elif row["intent"] == "run":
             client.call("torrents.start", dict(hashes=[actual_hash]))
         observed = client.call("torrents.get", dict(hash=actual_hash))["result"]["torrent"]
-        client.case.check(True, "record real transcript preconditions and observed state",
-                          json.dumps(dict(fixture_hash=fixture_hash, live_hash=actual_hash, expected_state=row["state"], observed=observed), sort_keys=True))
     return prepared
 
 
@@ -2203,7 +2196,6 @@ def receive_replay_sample(client, item, query, timeout=8):
         client.send_frame(query)
         frame = client.response(query["id"])
         row = frame["result"]["torrent"]
-        client.case.check(True, "bounded real loopback receive/query attempt", json.dumps(dict(attempt=attempt, elapsed_ms=round((time.monotonic()-began)*1000), torrent=row), sort_keys=True))
         if (row["state"] == "downloading" and row.get("dl_bps", 0) > 0) or row["state"] == "done":
             break
         time.sleep(.05)
@@ -2257,7 +2249,6 @@ def drive_replay_state(client, prepared, fixture_hash, harness, query):
             client.send_frame(query)
             frame = client.response(query["id"])
             sample = frame["result"]["torrent"]
-            client.case.check(True, "bounded real recheck/query attempt", json.dumps(dict(attempt=attempt, size=sample.get("size"), torrent=sample), sort_keys=True))
             if sample["state"] == "checking":
                 break
         return frame
@@ -2296,12 +2287,10 @@ def api_replay_normalization(binary, systemd):
         normalizer = ReplayNormalizer()
         normalizer.compare(dict(id=1, result=dict(instance="0" * 32, server=dict(version="0.2.0"))),
                            dict(id=123, result=dict(instance="a" * 32, server=dict(version="0.1.0"))))
-        case.check(True, "identity and version normalization accepts valid first occurrences", json.dumps(normalizer.identities, sort_keys=True))
         normalizer.compare(dict(result=dict(caps=["files", "torrents"])),
                            dict(result=dict(caps=["torrents", "watch", "files"])))
         normalizer.compare(dict(error=dict(code="not_found", message="Old wording", hint="Old hint")),
                            dict(error=dict(code="not_found", message="New wording", hint="New hint")))
-        case.check(True, "capability supersets and reworded guidance preserve behaviour", "Fixture caps retained; all live caps catalogued; error code unchanged.")
         for label, expected, actual, pointer in [
             ("missing capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["files"])), "/result/caps"),
             ("unknown capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["torrents", "made_up"])), "/result/caps"),
@@ -2320,7 +2309,6 @@ def api_replay_normalization(binary, systemd):
                 case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
         normalizer.compare(dict(result=dict(future_added_at=1, nested=dict(staged_until=2))),
                            dict(result=dict(future_added_at=int(time.time()), nested=dict(staged_until=int(time.time())+10))))
-        case.check(True,"computed timestamp suffixes compare by type and validity","Nested *_at and *_until values keep positive-u64 and presence checks.")
         for bad in (False,-1,0,"tomorrow"):
             try:
                 normalizer.compare(dict(result=dict(created_at=1)),dict(result=dict(created_at=bad)))
@@ -2338,7 +2326,6 @@ def api_replay_normalization(binary, systemd):
                 case.check("/result/undo_until" in str(error),label+" undo deadline fails at its pointer",str(error))
         undo_normalizer.observe(dict(op="torrents.remove",args=dict(delete_files=False,hashes=["a"*40])),live_undo)
         undo_normalizer.compare(expected_undo,live_undo)
-        case.check(True,"undo deadline is tied to a real removal response","Positive future timestamp is within the ten-second removal window.")
         for value in (int(time.time())-1,int(time.time())+11,True):
             try:
                 undo_normalizer.compare(expected_undo,dict(live_undo,result=dict(undo_until=value)))
@@ -2359,11 +2346,9 @@ def api_replay_normalization(binary, systemd):
         sample = dict(checking, completed_bytes=25, progress=.25)
         for wrap in (lambda row: dict(result=dict(torrent=row)), lambda row: dict(result=dict(torrents=[row]))):
             normalizer.compare(wrap(checking), wrap(sample))
-            case.check(True, "checking-only measurement normalization accepts a valid live tuple", json.dumps(wrap(sample)))
         zero = dict(checking, size=0, completed_bytes=0, progress=0.0)
         normalizer.compare(dict(result=dict(torrent=zero)), dict(result=dict(torrent=zero)))
         normalizer.compare(dict(result=dict(torrent=checking)), dict(result=dict(torrent=dict(sample, progress=.25 + 1e-10))))
-        case.check(True, "zero size and the declared 1e-9 tolerance are accepted", "zero/zero=0; in-tolerance tuple passes")
         for label, wanted, got, pointer in [
             ("over-size checked bytes", checking, dict(sample, completed_bytes=101), "/completed_bytes"),
             ("negative checked bytes", checking, dict(sample, completed_bytes=-1), "/completed_bytes"),
@@ -2403,7 +2388,6 @@ def replay_starting_window(client, harness, identifier, frames):
                     actual = fresh.response(identifier)
                     attempts.append(dict(attempt=attempt, hello_state=hello["state"], after_ready_ms=sent_after_ms,
                                          response_ms=round((time.monotonic() - ready_at) * 1000, 3), response=actual))
-                    client.case.check(True, "bounded retry immediately after real READY=1", json.dumps(attempts[-1], sort_keys=True))
             finally:
                 if process.child.poll() is None:
                     probe.stop_serve(process)
@@ -2564,7 +2548,6 @@ def contract_group(group, binary, systemd):
                 record = dict(fixture=str(path.relative_to(REPO)), line=number, pointer=pointer, bead=bead,
                               reason=reason, **{"class": replay_deferral_class(bead, reason)})
                 deferred.append(record)
-                case.check(True, "record the exact deferred fixture field and owner", json.dumps(record, sort_keys=True))
             for number, line in enumerate(lines, 1):
                 if line["dir"] == "c2s":
                     request = line["frame"]
@@ -2588,7 +2571,6 @@ def contract_group(group, binary, systemd):
                         raw = b'{"id":0,"op":"app.info"}\n' if number == 36 else b'x' * 65537 if number == 37 else None
                         if raw:
                             client.socket.sendall(raw)
-                            case.check(True, "drive the server-only fixture input validation scenario", f"line={number}; input bytes={len(raw)}")
                     current, request = request, None
                     condition_deferrals = []
                     if group == "errors" and current and "error" in expected:
@@ -2615,7 +2597,6 @@ def contract_group(group, binary, systemd):
                         try:
                             check_capabilities(expected.get("result", {}).get("caps", []),
                                                actual["result"]["caps"], normalizer.catalogue)
-                            case.check(True, "fixture caps are available and all live caps are catalogued", json.dumps(sorted(available_caps)))
                         except ValueError as error:
                             case.check(False, "fixture caps are available and all live caps are catalogued", str(error))
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
@@ -3458,7 +3439,6 @@ def add_url_pending_then_result(binary, systemd):
             normalizer = ReplayNormalizer()
             normalizer.compare(frozen[4]["frame"], again)
             normalizer.compare(dict(result=frozen[12]["frame"]["result"]), dict(result=outcome["result"]))
-            case.check(True, "pending and add result match the frozen mutation fixture using P1-06 normalization", json.dumps(outcome))
             if os.environ.get("FBT_API_CONTRACT_VALIDATOR"):
                 validate_live_contract(case, sandbox, trace)
                 # The frozen result omits optional duplicate. Keep P1-06's
@@ -3990,12 +3970,14 @@ def tui_reconnect_existing_owner(binary, systemd):
         try:
             target,done=ui.start()
             ui.assert_pane(target,"two-files")
-            harness.stop_serve(process)
+            # An abrupt owner loss has no intentional bye. The Stopped banner
+            # is reached only after an actual socket retry reports absent/refused.
+            os.kill(harness.daemon_pid(),signal.SIGKILL)
+            process.wait(timeout=10,code=137 if process.systemd else -signal.SIGKILL)
+            harness.engine_path.unlink(missing_ok=True)
             ui.assert_pane(target,"fbittorrent stopped")
             case.check("two-files" in ui.capture(target) and not done.exists(),
                        "confirmed rows remain visible when the daemon exits",ui.capture(target))
-            # Let a real automatic reconnect attempt reach an absent socket.
-            time.sleep(1.1)
             case.check(not DaemonContract.socket_path(sandbox).exists(),
                        "automatic socket retries never start a replacement daemon",ui.capture(target))
             # Discard the old owner's queued STATUS datagrams before its successor's READY.
@@ -4687,7 +4669,9 @@ def tracker_flow(name,binary,systemd,redacted=False):
         after=tracker_rows(client,fixture.info_hash);requests=tracker.snapshot()
         case.check(len(requests)==2 and 0<=requests[-1]["ts"]-started<2 and requests[-1]["event"]=="none" and after[0].get("peers")==1,
                    "force produces one event=none announce within two seconds and records one returned peer",json.dumps(dict(requests=requests,rows=json.loads(client.diagnostic(after)))))
-        client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]));time.sleep(.35)
+        client.call("torrents.reannounce",dict(hashes=[fixture.info_hash]))
+        from event_barriers import summary_samples
+        summary_samples(client)
         case.check(len(tracker.snapshot())==2,"second force within sixty seconds produces no announce",json.dumps(tracker.snapshot()))
         client.call("torrents.stop",dict(hashes=[fixture.info_hash]))
         paused=tracker_rows(client,fixture.info_hash)
@@ -4772,17 +4756,16 @@ def move_case(name,binary,systemd,cross=False,failing=False):
         hashes={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
         if cross:
             if not Path("/dev/shm").is_dir():
-                case.check(True,"cross-filesystem case is environment conditional","SKIP: /dev/shm tmpfs is unavailable");return
+                case.skip("/dev/shm tmpfs is unavailable; cross-filesystem move was not run");return
             temporary=stack.enter_context(tempfile.TemporaryDirectory(prefix="fbt-move-",dir="/dev/shm"));destination=Path(temporary)/"payload"
             if root.stat().st_dev==Path(temporary).stat().st_dev:
-                case.check(True,"cross-filesystem case requires a distinct device","SKIP: /tmp and /dev/shm have equal st_dev");return
+                case.skip("/tmp and /dev/shm are the same device; cross-filesystem move was not run");return
         else:destination=sandbox.root/"move-destination"
         destination.mkdir()
         if failing:
             # A real collision after the first file has been staged. The
             # transaction must retain both sources and this unrelated target.
             (destination/paths[-1].name).write_bytes(b"unrelated destination data")
-        case.check(True,"record filesystem strategy and source hashes",json.dumps(dict(source_device=root.stat().st_dev,destination_device=destination.stat().st_dev,save_path_before=before["save_path"],sha256=hashes)))
         event,states=move_receive(client,h,fixture.info_hash,destination,"move-"+name)
         after=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
         if failing:

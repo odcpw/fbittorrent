@@ -122,7 +122,6 @@ def serve(binary,state,systemd,throttle):
                 description=pair.description(state)
                 description['log']=str(case.path)
                 print('FBTFIXTURE '+json.dumps(description),flush=True)
-                case.check(True,'owned fixture is ready; retain it until owner stop, daemon exit or open stdin EOF',json.dumps(description))
                 poll=select.poll()
                 # Existing UI callers close a pipe to signal teardown. A closed
                 # stdin at invocation (e.g. /dev/null) is not an owner stop.
@@ -134,7 +133,6 @@ def serve(binary,state,systemd,throttle):
                     if any(p.child.poll() is not None for _,_,p,_ in pair.owned):reason='owned daemon exited';break
                     if watch_stdin and poll.poll(0):
                         if not os.read(0,1):reason='stdin EOF';break
-                case.check(True,'fixture stop releases every owned daemon/unit before removing sandboxes',reason)
         return d.suite_status("daemon_fixture")
     finally:
         for number,handler in previous.items():signal.signal(number,handler)

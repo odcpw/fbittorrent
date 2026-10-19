@@ -56,13 +56,15 @@ def run(binary,names,systemd,jobs,validator=None,budget=None):
                 if daemon_log.exists():shutil.copy2(daemon_log,suite.directory/daemon_log.name)
             # Make a worker crash/missing final an explicit failed JSONL step;
             # the umbrella summary must not silently omit an uncompleted case.
+            skipped=code==0 and not failed and bool(finals) and all(row.get('status')=='skip' for row in finals)
             with d.Case('daemon','worker_'+name) as case:
-                case.check(code==0 and not failed and bool(finals),
-                           'isolated case process exits 0 with a final passing result',
-                           json.dumps(dict(exit=code,finals=finals)),)
-                case.step('retain isolated worker diagnostics','separate stderr and stdout remain available').ok(str(root),[root/'worker.stdout.log',root/'worker.stderr.log'])
+                if skipped:case.skip('isolated worker skipped its coverage')
+                else:case.check(code==0 and not failed and bool(finals),
+                                'isolated case process exits 0 with a final passing result',
+                                json.dumps(dict(exit=code,finals=finals)))
+                case.write(dict(diagnostic='isolated worker output',artifacts=[str(root/'worker.stdout.log'),str(root/'worker.stderr.log')]))
             suite.results.extend(finals)
-            print(('FAIL' if code or failed else 'ok')+': daemon/'+name,flush=True)
+            print(('FAIL' if code or failed else 'SKIP' if skipped else 'ok')+': daemon/'+name,flush=True)
     finally:
         for future in locals().get('pending',[]):future.cancel()
         with lock:children=list(live)

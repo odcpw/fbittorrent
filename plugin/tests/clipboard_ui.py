@@ -118,7 +118,6 @@ def run(binary):
                     client.call('app.settings.set', dict(clipboard_watch=False))
                     pid = json.loads(trace.read_text().splitlines()[0])['pid']
                     q.wait(lambda: not daemon.process_alive(pid))
-                    case.check(True, 'turning watch off reaps the real reader', str(pid))
                     calls = [json.loads(line) for line in (box.root / 'shims/wl-paste.log').read_text().splitlines()]
                     case.check(len(calls) == 1 and calls[0][0] == '--watch',
                                'only the daemon owns a clipboard reader; UI spawns no clipboard process for events', json.dumps(calls))

@@ -56,6 +56,17 @@ class SafetyTests(unittest.TestCase):
                 self.assertEqual(check.status,'FAIL' if safety else 'FLAKY')
                 self.assertEqual(strict_rust_test(name),safety)
 
+    def test_skip_is_not_pass_and_safety_skip_fails(self):
+        for name, expected in [('daemon/rev_soak_10min','SKIP'),('daemon/zero_upload','FAIL')]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='fbt-skip-') as directory:
+                root=Path(directory)
+                script=('import json,sys;from pathlib import Path;'
+                        'p=Path(sys.argv[1]);(p/"daemon").mkdir();'
+                        '(p/"daemon/case.jsonl").write_text(json.dumps(dict(suite="daemon",final=True,ok=None,status="skip"))+"\\n")')
+                check=gate.Check(name,[sys.executable,'-c',script,'{logs}'],case=True)
+                gate.run_checks([check],root,dict(os.environ))
+                self.assertEqual(check.status,expected)
+
     def test_fast_gate_always_exercises_zero_upload(self):
         self.assertIn('zero_upload',gate.FAST['daemon'])
         self.assertTrue(strict_check('daemon/zero_upload'))

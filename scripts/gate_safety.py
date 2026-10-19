@@ -12,20 +12,25 @@ STRICT_CHECKS = (
     'daemon/offline_delete_keep_files_ledger', 'daemon/ref_replay_remove',
     'daemon/tracker_url_redacted', 'daemon/tracker_credentials*', 'tracker_privacy',
     'daemon/clipboard_never_logged', 'daemon/torznab*redact*',
-    'native/q_*', 'native/first_q_notice_once', 'native/stop_during_hashing',
+    'native/q_*', 'native/quit_restart_down', 'native/native_cli_fields_and_deletion_safety',
+    'native/first_q_notice_once', 'native/stop_during_hashing',
     'daemon/down_*', 'daemon/foreground_down', 'daemon/*shutdown*', 'daemon/*stop*',
-    'daemon/cleanup_*stop*', 'daemon/idle_exit_*', 'daemon/killmode_mixed',
-    'plugin_stop_rule', 'plugin_glance_policy',
+    'daemon/cleanup_*stop*', 'daemon/*idle_exit*', 'daemon/killmode_mixed',
+    'plugin_stop_rule', 'plugin_glance_policy', 'plugin_default_idle',
 )
 STRICT_RUST_TESTS = (
     'engine::tests::*upload*', 'engine::tests::*delete*',
     'engine::dormant_delete::tests::*', 'engine::tests::tracker_edit::*',
     'engine::tests::*native_lifecycle_hashes_existing_data_stops_restores_and_deletes_durably',
-    'engine::tests::*redact*',
+    'engine::tests::*redact*', 'engine::tests::*shutdown*',
+    'engine::tests::*stops_with_app*', 'engine::tests::*stop_during_hashing*',
     'native_runtime::shutdown_tests::*', 'daemon::lifecycle::*', 'daemon::policy::*',
     'api::trackers::*', 'search::torznab::tests::*credentials*',
     'tui::attach::tests::detach_never_requests_owner_shutdown',
-    'cli::status_tests::*shutdown*',
+    'cli::status::tests::*shutdown*', 'cli::status::tests::*stopping*',
+    'api::client::session::tests::*file_deletion*',
+    'tui::interaction_tests::destructive_delete_files_requires_y',
+    'tui::everyday_tests::commands::*removal*',
 )
 
 

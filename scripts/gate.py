@@ -2,7 +2,8 @@
 """Command orchestration only: all app checks live in the existing harnesses.
 
 Each failed case gets one serial retry in a fresh process/sandbox/log directory.
-Both attempts remain available. A successful retry is FLAKY, not FAIL.
+Both attempts remain available. Timing retry successes are FLAKY; safety failures
+remain FAIL, and an explicit opt-out is SKIP rather than passed coverage.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -235,6 +236,7 @@ def run_once(check, logs, env, attempt):
     check.seconds += time.monotonic() - started
     check.log = str(log)
     ok = code == 0
+    skipped = False
     if check.case:
         # A harness crash or missing final is a failure even if a wrapper exits 0.
         finals = []
@@ -246,6 +248,11 @@ def run_once(check, logs, env, attempt):
                 finals += [row for row in rows if row.get('final')]
         except (ValueError, OSError, AttributeError): ok = False
         ok &= bool(finals)
+        skipped = bool(finals) and all(row.get('status') == 'skip' for row in finals)
+    if ok and skipped:
+        check.status = 'FAIL' if strict_check(check.name) else 'SKIP'
+        check.detail = 'coverage skipped; no passed case' if not strict_check(check.name) else 'safety coverage was not executed'
+        return check.status == 'SKIP'
     check.status = ('PASS' if attempt == 1 else 'FAIL' if strict_check(check.name) else 'FLAKY') if ok else 'FAIL'
     return ok
 
@@ -338,6 +345,8 @@ def rust_tests(mode, logs, env):
 def full_checks(env, binary):
     return [python_check('resource_controls', 'agent_ergonomics_audit/audit/regression_tests/resources_test.py'),
             python_check('logging', 'agent_ergonomics_audit/audit/regression_tests/fbtlog_test.py'),
+            python_check('reality_controls','agent_ergonomics_audit/audit/regression_tests/test_reality_controls.py'),
+            python_check('owner_facts_controls','agent_ergonomics_audit/audit/regression_tests/owner_torrent_facts_test.py'),
             python_check('qml_logging', 'plugin/tests/qs-log.py', '--self-test'),
             Check('hygiene', ['bash', 'scripts/check-gitignore.sh']),
             Check('licences', ['bash', 'scripts/check-nova3-licences.sh']),
@@ -377,11 +386,11 @@ def summary(checks, elapsed, logs, mode):
         if group == 'tui_controls': group = 'tui_smoke'
         if group == 'upgrade_fixtures': group = 'daemon'
         if group in ('qs_store', 'qs_smoke', 'qs_palette', 'visual', 'widget', 'vpn'): group = 'optional'
-        counts = groups.setdefault(group, dict(PASS=0, FLAKY=0, FAIL=0, **{'NOT RUN': 0}))
+        counts = groups.setdefault(group, dict(PASS=0, FLAKY=0, FAIL=0, SKIP=0, **{'NOT RUN': 0}))
         counts[check.status] += 1
-    print('\nGate          PASS  FLAKY  FAIL  NOT RUN')
+    print('\nGate          PASS  FLAKY  FAIL  SKIP  NOT RUN')
     for name, counts in groups.items():
-        print(f'{name:13} {counts["PASS"]:4}  {counts["FLAKY"]:5}  {counts["FAIL"]:4}  {counts["NOT RUN"]:7}')
+        print(f'{name:13} {counts["PASS"]:4}  {counts["FLAKY"]:5}  {counts["FAIL"]:4}  {counts["SKIP"]:4}  {counts["NOT RUN"]:7}')
     problems = [check for check in checks if check.status in ('FAIL', 'FLAKY')]
     for check in problems[:6]:
         detail = check.detail if len(check.detail) <= 180 else check.detail[:180] + '... (see logs)'
