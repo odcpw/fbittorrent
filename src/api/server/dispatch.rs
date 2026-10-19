@@ -59,7 +59,10 @@ impl Shared {
                     hash: None, name: None, duplicate: None, deferred: None, disk: None }) };
                 if self.begin_confirmation(&job, reply, Confirmation::Worker, false) {
                     let result = ops::search::dispatch(&self.daemon, job.connection.number, &job.request.call);
-                    if result.as_ref().ok().is_some_and(|reply| ops::search::awaits_metadata(&self.daemon, reply)) {
+                    // A review stage is admitted before peers supply metadata:
+                    // its receipt must let the sheet commit or discard now.
+                    let staged = matches!(&job.request.call, Call::SearchGrab { args } if args.stage == Some(true));
+                    if !staged && result.as_ref().ok().is_some_and(|reply| ops::search::awaits_metadata(&self.daemon, reply)) {
                         if let Some(active) = self.mutation_active.lock().unwrap().get_mut(&(job.connection.number, job.generation)) {
                             active.confirmation = Some(Confirmation::Metadata(result.unwrap()));
                         }

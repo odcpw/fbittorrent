@@ -11,9 +11,10 @@ import fixtures
 
 
 class Swarm:
-    def __init__(self,case,binary,systemd,*,payload_bytes=8*1024*1024+16384*2,upload_bps=65536):
+    def __init__(self,case,binary,systemd,*,payload_bytes=8*1024*1024+16384*2,upload_bps=65536,leecher_bps=None):
         self.case,self.binary,self.systemd=case,binary,systemd
         self.payload_bytes,self.upload_bps=payload_bytes,upload_bps
+        self.leecher_bps=leecher_bps
         self.stack=ExitStack();self.nodes=[]
 
     def __enter__(self):
@@ -37,11 +38,19 @@ class Swarm:
                 box,h,_,client,_=self.nodes[index]
                 metainfo=fixtures.torrent_fixture(box.root,[payload],tracker=http.base+'/'+path)
                 self.hash=metainfo.info_hash
-                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index==0))
+                # This owned swarm deliberately includes an uploading leecher.
+                # Upload is off by default, so give both payload sources an
+                # explicit opt-in; the observing client retains upload off.
+                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index in (0,1),stopped=index==1 and self.leecher_bps is not None))
                 if index==0:
                     h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent'])['state']=='seeding',json.dumps(row)),'local seed verifies real payload')
                     d.DaemonContract.throttle(client,self.hash,self.upload_bps)
                 if index==1:
+                    if self.leecher_bps is not None:
+                        # Reserve real seed bandwidth for the observer instead
+                        # of assuming fairness between competing TCP requests.
+                        client.call('torrents.set_download_limit',dict(hashes=[self.hash],bps=self.leecher_bps))
+                        client.call('torrents.start',dict(hashes=[self.hash]))
                     h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent']).get('completed_bytes',0)>0 and row['state']=='downloading',json.dumps(row)),'incomplete local leecher receives actual payload')
             self.box,self.h,self.p,self.client,_=self.nodes[2]
             return self
@@ -89,7 +98,7 @@ def peers_local_swarm(binary,systemd):
 
 
 def peer_rates_move(binary,systemd):
-    with d.Case('daemon','peer_rates_move') as case,Swarm(case,binary,systemd) as swarm:
+    with d.Case('daemon','peer_rates_move') as case,Swarm(case,binary,systemd,leecher_bps=32768) as swarm:
         if not swarm.h.wait_for(swarm.observe,'actual seed and leecher bitfields arrive before rate observations',timeout=20):return
         c=swarm.client;topic='torrent:'+swarm.hash+'.peers'
         c.call('subscribe',dict(topics=[topic]))

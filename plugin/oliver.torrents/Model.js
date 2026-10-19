@@ -25,16 +25,17 @@ function bytes(n) {
 function rate(n, compact) { return Formats.rate(n,!!compact) }
 
 function isActive(t) {
-  return ["metadata", "checking", "stalled", "downloading"].indexOf(t.state) >= 0
+  return !t.staged && ["metadata", "checking", "stalled", "downloading"].indexOf(t.state) >= 0
 }
 function isStopped(t) {
-  return ["paused", "done"].indexOf(t.state) >= 0
+  return !t.staged && ["paused", "done"].indexOf(t.state) >= 0
 }
-function isDone(t) { return t.state === "done" || t.state === "seeding" }
+function isDone(t) { return !t.staged && (t.state === "done" || t.state === "seeding") }
 
-var words={metadata:"Metadata",checking:"Checking",downloading:"Downloading",stalled:"Stalled",queued:"Queued",paused:"Paused",done:"Done",seeding:"Seeding",waiting_vpn:"Waiting for VPN",error:"Error",disk_full:"Disk full",ready:"Ready to watch",added_before:"Added before",in_list:"In your list",unread:"Unread",pending:"Pending",reason:"Reason"}
+var words={metadata:"Metadata",checking:"Checking",downloading:"Downloading",stalled:"Stalled",queued:"Queued",paused:"Paused",done:"Done",seeding:"Uploading",waiting_vpn:"Waiting for VPN",error:"Error",disk_full:"Disk full",ready:"Ready to watch",added_before:"Added before",in_list:"In your list",unread:"Unread",pending:"Pending",reason:"Reason"}
 var stateRoles={metadata:"metadata",checking:"checking",downloading:"download",stalled:"stalled",queued:"queued",paused:"paused",done:"done",seeding:"upload",waiting_vpn:"vpn",error:"error",disk_full:"error",ready:"ready",added_before:"add",in_list:"add",unread:"unread",pending:"paused",reason:"error"}
 function stateLabel(t) {
+  if(t.staged)return "Reviewing"
   if(t.playable && t.playable.ready && isActive(t)){
     var p=t.playable
     return p.stall_free===true || (p.stall_free===undefined && Number(p.buffered_s)>=120) ? "Ready to watch" : "Playable · may stall"
@@ -46,6 +47,7 @@ function stateLabel(t) {
 }
 
 function glyph(t) {
+  if(t.staged)return Glyphs.glyph("add")
   if(t.playable && t.playable.ready && isActive(t))return Glyphs.glyph("ready")
   if (stateRoles[t.state]) return Glyphs.glyph(stateRoles[t.state])
   if (isStopped(t)) return isDone(t) ? Glyphs.done : Glyphs.paused
@@ -89,7 +91,7 @@ function heroMeta(s) {
 function detailPill(s) {
   if (!s.ok) return ""
   if (s.active > 0) return s.active + " ACTIVE"
-  if (s.seeding > 0) return s.seeding + " SEEDING"
+  if (s.seeding > 0) return s.seeding + " UPLOADING"
   if (s.queued > 0) return s.queued + " QUEUED"
   return ""
 }

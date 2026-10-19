@@ -35,7 +35,7 @@ def history(client):
     return list(events.values())
 
 @contextmanager
-def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override=None):
+def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override=None,prepared_prefix=0):
     binary=Path(binary).resolve()
     with (nullcontext(case_override) if case_override else d.Case('daemon',name)) as case,d.Sandbox() as box,d.Sandbox() as seedbox:
         notify.shims(box,action);notify.config(box,notify=True)
@@ -58,6 +58,12 @@ def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override
                         peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(seedbox.downloads),seed=True))
                         seed.wait_for(lambda:((v:=row(peer,item.info_hash))['state']=='seeding',json.dumps(v)),'loopback seed verifies fixture payload')
                         peer.call('transfer.set_limits',dict(upload_bps=MIB))
+                        if prepared_prefix:
+                            # Real existing verified bytes make the transition
+                            # case quick without changing its 64 MiB/bitrate bar.
+                            with payload.open('rb') as source,(box.downloads/payload.name).open('wb') as target:
+                                target.truncate(size);target.write(source.read(prepared_prefix))
+                                source.seek(-MIB,2);target.seek(-MIB,2);target.write(source.read())
                         client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(box.downloads)))
                         yield case,box,h,p,client,peer,item,payload
             finally:
@@ -122,6 +128,26 @@ def playable_before_complete(binary,systemd):
             if last.child.poll() is None:h.stop_serve(last)
 
 
+def playable_stall_free_flips(binary,systemd):
+    with pair('playable_stall_free_flips',binary,systemd,prepared_prefix=32*MIB) as (case,box,h,p,client,peer,item,payload):
+        peer.call('transfer.set_limits',dict(upload_bps=4*MIB))
+        client.call('transfer.set_limits',dict(download_bps=4*MIB,alt_download_bps=200*1024))
+        client.call('transfer.set_alt',dict(on=True))
+        def may_stall():
+            v=row(client,item.info_hash)
+            return v.get('playable',{}).get('ready') is True and v['playable'].get('stall_free') is False,json.dumps(v)
+        assert h.wait_for(may_stall,'ready video truthfully reports may stall with turtle below its bitrate',timeout=12)
+        slow=row(client,item.info_hash)
+        case.check(slow['completed_bytes']<slow['size'] and slow.get('effective_download_limit_bps')==200*1024,
+                   'turtle is the real active download cap while verified video is incomplete',json.dumps(slow))
+        began=time.monotonic();client.call('transfer.set_alt',dict(on=False))
+        def stall_free():
+            v=row(client,item.info_hash)
+            return v.get('playable',{}).get('ready') is True and v['playable'].get('stall_free') is True,json.dumps(v)
+        assert h.wait_for(stall_free,'lifting turtle restores stall-free within two seconds',timeout=2)
+        case.check(time.monotonic()-began<=2,'stall-free update meets the two-second transition budget',json.dumps(row(client,item.info_hash)))
+
+
 def playable_never_for_iso(binary,systemd):
     with pair('playable_never_for_iso',binary,systemd,extension='iso',size=8*MIB) as (case,box,h,p,client,peer,item,payload):
         def complete():
@@ -159,4 +185,4 @@ def playable_two_file_mid_piece(binary,systemd):
         cli(case,box,binary,'wait',item.info_hash,'--until','stall-free','--timeout','1','--json',code=8)
 
 
-CASES=(playable_before_complete,playable_never_for_iso,playable_two_file_mid_piece)
+CASES=(playable_before_complete,playable_stall_free_flips,playable_never_for_iso,playable_two_file_mid_piece)

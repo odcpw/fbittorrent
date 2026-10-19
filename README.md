@@ -1,532 +1,97 @@
 # fbittorrent
 
-A small torrent app for Omarchy, with an embedded Rust engine, a native bar
-widget, a FrankenTUI app, and a CLI that doubles as the `magnet:` handler.
-The native engine can run headlessly as `fbittorrent serve`. Write commands
-start its static systemd user unit on demand; closing a client window leaves
-the daemon running. `down` stops it. Torrent records and feed history stay on disk.
-
-- **Streaming priority is automatic.** The native engine downloads each file
-  sequentially and prioritizes its first and last pieces. These policies cannot
-  be toggled off in native mode.
-- **Ready to watch.** The largest selected video gets a playback badge after its
-  verified contiguous prefix reaches 32 MiB or 3% of the file, whichever is larger,
-  and its last piece is present. The row says when playback may stall. Known MKV/MP4
-  duration supplies the buffer estimate; unknown duration stays unknown. The
-  notification's Open action plays the file. Agents can use
-  `fbittorrent wait <hash> --until playable --json` or `--until stall-free`.
-- **Upload off by default.** Peers receive no piece payload while downloading or
-  after completion. `fbittorrent settings --upload on` allows upload while downloading,
-  subject to the configured speed limits. Completed torrents stop unless you explicitly
-  enable their Upload toggle in Details or run `fbittorrent seed <hash>`. That per-torrent
-  permission also works with global upload off; turning it off denies upload for that torrent.
-- **App lifetime.** CLI writes start the daemon on demand without opening a
-  terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
-  dashboard or TUI. Reads and status queries never start it. Nothing runs at
-  login: the user unit is static. `down` stops the owner and drains the engine.
-  The TUI starts or attaches to that daemon in the current terminal, including
-  over SSH. `q` or Ctrl+C closes only the TUI; transfers continue. `Q` stops
-  fbittorrent, asking for lowercase `y` when transfers are active. `down` also
-  stops the daemon. The first `q` prints a one-time background-transfer notice
-  after restoring the terminal; its preference lives in
-  `$XDG_STATE_HOME/fbittorrent/notices.json`.
-- **Bar widget** with the same chrome as the Wi-Fi panel: rates, progress rows,
-  pause/remove, add from clipboard, one click to the TUI. It only shows while the
-  app is open. Hover clipped names or details to see their full text.
-- **TUI** with four screens: (1) Torrents, (2) Search (streamed provider results),
-  (3) Shows (your local show list and releases), and (4) RSS (feeds and items).
-  All four screens, provider lists and IMDb cards use one daemon API connection.
-  Updates arrive as pushed changes; a disconnected screen retains dimmed rows
-  while it reconnects.
-  IMDb card per title:
-  rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
-  a row to preview its full name; click selects it, double-click activates it,
-  and the wheel moves the list under the pointer. Hover leaves the keyboard
-  target unchanged. Selected names stay still. Hovered, unselected names scroll once after a
-  short pause, return to the start and stop. `reduce_motion = true` in the
-  config, or Reduce motion in Settings, disables hover scrolling.
-  The bottom rows show contextual commands such as `(o) Open`; uppercase keys
-  use Shift, and separate action feedback.
-  Press `?` for scrollable help; `1`–`4` or Tab switch screens.
-  Live speed history appears in the TUI tab bar and dashboard/popup status row.
-  Dashboard Settings shows session and all-time transfer totals; press `L` in
-  the TUI for the same totals below the Log. All-time totals survive daemon restarts.
-- **Local show watchlist.** Follow a title or IMDb id with `n` on Shows, `f` on
-  a Search/RSS item, or `F` on a torrent. Public EZTV supplies episodes and
-  season packs, with no account or external watchlist. Checks run on app opening
-  when the last check is over 30 minutes old, or when you press `r`/`R`.
-  Enter downloads the selected release; checking never downloads automatically.
-  Read markers, download history, and cached releases persist across runs, so
-  new releases can appear after years away. Shows opens in **All unread**, a
-  combined inbox across every followed show, newest releases first. The Shows
-  tab displays the unread count from every screen. Left selects one show to
-  browse its full release history. A season pack has a key such as `S02`; an
-  episode has `S02E03`. Counts mean unread, including old releases from a first
-  check. In the inbox, `m` marks one release read and removes it; `u` undoes the
-  last inbox read action. In one show's history, `m` toggles the selected
-  release's read state and `Shift+M` marks that show's releases read.
-  Select a followed show first for `Shift+M`; it is unavailable in All unread.
-  The unread dot remains independent of download status. Checking, unchecked
-  shows and source warnings remain visible, including when the inbox is empty.
-- **Local RSS history.** Opening the app loads the cache, then refreshes each
-  feed once. `r` refreshes again; Enter downloads an item and marks it read after
-  a successful add. Hovering or selecting leaves read state alone. Read ids
-  remain remembered when an item leaves the visible cache.
-  RSS uses the same read shortcuts: `m` toggles one selected item, `Shift+M`
-  marks the selected feed's items read, and Enter on a feed opens its items.
-- **Provider browser.** Enter on an empty search box (or `b`) lists: 1337x
-  (trending, top movies, top TV, opened in the browser), YTS latest, EZTV latest
-  episodes, and The Pirate Bay top-100 movies and TV. Lists that load in the TUI
-  carry IMDb ids, so the poster card appears as soon as the cursor rests on a
-  title. Hover lookup also works on the Torrents screen and on RSS items.
-- **Pick your providers.** `s` on the Search screen opens a checkbox list of the
-  installed search plugins; the choice is stored locally and applies to
-  every search. Results show IMDb ratings where space allows: instant for
-  sources that carry IMDb ids (browse lists), filled in for others once their
-  title lookup completes.
-- **Add from anywhere.** Magnet links and `.torrent` files from the browser (the
-  desktop handler owns both), the clipboard, the TUI (`a`), or the CLI.
-  Per-torrent Upload opt-in lives in Details.
-- **Dashboard add review.** Press `a` or Ctrl+V to review a clipboard magnet,
-  torrent URL or local `.torrent` file. Download (Enter) confirms; Discard (Esc)
-  keeps files. Without the daemon staging capability, the sheet says that metadata
-  arrives after Download and creates no record before confirmation. With staging,
-  it offers file selection as metadata arrives and a destination. Enter can
-  confirm the download while metadata is still resolving.
-  The desktop handler respects `handler = "confirm"` by opening this sheet;
-  `handler = "add"` adds immediately. A local file drop uses the same sheet;
-  file-manager drag and drop on Hyprland still needs manual qualification.
-- **File selection.** Enter on a torrent opens its file list: Space toggles a
-  file between included and skipped, `1` includes it, and `a`/`n` select all or
-  none. Native mode does not support high/max file priorities.
-- **Download queue.** Three downloads run at once by default. Extra downloads
-  wait their turn; completed seeders do not take a download slot. A manual pause
-  stays paused after reopening. Press **F6** to change the limit.
-- **Peer encryption.** Encrypted connections are preferred by default. F6 also
-  offers Require (reject unencrypted peers) and Off. Encryption makes peer
-  traffic less easily readable; other peers can still see your IP address.
-- **ProtonVPN binding.** Choose ProtonVPN in F6 to require its `proton0` tunnel
-  for peers, discovery, trackers and torrent-file downloads, including their DNS
-  lookups. If the tunnel disappears, transfers stop and the app shows
-  **Waiting for ProtonVPN**. Reconnecting reopens the engine and restores saved
-  download intent. Feed, search and title-information websites use the usual
-  connection. Provider download helpers that fetch a torrent outside the engine
-  are refused with binding enabled; use a magnet or direct `.torrent` URL.
-- **Themed** from the active Omarchy theme, live, no template needed.
+fbittorrent is a torrent app for Omarchy: an on-demand daemon with an embedded
+Rust engine, a bar widget and popup, a dashboard, a terminal UI and a CLI.
+The daemon owns transfers; each interface connects to the same local API.
+Open the dashboard to search, review a download, watch its progress, manage
+Shows/RSS and inspect Files, Peers, Trackers, Pieces or Log in Details.
 
 ## Install
 
-```bash
-scripts/install.sh                       # locked release build, atomic replacement, setup --magnet --plugin=link
-fbittorrent setup --magnet --plugin=copy  # stable plugin copy instead of a checkout symlink
-fbittorrent setup --magnet --plugin=link --dry-run --json  # exact plan, no changes
-fbittorrent search --install              # provider scripts; Python 3 required
-```
+Requires Omarchy with Quickshell and a systemd user session. Building uses the
+pinned Rust toolchain; search providers need Python 3, and clipboard features
+need `wl-clipboard`.
 
-Changed plugin installs restart the Omarchy shell after all files are installed,
-so open dashboards use the new code.
-
-Setup writes the static user unit, desktop/MIME entries and icon, places the
-plugin in the bar only when missing, and updates only `torrents.*` menu entries.
-Open and Search summon the dashboard; Terminal keeps the TUI. Stop is shown
-while `fbittorrent status --quiet` succeeds. Repeating setup with the same
-options leaves files and commands unchanged. Nothing starts at login.
-
-For a private prefix or a build already produced by CI, use
-`scripts/install.sh --prefix /path/to/prefix --binary /path/to/fbittorrent` with
-an isolated HOME and XDG directories. The default prefix is `~/.local`.
-
-`fbittorrent setup --uninstall` removes desktop integration and keeps saved
-records, RSS, Shows and downloaded files. `setup --purge --yes` also removes
-application config/cache/state/data; it keeps downloaded payloads.
-
-Optional Hyprland Lua binding (checked free on 2026-10-19; SUPER+CTRL+T is Activity):
-
-```lua
-o.bind("SUPER + CTRL + M", "Torrents", "fbittorrent dashboard")
-```
-
-Add it to your own bindings file if desired. Normal setup keeps keybindings unchanged.
-
-The quick-add/search palette is a separate, optional overlay. To install it and
-an unused shortcut, opt in explicitly (the default chord below can be replaced):
-
-```bash
-fbittorrent setup --plugin copy --quick 'SUPER + CTRL + ALT + T'
-```
-
-Setup adds the `oliver.torrents-quick` plugin and an owned block in
-`hypr/bindings.lua`, preserving the bar route and unrelated bindings. Repeating
-setup is idempotent; `setup --uninstall` removes that block. Hyprland reloads Lua
-changes automatically. Choose a chord that is not already used by your desktop.
-The palette shares the existing Torrents daemon connection. Paste a magnet or
-absolute `.torrent` path and press Enter to add directly; ordinary text searches
-after a short pause. Use ↑/↓ and Enter to send a result to dashboard review.
-Esc closes only the palette and leaves transfers running.
-
-## Lifecycle
-
-`fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
-`down` drains it, and `restart` replaces the daemon and waits for a new hello.
-The API can also replace just the engine slot while its sockets stay
-available. `dashboard` summons the desktop view. The static user unit starts on
-writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
-never start an owner. When it is down, saved reads report `running:false`; `stop`
-and keep-files `delete` update the saved ledger under the same instance lock.
-`--no-start` and `autostart=false` prevent automatic startup. Without a user
-manager, run `serve` in a terminal or tmux. Automatic idle exit uses the busy
-table; binary replacement requests exit 75 when idle, and systemd starts the
-installed replacement.
-
-The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
-wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
-checked/reason/origin and optional `eta_s`/`seeds`. Stopped `status --json` now
-returns `ok:true,running:false`; `status --quiet` exits 4 when stopped. Magnets
-and local metainfo added while waiting for VPN return `deferred:true` and keep
-the requested intent until the interface returns. URL adds require a live engine.
-
-## Dashboard window
-
-The plugin exposes a separate window entry point while the bar keeps its popup:
+From this checkout:
 
 ```sh
-omarchy-shell shell summon oliver.torrents '{"view":"search","query":"sintel"}'
+scripts/install.sh                       # build and install in ~/.local/bin
+scripts/install.sh --plugin copy         # copy the plugin rather than link it
 ```
 
-The window routes Torrents, Search, Shows, RSS, Settings and Log.
-The bar service owns its API connection across window closes. `q` closes the
-window; Esc clears one layer and leaves the window open at the top level.
+Or put a built `fbittorrent` binary on PATH and install its desktop integration:
 
-No window-manager rule is installed. The window tiles by default. To float it,
-an optional [Hyprland Lua window rule](https://wiki.hypr.land/configuring/core/rules/window-rules/)
-can match its initial title and Quickshell class:
-
-```lua
-hl.window_rule({
-  name = "fbittorrent-dashboard",
-  match = { initial_title = "^fbittorrent$", class = "^org[.]quickshell$" },
-  float = true,
-})
+```sh
+fbittorrent setup --magnet --plugin=copy
 ```
 
-Search starts from a query payload or Enter in the focused query field. Results
-stream from the daemon, merge duplicate hashes, and keep provider names. Press
-`s` to sort Seeds, Size, Uploaded, Name or rating, and `S` to reverse; unknown
-measurements stay last. `b` opens browse lists and `P` manages providers. A result
-marked `+ In your list` selects its existing torrent on Enter. New results open
-the shared review sheet: staged add is used when the daemon advertises it; older
-daemons send `search.grab` only after Download. `y` copies a magnet, `O` opens the
-source page, and `f` follows an IMDb-linked show. The table renders at most 500 rows.
+Keep the build checkout available while setup copies the plugin. Setup installs
+the on-demand user service, magnet/`.torrent` handlers, icon, menu and bar entry.
+Changed plugin installs **restart the Omarchy shell**, recreating open windows
+with the new code. An unchanged repeat is a no-op. Nothing is enabled at login.
+`scripts/install.sh --binary /path/to/fbittorrent` installs an existing build.
 
-Empty Search opens YTS's latest movies as a poster grid. Use `b` to select a
-browse list, including TPB; its provider and list name stay in the query box.
-`v` switches between the grid and rows. The grid shows at most 60 local posters
-in three to six columns, with title, year, known rating and seed count. Poster
-reads are asynchronous and bounded; QML never fetches image URLs from the network.
-Enter opens the same add review as a search result.
-
-The torrent Details pane has Overview, Files, and Log tabs (`[` / `]`). At 1,400
-logical pixels it docks beside the list; below that, Enter opens a sheet and Esc
-closes it. Drag the divider to resize it; width and sort order survive reopening
-the window or restarting the shell. `h` / `l` change pane focus. In focused Files,
-Space toggles the selected file, `a` / `n` include or skip the filtered files, `/`
-filters names, and `o` opens the selected file. Files sort naturally by episode
-number. Overview loads the daemon's local IMDb poster and shows the confirmed
-seed policy. Log shares one bounded subscription and filters by torrent hash.
-The Pieces tab shows the verified have bitfield, first/last priority markers and
-the known playable prefix. Both UIs release its two-second subscription when
-hiding the pane. Large torrents are aggregated to the available display width.
-
-Press `,` for Settings, `L` for Log, and `?` for the generated keyboard help.
-Settings covers every current writable daemon setting, including the VPN binding,
-peer port, clipboard watch and four speed limits. Limit fields accept bytes per
-second with `K`/`M` suffixes (1024/1048576); empty means unlimited. Changes wait for
-confirmed settings. Encryption, binding and port changes restart the engine slot
-while preserving the window's connection. Log filters by level, source and torrent
-hash, keeps the newest entry last, and follows new messages until you scroll back.
-`plugin/tests/qs-dashboard.sh --preferences --binary /path/to/fbittorrent` tests
-these views in a private compositor and retains JSONL and native PNG captures.
-
-Run `plugin/tests/qs-dashboard.sh --details --binary /path/to/fbittorrent` for the
-private-compositor acceptance cases. They use isolated state and a local IMDb
-server, restart their own daemon and shell, and retain JSONL plus native captures
-under `target/test-logs/qs_details/`; they never restart the owner's shell.
-
-## CLI
-
-Ordinary CLI commands take `--json` and print one JSON object; errors become
-`{"ok":false,"code":N,"code_name":"…","error":"…","hint":"<runnable command>"}` with
-the same exit code. Torrents are selected by hash prefix, a unique part of the
-name, or `all`.
-
-```
-fbittorrent                          TUI on a terminal; `triage --json` when stdout is not a TTY
-fbittorrent triage --json            backend, rates, torrents, warnings, next commands (one call)
-fbittorrent capabilities             machine-readable contract: commands, exit codes, conventions
-fbittorrent robot-docs               agent handbook
-fbittorrent search <query> --json    best-seeded results with magnet links (--limit, --wait)
-fbittorrent add <magnet|url|.torrent> --json   returns the hash; --wait [--timeout S] blocks until complete
-fbittorrent wait <sel>... --timeout S   progress on stderr; exit 0 done, 8 timeout
-fbittorrent show <sel> --json        one torrent with files and open_target
-fbittorrent list | ls                all torrents (hash, %, speed, eta, S/F/U flags)
-fbittorrent start|stop|seed|noseed <sel>...
-fbittorrent delete <sel> [--files --yes] [--dry-run]   data kept unless --files
-fbittorrent open <sel>               the file, or the folder
-fbittorrent rss list|add|remove|refresh|items|grab
-fbittorrent shows list|follow|unfollow|check|episodes|grab|seen
-fbittorrent tui --search | --rss | --shows
-fbittorrent search --install | --install-url <url> | --plugins
-fbittorrent imdb <release name>      rating, blurb, poster path
-fbittorrent up [--ui] | down          start daemon / drain and stop owner
-fbittorrent dashboard [--view v] [--query q]   summon panel, or fall back to TUI
-fbittorrent restart                  restart daemon now; wait up to 30 s for new hello
-fbittorrent serve                   run the native engine headlessly in the foreground
-fbittorrent status                   rates and counts; never opens the app
-fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
-fbittorrent settings --interfaces   current choices and available connections
-fbittorrent config | setup [--magnet] | register-magnet
+```sh
+fbittorrent search --install             # install the Python search providers
+fbittorrent dashboard                    # open the desktop window
+fbittorrent tui                          # open the TUI in this terminal
 ```
 
-Exit codes: 0 ok · 1 failure · 2 usage · 3 safety (needs `--yes`) · 4 backend down ·
-5 upstream · 6 not found · 7 ambiguous · 8 timeout.
+Search providers are local Python programs; install sources you trust.
+`fbittorrent setup --uninstall` removes integration and keeps saved data and downloads.
 
-`fbittorrent serve` keeps the native engine available to the CLI without a TUI
-or a terminal window hosting it. It owns the private API v1 `api.sock` and
-instance lock as the current app; a second owner is refused. `down`, SIGTERM,
-SIGINT or SIGHUP drains the engine and removes its socket. A missing configured
-interface starts it parked, with saved history and start/stop/remove-keeping-files
-available; the engine reopens when that exact interface returns.
+## Stop rule
 
-`serve --no-notify` disables desktop notifications while retaining systemd
-readiness datagrams. `idle_exit_secs` defaults to 300 in the config (minimum 30,
-or 0 to disable); `serve --idle-exit-secs N` overrides it. The daemon stops when
-its idle countdown reaches zero. Downloads, explicit seeding, waiting downloads
-behind an unavailable interface, interactive clients, search sessions and pending
-mutations cancel that countdown. The bar alone never keeps it running; opening
-the popup pauses the remaining time and closing it resumes that time. The
-`summary` subscription reports the countdown and busy reasons. Owner shutdown
-always drains, even while busy, and preserves download intent for the next start.
-`setup --magnet` writes the on-demand static `fbittorrent.service` using the
-current executable path, reloads the user manager and registers desktop handlers.
-It never enables or starts the unit. `setup --uninstall` removes the unit while
-keeping saved data. `FBITTORRENT_UNIT` selects a different unit name for isolated
-harnesses. Without a user manager, commands exit 4 with the hint `fbittorrent serve`;
-run it in a terminal or tmux window. Daemon exits 70 (panic) and 75 (upgrade) belong to the
-unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
-`api.sock`: clients can subscribe to summary, torrents, files, network, settings
-and events, receive consistent snapshots, then pushed changes. The CLI and attached TUI use API v1; closing the TUI leaves transfers running.
+**The bar icon is lit exactly while the daemon runs.** The popup power button,
+`fbittorrent down`, or uppercase **Q** stops the daemon and all transfers. The
+UIs ask for confirmation when transfers are active; `down` stops directly.
+Closing a UI window, lowercase **q** or Ctrl+C in the UI never stops transfers.
+By default the daemon exits after five idle minutes: transfers, interactive
+windows, searches and pending operations keep it alive. The bar alone does not;
+an open popup pauses the countdown. Set `idle_exit_secs = 0` to disable idle exit.
 
-The daemon posts completion notifications with Open File / Open Folder actions.
-Give a torrent a display name with `fbittorrent rename <selector> 'My title'`,
-`N` in the TUI/dashboard, or a double-click on its dashboard Overview title.
-An empty name clears the override. Display names survive restart and metadata
-refresh; payload file names and the info hash stay unchanged. Filters, sorting
-and CLI name selectors use the display name.
+## Downloads and upload permission
 
-A Shows check that finds unread releases posts one notification about new episodes,
-listing up to three names; Open Shows opens the Shows dashboard. Unchanged
-checks stay silent, and an interactive dashboard or TUI suppresses this notice.
-Browser handlers use `add --origin handler`: the daemon posts Added with Undo
-(keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
-or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
-Notification bodies escape markup, duplicate pending notices collapse, and four
-workers drain a bounded queue. VPN notices name the selected interface and limit
-rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
-`setup` installs the monochrome download SVG under
-`$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
-desktop entries and notifications use fbittorrent.
+Dashboard and browser adds open a review sheet for magnets, torrent URLs and
+local `.torrent` files.
+Inspect the destination and files; **Enter / Download** commits once, **Esc /
+Discard** removes the stage and keeps files. The sheet opens before metadata;
+Download can proceed while the file list is still being fetched. The default
+browser handler uses this review (`handler = "confirm"`); `handler = "add"` adds
+immediately. Ordinary CLI `add` also adds directly.
 
-Daemon diagnostics are available with `fbittorrent log --json`, filtered with
-`--level error|warn|info|debug` and `--source engine` (or another source).
-`fbittorrent log --follow` streams NDJSON entries. These commands never start the
-daemon; when it is down they point to `fbittorrent up` and the journal's longer
-history (`journalctl --user -u fbittorrent`). The in-memory ring holds 2,000
-entries. `app.info.clients` counts successful connections since this daemon
-started; `app.stats.active_clients` reports current connections. Nothing is sent
-outside the machine.
+**Upload is off by default** (`upload = "off"`): no piece payload is uploaded
+while downloading or after completion. The explicit **Upload: off/on** toggle in
+Details permits upload for that torrent, including after completion; switching
+it off persists that torrent's opt-out. Global Upload in Settings, or
+`fbittorrent settings --upload on`, permits upload during downloads. Completed
+torrents still stop unless individually opted in. Add has no upload switch.
 
-### For agents
+Streaming priority is automatic. A verified video prefix produces **Ready to
+watch** or **Playable · may stall** according to the known buffer and transfer
+rate. **o** opens it in the configured player.
+Checking Shows or RSS never downloads a release automatically; review and
+Download are deliberate, and inbox read state is separate from transfer state.
 
-```
-fbittorrent robot-docs                                   # read once
-fbittorrent triage --json                                # what is the state?
-fbittorrent search "Sintel 2010" --json | jq '.results[0].fileUrl'
-fbittorrent add "<magnet>" --wait --timeout 3600 --json  # {"ok":true,"complete":true,"torrents":[{open_target…}]}
-fbittorrent show <hash> --json | jq -r .open_target
-```
+## Keys and everyday use
 
-The audit that produced this surface lives in `agent_ergonomics_audit/` (scorecard,
-applied changes, handoff, and `regression_tests/run.sh`).
+**1–4** select Torrents / Search / Shows / RSS; **Tab / Shift+Tab** cycle them.
+**j/k** or arrows move, **Enter** activates, **/** edits the query or filter,
+**?** opens contextual help, **,** opens Settings (**F6** also works in the TUI).
+In Torrents, **Enter** opens Details, **[ / ]** change its tab, **p / Space**
+pause/resume, **u** opens Upload details, **d** removes while keeping files and
+**D** explicitly deletes files. Confirmation starts on Cancel. In dashboard
+Torrents, **U** undoes a keep-files removal within its ten-second window.
+**z** toggles turtle limits. Popup **w** opens the dashboard; **t** opens the TUI.
 
-## Config
+The [M2 demo](docs/M2-demo.md) walks through search → review → watch, the Shows
+inbox and cleanup. [Owner checks](docs/OWNER-CHECKS.md) collect the remaining
+human checks. The full key reference below is generated from the action
+catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) or
+`fbittorrent robot-docs keys --surface all`.
 
-`~/.config/fbittorrent/config.toml`
-
-```toml
-engine = "native"
-peer_port = 6882
-max_active_downloads = 3
-peer_encryption = "prefer"           # off, prefer, require
-# network_interface = "proton"       # required ProtonVPN, or an exact interface
-upload = "off"
-show_quality = "1080p"
-notify = true
-timeout_secs = 10
-autostart = true
-# save_path = "/home/you/Downloads"      # set by `setup --save`
-# category = "movies"
-```
-
-`--no-start` (a global flag) or `FBITTORRENT_NO_START=1` prevents commands from
-starting the daemon. Commands that need a closed engine return
-exit 4 with an opening hint. This also prevents explicit `up`, `dashboard`, `tui` and `serve` startup;
-Setup installs the native daemon for explicit, on-demand startup. The widget uses
-`--no-start` for status polling and every torrent action. Explicit Open TUI
-requests may launch the app: middle-click, `t`/`T`, the TUI header button
-(including keyboard activation), and the panel's `tui()` IPC method. `autostart = false` is the persistent form for ordinary torrent commands. Show/RSS lists,
-read markers, provider choices, and torrent records live in
-`~/.local/share/fbittorrent`; none needs a third-party account.
-
-F6 opens the download settings in the TUI. Use up/down to select a choice,
-left/right to change it, Enter to save, and Escape to cancel. You can also click
-each choice. Queue changes apply immediately. Encryption and connection changes
-drain and reopen the engine. `settings --vpn off` disables interface binding.
-While waiting for a required VPN, saved file names and pause choices remain
-available; percentages are unknown until the engine can check files again.
-
-The native daemon is the only backend (`engine = "native"`). Streaming
-priority is intrinsic and files support include/skip. Today's native ledger,
-RSS, Shows and settings files load directly; no source application is launched.
-
-With opt-in clipboard watching enabled, the TUI offers each new magnet in its
-footer: `Add '<name>'? (y/Esc)`. Press `y` to add or Esc to dismiss. An open text
-input or dialog keeps its keys; clipboard text is not saved in message history.
-
-## Layout
-
-```
-src/main.rs        CLI (clap)
-src/engine/        embedded librqbit engine, durable torrent records
-src/daemon/        headless owner, lifecycle, replaceable engine slot, signals, sd_notify
-src/ipc.rs         local Unix socket connecting CLI/widget to the open app
-src/qbt.rs         CLI output shapes and display helpers
-src/backend.rs     open/focus the app; stop its daemon
-src/search.rs      local provider preferences and bounded Nova/Python searches
-src/rss.rs         local RSS/Atom subscriptions, cache, and durable read ids
-src/shows.rs       local watchlist, EZTV checks, episode/season release history
-src/setup.rs       first-run setup, magnet handler registration
-src/imdb.rs        IMDb suggestion endpoint, ratings dataset cache, Wikipedia blurb, posters
-src/release.rs     release-name parser (title, year, episode)
-src/tui/           FrankenTUI app: mod.rs (screens), theme.rs (Omarchy colors), poster.rs
-plugin/oliver.torrents/   Omarchy shell bar widget (Quickshell/QML)
-```
-
-## Search providers
-
-`fbittorrent search --install` installs the official engines (eztv, limetorrents,
-piratebay, solidtorrents, torlock, torrentproject, torrentscsv) plus a curated set
-from the community wiki (yts, torrentgalaxy, magnetdl, therarbg, bitsearch,
-torrentdownloads, kickasstorrents, snowfl, zooqle, eztvx, nyaasi). Add any other
-plugin from the [qBittorrent provider wiki](https://github.com/qbittorrent/search-plugins/wiki/Unofficial-search-plugins)
-with `--install-url`. The native app owns the provider preferences and runs
-Python for metadata inspection, an active search, or a selected result's
-download hook when you add it. Direct magnet and torrent-file links bypass
-that hook. Provider scripts
-execute locally, so install scripts you trust. Private trackers usually need Jackett or Prowlarr; the
-official `jackett.py` plugin works once you have one of those running.
-
-## Provider browsing
-
-YTS loads in the app through its JSON API; if a host is unavailable, the app
-tries mirrors and offers an Open site entry. The Pirate Bay (`apibay.org`)
-and EZTV also load in the TUI. 1337x stays browser-only because its Cloudflare
-challenge blocks scripted requests; its entries open in your browser.
-
-## Security
-
-The native daemon uses a Unix socket restricted to the current user (0600 in
-a private 0700 runtime directory). It exposes no WebUI, TCP listener, credentials
-or second IPC protocol. Clients negotiate API v1 and stay attached while the
-engine slot restarts.
-
-## Tests
-
-Run `agent_ergonomics_audit/audit/regression_tests/all.sh --help` for the local
-Quickshell, visual, widget, VPN and resource opt-ins. The default gate uses
-isolated app fixtures and finishes with the JSONL case summary. Run it before
-each merge, including when hosted Actions is unavailable. On this workstation,
-use the release lock and memory scope prescribed in `AGENTS.md`.
-
-`.github/workflows/ci.yml` runs unit/background-worker, engine-library, native
-CLI/TUI and whitespace jobs on pushes and pull requests, plus a weekly RustSec
-audit. Every job retains `target/test-logs/` even on failure. A manual run can
-set `force_fail` to `native/quit_restart_down` to verify the failing JSONL
-artifact. The workflow's presence is not proof that a hosted run has passed.
-
-The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
-reference host before each release. Its checked-in baseline contains three
-idle and three verified loopback-download measurements,
-with the reference machine and workload. Both use a local empty IMDb ratings
-fixture; the active transfer uses the existing plaintext loopback seed.
-Each CPU/RSS observation must stay at
-or below the baseline median plus the larger of 10% of that median and three
-times the baseline range. A different host is rejected. To deliberately record
-a new reference, build `release-perf`, then run the following under the same
-release lock. Review the measured values before committing them. Comparison
-runs never rewrite the baseline.
-
-```bash
-python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
-  --runs 3 \
-  --write-baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
-  --output target/test-logs/resources/measurement.json
-```
-
-The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
-It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
-three 60-second windows per configuration, plus matched CLI polling references
-(about 24 minutes total). The daemon entries share `baselines/resources.json`
-with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
---seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
-against the same median and spread rule; `--write-baseline` records a complete
-matrix deliberately. Use the reference host and the release-lock/memory scope.
-
-`python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
-dependency graph and screen mockups. They run by hand, outside CI.
-
-```
-agent_ergonomics_audit/audit/regression_tests/all.sh   # default isolated gate; live suites below require opt-in
-cargo test --locked -- --nocapture                    # engine records, feeds/shows/search, TUI render/interactions, API client
-python3 agent_ergonomics_audit/audit/regression_tests/native.py  # isolated native app + real CLI/TUI actions
-…/regression_tests/run.sh                              # CLI agent contract (exit codes, JSON, safety)
-python3 …/regression_tests/tui_smoke.py target/debug/fbittorrent  # private daemon; 80/120/160 columns; Details, Files, prompts, screens, help, q/Q
-…/regression_tests/widget_keys.sh                      # bar widget keyboard handling via wtype + the `cursor` IPC hook
-```
-
-The CLI/TUI cases use disposable native daemons. The widget
-test also needs the Omarchy shell running with the plugin enabled.
-
-## Notes
-
-- IMDb's title pages are bot-gated, so ratings come from IMDb's official daily
-  ratings dataset (cached in `~/.cache/fbittorrent`, refreshed after 24h) and the
-  blurb from Wikipedia's summary API. Posters are IMDb's own CDN images.
-- The native engine uses the rqbit protocol code ported to Asupersync, with
-  app-owned tasks, network activity, and storage work. The app's normal
-  dependency graph has no Tokio runtime. Existing files are hash checked on opening. Changing
-  an upload cap updates the existing live limiter without another
-  check. Native MSE/peer encryption is supported; high/max file priorities,
-  uTP and pure BitTorrent v2 remain unavailable.
-  See [the engine evaluation](docs/engine-evaluation.md) for the implementation
-  choices, performance limits, and validation evidence.
-- Native RSS cache keeps up to 500 visible articles per feed; read identifiers
-  persist beyond that window. Show checks merge new releases into their saved
-  catalogue and preserve old releases even if the source removes them. A first
-  show check has a 30-second/page budget and reports incomplete history instead
-  of presenting it as complete.
-- Personal use is legal in Switzerland. Mind your local law elsewhere.
-
-## Keys
+<details>
+<summary>Full generated keymap: TUI, dashboard and popup</summary>
 
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
@@ -714,45 +279,64 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:poster` | Wikipedia | `w` | — | — |  |
 <!-- keys:end -->
 
-The daemon checks its executable inode and modification time every 30 seconds.
-An atomically installed replacement switches automatically when the busy table
-is empty, through exit 75 and the systemd unit's forced restart. While work is
-active, summary/app.info expose `upgrade_pending`; `restart` switches immediately.
-Foreground `serve` exits 75 too, but requires its supervisor to launch a new owner;
-CLI restart waits 30 seconds and exits 8 if no replacement hello arrives. Reads
-and restart never start a closed daemon. Hello reports the compiled git build id.
+</details>
 
-Agents can use `fbittorrent events --follow --kinds torrent.completed --json`
-instead of polling. Save `(instance, seq)` and pass `--since-seq` to replay; an
-expired cursor emits an explicit resync marker. Ctrl+C detaches only the reader.
-`fbittorrent api torrents.list --json` prints the unchanged API envelope. Raw
-arguments accept repeated `--arg key=value` or one `--json-args` object; `--ref`
-keeps an explicit mutation identity across invocations. `api --list --json` and
-`robot-docs api` expose the operation catalogue. Reads never start a daemon.
+## Settings and data
 
-Local integration consumers can run `python3
-agent_ergonomics_audit/audit/regression_tests/daemon.py target/debug/fbittorrent
---serve-fixture downloading --throttle 32768` (also idle/seeding/paused; empty is
-an idle alias). The FBTFIXTURE JSON line names its private socket, summary and
-owned resources. The fixture stays alive until stopped; an initially closed
-stdin does not stop it. Closing a pipe that was open at launch supports UI
-teardown. A guardian removes both private peer daemons even after launcher
-SIGKILL. --systemd uses only disposable transient units. Global throttle API
-wiring follows P5-04; the current single-seed fixture uses its per-torrent cap.
+Use dashboard Settings, TUI **F6 / ,**, or `fbittorrent settings` for live changes.
+`fbittorrent config` shows the effective configuration and its path. Defaults:
 
-Completed stop-on-complete records restore as `done, checked:false` without
-opening their payloads for hashing. `seed` and nonempty file-selection actions
-verify them before use; `open` only stats the saved target and stays dormant.
-Listing stats selected file paths and sizes: missing or truncated data is shown
-as `Files missing` (`error`, `reason:missing_files`) without claiming completion
-or admitting a handle. Same-size content changes still require verification. Explicit
-`delete --files --yes` can remove a dormant record without creating a live handle.
+```toml
+upload = "off"
+idle_exit_secs = 300
+max_active_downloads = 3
+peer_encryption = "prefer"
+handler = "confirm"
+clipboard_watch = false
+# save_path = "/home/you/Downloads"
+# network_interface = "proton"
+```
 
+A required network interface stops torrent traffic when unavailable and resumes
+saved download intent when it returns. Search, RSS and title lookups use the
+usual connection. Turtle limits are separate from upload permission.
 
-Private Jackett/Prowlarr indexers use native Torznab, alongside Nova providers:
-`fbittorrent search --install-torznab https://indexer.example/api --key-file /path/to/indexer.key`.
-Keep the key in its own user-owned 0600 regular file; indexers.toml has the same
-requirement, and unsafe modes/symlinks are refused. Keyed HTTP is allowed only
-on loopback. Queries are bounded to 30 seconds/4 MiB and refuse cross-origin
-redirects; credentials are redacted from results and diagnostics. The providers
-sheet/modal displays `nova` or `torznab`. See [IPC.md](docs/IPC.md#native-torznab-providers-p7-01-cli-contract-1229).
+| What | Default location |
+|---|---|
+| Configuration | `~/.config/fbittorrent/config.toml` |
+| Torrent records and metadata | `~/.local/share/fbittorrent/engine/` |
+| Shows, RSS, search preferences and playback acknowledgements | `~/.local/share/fbittorrent/` |
+| Statistics totals and UI preferences | `~/.local/state/fbittorrent/` |
+| IMDb data, ratings and posters | `~/.cache/fbittorrent/` |
+| Local API socket and instance lock | `$XDG_RUNTIME_DIR/fbittorrent/` |
+| Downloaded files | Your Downloads directory, or the chosen `save_path` |
+
+The corresponding `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
+`XDG_CACHE_HOME` override those defaults. Downloaded files are separate from
+application data; Remove keeps them, Delete files requires explicit confirmation.
+Logs: `fbittorrent log --follow` or `journalctl --user -u fbittorrent`.
+
+## CLI and agents
+
+```sh
+fbittorrent search "Sintel" --json
+fbittorrent status --json
+fbittorrent list --json
+fbittorrent shows list --json
+fbittorrent rss list --json
+fbittorrent robot-docs
+```
+
+The CLI works without a desktop; the TUI also works over SSH. Commands needing
+the engine start the daemon on demand. Reads never start it; `--no-start` or
+`FBITTORRENT_NO_START=1` prevents startup. Without a user manager, run
+`fbittorrent serve` in a terminal or tmux. Select torrents by hash prefix, unique
+name text or `all`; ordinary CLI commands accept `--json`.
+
+Agents: start with `fbittorrent robot-docs`, then `triage --json` for current
+state and next actions. `capabilities`, `robot-docs api` and `api --list --json`
+describe commands, exit codes and API operations. `events --follow --json`
+streams updates; `wait HASH --until playable --json` waits for playback readiness.
+See [IPC.md](docs/IPC.md) for the local API contract. Local verification uses
+`scripts/gate-fast.sh`; integration details live in [plugin/tests](plugin/tests/README.md).
+Hosted GitHub Actions is disabled by default.

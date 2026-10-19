@@ -4,6 +4,28 @@ The binary and the bar plugin share one version number. The API protocol and
 the agent CLI contract (`fbittorrent capabilities --json`, `contract_version`)
 are versioned separately.
 
+## v0.2.0 — draft (unreleased)
+
+- A local daemon owns transfers independently of the terminal and dashboard.
+  The API client starts it on demand; closing a view leaves transfers running,
+  while explicit Stop drains the engine. Idle exit and restart retain saved intent.
+- The Omarchy bar popup receives pushed state and opens a dashboard with
+  Torrents, Search, Shows, RSS, Settings and Log. Search and feed results enter
+  a review sheet before downloading. The optional quick palette has its own
+  shortcut and leaves the normal bar toggle intact.
+- Payload upload is **off by default**, during downloads and after completion.
+  Upload requires a per-torrent opt-in. Interface binding pauses network work
+  when the selected tunnel is unavailable; deferred adds retain their records.
+- Torrent details include files, pieces, peers, trackers, readiness to watch,
+  per-torrent download caps, a folder picker for safe moves, and durable display
+  names that leave payload paths unchanged. Keep-files removal offers Undo.
+- Torznab catalogues join the existing search providers, with duplicate results
+  combined and API keys protected from insecure remote HTTP and redirects.
+- Private compositor journeys cover popup keys, palette routing, RSS review,
+  long recheck feedback, and the dashboard's download, Shows and watch workflows.
+  Theme captures and automated contrast checks supplement the owner's final
+  desktop readability check.
+
 ## v0.1.1 (2026-10-18)
 
 The native product lands on `main`. Until this release `main` held the

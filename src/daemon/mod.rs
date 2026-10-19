@@ -441,7 +441,12 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         .state()
         != State::Stopping
     {
-        drop(daemon.replace(Slot::Stopping)?);
+        let previous = daemon.replace(Slot::Stopping)?;
+        let parked = matches!(&previous, Slot::Parked(_));
+        drop(previous);
+        if parked {
+            eprintln!("INFO engine slot empty state=parked session=absent");
+        }
     }
     eprintln!(
         "INFO daemon slot released elapsed_ms={}",

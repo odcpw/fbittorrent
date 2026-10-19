@@ -22,6 +22,7 @@ def detail_texts(q):return json.loads(q.ipc('detailTexts'))
 
 def run(binary,which):
     if which=='popup':return popup(binary)
+    if which=='review':return review(binary)
     with Case(SUITE,which) as case,fixtures.Sandbox() as box,daemon.Harness(case,binary,box,False) as h:
         process=h.start_serve(idle_exit_secs=0)
         if not(h.receive_ready() and h.wait_engine()):raise RuntimeError('private daemon startup failed')
@@ -97,15 +98,50 @@ def run(binary,which):
     return suite_status(SUITE)
 
 
+def review(binary):
+    with Case(SUITE,'review') as case,fixtures.Sandbox() as box,daemon.Harness(case,binary,box,False) as h:
+        process=h.start_serve(idle_exit_secs=0)
+        if not(h.receive_ready() and h.wait_engine()):raise RuntimeError('private review daemon startup failed')
+        with daemon.ApiConn(h) as client:
+            client.hello()
+            source=box.root/'source';source.mkdir()
+            payload=source/'Already paused.bin';payload.write_bytes(b'x'*65536)
+            torrent=fixtures.torrent_fixture(source,[payload])
+            client.call('torrents.add',dict(source=dict(path=str(torrent.torrent)),stopped=True))
+            q=Session(case,box)
+            try:
+                q.compositor.ipc('output * mode 1920x1080')
+                q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
+                q.wait(lambda:'Paused' in rendered(q,torrent.info_hash))
+                staged='b'*40
+                magnet='magnet:?xt=urn:btih:'+staged+'&dn=Review%20magnet'
+                q.shell('summon',json.dumps(dict(view='torrents',add=dict(source=dict(magnet=magnet)))))
+                q.wait(lambda:view(q).get('add',{}).get('hash')==staged and view(q).get('add',{}).get('owned'))
+                def labels():return json.loads(q.ipc('viewTexts'))
+                q.wait(lambda:all(caption in labels() for caption in ['All  2','Paused  1','Reviewing  1']))
+                case.check('Reviewing' in rendered(q,staged) and view(q)['rows']==2,'review sheet leaves two rows with matching All 2 / Paused 1 / Reviewing 1 captions',json.dumps(dict(labels=labels(),rows=json.loads(q.ipc('renderedRows')))))
+                case.check(any('u upload' in text for text in labels()) and not any('u seed' in text for text in labels()),'footer advertises u upload; Details uses effective Upload off/on wording',json.dumps(labels()))
+                q.compositor.ipc('[title="^fbittorrent$"] focus')
+                q.keys(['-k','Escape'],lambda:not view(q).get('add',{}).get('visible'))
+                q.wait(lambda:view(q).get('rows')==1 and all(caption in labels() for caption in ['All  1','Paused  1','Reviewing  0']))
+                case.check([r['hash'] for r in client.call('torrents.list',{})['result']['torrents']]==[torrent.info_hash],'Discard removes only the staged magnet and immediately repairs filter counts',json.dumps(labels()))
+            finally:q.close()
+        h.stop_serve(process);h.lock_free()
+    return suite_status(SUITE)
+
+
 def popup(binary):
     from visual import Capture
     from visual_fixture import running
     with Case(SUITE,'popup') as case,running(binary,'empty',case) as (box,h,client,_):
+        client.call('torrents.add',dict(source=dict(magnet='magnet:?xt=urn:btih:'+'c'*40),stage=True))
         q=Capture(case,box,'owner')
         try:
             q.wait(lambda:json.loads(q.ipc('state'))['online']);q.ipc('open')
             q.wait(lambda:json.loads(q.ipc('state')).get('idle','').startswith('Idle'))
             case.check(True,'running idle daemon shows its actual optional countdown',q.ipc('state'))
+            q.wait(lambda:json.loads(q.ipc('groups'))==[dict(key='reviewing',count=1)])
+            case.check(True,'staged magnet is grouped as Reviewing in the actual popup',q.ipc('groups'))
             q.ipc('clickPower');q.wait(lambda:not json.loads(q.ipc('state'))['online'])
             case.check(json.loads(q.ipc('state'))['idle']=='','power-off clears the cached countdown in the real open popup',q.ipc('state'))
         finally:q.close()
@@ -150,7 +186,7 @@ def tmux_pieces(case,box,binary,h,hash):
 if __name__=='__main__':
     import private_net
     private_net.enter()
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--binary',required=True,type=Path);parser.add_argument('--case',choices=['search','rows','pieces','popup'],required=True)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--binary',required=True,type=Path);parser.add_argument('--case',choices=['search','rows','pieces','popup','review'],required=True)
     args=parser.parse_args()
     previous=ROOT/'target/test-logs'/SUITE
     if previous.exists():shutil.copytree(previous,ROOT/'target/test-logs/owner-review-runs'/str(time.time_ns()))

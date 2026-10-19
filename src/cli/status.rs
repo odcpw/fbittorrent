@@ -48,6 +48,7 @@ fn collect(client:&Client,cfg:&Config)->Result<Value> {
     let summary=native::summary_with(client,cfg,|op,args|read(client,op,args))?;
     let mut value=native::counts(&rows);
     value["ok"]=json!(true);value["running"]=json!(true);value["all_time"]=stats["all_time"].clone();
+    value["session"]=stats["session"].clone();
     value["connection"]=json!("api");value["backend"]=json!("native");value["engine"]=json!(cfg.engine);
     if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
     value["app_open"]=json!(summary.as_ref().is_some_and(|v|v["daemon"]["busy_reasons"].as_array()

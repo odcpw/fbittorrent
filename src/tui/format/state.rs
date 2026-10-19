@@ -68,7 +68,7 @@ mod tests {
     fn every_torrent_state_has_a_word_at_every_width() {
         for (state,label) in [("metaDL","◌ Meta"),("checkingDL","⟳ Check"),("downloading","↓ Down"),
             ("stalledDL","~ Stall"),("queuedDL","… Queue"),("stoppedDL","‖ Pause"),
-            ("stoppedUP","✓ Done"),("uploading","↑ Seed"),("waitingVPN","⏚ VPN"),("error","! Error")] {
+            ("stoppedUP","✓ Done"),("uploading","↑ Upload"),("waitingVPN","⏚ VPN"),("error","! Error")] {
             let row=Torrent {state:state.into(),..Default::default()};
             assert_eq!(state_cell(&row,None).trim_end(),label);
             assert_eq!(dw(state_cell(&row,None)),9);

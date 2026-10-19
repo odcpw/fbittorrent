@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract 1.2 CLI qualification against owned foreground/systemd daemons."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -331,9 +332,10 @@ from daemon_history import status_history_field
 from daemon_show_quality import shows_quality_verb
 from daemon_limits import limits_verb
 from daemon_download_limit import limit_verb
+from agent_rename import rename_verb
 from agent_tui_format import list_human_matches_tui_format
 
-CASES={f.__name__:f for f in [list_human_matches_tui_format,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [list_human_matches_tui_format,rename_verb,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)
