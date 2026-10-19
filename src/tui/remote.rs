@@ -1,6 +1,8 @@
 //! Available API read operations; one existing presence connection owns transport.
 use super::*;
 mod client;
+pub(super) mod search;
+pub(super) mod imdb;
 mod metadata;
 pub(super) use client::ScreenClient;
 mod subscription;

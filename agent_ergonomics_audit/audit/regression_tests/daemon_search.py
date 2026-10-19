@@ -192,3 +192,81 @@ def search_grab_and_ledger(binary, systemd):
 
 
 CASES=CASES+(search_grab_and_ledger,)
+
+
+def tui_search_api(binary, systemd):
+    import native
+    with owned('tui_search_api',binary,systemd) as (case,sandbox,h,process,runtime),d.ApiConn(h) as observer:
+        daemon_pid=observer.hello()['result']['server']['pid'];native.prepare_imdb_fixture(sandbox.env,['辛特尔'])
+        hidden=h.engine_path.with_name('hidden-compat.sock');h.engine_path.rename(hidden)
+        ui=native.AttachedTui(case,str(binary),sandbox,h,session='fbt-fbt-p4-03-r5p-search')
+        try:
+            target,done=ui.start();ui.keys(target,'2');ui.keys(target,'hold-ui');ui.keys(target,'Enter',literal=False)
+            ui.assert_pane(target,'辛特尔')
+            original=wait_groups(h,runtime)
+            case.check(observer.call('app.stats')['result']['active_clients']['tui']==1,
+                       'native search snapshots use the existing single TUI API connection',ui.capture(target))
+            # Follow /proc ancestry: the Nova group is owned by the daemon,
+            # rather than the shell/terminal or a Python worker in the TUI.
+            ancestry=[]
+            for group in original:
+                pid=group['pgid'];chain=[]
+                for _ in range(32):
+                    chain.append(pid)
+                    if pid==daemon_pid:break
+                    try:pid=int(Path(f'/proc/{pid}/stat').read_text().rsplit(') ',1)[1].split()[1])
+                    except FileNotFoundError:break
+                ancestry.append(chain)
+            case.check(all(daemon_pid in chain for chain in ancestry),
+                       'provider process groups descend from the daemon owner',json.dumps(ancestry))
+            ui.keys(target,'Escape',literal=False)
+            ui.assert_pane(target,'alpha, beta')
+            ui.keys(target,'P');ui.assert_pane(target,'Search providers')
+            ui.keys(target,' ')
+            h.wait_for(lambda:((ps:=observer.call('search.providers')['result']['providers']) and any(not p['enabled'] for p in ps),json.dumps(ps)),
+                       'provider modal persists its toggle through the daemon API')
+            ui.keys(target,'Escape',literal=False)
+            ui.keys(target,'Enter',literal=False)
+            h.wait_for(lambda:((rows:=observer.call('torrents.list',{})['result']['torrents']) and rows[0]['hash']=='a'*40 and rows[0]['origin']=='search',json.dumps(rows)),
+                       'selected-row grab creates its real daemon ledger intent with search origin')
+            ui.assert_pane(target,'Adding')
+            ui.keys(target,'q')
+            h.wait_for(lambda:(done.exists(),ui.capture(target)), 'q detaches even while a search grab awaits metadata')
+            case.check(process.child.poll() is None and all(live(g['pgid']) for g in original),
+                       'detaching the TUI preserves daemon search/provider processes for the disconnect grace',json.dumps([members(g['pgid']) for g in original]))
+        finally:
+            ui.close()
+            if hidden.exists():hidden.rename(h.engine_path)
+
+
+CASES=CASES+(tui_search_api,)
+
+
+def tui_search_owner_restart(binary, systemd):
+    import native
+    with owned('tui_search_owner_restart',binary,systemd) as (case,sandbox,h,process,runtime):
+        native.prepare_imdb_fixture(sandbox.env,['辛特尔'])
+        ui=native.AttachedTui(case,str(binary),sandbox,h,session='fbt-fbt-p4-03-r5p-search-reconnect')
+        replacement=None
+        try:
+            target,done=ui.start();ui.keys(target,'2');ui.keys(target,'hold-reconnect');ui.keys(target,'Enter',literal=False)
+            ui.assert_pane(target,'辛特尔');original=wait_groups(h,runtime)
+            h.stop_serve(process)
+            ui.assert_pane(target,'fbittorrent stopped')
+            h.notify.close();replacement=h.start_serve()
+            if not (h.receive_ready() and h.wait_engine()):raise RuntimeError('replacement owner failed')
+            with d.ApiConn(h) as observer:
+                observer.hello()
+                h.wait_for(lambda:((counts:=observer.call('app.stats')['result']['active_clients'])['tui']==1,json.dumps(counts)),
+                           'existing search terminal reconnects its single API connection')
+                ui.assert_pane(target,'run the query again')
+                case.check(groups(runtime)==original and all(not live(g['pgid']) for g in original),
+                           'new daemon instance does not replay a search or retain old provider processes',json.dumps(dict(original=original,now=groups(runtime))))
+                ui.keys(target,'Escape',literal=False);ui.keys(target,'q')
+                h.wait_for(lambda:(done.exists(),ui.capture(target)),'q detaches after the search owner restarts')
+        finally:
+            ui.close()
+            if replacement is not None and replacement.child.poll() is None:h.stop_serve(replacement)
+
+
+CASES=CASES+(tui_search_owner_restart,)

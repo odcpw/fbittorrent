@@ -4,9 +4,12 @@ use super::*;
 impl TuiApp {
     pub(super) fn lookup_imdb(&mut self, name: String, id: Option<String>) -> Cmd<Msg> {
         if matches!(self.imdb.get(&name), Some(ImdbState::Loading) | Some(ImdbState::Ready(..))) { return Cmd::none(); }
+        let connection=self.presence.clone().filter(|c|self.cfg.native()&&c.alive());
+        if self.cfg.native()&&connection.is_none(){return Cmd::none();}
         self.imdb.insert(name.clone(), ImdbState::Loading);
         let key = name.clone();
         Cmd::task(move || {
+            if let Some(connection)=connection {return Msg::Imdb(key,remote::imdb::lookup(&connection,&name,id.as_deref()).map_err(|e|e.to_string()));}
             if imdb::ratings_stale() { let _ = imdb::refresh_ratings(); }
             let found = match id.as_deref().filter(|i| i.starts_with("tt")) {
                 Some(i) => imdb::lookup_id(i),
@@ -25,6 +28,7 @@ impl TuiApp {
     }
 
     pub(super) fn load_ratings(&self) -> Cmd<Msg> {
+        if self.cfg.native(){return Cmd::none();}
         Cmd::task(|| {
             if imdb::ratings_stale() { let _ = imdb::refresh_ratings(); }
             Msg::Ratings(imdb::RatingsIndex::load().map(Arc::new).map_err(|e| e.to_string()))
@@ -34,6 +38,7 @@ impl TuiApp {
     /// Rating for a result: from the in-memory index when the source gave an IMDb id,
     /// otherwise from a finished name lookup.
     pub(super) fn rating_for(&self, r: &SearchResult) -> Option<f32> {
+        if let Some(rating)=self.wire_result(r).and_then(|row|row.rating){return Some(rating as f32);}
         let id = if !r.imdb.is_empty() { Some(r.imdb.as_str()) } else { self.name_ids.get(&r.file_name).map(|s| s.as_str()) };
         if let (Some(id), Some(idx)) = (id, &self.ratings) {
             if let Some((v, _)) = idx.get(id) { return Some(v); }
@@ -44,6 +49,7 @@ impl TuiApp {
     /// Resolve IMDb ids for the best results that came without one (top of the list only:
     /// one network call each, cached on disk by release name).
     pub(super) fn resolve_ids(&mut self) -> Cmd<Msg> {
+        if self.cfg.native(){return Cmd::none();}
         if self.ids_inflight { return Cmd::none(); }
         let names: Vec<String> = self.search_results.iter()
             .filter(|r| r.imdb.is_empty() && !self.name_ids.contains_key(&r.file_name))

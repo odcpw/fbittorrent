@@ -90,7 +90,7 @@ impl Model for TuiApp {
             v.push(Box::new(Every::with_id(1,Duration::from_millis(2000),||Msg::Poll)));
         }
         if let Some(connection)=self.presence.as_ref().filter(|connection|connection.alive()) {v.push(Box::new(remote::ApiSub {connection:connection.clone()}));}
-        if let Some((id, q)) = &self.search_sub {
+        if let Some((id, q)) = self.search_sub.as_ref().filter(|_|!self.cfg.native()) {
             v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone(),presence:self.presence.clone() }));
         }
         if self.rss_retry_until.is_some_and(|until| std::time::Instant::now() < until) && self.feeds.iter().any(|f| f.is_loading) {
@@ -171,7 +171,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -194,6 +194,17 @@ impl Model for TuiApp {
                 self.imdb.insert(key, st);
                 Cmd::none()
             }
+            Msg::NativeSearchStarted {connection,sequence,result} => self.native_search_started(connection,sequence,result),
+            Msg::SearchDisposed => Cmd::none(),
+            Msg::NativeBrowse {connection,sequence,label,result} => {
+                if self.presence.as_ref().map(|c|c.id)!=connection || sequence!=self.search_seq {return Cmd::none();}
+                self.browse_loading=None;
+                match result {
+                    Ok(Some(rows))=>{self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
+                    Ok(None)=>{self.set_status(format!("opened {label} in browser"),false);Cmd::none()},
+                    Err(error)=>{self.set_status(error,true);Cmd::none()}
+                }
+            },
             Msg::SearchBatch { id, results, done, error } => {
                 if self.search_sub.as_ref().map(|(i, _)| *i) != Some(id) { return Cmd::none(); }
                 if let Some(e) = error.as_ref() { self.set_status(format!("search failed: {e}"), true); }

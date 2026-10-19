@@ -9,12 +9,14 @@ impl TuiApp {
     }
 
     pub(super) fn add_search_result(&self, result: SearchResult) -> Cmd<Msg> {
+        if self.cfg.native() {return self.native_search_grab(&result);}
         let opts = self.add_opts();
         let label = short(&result.file_name, 40);
         self.action(format!("added {label}"), move |c| c.add_search_result(&result, &opts))
     }
 
     pub(super) fn load_browse(&mut self, entry: browse::Entry) -> Cmd<Msg> {
+        if self.cfg.native() {return self.native_browse(entry);}
         if let browse::Source::Site(url) = &entry.source {
             let _ = std::process::Command::new("xdg-open").arg(url).spawn();
             self.set_status(format!("opened {} in browser", entry.provider), false);
@@ -32,10 +34,12 @@ impl TuiApp {
         if q.is_empty() { return Cmd::none(); }
         self.search_seq += 1;
         self.search_results.clear();
+        self.search_wire.clear();
         self.search_list.borrow_mut().select(None);
         self.search_running = true;
         self.search_sub = Some((1000 + self.search_seq, q.clone()));
         self.set_status(format!("searching \"{q}\"…"), false);
+        if self.cfg.native() {return self.native_search_start(q);}
         Cmd::none()
     }
 
@@ -70,7 +74,7 @@ impl TuiApp {
                 if self.browse_list.borrow().selected().is_none() { self.browse_list.borrow_mut().select(Some(0)); }
             }
             actions::Intent::Query => { self.search_focus_input = true; self.search_input.set_focused(true); }
-            actions::Intent::Cancel => { self.search_sub = None; self.search_running = false; }
+            actions::Intent::Cancel => { if self.cfg.native(){return self.native_search_cancel();} self.search_sub = None; self.search_running = false; }
             actions::Intent::Down => { if n > 0 { self.search_list.borrow_mut().select_next(n); } }
             actions::Intent::Up => {
                 if self.search_list.borrow().selected() == Some(0) { self.search_focus_input = true; self.search_input.set_focused(true); }
@@ -154,6 +158,7 @@ impl TuiApp {
                 .filter(|(count, _)| *count >= 0).map(|(count, label)| format!("{count} {label}"))
                 .collect::<Vec<_>>().join(", ");
             if !peers.is_empty() { lines.push(kv("peers", peers)); }
+            if self.wire_result(r).is_some_and(|row|row.added.is_some()) {lines.push(Line::styled("+ In your list",th.ok()));}
             lines.extend([
                 kv("uploaded", if r.pub_date > 0 { ymd(r.pub_date) } else { "unknown".into() }),
                 kv("source", format!("{}  {}", r.engine, r.site_url)),
