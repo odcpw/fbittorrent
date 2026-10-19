@@ -16,6 +16,8 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::Commit {hash, ..}
+        | EngineOp::Discard {hash}
         | EngineOp::Files { hash }
         | EngineOp::OpenTarget { hash }
         | EngineOp::SetFiles { hash, .. } => Some(hash.clone()),
@@ -161,6 +163,23 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     use ErrorCode::*;
     Ok(match call {
+        Call::TorrentsCommit {args} => {
+            if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
+                return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
+            }
+            if let Some(indices)=&args.files {
+                let entries=files(daemon,&args.hash)?;
+                if indices.iter().any(|index|*index>=entries.len() as u64) {return Err(error(InvalidArgs,"file index is out of range",Some("files")));}
+            }
+            execute(daemon,EngineOp::Commit {hash:args.hash.to_string(),
+                files:args.files.as_ref().map(|values|values.iter().map(|v|*v as usize).collect()),
+                seed:args.seed,save_path:args.save_path.as_ref().map(Into::into)})?;
+            Reply::TorrentsCommit(DoneResult {state:DoneState::Done})
+        }
+        Call::TorrentsDiscard {args} => {
+            execute(daemon,EngineOp::Discard {hash:args.hash.to_string()})?;
+            Reply::TorrentsDiscard(DoneResult {state:DoneState::Done})
+        }
         Call::ImdbLookup { args } => return super::imdb::lookup(&daemon.imdb, args),
         Call::TorrentsList { args } => {
             let mut rows = list(daemon)?;
@@ -204,12 +223,8 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             files: files(daemon, &args.hash)?,
         }),
         Call::TorrentsAdd { args } => {
-            if args.stage.is_some() {
-                return Err(error(
-                    InvalidArgs,
-                    "staging is not implemented",
-                    Some("stage"),
-                ));
+            if args.stage==Some(true) && matches!(&args.source,AddSource::Restore(_)) {
+                return Err(error(InvalidArgs,"restore cannot be staged",Some("stage")));
             }
             if let AddSource::Restore(source)=&args.source {
                 let EngineResult::Added(mut added)=execute(daemon,EngineOp::RestoreUndo {hash:source.as_str().into()})? else {unreachable!("restore result")};
@@ -353,7 +368,9 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             } else { None };
             let EngineResult::Added(mut added) = execute(
                 daemon,
-                if magnet {
+                if args.stage==Some(true) {
+                    EngineOp::Stage {options:add,files:selected}
+                } else if magnet {
                     EngineOp::AddMagnet(add)
                 } else if let Some(files) = selected {
                     EngineOp::AddSelected {
@@ -616,13 +633,6 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
 /// Validate before acknowledging a URL task. The actual download stays in the
 /// bounded dispatch pool and uses the engine's interface-bound HTTP client.
 pub fn validate_url_add(args: &AddArgs) -> ApiResult<()> {
-    if args.stage.is_some() {
-        return Err(error(
-            ErrorCode::InvalidArgs,
-            "staging is not implemented",
-            Some("stage"),
-        ));
-    }
     if args
         .origin
         .as_deref()

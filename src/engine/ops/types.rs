@@ -81,6 +81,9 @@ pub enum EngineOp {
         hashes: HashSelection,
         on: bool,
     },
+    Stage { options: AddRequest, files: Option<Vec<usize>> },
+    Commit { hash: String, files: Option<Vec<usize>>, seed: Option<bool>, save_path: Option<PathBuf> },
+    Discard { hash: String },
     Add(AddRequest),
     AddSelected {
         options: AddRequest,
@@ -138,7 +141,7 @@ impl EngineOp {
             Self::SetShareLimits { ratio, .. } if !matches!(ratio, -2.0 | 0.0) => bail!(
                 "native share limits support unlimited (-2) or stop on completion (ratio 0, Stop)"
             ),
-            Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} => {
+            Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} | Self::Stage {options, ..} => {
                 if options.upload_limit < 0 {
                     bail!("upload limit cannot be negative");
                 }

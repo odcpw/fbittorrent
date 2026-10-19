@@ -7,6 +7,8 @@ pub struct Operation {
     pub since: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation{name:"torrents.commit",mutating:true,idempotent:true,since:"P3-06"},
+    Operation{name:"torrents.discard",mutating:true,idempotent:true,since:"P3-06"},
     Operation{name:"torrents.move",mutating:true,idempotent:false,since:"P7-02"},
     Operation {name:"torrents.trackers",mutating:false,idempotent:false,since:"P6-01"},
     Operation {name:"torrents.reannounce",mutating:true,idempotent:true,since:"P6-01"},

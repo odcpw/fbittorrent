@@ -126,7 +126,7 @@ impl Shared {
             }
         };
         if let Ok(Reply::TorrentsAdd(added)) = &result {
-            if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)))
+            if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)) && args.stage!=Some(true))
                 && added.duplicate != Some(true)
                 && added.deferred != Some(true)
             {

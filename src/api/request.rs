@@ -262,6 +262,10 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="torrents.commit")]
+    TorrentsCommit { args: CommitArgs },
+    #[serde(rename="torrents.discard")]
+    TorrentsDiscard { args: HashArgs },
     #[serde(rename="torrents.move")]
     TorrentsMove {args: MoveArgs},
     #[serde(rename="torrents.trackers")]
@@ -339,6 +343,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::TorrentsCommit {..}=>"torrents.commit",
+            Self::TorrentsDiscard {..}=>"torrents.discard",
             Self::TorrentsMove {..}=>"torrents.move",
             Self::TorrentsTrackers {..} => "torrents.trackers",
             Self::TorrentsReannounce {..} => "torrents.reannounce",
@@ -400,3 +406,15 @@ pub struct QueueMoveArgs { pub hash: Hash, pub to: QueueTo }
 #[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MoveArgs {pub hashes:Hashes,pub save_path:String}
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommitArgs {
+    pub hash: Hash,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub files: Option<Vec<u64>>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub seed: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub save_path: Option<String>,
+}

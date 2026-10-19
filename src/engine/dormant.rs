@@ -228,6 +228,7 @@ impl EngineDispatcher {
                 if let EngineOp::SetSeed { hashes, on } = op {
                     for hash in hashes.resolve(&ledger)? {
                         let index = ledger.records.iter().position(|r| r.hash == hash).unwrap();
+                        if ledger.records[index].staged {return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());}
                         let mut changed = ledger.records[index].clone();
                         changed.ratio_limit = if *on { -2.0 } else { 0.0 };
                         changed.upload_limit = if *on { 0 } else { NO_UPLOAD_LIMIT };
@@ -289,6 +290,7 @@ impl EngineDispatcher {
                         .iter()
                         .position(|r| &r.hash == hash)
                         .context("torrent record not found")?;
+                    if ledger.records[index].staged {return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());}
                     let mut changed = ledger.records[index].clone();
                     if !matches!(op, EngineOp::OpenTarget { .. })
                         && self.inner.handle(hash).is_err()

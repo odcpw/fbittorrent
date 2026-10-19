@@ -86,6 +86,8 @@ when a required cap is missing.
 | `imdb` | `imdb.lookup` | P3-04 |
 | `peers` | `torrents.peers`, topic `torrent:<h>.peers`, `seeds` field | P5-01 |
 | `recheck` | `torrents.force_start` | `hashes: [hash]` (1..256), `on: bool` | `{state: "done"}` | yes | P6-05 |
+| `torrents.commit` | `hash`, optional `files`, `seed`, `save_path` | `{state:"done"}` | yes | P3-06 |
+| `torrents.discard` | `hash` | `{state:"done"}`; payload never deleted | yes | P3-06 |
 | `torrents.move` | `hashes` (1..256), `save_path` | `{state:"pending",ref}` then `mutation.result` | yes | P7-02 |
 | `torrents.trackers` | `hash` | `{trackers: [Tracker]}` sorted by URL | no | P6-01 |
 | `torrents.reannounce` | `hashes` (1..256) | `{state: "done"}` (triggered) | yes | P6-01 |
@@ -480,7 +482,25 @@ scenario requires one exact revision failure and recovery; it does not bypass
 other validation. LogEntry examples in diagnostic error details exercise the
 specified object without introducing its later operation or topic.
 
+## Staged adds (P3-06)
+
+`torrents.add {source, stage:true}` persists paused metainfo intent without
+opening payload storage. `torrents.commit {hash, files?, seed?, save_path?}`
+durably applies choices, clears staging and joins the queue; `torrents.discard {hash}` removes only the staged record and cached metainfo. Both return
+`{state:"done"}`, are idempotent with a repeated mutation ref, and reject an
+existing non-staged hash with `invalid_state` / `reason:"not_staged"`.
+Unresolved magnets return their hash immediately, resolve metadata for at most
+90 seconds, then remain paused with `reason:"metadata_timeout"` if no peers
+answer. Engine-slot restarts retain staging; a new daemon lifetime discards all
+staged records before accepting clients and never removes payload data.
+Staged rows are excluded from queue admission and all counts except `staged`;
+they must be excluded from idle busy reasons (P1-12 integration).
+
 ## Changelog
+
+- **P3-06:** implements `staging`, `torrents.commit/discard`, and the reserved
+  `stage` argument; CLI contract 1.2.8 includes additive `staged` row visibility.
+
 
 - **P3-04:** implements the planned `imdb` capability and `imdb.lookup`, adds
   `ImdbCard` with optional local `poster_path`, and an additive IMDb transcript.

@@ -599,7 +599,8 @@ fn add(
     await_mutation(c, result)
 }
 fn counts(rows: &[api::Torrent]) -> Value {
-    json!({"total":rows.len(),"active":rows.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
+    let visible:Vec<_>=rows.iter().filter(|r|!r.staged).collect();
+    json!({"total":visible.len(),"active":visible.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":visible.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":visible.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":visible.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":visible.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count(),"staged":rows.iter().filter(|r|r.staged).count()})
 }
 fn status(
     c: Option<&ApiClient>,

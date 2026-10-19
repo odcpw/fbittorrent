@@ -70,6 +70,9 @@ impl EngineDispatcher {
         let read=matches!(&op,EngineOp::Version|EngineOp::Shutdown|EngineOp::Restart|EngineOp::Network|EngineOp::Settings|EngineOp::Queue|EngineOp::TransferInfo|EngineOp::Info|EngineOp::Get{..}|EngineOp::Files{..}|EngineOp::Trackers{..});
         if !read && self.inner.moves.any() {return Err(moving::Busy.into());}
         let _serial=if read {None}else{Some(OwnedMutexGuard::lock(self.inner.operations.clone(),cx).await?)};
+        if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
+            return self.staged_operation(cx, op).await;
+        }
         match &op {
             EngineOp::Trackers {hash} => return self.trackers(cx,hash).await,
             EngineOp::Reannounce {hashes} => return self.reannounce(cx,hashes).await,
@@ -646,6 +649,13 @@ pub(super) fn mutation_hashes(
         .selection()
         .context("operation has no torrent selection")?;
     let hashes = selection.resolve(ledger)?;
+    if matches!(op, EngineOp::Start { .. }) {
+        for hash in &hashes {
+            if ledger.records.iter().any(|r| &r.hash == hash && r.staged) {
+                return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());
+            }
+        }
+    }
     let EngineOp::Start { skip_complete, .. } = op else {
         return Ok((hashes, None));
     };

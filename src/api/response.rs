@@ -202,6 +202,8 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    TorrentsCommit(DoneResult),
+    TorrentsDiscard(DoneResult),
     TorrentsMove(MutationResult),
     TorrentsTrackers(TrackersResult),
     TorrentsReannounce(DoneResult),
@@ -235,6 +237,8 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "torrents.commit"=>serde_json::from_value(result).map(Self::TorrentsCommit),
+            "torrents.discard"=>serde_json::from_value(result).map(Self::TorrentsDiscard),
             "torrents.move"=>serde_json::from_value(result).map(Self::TorrentsMove),
             "torrents.trackers" => serde_json::from_value(result).map(Self::TorrentsTrackers),
             "torrents.reannounce" => serde_json::from_value(result).map(Self::TorrentsReannounce),

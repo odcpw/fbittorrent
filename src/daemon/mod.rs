@@ -303,6 +303,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         directory.clone(),
         Duration::from_secs(5),
     )?);
+    engine::staging::discard_at_start(&crate::config::data_dir().join("engine"))?;
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
     let panicked = Arc::new(AtomicBool::new(false));

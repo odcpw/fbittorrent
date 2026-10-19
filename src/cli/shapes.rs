@@ -33,7 +33,7 @@ pub fn torrent(t: &api::Torrent) -> Value {
         "eta":t.eta_s.unwrap_or(8640000),"num_seeds":t.seeds.unwrap_or(0),"num_leechs":t.peers.unwrap_or(0),"ratio":t.ratio.unwrap_or(0.0),
         "seq_dl":true,"f_l_piece_prio":true,"save_path":t.save_path,"content_path":t.content_path.as_deref().unwrap_or(&t.save_path),"category":"",
         "added_on":t.added_at,"completion_on":t.completed_at.unwrap_or(0),"up_limit":t.upload_limit_bps.unwrap_or(0),"ratio_limit":if t.seed{-2.0}else{0.0},"tags":if t.seed {qbt::SEED_TAG}else{""},
-        "native_state":t.state,"checked":t.checked});
+        "native_state":t.state,"checked":t.checked,"staged":t.staged});
     let object = value.as_object_mut().unwrap();
     for (key, field) in [
         ("reason", json!(t.reason)),
