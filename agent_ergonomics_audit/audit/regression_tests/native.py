@@ -796,15 +796,16 @@ def store_modes(case, root, env, cli, base, fixture):
         for path in [by_name, by_id, ratings]:
             path.chmod(0o644)
         result = cli("imdb", "Private cache fixture")
-        poster = cache / "posters/poster_300.jpg"
-        case.check(result.get("found") is True and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
+        poster = Path(result.get("poster_path") or root / "missing-poster")
+        expected_poster = cache / "posters/tt1234567.jpg"
+        case.check(result.get("found") is True and poster == expected_poster and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
                    "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
-                   f"found={result.get('found')}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
+                   f"found={result.get('found')}; poster={poster}; expected={expected_poster}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
         if poster.is_file():
             poster.chmod(0o644)
             poster.parent.chmod(0o777)
-        cli("imdb", "Private cache fixture")
-        case.check(fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+        second = cli("imdb", "Private cache fixture")
+        case.check(second.get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
                    "The second IMDb CLI call repairs the existing poster without another HTTP request.",
                    f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
     finally:

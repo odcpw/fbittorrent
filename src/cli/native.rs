@@ -550,7 +550,7 @@ fn await_move(c:&ApiClient,result:Value)->Result<Value> {
         }
     }
 }
-fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
+pub(super) fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]
         .as_str()
         .context("pending result omitted ref")?;
