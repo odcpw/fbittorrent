@@ -163,7 +163,8 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
             root = Path(temporary); plugins = root / 'plugin/tests'; plugins.mkdir(parents=True)
             for name in ('qs-store.sh', 'qs-smoke.sh', 'qs-dashboard.sh', 'qs-visual.sh'):
                 (plugins / name).write_text('echo ' + name + ' >> dispatch.log\n')
-            env = dict(os.environ, FBT_TEST_QS='1', FBT_TEST_VISUAL='1')
+            env = {key:value for key,value in os.environ.items() if key not in {'FBT_TEST_'+flag for flag in gate.FLAGS}}
+            env.update(FBT_TEST_QS='1', FBT_TEST_VISUAL='1')
             with patch.object(gate, 'ROOT', root):
                 checks = gate.optional_checks(env, Path('/missing/binary'))
                 self.assertEqual(next(c for c in checks if c.name == 'visual').command[-3:], ['--milestone', '--binary', '/missing/binary'])

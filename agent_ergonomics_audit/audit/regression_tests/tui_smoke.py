@@ -46,7 +46,7 @@ class PaneUi(native.AttachedTui):
         self.target,self.done=super().start()
         return self.target,self.done
 
-    def observe(self, action, expect, predicate=lambda pane:True, timeout=5):
+    def observe(self, action, expect, predicate=lambda pane:True, timeout=5, *, artifacts=()):
         step=self.case.step(action,expect)
         deadline=time.monotonic()+timeout
         pane='';ok=False;error=''
@@ -59,7 +59,7 @@ class PaneUi(native.AttachedTui):
         self.panes+=1
         artifact=self.case.path.with_suffix(f'.{self.panes:03}.pane.txt')
         artifact.write_text(pane)
-        return step.close(ok,(self.context+'\n'if self.context else '')+pane+(f'\nCheck error: {error}' if error else ''),[artifact])
+        return step.close(ok,(self.context+'\n'if self.context else '')+pane+(f'\nCheck error: {error}' if error else ''),[artifact,*artifacts])
 
     def press(self,key,expect,predicate=lambda pane:True,*,literal=True):
         result=self.tmux('send-keys','-t',self.target,*(['-l',key]if literal else[key]))
@@ -205,9 +205,10 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
             ui.contains('Q','Stop fbittorrent?')
             ui.press('y','confirmed Q stops the daemon and exits the client cleanly',
                      lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()==0 and not d.DaemonContract.socket_path(sandbox).exists())
+            diagnostics=case.path.with_suffix('.shutdown.log');diagnostics.write_text(h.stderr())
             ui.context=h.stderr()
             ui.observe('read shutdown diagnostics','confirmed Q emits healthy diagnostics and drains before unlinking sockets',
-                       lambda pane:d.expected_daemon_stderr(h.stderr()),timeout=0)
+                       lambda pane:d.expected_daemon_stderr(h.stderr()),timeout=0,artifacts=[diagnostics])
             ui.context=''
         except Exception as error:
             ui.observe('finish UI actions','all actions complete without an exception',lambda pane:False,timeout=0)
@@ -315,7 +316,7 @@ def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
             case.check(settings.get('download_limit_bps')==131072 and settings.get('alt_download_limit_bps')==65536 and settings['alt_limits_on'],
                        'F6 saves only the edited rate over API v1',json.dumps(settings))
             rows=client.call('torrents.list',{})['result']['torrents']
-            case.check(all(row['upload_enabled'] is False and row['upload_policy']=='off'
+            case.check(all(row['upload_enabled'] is False and row['seed'] is False and row['upload_policy']=='off'
                            and row.get('ul_bps',0)==0 and row.get('uploaded_bytes',0)==0 for row in rows),
                        'global unlimited never enables payload upload for default-off torrents',json.dumps(rows))
             ui.press('q','q detaches with the confirmed turtle still on',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
