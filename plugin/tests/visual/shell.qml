@@ -63,7 +63,7 @@ ShellRoot {
     function clickTurtle():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;var button=root.find(widget.popupItem(),"popup-turtle");if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
     function cursor():string {var c=widget.popupItem() ? widget.popupItem().cursor() : {};c.opened=widget.opened;c.visible=widget.visible;return JSON.stringify(c)}
     function expand(group:string):bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !widget.popupItem())return false;var item=widget.popupItem();for(var i=0;i<item.sections.length;i++)if(item.sections[i].key===group){if(!item.sections[i].open)item.toggleGroup(item.sections[i]);return true}return false}
-    function state():string {return JSON.stringify({turtle:service.turtleOn,bar:BarState.describe(service),popupTurtle:widget.popupItem() ? widget.popupItem().turtleOn : false,online:service.online,rows:service.torrents.length,error:service.lastError,action:service.actionStatus,opened:widget.opened,mode:service.client ? service.client.mode : "",geometry:widget.geometry()})}
+    function state():string {return JSON.stringify({banner:widget.popupItem() ? widget.popupItem().presentation.banner : "",turtle:service.turtleOn,bar:BarState.describe(service),popupTurtle:widget.popupItem() ? widget.popupItem().turtleOn : false,online:service.online,rows:service.torrents.length,error:service.lastError,action:service.actionStatus,opened:widget.opened,mode:service.client ? service.client.mode : "",geometry:widget.geometry()})}
     function useRuntimeDir(path:string):string {return service.useRuntimeDir(path)}
     function open():void {reference.close();widget.open()}
     function close():void {reference.close();widget.close()}

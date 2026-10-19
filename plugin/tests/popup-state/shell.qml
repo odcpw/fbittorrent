@@ -52,6 +52,12 @@ ShellRoot {
     s.backendState="running";s.store.summary={daemon:{upgrade_pending:true}};r=State.describe(s);check("states","upgrade pending",r,r.banner.indexOf("restarts when idle")>=0)
     s.store.summary={daemon:{idle_exit_in_s:240}};r=State.describe(s);check("states","optional idle countdown",r,r.idle==="Idle · stops in 4 min")
     s.store.summary={};r=State.describe(s);check("states","idle countdown omitted when absent; empty message stays outside list",r,r.idle==="" && r.message.indexOf("Nothing here yet")===0)
+    s.backendState="parked";s.store.summary={disk:{low:true,needed_bytes:104857600,free_bytes:67108864},network:{interface:"fixture0"}}
+    r=State.describe(s);check("disk","disk warning takes priority and formats actual binary units",r,r.urgent && r.banner==="Not enough space for the running downloads: 100.0 MiB needed, 64.0 MiB free")
+    check("disk","missing free bytes remains unknown",State.diskBanner({low:true,needed_bytes:104857600}),State.diskBanner({low:true,needed_bytes:104857600})==="Not enough space for the running downloads: 100.0 MiB needed, free space unknown")
+    check("disk","recovered disk clears its banner",State.diskBanner({low:false,needed_bytes:104857600,free_bytes:67108864}),State.diskBanner({low:false,needed_bytes:104857600,free_bytes:67108864})==="")
+    s.backendState="running";s.store.summary={}
+    console.log("FBTQS-PASS disk")
     var row={state:"downloading",progress:0.42,dl_bps:4200000,eta_s:720,peers:41,playable:{ready:true,buffered_s:240,stall_free:false,finishes_in_s:1080}}
     var meta=State.meta(row,false);check("rows","truthful ordered fields and playable warning",meta,meta.indexOf("Ready to watch · 42% · ↓ 4.2 MB/s · 12 min · 41 peers")===0 && meta.indexOf("may stall · finishes in 18 min")>=0)
     check("rows","parked omits progress",State.meta(row,true),State.meta(row,true).indexOf("42%")<0)

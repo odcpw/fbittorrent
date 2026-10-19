@@ -37,7 +37,7 @@ Item {
     svc.dashboardOwner=window.visible ? root : null
     svc.dashboardVisible=window.visible
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+      diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:searchInput.activeFocus ? "query" : "view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.viewState)
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.viewState)
     if(window.visible && svc.addFlow){svc.dashboardState.add=svc.addFlow.snapshot();svc.dashboardState.add.picker=addSheet.item ? addSheet.item.pickerState() : null;svc.dashboardState.add.field=addSheet.item ? addSheet.item.field() : "";if(svc.dashboardState.add.visible){svc.dashboardState.cursor="add"}}
@@ -156,6 +156,7 @@ Item {
           Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }
+        Components.PopupBanner {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;text:root.svc ? root.svc.diskBanner : "";urgent:true}
         Ui.PanelSeparator {Layout.fillWidth:true}
         Item {
           Layout.fillWidth:true;Layout.fillHeight:true

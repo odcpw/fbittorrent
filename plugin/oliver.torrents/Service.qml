@@ -7,6 +7,7 @@ import qs.Commons as Commons
 import "ApiClient.js" as ApiClient
 import "Store.js" as Store
 import "Model.js" as Model
+import "PopupState.js" as PopupState
 import "Focus.js" as Focus
 import "AddFlow.js" as AddFlow
 import "AddSource.js" as AddSource
@@ -221,6 +222,7 @@ Item {
       }
     }})
   }
+  readonly property string diskBanner: {var confirmed=status;return online ? PopupState.diskBanner(store.summary.disk) : ""}
   readonly property bool turtleOn: {var confirmed=status;return store.summary.alt===true}
   function toggleTurtle(){return setTurtle(!turtleOn)}
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
