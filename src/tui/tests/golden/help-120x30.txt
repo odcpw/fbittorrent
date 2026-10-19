@@ -14,6 +14,7 @@
 │                 │   (c) Clipboard                                                                  │                 │
 │                 │   (r) Refresh                                                                    │                 │
 │                 │   (a) Add                                                                        │                 │
+│                 │   (v) Card                                                                       │                 │
 │                 │                                                                                  │                 │
 │                 │ SCREEN:TORRENTS                                                                  │                 │
 │                 │   (j/↓) Next                                                                     │                 │
@@ -23,8 +24,7 @@
 │                 │   (PgDn) Page down                                                               │                 │
 │                 │   (PgUp) Page up                                                                 │                 │
 │                 │   (Enter) Details                                                                │                 │
-│                 │   (o) Open                                                                       │                 │
-╰─────────────────│   (p/Space) Pause/resume                                                         │─────────────────╯
+╰─────────────────│   (o) Open                                                                       │─────────────────╯
 ↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

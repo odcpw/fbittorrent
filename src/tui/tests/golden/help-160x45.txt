@@ -19,6 +19,7 @@
 │                                     │   (c) Clipboard                                                                  │                                     │
 │                                     │   (r) Refresh                                                                    │                                     │
 │                                     │   (a) Add                                                                        │                                     │
+│                                     │   (v) Card                                                                       │                                     │
 │                                     │                                                                                  │                                     │
 │                                     │ SCREEN:TORRENTS                                                                  │                                     │
 │                                     │   (j/↓) Next                                                                     │                                     │
@@ -33,7 +34,6 @@
 │                                     │   (u) Seed on/off                                                                │                                     │
 │                                     │   (d/x/Delete) Remove, keep files                                                │                                     │
 │                                     │   (D) Delete with files                                                          │                                     │
-│                                     │   (i) IMDb                                                                       │                                     │
 │                                     │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │                                     │
 │                                     │                                                                                  │                                     │
 │                                     ╰──────────────────────────────────────────────────────────────────────────────────╯                                     │

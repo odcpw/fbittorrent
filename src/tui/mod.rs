@@ -29,6 +29,8 @@ use modals_files::*;
 #[path = "modals/details.rs"]
 mod modals_details;
 use modals_details::*;
+#[path = "modals/poster.rs"]
+mod modals_poster;
 #[path = "modals/providers.rs"]
 mod modals_providers;
 use modals_providers::*;
@@ -39,6 +41,7 @@ use modals_settings::*;
 mod modals_prompt;
 use modals_prompt::*;
 mod imdb_card;
+mod imdb_cache;
 mod motion;
 mod mouse;
 use mouse::*;
@@ -57,6 +60,9 @@ mod palette;
 #[cfg(test)]
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
+#[cfg(test)]
+#[path = "tests/posters.rs"]
+mod poster_tests;
 #[cfg(test)]
 #[path = "tests/responsive.rs"]
 mod responsive_tests;
@@ -197,12 +203,7 @@ impl Model for TuiApp {
                 self.poll()
             }
             Msg::Imdb(key, r) => {
-                let st = match r {
-                    Ok(Some((t, p))) => ImdbState::Ready(Box::new(t), p),
-                    Ok(None) => ImdbState::Missing,
-                    Err(e) => ImdbState::Failed(e),
-                };
-                self.imdb.insert(key, st);
+                self.remember_imdb(key,r);
                 Cmd::none()
             }
             Msg::NativeSearchStarted {connection,sequence,result} => self.native_search_started(connection,sequence,result),
@@ -406,6 +407,9 @@ impl Model for TuiApp {
         self.last_bounds.set(frame.bounds());
         self.rects.borrow_mut().begin();
         self.poster_drawn.set(false);
+        let hard_overlay=self.files.is_some()||self.details.is_some()||self.providers.is_some()||self.settings.is_some()||self.show_help||self.prompt.is_some();
+        self.graphics_suppressed.set(hard_overlay||self.poster_open);
+        if hard_overlay {if let Some(kitty)=&self.kitty {kitty.borrow_mut().clear();}}
         let banner=self.priority_banner();
         let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
@@ -422,8 +426,10 @@ impl Model for TuiApp {
         if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
         self.rects.borrow_mut().footer=root[5];
         if self.details.is_none(){self.view_status(root[5], frame);}
+        self.graphics_suppressed.set(hard_overlay);
         if self.details.is_some() { self.view_details(frame); }
         else if self.files.is_some() { self.view_files(frame); }
+        if self.poster_open {self.view_poster_overlay(frame);}
         if self.providers.is_some() { self.view_providers(frame); }
         if self.settings.is_some() { self.view_settings(frame); }
         if self.show_help { self.view_help(frame); }
@@ -442,8 +448,7 @@ impl Model for TuiApp {
         // Graphics-layer posters sit above text, so anything drawn over the card
         // (modals, other screens) needs the placement gone.
         if let Some(k) = &self.kitty {
-            let overlay = self.details.is_some() || self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
-            if !self.poster_drawn.get() || overlay { k.borrow_mut().clear(); }
+            if !self.poster_drawn.get() { k.borrow_mut().clear(); }
         }
     }
 }

@@ -14,11 +14,11 @@
 │   (c) Clipboard                                                              │
 │   (r) Refresh                                                                │
 │   (a) Add                                                                    │
+│   (v) Card                                                                   │
 │                                                                              │
 │ SCREEN:TORRENTS                                                              │
 │   (j/↓) Next                                                                 │
 │   (k/↑) Previous                                                             │
-│   (g/Home) First                                                             │
 │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                          │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

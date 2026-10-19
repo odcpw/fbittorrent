@@ -79,6 +79,7 @@ pub enum Pane {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalKind {
+    Poster,
     Details,
     Files,
     Providers,
@@ -150,7 +151,6 @@ pub(super) enum Intent {
     Follow,
     Providers,
     Browse,
-    Card,
     Query,
     Source,
     New,

@@ -421,13 +421,13 @@ fn narrow_breadcrumb_navigation_and_search_card_do_not_start_work() {
         app.on_key(KeyEvent::new(KeyCode::Char('v'))),
         Cmd::None
     ));
-    assert!(app.search_card);
-    assert!(super::golden::render(&app, 80, 24).contains("╭ Details"));
+    assert!(app.poster_open);
+    assert!(super::golden::render(&app, 80, 24).contains("╭ IMDb"));
     assert!(matches!(
         app.on_key(KeyEvent::new(KeyCode::Escape)),
         Cmd::None
     ));
-    assert!(!app.search_card);
+    assert!(!app.poster_open);
     assert_eq!(app.search_results.len(), 10);
 }
 

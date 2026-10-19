@@ -251,7 +251,7 @@ impl TuiApp {
                     .constraints([
                         Constraint::Percentage(22.0),
                         Constraint::Fill,
-                        Constraint::Fixed(42),
+                        Constraint::Fixed(52),
                     ])
                     .split(area);
                 [c[0], c[1], c[2]]
@@ -366,7 +366,7 @@ impl TuiApp {
             let card = block.inner(cols[2]);
             block.render(cols[2], frame);
             if let Some(show) = self.release_show() {
-                self.view_imdb_card(&show.label(), pad(card), frame);
+                self.view_imdb_card(&show.label(), card, frame);
             }
         }
         self.shows_rects.set([inner, Rect::default()]);

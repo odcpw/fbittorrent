@@ -28,6 +28,7 @@ mod details;
 mod global;
 mod modals;
 mod prompt;
+mod poster;
 mod rss;
 mod search;
 mod shows;
@@ -42,4 +43,5 @@ pub(super) const TABLE: &[&[Action]] = &[
     shows::ACTIONS,
     modals::ACTIONS,
     prompt::ACTIONS,
+    poster::ACTIONS,
 ];

@@ -54,6 +54,7 @@ pub(in crate::tui) struct Rects {
     pub footer: Rect,
     pub table: Option<Rect>,
     pub details: Option<Rect>,
+    pub poster: Option<Rect>,
     pub files: Option<Rect>,
     pub lists: [Option<Rect>;10],
 }
@@ -62,6 +63,7 @@ impl Rects {
         self.headers.clear();
         self.table = None;
         self.details = None;
+        self.poster = None;
         self.files = None;
         self.lists.fill(None);
     }

@@ -7,7 +7,7 @@ pub(super) enum MouseList { Torrents, Results, Browse, Feeds, Items, Shows, Epis
 impl TuiApp {
     pub(super) fn mouse_list_at(&self, x: u16, y: u16) -> Option<(MouseList, Rect)> {
         let b = self.last_bounds.get();
-        if self.screen==Screen::Search && self.search_card {return None;}
+        if self.screen==Screen::Search && self.poster_open {return None;}
         if b.width == 0 || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
         if let Some(m) = &self.providers {
             let area = providers_area(b, m.plugins.len());
@@ -166,6 +166,7 @@ impl TuiApp {
             }
             return Cmd::none();
         }
+        if self.poster_open && self.prompt.is_none(){return Cmd::none();}
         if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
             if self.show_help { self.show_help = false; return Cmd::none(); }
             let b = self.last_bounds.get();

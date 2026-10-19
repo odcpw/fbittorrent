@@ -26,5 +26,5 @@
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ↓ Down · downloading · 32 KiB/s cap · stops when complete (u to seed) · /fixture/downloads
-[Torrents] (Enter) Details  (o) Open  (p) Pause  (u) Seed on  (d) Remove, keep files  (D) Delete with files …   (?) Help
+[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (a) Add …       (?) Help
 The Diplomat S04E01 1080p WEB-DL H264-GROUP

@@ -29,6 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
+CASES=(*SIZES,'poster_overlay_cleanup')
 
 
 class PaneUi(native.AttachedTui):
@@ -181,19 +182,58 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
     ui.case=setup
 
 
+def poster_overlay_cleanup(binary,setup,sandbox,h,ui,process,torrent):
+    """Real decoded poster through the portable path; log actual tmux capability."""
+    import re,shutil
+    cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent'
+    identifier='tt17491088'
+    title=dict(id=identifier,name='The Diplomat',year=2023,kind='TV series',stars='Keri Russell, Rufus Sewell',
+               poster_url='http://127.0.0.1/poster-fixture.jpg',rating=7.9,votes=102000,
+               blurb='A veteran US diplomat takes a new assignment.',wiki_url='')
+    def document(kind,key,value):
+        directory=cache/'imdb'/kind;directory.mkdir(parents=True,exist_ok=True)
+        path=directory/(re.sub('[^a-z0-9]','_',key.lower())[:120]+'.json');path.write_text(json.dumps(value));path.chmod(0o600)
+    document('by-name-v2',ACTIVE,dict(id=identifier));document('by-id',identifier,title)
+    posters=cache/'posters';posters.mkdir(exist_ok=True)
+    shutil.copyfile(fixtures.HERE/'fixtures/imdb/poster.jpg',posters/(identifier+'.jpg'))
+    (posters/(identifier+'.jpg')).chmod(0o600)
+    (cache/'title.ratings.tsv').write_text('tconst\taverageRating\tnumVotes\n'+identifier+'\t7.9\t102000\n')
+    target,done=ui.start_owned()
+    with Case('tui_smoke','poster_overlay_cleanup')as case:
+        ui.case=case
+        ui.tmux('resize-window','-t',target,'-x','80','-y','24')
+        # kitty_supported() intentionally disables the graphics layer under tmux.
+        # Text capture can prove the half-block path; the real kitty encoder has
+        # its own delete/restore control in tui::poster_tests.
+        features=ui.tmux('display-message','-p','-t',target,'#{pane_tty} #{client_termfeatures}').stdout.strip()
+        ui.observe('detect terminal graphics; kitty=false under tmux; '+features,
+                   'portable half-block path is exercised without inventing kitty support',lambda pane:'Torrents (3)'in pane)
+        with d.ApiConn(h)as client:
+            client.hello();ui.select_active(client)
+        ui.contains('v','IMDb · v/Esc Back')
+        ui.observe('read decoded poster','local poster pixels, title, year, rating and cast are visible',
+                   lambda pane:'The Diplomat (2023)'in pane and '7.9'in pane and 'Keri Russell'in pane and any(c in pane for c in('▀','▄')))
+        ui.contains('?','GLOBAL')
+        ui.observe('capture Help over poster; kitty=false','no poster cells remain in the Help capture',lambda pane:'GLOBAL'in pane and '▀'not in pane and '▄'not in pane)
+        ui.press('Escape','closing Help restores the poster card',lambda pane:'IMDb · v/Esc Back'in pane and any(c in pane for c in('▀','▄')),literal=False)
+        ui.press('Escape','Esc hides the centered card and returns to the list',lambda pane:'IMDb · v/Esc Back'not in pane and '[Torrents]'in pane,literal=False)
+        ui.press('q','q detaches the card test while the owner survives',lambda pane:done.exists()and done.read_text()=='0'and process.child.poll()is None)
+    ui.case=setup
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',nargs='?',type=Path,default=REPO/'target/debug/fbittorrent')
-    parser.add_argument('--case',choices=SIZES)
+    parser.add_argument('--case',choices=CASES)
     parser.add_argument('--list',action='store_true')
     parser.add_argument('--log-root',type=Path,help='override root for a retained independent harness run')
     args=parser.parse_args()
-    if args.list:print('\n'.join(SIZES));return 0
+    if args.list:print('\n'.join(CASES));return 0
     private_net.enter()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
-            for index,(name,size)in enumerate(([(args.case,SIZES[args.case])]if args.case else SIZES.items())):
+            for index,(name,size)in enumerate(([]if args.case=='poster_overlay_cleanup'else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
                 if index:
                     h.notify.close()
                     process=h.start_serve()
@@ -203,6 +243,12 @@ def main():
                         h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent'])['state']=='downloading',json.dumps(row)),
                                    'saved incomplete fixture resumes its real loopback transfer')
                 drive_size(name,size,args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'poster_overlay_cleanup'):
+                if process.child.poll()is not None:
+                    h.notify.close();process=h.start_serve()
+                    if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('poster fixture owner did not restart')
+                poster_overlay_cleanup(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+
     return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
 
 

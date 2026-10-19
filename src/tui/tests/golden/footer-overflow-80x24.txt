@@ -20,5 +20,5 @@
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Details  (o) Open  (p) Pause  (u) Seed on …          (?) Help
+[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (a) Add …    (?) Help
 The Diplomat S04E01 1080p WEB-DL H264-GROUP

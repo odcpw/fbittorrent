@@ -32,6 +32,8 @@ pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
         Scope::Modal(ModalKind::Help)
     } else if app.prompt.is_some() {
         Scope::Prompt
+    } else if app.poster_open {
+        Scope::Modal(ModalKind::Poster)
     } else if app.files.is_some() {
         Scope::Modal(ModalKind::Files)
     } else if app.details.is_some() {

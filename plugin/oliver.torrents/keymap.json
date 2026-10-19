@@ -683,18 +683,6 @@
       "scope": "screen:torrents"
     },
     {
-      "id": "search.card",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "v"
-        ]
-      },
-      "label": "Card",
-      "scope": "screen:search"
-    },
-    {
       "id": "search.next",
       "keys": {
         "dashboard": [
@@ -1981,6 +1969,55 @@
       },
       "label": "Seed on/off",
       "scope": "prompt"
+    },
+    {
+      "id": "poster.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "v"
+        ]
+      },
+      "label": "Card",
+      "scope": "global"
+    },
+    {
+      "id": "poster.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "v"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.imdb",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.wiki",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "modal:poster"
     }
   ],
   "version": 1

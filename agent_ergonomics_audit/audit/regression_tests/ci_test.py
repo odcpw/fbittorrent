@@ -186,7 +186,7 @@ def native_tui_wiring():
                        f"{suite} is reset, summarized and included in CI artifacts")
         unused=case.suite.directory/"fixtures/list_only"
         listed=subprocess.run([sys.executable,str(HERE/"tui_smoke.py"),"/missing/fbittorrent","--list","--log-root",str(unused)],capture_output=True,text=True,timeout=5)
-        case.check(listed.returncode==0 and listed.stdout.splitlines()==["layout_80x24","layout_120x30","layout_160x45"]and not unused.exists(),
+        case.check(listed.returncode==0 and listed.stdout.splitlines()==["layout_80x24","layout_120x30","layout_160x45","poster_overlay_cleanup"]and not unused.exists(),
                    "--list has stable case slugs and starts no daemon or log suite",listed.stdout+listed.stderr)
 
 
