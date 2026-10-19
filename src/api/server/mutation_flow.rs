@@ -124,6 +124,7 @@ impl Shared {
                     op: job.request.call.op().into(),
                     deadline,
                     confirmation: None,
+                    handler_add: matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")),
                     _activity: job._activity.as_ref().unwrap().clone(),
                 },
             );
@@ -140,6 +141,7 @@ impl Shared {
         true
     }
     pub(super) fn answer(&self, job: &Job, answer: ApiResult<Reply>) {
+        if answer.is_err() && matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")) { self.daemon.notifier.failed(); }
         if let Some(ticket) = &job.mutation {
             let active = self
                 .mutation_active
@@ -200,6 +202,7 @@ impl Shared {
         } else {
             result
         };
+        if result.is_err() && task.handler_add { self.daemon.notifier.failed(); }
         let (outcome, failure, result) = match result {
             Ok(reply) => (
                 MutationOutcome::Done,

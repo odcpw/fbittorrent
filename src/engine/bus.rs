@@ -4,6 +4,10 @@ use super::*;
 use std::{future::Future, pin::Pin, task::Poll};
 
 impl EngineDispatcher {
+    pub(crate) fn take_completions(&self) -> Vec<serde_json::Value> {
+        self.inner.completions.lock().unwrap().drain(..).collect()
+    }
+
     pub(crate) fn bus_sample(
         &self,
         files: &[String],

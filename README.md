@@ -168,6 +168,17 @@ unit, outside the CLI's 0–8 dictionary. API v1 is available on the private
 and events, receive consistent snapshots, then pushed changes. The current CLI
 uses the framed compatibility socket; CLI migration and TUI attachment follow.
 
+The daemon posts completion notifications with Open File / Open Folder actions.
+Browser handlers use `add --origin handler`: the daemon posts Added with Undo
+(keeps files) and Open window. Ordinary `add` posts a plain toast only on a TTY
+or with `--notify`; `--json`, `--quiet` and agent origin suppress that toast.
+Notification bodies escape markup, duplicate pending notices collapse, and four
+workers drain a bounded queue. VPN notices name the selected interface and limit
+rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
+`setup` installs the monochrome download SVG under
+`$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
+desktop entries and notifications use fbittorrent.
+
 ### For agents
 
 ```

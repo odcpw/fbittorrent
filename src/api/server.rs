@@ -86,6 +86,7 @@ struct Background {
     deadline: Option<Instant>,
     confirmation: Option<Confirmation>,
     _activity: Arc<crate::daemon::policy::Mutation>,
+    handler_add: bool,
 }
 struct Pending {
     generation: u64,

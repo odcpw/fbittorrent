@@ -95,6 +95,12 @@ pub(super) enum Cmd {
         /// Suppress the desktop notification
         #[arg(long)]
         quiet: bool,
+        /// Show a plain notification even when stdout is not a TTY (never with --json)
+        #[arg(long)]
+        notify: bool,
+        /// Source of this add; browser handlers request daemon-owned Undo actions
+        #[arg(long, value_parser = ["manual", "handler", "agent"], default_value = "manual")]
+        origin: String,
         /// Block until the download completes (see `wait`)
         #[arg(long)]
         wait: bool,

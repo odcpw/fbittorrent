@@ -151,7 +151,7 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "show", aliases: &["info"], summary: "One torrent in full, including its files and the path to open", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "search", aliases: &["find"], summary: "Search local providers; results carry magnet links; native mode does not open the app", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; returns the hash; --wait blocks until complete", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "add", aliases: &["download", "get"], summary: "Add a magnet or URL; --wait blocks until complete; --notify requests a plain toast; --origin handler delegates actions to the daemon", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "wait", aliases: &[], summary: "Block until torrents complete (or --timeout); progress on stderr", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "start", aliases: &["resume"], summary: "Start torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "stop", aliases: &["pause"], summary: "Stop torrents", json: true, mutating: true, needs_backend: true },

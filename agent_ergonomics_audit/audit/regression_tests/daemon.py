@@ -3089,8 +3089,12 @@ def setup_desktop_handlers(binary, systemd):
         h.cli("setup", "--magnet")
         apps = Path(sandbox.env["XDG_DATA_HOME"]) / "applications"
         app, magnet = [(apps / name).read_text() for name in ("fbittorrent.desktop", "fbittorrent-magnet.desktop")]
-        case.check(" dashboard\n" in app and " add %u\n" in magnet and "Terminal=false" in magnet,
+        case.check(" dashboard\n" in app and " add --origin handler %u\n" in magnet and "Terminal=false" in magnet,
                    "setup writes dashboard and direct headless magnet desktop entries", app + magnet)
+        icon = Path(sandbox.env["XDG_DATA_HOME"]) / "icons/hicolor/scalable/apps/fbittorrent.svg"
+        case.check("Icon=fbittorrent" in app and "Icon=fbittorrent" in magnet and
+                   icon.read_text() == (REPO / "assets/fbittorrent.svg").read_text(),
+                   "both desktop entries and the private hicolor SVG use fbittorrent's download glyph", str(icon))
         calls = [json.loads(line) for line in (sandbox.root / "shims/xdg-mime.log").read_text().splitlines()]
         case.check(len(calls) == 2 and all(call[:2] == ["default", "fbittorrent-magnet.desktop"] for call in calls),
                    "both magnet and torrent-file MIME registrations use the direct add handler", str(calls))
@@ -3160,6 +3164,10 @@ from daemon_bus import (bus_subscriptions, subscribe_gap_recovery,
                         structural_frame_within_100ms, detail_topic_released,
                         engine_restart_keeps_connection, slow_client_closed_others_live,
                         rev_soak_10min, state_watcher_cancellation_stress, events_since_seq_replay, mutation_bus_sequence)
+
+from daemon_notify import (notify_completed, notify_action_open, notify_action_default,
+    notify_action_folder, notify_added_undo, notify_off, notify_failed, notify_queue_bounded,
+    notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
 
 from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
@@ -3591,7 +3599,9 @@ def imdb_poster_atomic(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+         (notify_completed, notify_action_open, notify_action_default, notify_action_folder,
+          notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
+          idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
           idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
           idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
           idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,

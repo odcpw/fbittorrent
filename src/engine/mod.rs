@@ -81,6 +81,7 @@ struct RestoreTask {
 struct Inner {
     session: Arc<Session>,
     bus_changed: rqbit_runtime::sync::Notify,
+    completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
     directory: PathBuf,
@@ -179,6 +180,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     let inner = Arc::new(Inner {
         session,
         bus_changed: rqbit_runtime::sync::Notify::new(),
+        completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
         directory,

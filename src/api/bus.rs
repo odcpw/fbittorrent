@@ -114,6 +114,7 @@ struct Sample {
     epoch: u64,
     state: String,
     rows: Vec<Torrent>,
+    completions: Vec<Value>,
     files: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
@@ -369,6 +370,10 @@ impl Bus {
             }
             Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new()),
         };
+        let completions = match &slot.slot {
+            Slot::Running(app) => app.dispatcher().take_completions(),
+            _ => Vec::new(),
+        };
         let rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)
@@ -404,6 +409,7 @@ impl Bus {
         };
         daemon["state"] = json!(state);
         daemon["upgrade_pending"] = json!(false);
+        self.daemon.notifier.enabled(cfg.notify && !self.daemon.no_notify);
         let network = serde_json::to_value(self.daemon.network()).unwrap();
         let mut settings = json!({"max_active_downloads":cfg.max_active_downloads,"peer_encryption":cfg.peer_encryption,"save_path":cfg.save_path.unwrap_or_else(|| dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads")).to_string_lossy().into_owned()),"seed_by_default":cfg.seed_by_default,"autostart":cfg.autostart,"idle_exit_secs":self.daemon.idle_exit_secs(),"notify":cfg.notify,"timeout_secs":cfg.timeout_secs,"handler":"confirm","open_command":"xdg-open","clipboard_watch":false,"peer_port":cfg.peer_port,"show_quality":cfg.show_quality,"alt_limits_on":false,"restart_class":["network_interface","peer_encryption","peer_port"]});
         if let Some(v) = cfg.network_interface {
@@ -413,6 +419,7 @@ impl Bus {
             epoch,
             state,
             rows,
+            completions,
             files,
             network,
             settings,
@@ -539,12 +546,6 @@ impl Bus {
                                 Some(
                                     json!({"ev":"torrent.added","hash":row.hash,"name":row.name,"origin":row.origin.as_deref().unwrap_or("manual")}),
                                 )
-                            } else if old.is_some_and(|o| o.state != row.state)
-                                && row.state == TorrentState::Done
-                            {
-                                Some(
-                                    json!({"ev":"torrent.completed","hash":row.hash,"name":row.name,"open_target":row.content_path.as_deref().unwrap_or(&row.save_path)}),
-                                )
                             } else if old.is_some_and(|o| o.error != row.error)
                                 && row.error.is_some()
                             {
@@ -555,8 +556,13 @@ impl Bus {
                                 None
                             };
                             if let Some(event) = event {
+                                self.daemon.notifier.event(&event);
                                 r.events.append(event);
                             }
+                        }
+                        for event in &sample.completions {
+                            self.daemon.notifier.event(event);
+                            r.events.append(event.clone());
                         }
                         previous_rows = sample
                             .rows

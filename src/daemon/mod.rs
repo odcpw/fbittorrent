@@ -1,5 +1,6 @@
 pub mod lifecycle;
 pub(crate) mod policy;
+pub(crate) mod notify;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
@@ -29,6 +30,7 @@ pub struct Daemon {
     pub launcher: &'static str,
     pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub no_notify: bool,
+    pub(crate) notifier: notify::Notifier,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
@@ -215,7 +217,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         )))?;
     } else {
         let mut engine_cfg = cfg.clone();
-        engine_cfg.network_interface = network.interface;
+        engine_cfg.network_interface = network.interface.clone();
         eprintln!("INFO engine starting session");
         let engine =
             match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone()) {
@@ -231,6 +233,14 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         );
         daemon.replace(Slot::Running(engine))?;
     }
+    daemon.notifier.enabled(cfg.notify && !daemon.no_notify);
+    let resumed = match daemon.execute(engine::ops::EngineOp::Info) {
+        Ok(engine::ops::EngineResult::Torrents(rows)) => rows.into_iter()
+            .filter_map(|row| crate::api::ops::torrents::torrent(row).ok())
+            .filter(|row| row.intent == crate::api::Intent::Run && !row.staged && row.completed_at.is_none()).count(),
+        _ => 0,
+    };
+    daemon.notifier.network(network.ready, cfg.network_interface.as_deref().unwrap_or("network"), resumed);
     Ok(())
 }
 
@@ -314,6 +324,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         },
         policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         no_notify,
+        notifier: notify::Notifier::new(cfg.notify)?,
         imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
@@ -346,6 +357,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();

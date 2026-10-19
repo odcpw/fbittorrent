@@ -93,3 +93,44 @@ ignores. Every changed Rust source is below 900 lines. The earlier parser-phase
 and transcript-context failures remain archived. No all.sh between track beads,
 per owner policy. Unmet for this port: none. The existing P1-08 literal canonical
 live replay limitation above remains recorded; no additional claim is made here.
+
+## P1-13 — daemon notifications and the icon (`fbt-p1-13-7tx`)
+
+Added a bounded 512-waiting/four-worker notifier, pending-key collapse, markup
+escaping, action argv, cancellation/group cleanup, config/flag suppression and
+VPN transition limiting at the owner. The engine emits completion exactly when
+it first persists completion_on (including immediately completed records), with
+the resolved metadata name and content target. Handler-origin adds receive the
+daemon's Undo/Open-window toast; Undo is a normal API mutation with a unique ref
+and keeps files. Manual CLI adds notify only on a TTY or --notify; JSON, quiet and
+agent callers suppress that toast. Setup installs the monochrome download SVG
+inside the active XDG data home and uses it in both desktop entries and toasts.
+Mechanical neighbouring edits thread origin through legacy AddOptions until
+P1-11, initialize the engine/test event queue, and report failed handler adds from
+the mutation receipt path. No frozen contract changes or live desktop/state edits.
+
+Evidence is under `target/test-logs/fbt-p1-13-7tx/`; commands use its private-XDG
+`run.py`. `cases` names the notify_* functions plus `setup_desktop_handlers`, in
+`foreground-verified/` and `FBT_BUS_SYSTEMD=1` in `systemd/`.
+
+| Acceptance criterion | Command / JSONL in both modes | Observed result |
+|---|---|---|
+| Correct notification argv/actions | `cases notify_completed notify_failed notify_handler_cli_once`; `daemon/<case>.jsonl` plus `.notify-send.argv.json` | PASS: one real loopback magnet completion with exact bytes; default/open/folder actions; failed add log action; one actioned handler toast. |
+| Open action receives the right path | `cases notify_action_open notify_action_default notify_action_folder`; `.xdg-open.argv.json` | PASS: exact completed file / containing directory. |
+| Undo removes, retaining data | `cases notify_added_undo` | PASS: API removes only the record and preserves every payload byte. |
+| notify=false suppresses all | `cases notify_off notify_cli_policy`; `notify_off_{config,flag}.jsonl` | PASS: config false and --no-notify suppress completion/failure; non-TTY/JSON/quiet/agent adds have no plain toast; explicit --notify has one. |
+| Three VPN transitions in 2s → ≤2 notices | `cases notify_vpn_once_per_transition` | PASS: systemd 0.192 s; two notices, configured interface named. |
+
+Additional cases: forty actual completions deliver forty notices, measured peak
+four concurrent children and zero remaining; killed action handler never opens;
+restoring a completed ledger never repeats its completion; icon and desktop
+handler installation are verified inside private XDG. `policy` unit filter
+(`notifier-units-final/`): two passed (escaping, collapse/cap). `api`
+(`module-tests/`): 77 passed/one bridge ignored. `engine_watch` queue filter
+(`engine-queue-final/`): two passed. Single full `cargo test --locked -- --nocapture`
+(`full-final/`): **328 passed, zero failed, two intentional ignores**, 7.95 s.
+Earlier failures are retained. No all.sh between track beads per owner policy.
+Unmet acceptance criteria: none. Follow-ups: Open-log is wired to the CLI log
+verb supplied by P1-14; actual desktop notification rendering/action selection
+remains outside these recording-shim checks. P1-14 keeps the existing app.info counts cumulative (connections since start),
+as its canonical rule requires.
