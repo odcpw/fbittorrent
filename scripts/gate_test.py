@@ -215,6 +215,7 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
         self.assertTrue({'agent_contract/' + name for name in registry['agent_contract'].CASES} <= names)
         self.assertTrue({'native/' + name for name in registry['native'].CASES + registry['native'].ATTACH_CASES} <= names)
         self.assertTrue({'tui_smoke/' + name for name in registry['tui_smoke'].CASES} <= names)
+        self.assertTrue({'tui_journey/' + name for name in registry['tui_journey'].SOURCES} <= names)
         self.assertEqual(gate.optional_checks({}, Path('/missing/binary')), [])
         enabled = {key: '1' for key in ('FBT_TEST_QS', 'FBT_TEST_VISUAL', 'FBT_TEST_WIDGET', 'FBT_TEST_VPN')}
         chosen = gate.optional_checks(enabled, Path('/missing/binary'))
@@ -240,7 +241,7 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
             root = Path(temporary); scripts = root / 'scripts'; scripts.mkdir()
             for name in ('gate.py', 'gate-fast.sh'): shutil.copy2(gate.ROOT / 'scripts' / name, scripts / name)
             harness = root / 'agent_ergonomics_audit/audit/regression_tests'; harness.mkdir(parents=True)
-            for name in ('daemon', 'native', 'agent_contract', 'tui_smoke'):
+            for name in ('daemon', 'native', 'agent_contract', 'tui_smoke', 'tui_journey'):
                 (harness / (name + '.py')).write_text('SYSTEMD_CASES=set()\n')
             home = root / 'home'; shims = home / '.rch/shims'; shims.mkdir(parents=True)
             binary = root / 'target/debug/test-binary'; binary.parent.mkdir(parents=True); binary.write_text('never execute'); binary.chmod(0o700)
