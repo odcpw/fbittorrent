@@ -1,6 +1,6 @@
 //! Shared fixture format and contract checks. The daemon and UI replay runners
 //! consume these same files; this module makes no claim of live server proof.
-use super::validation::{self, NegotiatedCaps, Revisions, Validate};
+use super::validation::{self, NegotiatedCaps, Revisions, TorrentFileSizes, Validate};
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -87,6 +87,7 @@ fn canonical(mut value: Value) -> String {
 pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
     let mut calls = BTreeMap::new();
     let mut caps = NegotiatedCaps::default();
+    let mut file_sizes = TorrentFileSizes::default();
     let mut revisions = Revisions::default();
     let mut unsubscribes = BTreeMap::new();
     let mut expected_gaps = 0;
@@ -99,7 +100,7 @@ pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
                 Line::C2s { frame } => {
                     frame.validate().map_err(|e| e.to_string())?;
                     validation::frame(frame, LINE_IN).map_err(|e| e.to_string())?;
-                    calls.insert(frame.id.get(), frame.call.op());
+                    calls.insert(frame.id.get(), frame.call.clone());
                     unsubscribes.remove(&frame.id.get());
                     if let Call::Unsubscribe { args } = &frame.call {
                         unsubscribes.insert(frame.id.get(), args.sub);
@@ -109,16 +110,18 @@ pub(super) fn check_group(group: &str, text: &str) -> Result<(), String> {
                     validation::frame(frame, LINE_OUT).map_err(|e| e.to_string())?;
                     match frame {
                         ServerFrame::Response(Response::Success(frame)) => {
-                            let op = calls
+                            let call = calls
                                 .get(&frame.id.get())
                                 .ok_or("response has no request")?;
+                            let op = call.op();
                             let reply = Reply::decode(op, frame.result.clone())
                                 .map_err(|e| format!("{op} result: {e}"))?;
                             if let Reply::Hello(hello) = &reply {
                                 caps = NegotiatedCaps::from_hello(hello);
                             }
                             caps.reply(&reply).map_err(|e| e.to_string())?;
-                            if *op == "unsubscribe" {
+                            file_sizes.reply(call, &reply).map_err(|e| e.to_string())?;
+                            if op == "unsubscribe" {
                                 if let Some(sub) = unsubscribes.remove(&frame.id.get()) {
                                     revisions.unsubscribe(sub);
                                 }

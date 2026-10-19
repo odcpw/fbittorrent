@@ -22,7 +22,7 @@
 {"dir":"c2s","frame":{"args":{"delete_files":false,"hashes":["0123456789abcdef0123456789abcdef01234567"]},"id":13,"op":"torrents.remove"}}
 {"dir":"s2c","frame":{"id":13,"ok":true,"result":{"state":"done","undo_until":1792310430}}}
 {"dir":"c2s","frame":{"args":{"hash":"0123456789abcdef0123456789abcdef01234567"},"id":14,"op":"torrents.files"}}
-{"dir":"s2c","frame":{"id":14,"ok":true,"result":{"files":[{"included":true,"index":0,"path":"Example e2.mkv","progress":0.25,"ready":true,"size":4096,"sort_key":"example e0000000002.mkv"},{"included":true,"index":1,"path":"Example e10.mkv","progress":0.25,"size":4096,"sort_key":"example e0000000010.mkv"}]}}}
+{"dir":"s2c","frame":{"id":14,"ok":true,"result":{"files":[{"included":true,"index":0,"path":"Example e2.mkv","progress":0.25,"ready":true,"size":2048,"sort_key":"example e0000000002.mkv"},{"included":true,"index":1,"path":"Example e10.mkv","progress":0.25,"size":2048,"sort_key":"example e0000000010.mkv"}]}}}
 {"dir":"c2s","frame":{"args":{"hash":"0123456789abcdef0123456789abcdef01234567","include":[0],"skip":[1]},"id":15,"op":"torrents.set_files"}}
 {"dir":"s2c","frame":{"id":15,"ok":true,"result":{"state":"done"}}}
 {"dir":"c2s","frame":{"args":{"hashes":["0123456789abcdef0123456789abcdef01234567"],"on":true},"id":16,"op":"torrents.set_seed"}}
