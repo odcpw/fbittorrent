@@ -320,7 +320,9 @@ pub fn probe(cfg: &Config) -> Result<()> {
 }
 
 fn probe_at(cfg: &Config, path: &std::path::Path) -> Result<()> {
-    Client::connect_at(cfg, false, path).map(|_| ())
+    let client = Client::connect_at(cfg, false, path)?;
+    anyhow::ensure!(client.hello.state != crate::api::DaemonState::Stopping, "daemon is stopping");
+    Ok(())
 }
 
 /// Returns whether startup was needed. Reads pass no_start=true; explicit up
@@ -352,7 +354,12 @@ pub fn ensure_daemon(cfg: &Config, no_start: bool) -> Result<bool> {
                 &journal,
             ));
         }
-        match probe(cfg) {
+        // The old owner can still answer hello while systemd is draining it.
+        // A completed start call must not return that deactivating owner.
+        match probe(cfg).and_then(|_| {
+            anyhow::ensure!(!deactivating(&unit)?, "daemon is deactivating");
+            Ok(())
+        }) {
             Ok(()) => return Ok(true),
             Err(error) if round == 0 => {
                 eprintln!(
@@ -413,6 +420,30 @@ mod tests {
         .is_err());
         assert!(connect_probe(std::path::Path::new(&"x".repeat(200)), deadline).is_err());
     }
+    #[test]
+    fn probe_rejects_a_stopping_owner() {
+        use std::io::{BufRead, Write};
+        for state in ["running", "parked", "stopping"] {
+            let path = std::env::temp_dir().join(format!("fbt-probe-{}-{state}", std::process::id()));
+            let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+            let peer = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = String::new();
+                std::io::BufReader::new(stream.try_clone().unwrap()).read_line(&mut request).unwrap();
+                assert_eq!(serde_json::from_str::<serde_json::Value>(&request).unwrap()["op"], "hello");
+                let transcript = include_str!("../../contracts/ipc/v1/hello.ndjson");
+                let mut response: serde_json::Value = transcript.lines().filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                    .find(|frame| frame["dir"] == "s2c").unwrap()["frame"].clone();
+                response["result"]["state"] = state.into();
+                stream.write_all((serde_json::to_string(&response).unwrap()+"\n").as_bytes()).unwrap();
+            });
+            let result = probe_at(&Config::default(), &path);
+            assert_eq!(result.is_ok(), state != "stopping", "{state}: {result:?}");
+            peer.join().unwrap();
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+
     #[test]
     fn probe_deadline_bounds_a_silent_peer() {
         let path = std::env::temp_dir().join(format!("fbt-probe-{}", std::process::id()));

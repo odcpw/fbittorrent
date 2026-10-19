@@ -366,6 +366,19 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
     }
     Ok(actions)
 }
+// Keep the app's XDG environment private; only manager control uses its bus.
+fn action_command(item: &Action) -> std::process::Command {
+    if item.path == Path::new("systemctl") {
+        let mut command = crate::api::client::manager_command();
+        command.args(item.args.iter().filter(|arg| !matches!(arg.as_str(), "--user" | "--no-ask-password")));
+        command
+    } else {
+        let mut command = std::process::Command::new(&item.path);
+        command.args(&item.args);
+        command
+    }
+}
+
 fn apply(item: &Action) -> Result<()> {
     match item.kind {
         "mkdir" => std::fs::create_dir_all(&item.path)?,
@@ -404,8 +417,7 @@ fn apply(item: &Action) -> Result<()> {
             std::os::unix::fs::symlink(&item.args[0], &item.path)?;
         }
         "command" => {
-            let status = std::process::Command::new(&item.path)
-                .args(&item.args)
+            let status = action_command(item)
                 .stdout(std::process::Stdio::null())
                 .status()
                 .with_context(|| format!("running {}", item.path.display()))?;
@@ -420,6 +432,18 @@ fn apply(item: &Action) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manager_actions_use_the_manager_runtime_only() {
+        let mut actions = Vec::new();
+        super::command(&mut actions, "systemctl", &["--user", "--no-ask-password", "daemon-reload"]);
+        let command = super::action_command(&actions[0]);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["--user", "--no-ask-password", "daemon-reload"]);
+        assert!(command.get_envs().any(|(key, value)| key == "XDG_RUNTIME_DIR"
+            && value == Some(std::ffi::OsStr::new(&format!("/run/user/{}", unsafe { libc::geteuid() })))));
+        super::command(&mut actions, "update-desktop-database", &["private-apps"]);
+        assert!(!super::action_command(&actions[1]).get_envs().any(|(key, _)| key == "XDG_RUNTIME_DIR"));
+    }
+
     #[test]
     fn unit_plan_requires_writable_directory_before_and_after_install() {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
