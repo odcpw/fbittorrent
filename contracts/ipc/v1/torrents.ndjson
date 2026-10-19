@@ -6,7 +6,7 @@
 {"dir":"c2s","frame":{"args":{"glance":false,"interactive":true},"id":3,"op":"app.client"}}
 {"dir":"s2c","frame":{"id":3,"ok":true,"result":{}}}
 {"dir":"c2s","frame":{"id":4,"op":"app.network"}}
-{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"interfaces":["fixture0"],"state":{"interface":"fixture0","message":"ready","ready":true,"selection":"auto"}}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"interfaces":["fixture0"],"state":{"interface":"fixture0","message":"VPN bound: fixture0","ready":true,"selection":"fixture0"}}}}
 {"dir":"c2s","frame":{"id":7,"op":"transfer.info"}}
 {"dir":"s2c","frame":{"id":7,"ok":true,"result":{"dl_bps":1024,"session_downloaded":1024,"session_uploaded":512,"ul_bps":0}}}
 {"dir":"c2s","frame":{"args":{"origin":["manual"],"states":["downloading","metadata","checking","queued","paused","done","seeding","waiting_vpn","error","stalled"]},"id":8,"op":"torrents.list"}}
@@ -52,7 +52,7 @@
 {"dir":"c2s","frame":{"args":{"hash":"7777777777777777777777777777777777777777"},"id":107,"op":"torrents.get"}}
 {"dir":"s2c","frame":{"id":107,"ok":true,"result":{"torrent":{"added_at":1792310400,"checked":false,"force":false,"hash":"7777777777777777777777777777777777777777","intent":"run","name":"Fixture waiting_vpn","private":false,"reason":"vpn_down","save_path":"/tmp/fbt-fixture/downloads","seed":false,"staged":false,"state":"waiting_vpn","upload_policy":"default_cap"}}}}
 {"dir":"c2s","frame":{"args":{"hash":"8888888888888888888888888888888888888888"},"id":108,"op":"torrents.get"}}
-{"dir":"s2c","frame":{"id":108,"ok":true,"result":{"torrent":{"added_at":1792310400,"checked":false,"error":"Fixture restore failed: missing files","force":false,"hash":"8888888888888888888888888888888888888888","intent":"run","name":"Fixture error","private":false,"reason":"restore_failed","save_path":"/tmp/fbt-fixture/downloads","seed":false,"staged":false,"state":"error","upload_policy":"default_cap"}}}}
+{"dir":"s2c","frame":{"id":108,"ok":true,"result":{"torrent":{"added_at":1792310400,"checked":false,"error":"Fixture error restore failed: missing files","force":false,"hash":"8888888888888888888888888888888888888888","intent":"run","name":"Fixture error","private":false,"reason":"missing_files","save_path":"/tmp/fbt-fixture/downloads","seed":false,"staged":false,"state":"error","upload_policy":"default_cap"}}}}
 {"dir":"c2s","frame":{"args":{"hash":"9999999999999999999999999999999999999999"},"id":109,"op":"torrents.get"}}
 {"dir":"s2c","frame":{"id":109,"ok":true,"result":{"torrent":{"added_at":1792310400,"checked":true,"completed_bytes":2048,"content_path":"/tmp/fbt-fixture/downloads/Fixture stalled","dl_bps":0,"force":false,"hash":"9999999999999999999999999999999999999999","intent":"run","name":"Fixture stalled","peers":1,"private":false,"progress":0.5,"ratio":0.0,"save_path":"/tmp/fbt-fixture/downloads","seed":false,"size":4096,"staged":false,"state":"stalled","ul_bps":0,"upload_policy":"default_cap","uploaded_bytes":0}}}}
 {"dir":"c2s","frame":{"args":{"delete_files":true,"hashes":["0123456789abcdef0123456789abcdef01234567"]},"id":200,"op":"torrents.remove","ref":"fixture-remove"}}

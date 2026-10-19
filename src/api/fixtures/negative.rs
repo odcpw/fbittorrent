@@ -363,3 +363,69 @@ fn events_changed_entries_are_rejected_with_and_without_watch() {
         check_group(group, &(prefix + &empty.to_string() + "\n")).unwrap();
     }
 }
+
+#[test]
+fn missing_files_restore_errors_require_the_matching_reason() {
+    let detail: Value = GROUPS
+        .iter()
+        .find(|(group, _)| *group == "torrents")
+        .unwrap()
+        .1
+        .lines()
+        .nth(54)
+        .map(|line| {
+            serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone()
+        })
+        .unwrap();
+    assert_eq!(detail["name"], "Fixture error");
+    assert_eq!(
+        detail["error"],
+        "Fixture error restore failed: missing files"
+    );
+    assert_eq!(detail["reason"], "missing_files");
+    for op in ["torrents.list", "torrents.get"] {
+        let encode = |mut torrent: Value| {
+            let (args, result) = if op == "torrents.list" {
+                torrent.as_object_mut().unwrap().remove("private");
+                (json!({}), json!({"torrents":[torrent]}))
+            } else {
+                (json!({"hash":torrent["hash"]}), json!({"torrent":torrent}))
+            };
+            format!(
+                "{}\n{}\n",
+                json!({"dir":"c2s","frame":{"id":1,"op":op,"args":args}}),
+                json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":result}})
+            )
+        };
+        check_group("missing-files-positive", &encode(detail.clone())).unwrap();
+        for (message, reason) in [
+            (
+                "Fixture error restore failed: missing files",
+                Some("restore_failed"),
+            ),
+            ("Fixture error restore failed: missing files", None),
+            // Reproduce the entire original error/reason combination, including
+            // its truncated name, rather than testing just the corrected text.
+            (
+                "Fixture restore failed: missing files",
+                Some("restore_failed"),
+            ),
+        ] {
+            let mut invalid = detail.clone();
+            invalid["error"] = json!(message);
+            if let Some(reason) = reason {
+                invalid["reason"] = json!(reason);
+            } else {
+                invalid.as_object_mut().unwrap().remove("reason");
+            }
+            let error = check_group("missing-files-negative", &encode(invalid)).unwrap_err();
+            assert_eq!(error, format!("contracts/ipc/v1/missing-files-negative.ndjson:2: {op} result: torrent.reason: missing-files restore errors require missing_files"));
+            println!("{op} rejected message={message:?}, reason={reason:?}: {error}");
+        }
+        let mut other_failure = detail.clone();
+        other_failure["error"] = json!("Fixture error could not restore torrent: invalid metadata");
+        other_failure["reason"] = json!("restore_failed");
+        check_group("other-restore-positive", &encode(other_failure)).unwrap();
+        println!("{op}: missing_files positive and unrelated restore_failed positive passed");
+    }
+}
