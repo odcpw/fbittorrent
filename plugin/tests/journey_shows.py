@@ -65,10 +65,12 @@ def run(binary):
             q.keys(['='],lambda:(view().get('controls') or {}).get('preferenceOpen'))
             q.keys(['j','-k','Return'],lambda:not (view().get('controls') or {}).get('preferenceOpen') and followed()[0].get('quality')=='2160p')
             case.check(not records(),'the visible per-show quality dropdown durably selects 2160p without downloading',json.dumps(followed()))
+            q.keys(['R'],lambda:not shows().get('busy') and len(shows().get('rows',[]))==3 and all(r.get('quality')=='2160p' for r in shows()['rows']))
+            case.check(not records(),'the next dashboard check prefers 2160p for every episode and still downloads nothing',json.dumps(shows()['rows']))
             q.keys(['g','-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)
             selected=shows()['rows'][shows()['cursor']]['key'];hash_=add()['hash']
             stage=c.call('torrents.get',dict(hash=hash_))['result']['torrent']
-            case.check(stage['staged'] and not stage['checked'] and not next(r for r in releases() if r['key']==selected)['read'] and not list(box.downloads.iterdir()),'review stages release metadata while leaving the inbox unread and payload absent',json.dumps(stage))
+            case.check(stage['staged'] and not stage['checked'] and '2160p' in stage['name'] and not next(r for r in releases() if r['key']==selected)['read'] and not list(box.downloads.iterdir()),'review stages the preferred release metadata while leaving the inbox unread and payload absent',json.dumps(stage))
             q.keys(['-k','Escape'],lambda:not add().get('visible'))
             case.check(not records() and not next(r for r in releases() if r['key']==selected)['read'],'Discard leaves no transfer and does not mark the release read','same unread release')
             q.keys(['-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)
@@ -80,7 +82,7 @@ def run(binary):
             q.wait(lambda:any(r['key']==selected and r['read'] and r['transfer']!='none' for r in shows().get('rows',[])))
             case.check(records()[0]['origin']=='shows' and not records()[0]['staged'],'only deliberate Download creates a transfer and marks the release read; read and transfer remain independent',json.dumps(releases()))
             q.shell('hide');q.wait(lambda:q.state().get('view') is None);c.close()
-            h.stop_serve(process);process=h.start_serve(idle_exit_secs=0);h.receive_ready();h.wait_engine();c=daemon.ApiConn(h);c.hello()
+            h.stop_serve(process);h.notify.close();process=h.start_serve(idle_exit_secs=0);h.receive_ready();h.wait_engine();c=daemon.ApiConn(h);c.hello()
             saved=followed()[0];saved_releases=releases()
             case.check(saved['quality']=='2160p' and next(r for r in saved_releases if r['key']==selected)['read'] and len(records())==1,'a real daemon restart retains follow, preference, inbox read state and transfer association',json.dumps(dict(show=saved,releases=saved_releases)))
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"shows"}');q.wait(lambda:'shows' in view())
