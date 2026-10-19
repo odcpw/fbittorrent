@@ -98,6 +98,11 @@ def run(binary):
                         wait(lambda:'257 / 1000 verified pieces' in capture())
                         text=capture();case.path.with_suffix('.txt').write_text(text)
                         case.check('[Pieces]' in text and '▲' in text and '▒' in text,'actual TUI consumes the real verified piece subscription',text)
+                        lines=text.splitlines()
+                        filled=next((i for i,line in enumerate(lines) if '█' in line and '▒' in line and 'verified' not in line),None)
+                        marked=next((i for i,line in enumerate(lines) if '▲' in line and 'first/last' not in line),None)
+                        case.check(filled is not None and marked==filled+1 and '▲' not in lines[filled],
+                                   'real TUI keeps verified/missing completion visible with priority on the following row',text)
                         topic='torrent:'+torrent.info_hash+'.pieces'
                         case.check(client.call('app.info')['result']['subscriptions']['by_topic'].get(topic)==1,'TUI owns one visible sampled detail topic','one subscription')
                         tmux('send-keys','-t',session,'Escape')

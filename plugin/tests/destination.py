@@ -78,7 +78,7 @@ def destination_picker(binary):
         try:
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{}')
             q.wait(lambda:(q.state().get('view') or {}).get('window',{}).get('visible'))
-            press(case,q,['a'],lambda:state(q).get('phase')=='preview','a opens the actual add review')
+            press(case,q,['a'],lambda:state(q).get('phase')=='ready','a opens the actual add review')
             q.wait(lambda:state(q).get('destinationReady'))
             open_picker(case,q);q.wait(lambda:picker(q) and not picker(q).get('loading') and picker(q).get('count')==2)
             case.check(picker(q)['path']==str(sandbox.downloads) and picker(q)['names']==['a choice #1','z readonly'],'picker starts at save_path and excludes files and hidden folders',json.dumps(picker(q)))
@@ -91,7 +91,7 @@ def destination_picker(binary):
             q.wait(lambda:not state(q)['space'].get('pending'))
             case.check(state(q)['space']['writable'] is False and not state(q)['destinationReady'],'unwritable destination disables Download',json.dumps(state(q)))
             q.keys(['-k','Return'],lambda:state(q).get('visible'))
-            case.check(not state(q)['trace'] and client.call('torrents.list',{})['result']['torrents']==[],'Enter cannot commit an unwritable destination',json.dumps(state(q)))
+            case.check(not any(t['kind']=='request' and t['op']=='torrents.commit' for t in state(q)['trace']) and all(t['staged'] for t in client.call('torrents.list',{})['result']['torrents']),'Enter cannot commit an unwritable destination',json.dumps(state(q)))
             open_picker(case,q)
             press(case,q,['-k','Left'],lambda:picker(q) and picker(q).get('path')==str(sandbox.downloads),'Left navigates to the parent folder')
             q.wait(lambda:picker(q) and not picker(q).get('loading') and picker(q).get('count')==2)

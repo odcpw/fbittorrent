@@ -11,17 +11,11 @@ Column {
  spacing:Commons.Style.spacing.sm
  Text {width:root.width;text:root.map ? root.map.have+" / "+root.map.data.count+" verified pieces" : PiecesModel.unavailable(root.torrent);textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
  Item {
-  width:root.width;height:Commons.Style.space(22)
+  width:root.width;height:Commons.Style.space(28)
   Row {
    Repeater {
     model:root.cells
-    Item {
-     required property var modelData
-     width:Commons.Style.space(4);height:Commons.Style.space(22)
-     Rectangle {width:Commons.Style.space(4);height:Commons.Style.space(12);color:parent.modelData.priority ? Commons.Color.accent : parent.modelData.have ? Commons.Color.foreground : Commons.Util.alpha(Commons.Color.foreground,0.22)}
-     Text {anchors.top:parent.top;anchors.topMargin:Commons.Style.space(10);text:parent.modelData.priority ? "▲" : "";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.caption}
-     Rectangle {anchors.bottom:parent.bottom;width:Commons.Style.space(4);height:Commons.Style.space(2);visible:parent.modelData.prefix;color:Commons.Color.foreground}
-    }
+    PieceCell {}
    }
   }
  }

@@ -42,14 +42,11 @@ stop and reap all owned children. It never fabricates states for a screenshot.
 | File | What it tests | Run | Last result |
 |---|---|---|---|
 | `smoke/probe-ui.qml` | Installed `qs.Ui.PanelHero` and `qs.Commons` imports via private symlinks | `FBT_BIN=<binary> plugin/tests/qs-smoke.sh` | PASS, Quickshell 0.3.2, revision 2b4501a282689792b62e94f3fb30d8f512324fe6 |
-| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | PASS on socket-polling fallback; live subscription restoration still needs the P1-08 server cap |
+| `smoke/shell.qml` | Service/socket/real daemon/store, metadata add/pause/resume/remove and restart | Same command; `FBT_TEST_QS=1 all.sh` enables it in the integrated gate | Uses the current API subscription service |
 
-The smoke runs offscreen and never uses an owner Wayland socket. It reads only
-`app.info` from an already running owner API socket before/after the test to check
-`clients.bar`; absent socket or changed instance is logged as a skip, and no owner
-daemon is started. The current pre-P1-11 binary lacks `status --quiet`, so readiness
-uses its equivalent read-only `status --json` until that flag appears. The owner
-probe likewise uses API 1 directly until the `api` CLI verb lands.
+The smoke runs offscreen with its own daemon and private HOME/XDG paths. It
+never probes an owner API or Wayland socket. Mutations and reconnect observations
+use the disposable daemon.
 
 ## Dashboard and network boundary
 
@@ -79,9 +76,9 @@ not fully contained. Requalified runs are retained with the Track C receipt.
 native table at 900 and each tier boundary ±1, including live header widths,
 sidebar/details docking, a native double-click, no right-click action, Cancel-first
 remove/delete, typed sort persistence across a service restart, confirmed
-pause/resume and seed policy, recorded argv for open/copy/title links, and real
-Ctrl+Q shutdown. A missing Shows cap is an explicit unqualified positive-follow
-case. `python3 plugin/tests/run-qs.py table plugin/tests/table` covers the Qt proxy,
+pause/resume, Details upload opt-in/out, recorded argv for open/copy/title links,
+real Shows follow and Ctrl+Q shutdown. It captures Details at 900/1280/1500/1600 px.
+`python3 plugin/tests/run-qs.py table plugin/tests/table` covers the Qt proxy,
 extra typed sorts, pending/failed ref indexes, unread badges and visible ranges.
 `lint.sh` rejects collection loops in Service/view frame handlers with positive
 and negative controls.
@@ -159,3 +156,48 @@ also pairs the real installed Wi-Fi panel (its backend is an unavailable private
 shim). PNGs are under `target/test-logs/visual/<date>/`, with per-state logs under
 `target/test-logs/qs_visual_runs/`. No owner-theme switch or shell IPC is used.
 The opt-in full gate runs this matrix using the executable it just built.
+
+## M2 milestone checks
+
+`python3 plugin/tests/m2.py --binary <current-binary>` runs the P2 checks, every
+dashboard entry point, all width boundaries (including 1098/1398/1598), the three
+owner journeys and P3 daemon cases serially. Native shells and foreground daemon
+cases use private network namespaces. The real-manager catalogue autostart case
+uses its existing disposable named unit, private XDG and loopback HTTP fixture
+in the manager's network namespace, so both ends can actually communicate. Focus with
+`--group p2|dashboard|daemon` or repeated `--case NAME`. Each invocation retains
+commands, exit status, output and generated case evidence under `target/m2-*/`.
+See [the one-page owner demo](../../docs/M2-demo.md) for real-desktop checks.
+
+## Resource measurement
+
+The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
+reference host before each release, after other builds and tests have finished.
+It measures the daemon with 10 and 100 paused local torrents and 0, 1 and 8
+Summary subscribers: three 60-second windows per configuration, plus matched
+CLI polling references (about 24 minutes total). `FBT_TEST_DAEMON_RESOURCES=1`
+selects the same matrix; setting both runs it once. Each fixture has private
+HOME/XDG paths, local payloads and a loopback-bound daemon.
+
+The checked-in P1-08 daemon baseline is in `baselines/resources.json` beside
+P0-06's original TUI measurements. The gate uses the daemon workloads because
+the TUI now attaches to the daemon and `q` detaches. Every CPU/RSS observation
+must be at or below its baseline median plus the larger of 10% of that median
+and three times the range of the three baseline runs. One bar subscription must
+cost no more CPU than status polling every ten seconds. A different reference
+host or window is rejected. Comparison runs never rewrite the baseline.
+
+To run just the resource check after building `release-perf`, use the following
+under the release lock and memory scope. To deliberately record a new reference,
+replace `--baseline` with `--write-baseline` and review the values before committing.
+
+```bash
+python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
+  --daemon --matrix --runs 3 --seconds 60 \
+  --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
+  --output target/test-logs/resources/measurement.json
+```
+
+`resources.py --daemon --torrents N --subscribers K --seconds 60 --runs 3
+--baseline <path> --output <path>` measures one workload; add `--matrix` for the
+complete matrix.
