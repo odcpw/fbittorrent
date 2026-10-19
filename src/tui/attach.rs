@@ -3,7 +3,7 @@ use super::*;
 mod notices;
 mod presence;
 mod wire;
-pub(super) use presence::Presence;
+pub(super) use presence::{Presence, Update as ApiUpdate};
 #[cfg(test)]
 mod tests;
 
@@ -20,7 +20,7 @@ pub(super) fn connect(cfg: &Config) -> Result<Arc<Presence>> {
 fn ensure(cfg: &Config) -> Result<()> {
     let mut explicit = cfg.clone();
     explicit.autostart = true;
-    crate::backend::ensure_running(&explicit, &Client::from_config(&explicit))?;
+    crate::backend::ensure_running(&explicit, &LegacyClient::from_config(&explicit))?;
     Ok(())
 }
 

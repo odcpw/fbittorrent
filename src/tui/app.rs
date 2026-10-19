@@ -99,7 +99,8 @@ pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: S
 pub enum Msg {
     Raw(Event),
     Poll,
-    ApiRead(Result<super::remote::ReadSnapshot,String>),
+    Api {connection:u64,update:super::attach::ApiUpdate,ack:std::sync::mpsc::SyncSender<()>},
+    ApiRead {connection:Option<u64>,result:Result<super::remote::ReadSnapshot,String>},
     Attached(Result<Arc<super::attach::Presence>,String>),
     OwnerShutdown(Result<(),String>),
     SettingsSaved(Result<Config,String>),
@@ -115,6 +116,7 @@ pub enum Msg {
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
     Files(String, Result<Vec<TorrentFile>, String>),
+    ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
     Ratings(Result<Arc<imdb::RatingsIndex>, String>),
     /// Resolved (release name, IMDb id) pairs for the ratings column.

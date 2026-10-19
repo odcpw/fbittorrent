@@ -101,3 +101,33 @@ fn notice_is_once_private_and_preserves_other_preferences() {
     assert!(notices::first_quit(&directory).unwrap());
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn request_byte_cap_counts_json_escaping_before_queueing() {
+    let healthy = serde_json::json!({"text":"\"".repeat(32_000)});
+    let encoded = wire::Wire::encode(&healthy).unwrap();
+    assert!(encoded.ends_with(b"\n") && encoded.len() <= crate::api::LINE_IN);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&encoded).unwrap(),
+        healthy
+    );
+    let oversized = serde_json::json!({"text":"\"".repeat(40_000)});
+    assert!(
+        wire::Wire::encode(&oversized).is_err(),
+        "escaped data must not bypass the byte cap"
+    );
+}
+#[test]
+fn domain_errors_keep_the_transport_distinct_from_malformed_replies() {
+    let success = serde_json::json!({"id":2,"ok":true,"result":{}});
+    assert!(wire::Wire::result("app.client", &success).is_ok());
+    let missing = serde_json::json!({"id":2,"ok":false,"error":{"code":"not_found","message":"missing torrent","retryable":false}});
+    let error = wire::Wire::result("torrents.get", &missing).unwrap_err();
+    assert!(error.downcast_ref::<wire::RemoteError>().is_some());
+    let invalid = serde_json::json!({"id":2,"ok":true,"result":{}});
+    let error = wire::Wire::result("torrents.list", &invalid).unwrap_err();
+    assert!(
+        error.downcast_ref::<wire::RemoteError>().is_none(),
+        "malformed data must close the connection"
+    );
+}

@@ -27,6 +27,7 @@ impl TuiApp {
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
         if let Some(torrent) = self.selected_torrent() {
+            self.store.pending_for_key(&torrent.hash).hash(&mut hash);
             torrent.name.hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);

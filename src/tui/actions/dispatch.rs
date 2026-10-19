@@ -145,13 +145,15 @@ pub(super) fn refresh(app: &mut TuiApp) -> Cmd<Msg> {
     }
     let cfg = app.cfg.clone();
     Cmd::task(move || {
-        let client = Client::from_config(&cfg);
+        if cfg.native() {return Msg::Attached(attach::connect(&cfg).map_err(|error|error.to_string()));}
+        let client = LegacyClient::from_config(&cfg);
         match crate::backend::ensure_running(&cfg, &client) {
             Ok(_) => Msg::ActionDone(Ok("torrent engine ready".into())),
             Err(error) => Msg::ActionDone(Err(error.to_string())),
         }
     })
 }
+
 pub(super) fn query_submit(app: &mut TuiApp) -> Cmd<Msg> {
     if !app.search_input.value().trim().is_empty() {
         return app.start_search();

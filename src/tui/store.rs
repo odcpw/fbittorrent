@@ -49,17 +49,12 @@ pub(super) struct Store {
 }
 impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
-        let changed = self
-            .hello
-            .as_ref()
-            .is_none_or(|old| old.instance != hello.instance);
-        if changed {
-            self.stale = true;
-            self.lose_pending();
-            self.subscriptions.clear();
-            self.snapshots.clear();
-            // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
-        }
+        self.stale = true;
+        self.lose_pending();
+        self.subscriptions.clear();
+        self.snapshots.clear();
+        // Subscriptions belong to the connection, even if the instance did not change.
+        // Keep confirmed rows for the reconnect banner until a fresh snapshot commits.
         self.connected = hello.proto == api::PROTO;
         self.caps = api::validation::NegotiatedCaps::from_hello(&hello);
         self.hello = Some(hello);

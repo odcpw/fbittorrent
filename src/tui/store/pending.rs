@@ -43,10 +43,25 @@ impl Store {
         );
         Ok(())
     }
+    pub(in crate::tui) fn mutation_failed(&mut self, reference: &api::MutationRef, unknown: bool) {
+        if unknown {
+            if let Some(pending) = self.pending.get_mut(reference) {
+                pending.status = Status::Unknown;
+            }
+        } else {
+            self.pending.remove(reference);
+        }
+    }
     pub fn pending_for(&self, hash: &api::Hash) -> Option<&str> {
+        self.pending_for_key(hash.as_str())
+    }
+    pub fn pending_for_key(&self, hash: &str) -> Option<&str> {
         self.pending
             .values()
-            .find(|pending| pending.status == Status::Waiting && pending.hashes.contains(hash))
+            .find(|pending| {
+                pending.status == Status::Waiting
+                    && pending.hashes.iter().any(|key| key.as_str() == hash)
+            })
             .map(|pending| pending.op.as_str())
     }
     pub(super) fn fresh_rows(&mut self) {

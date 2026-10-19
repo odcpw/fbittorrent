@@ -2510,8 +2510,13 @@ class InstalledUnit:
                                        "actual owned child keeps every private environment path and working directory", f"pid={pid}; isolated={isolated}; cwd={cwd}"):
                     self.control("stop", self.sandbox.unit)
                     raise RuntimeError("stopped owned unit after failed child isolation verification")
-            except FileNotFoundError:
-                self.case.check(False, "owned child remains available for isolation verification", f"pid={pid} exited during verification")
+            except (FileNotFoundError, ProcessLookupError):
+                # A shutdown CLI can complete between MainPID and the /proc read.
+                # Still refuse an unreadable live child; a reaped child has no
+                # remaining environment or working directory to verify.
+                alive = process_alive(pid)
+                self.case.check(not alive, "child disappearing during isolation verification has exited",
+                                f"pid={pid}; live={alive}")
 
     def state(self):
         return self.control("show", self.sandbox.unit, "--property=ActiveState", "--value").output
@@ -3278,7 +3283,11 @@ def tui_single_connection(binary, systemd):
     import native
     with api_owned("tui_single_connection", binary, systemd) as (case, sandbox, harness, process), ApiConn(harness) as client:
         mutation_hello(client,"tui-observer")
-        fixture, _ = mutation_add_path(client,sandbox)
+        directory=sandbox.root / "ui-payload"
+        directory.mkdir()
+        fixture=fixtures.two_file_fixture(directory)
+        for path in fixture.files: fixtures.corrupt_byte(path,0)
+        mutation_request(client,"torrents.add",dict(source=dict(path=str(fixture.torrent)),stopped=True,save_path=str(directory)))
         cache=Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent/imdb/by-name-v2/two_files.json"
         cache.write_text('{"missing":true}')
         before=client.call("app.info")["result"]["clients"]
@@ -3304,6 +3313,43 @@ def tui_single_connection(binary, systemd):
             harness.wait_for(first_skipped,"Space changes the actual engine selection over API v1")
             ui.keys(target,"Escape",literal=False)
             ui.assert_pane(target,"two-files")
+            ui.assert_pane(target,"(p) Resume")
+            ui.keys(target,"p")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["intent"]=="run" and row["state"] in ("downloading","stalled"),json.dumps(row)),
+                             "p starts the incomplete native torrent over API v1")
+            ui.assert_pane(target,"(p) Pause")
+            ui.keys(target,"u")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["seed"],json.dumps(row)),
+                             "u changes the actual per-torrent seed intent over API v1")
+            ui.assert_pane(target,"(u) Seed off")
+            ui.keys(target,"p")
+            harness.wait_for(lambda:((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["intent"]=="pause",json.dumps(row)),
+                             "p stops the native torrent over API v1")
+            ui.assert_pane(target,"(p) Resume")
+            added_payload=sandbox.root / "api-add.bin"
+            added_payload.write_bytes(os.urandom(16384))
+            added_fixture=fixtures.torrent_fixture(sandbox.root,[added_payload],name="api-add.bin")
+            native.prepare_imdb_fixture(sandbox.env,["api-add.bin","two-files"])
+            with fixtures.HttpFixture(sandbox.root) as source:
+                ui.keys(target,"a")
+                ui.keys(target,source.base+"/"+added_fixture.torrent.name)
+                ui.keys(target,"Enter",literal=False)
+                harness.wait_for(lambda:((rows:=client.call("torrents.list",{})["result"]["torrents"]) and any(row["hash"]==added_fixture.info_hash for row in rows),json.dumps(rows)),
+                                 "add prompt admits real local HTTP metainfo through the pending API operation")
+                ui.assert_pane(target,"api-add.bin")
+                case.check(len(source.requests)==1,"one Enter fetches metainfo only once",str(source.requests))
+            # Selection is preserved by hash when the API read inserts the new row.
+            expected_target=client.call("torrents.open_target",dict(hash=fixture.info_hash))["result"]["path"]
+            ui.keys(target,"o")
+            opener=sandbox.root / "shims/xdg-open.log"
+            harness.wait_for(lambda:(opener.exists() and json.loads(opener.read_text().splitlines()[-1])==[expected_target],opener.read_text() if opener.exists() else "opener not called"),
+                             "o resolves its real target through API v1 before invoking the private opener")
+            ui.keys(target,"d")
+            ui.assert_pane(target,"Remove 'two-files' (keep files)? y/N")
+            ui.keys(target,"y")
+            harness.wait_for(lambda:((rows:=client.call("torrents.list",{})["result"]["torrents"]) is not None and all(row["hash"]!=fixture.info_hash for row in rows),json.dumps(rows)),
+                             "d/y removes the selected record through API v1")
+            case.check(all(path.exists() for path in fixture.files),"remove-keeping-files preserves both real payload files",str(fixture.files))
             # Keep the UI through another scheduled refresh with the compat path unavailable.
             time.sleep(2.2)
             case.check("offline" not in ui.capture(target) and not harness.engine_path.exists(),
@@ -3318,8 +3364,48 @@ def tui_single_connection(binary, systemd):
             if hidden.exists(): hidden.rename(harness.engine_path)
 
 
+def tui_pending_rss_failure(binary, systemd):
+    import native
+    with api_owned("tui_pending_rss_failure",binary,systemd) as (case,sandbox,harness,process), ApiConn(harness) as client:
+        client.hello()
+        ui=None
+        try:
+            with stalled_api_source(case) as (url,entered), fixtures.HttpFixture(sandbox.root) as feed:
+                (sandbox.root / "rss.xml").write_text('<rss version="2.0"><channel><title>Pending feed</title><item><title>Pending local failure</title><guid>pending-local</guid><link>'+url+'</link></item></channel></rss>')
+                harness.cli("rss","add",feed.base+"/rss.xml","--name","Pending feed")
+                native.prepare_imdb_fixture(sandbox.env,["Pending local failure"])
+                ui=native.AttachedTui(case,str(binary),sandbox,harness,session="fbt-fbt-p4-03-r5p-rss")
+                hidden=harness.engine_path.with_name("hidden-compat.sock")
+                harness.engine_path.rename(hidden)
+                try:
+                    target,done=ui.start()
+                    ui.keys(target,"4")
+                    ui.assert_pane(target,"Pending local failure")
+                    ui.keys(target,"Enter",literal=False)
+                    ui.keys(target,"Enter",literal=False)
+                    case.check(entered.wait(5),"real daemon URL fetch reaches the held loopback source",f"entered={entered.is_set()}")
+                    ui.assert_pane(target,"Adding")
+                    items=harness.cli("rss","items","Pending feed")["items"]
+                    case.check(len(items)==1 and not items[0]["isRead"],"pending admission does not mark the local RSS item read",json.dumps(items))
+                    ui.keys(target,"?")
+                    ui.assert_pane(target,"GLOBAL")
+                    ui.keys(target,"Escape",literal=False)
+                    case.check(client.call("app.info")["result"]["clients"]["tui"]==1,
+                               "held URL confirmation does not block other RPCs or the UI",ui.capture(target))
+                    # Leaving this source context below releases an actual HTTP 404.
+                finally:
+                    if hidden.exists(): hidden.rename(harness.engine_path)
+            ui.assert_pane(target,"could not fetch valid torrent metainfo")
+            items=harness.cli("rss","items","Pending feed")["items"]
+            case.check(not items[0]["isRead"],"failed mutation confirmation leaves RSS unread",json.dumps(items))
+            case.check(client.call("torrents.list",{})["result"]["torrents"]==[],"failed URL creates no torrent record")
+            ui.keys(target,"q")
+            harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after the failed admission")
+        finally:
+            if ui is not None: ui.close()
+
 CASES = {function.__name__: function for function in
-         (tui_single_connection, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (tui_single_connection, tui_pending_rss_failure, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

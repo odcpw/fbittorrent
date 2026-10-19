@@ -7,8 +7,9 @@ impl TuiApp {
         self.rss_loading = true;
         let revision = self.rss_revision;
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             Msg::Rss { revision, result: c.login().and_then(|_| c.rss_feeds()).map_err(|e| e.to_string()) }
         })
     }
@@ -23,9 +24,10 @@ impl TuiApp {
         self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45));
         let revision = self.rss_revision;
         let cfg = self.cfg.clone();
+        let presence = self.presence.clone();
         let label = label.into();
         Cmd::task(move || {
-            let c = Client::from_config(&cfg);
+            let c = Client::from_config(&cfg, presence.clone());
             let (result, error) = match c.login() {
                 Ok(()) => {
                     let error = action(&c).err().map(|error| error.to_string());

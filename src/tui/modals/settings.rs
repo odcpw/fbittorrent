@@ -47,7 +47,7 @@ impl TuiApp {
                         presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?
                             .request("app.restart",serde_json::json!({"scope":"engine"}))?;
                     } else {
-                        if queue_changed {Client::from_config(&previous).set_queue_limit(latest.max_active_downloads)?;}
+                        if queue_changed {Client::from_config(&previous,presence.clone()).set_queue_limit(latest.max_active_downloads)?;}
                         latest.save()?;
                     }
                     Ok(latest)

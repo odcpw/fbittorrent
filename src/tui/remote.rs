@@ -1,8 +1,13 @@
 //! Available API read operations; one existing presence connection owns transport.
 use super::*;
+mod client;
+mod metadata;
+pub(super) use client::ScreenClient;
+mod subscription;
 use crate::api;
 use serde::de::DeserializeOwned;
 use serde_json::json;
+pub(super) use subscription::{verb as mutation_verb, ApiSub};
 
 pub(super) struct ReadSnapshot {
     pub torrents: api::ListResult,
@@ -48,7 +53,7 @@ pub(super) fn set_files(
         .map(|index| u64::try_from(*index))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let field = if priority == 0 { "skip" } else { "include" };
-    connection.request("torrents.set_files", json!({"hash":hash,(field):indices}))?;
+    connection.request_confirmed("torrents.set_files", json!({"hash":hash,(field):indices}))?;
     files(connection, hash)
 }
 impl TuiApp {
@@ -153,7 +158,10 @@ mod tests {
                 interfaces: vec![],
             },
         };
-        app.update(Msg::ApiRead(Ok(snapshot)));
+        app.update(Msg::ApiRead {
+            connection: None,
+            result: Ok(snapshot),
+        });
         assert!(app.online, "{}", app.backend_error);
         assert_eq!(app.network_banner().1, "Waiting for fixture VPN");
         let row = &app.store.torrents[metadata.as_str()];
@@ -202,5 +210,17 @@ mod tests {
             upload.contains("64") && upload.contains("cap") && !upload.contains("seeding allowed"),
             "{upload}"
         );
+    }
+    #[test]
+    fn responses_from_an_old_connection_cannot_change_the_new_models_state() {
+        let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
+        app.poll_inflight = true;
+        app.online = true;
+        app.update(Msg::ApiRead {
+            connection: Some(42),
+            result: Err("old connection failed".into()),
+        });
+        assert!(app.online && app.poll_inflight);
+        assert!(app.backend_error.is_empty());
     }
 }

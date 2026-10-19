@@ -86,8 +86,9 @@ impl Model for TuiApp {
             Box::new(Every::with_id(1, Duration::from_millis(2000), || Msg::Poll)),
             Box::new(Every::with_id(2, Duration::from_millis(300), || Msg::Hover)),
         ];
+        if let Some(connection)=self.presence.as_ref().filter(|connection|connection.alive()) {v.push(Box::new(remote::ApiSub {connection:connection.clone()}));}
         if let Some((id, q)) = &self.search_sub {
-            v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone() }));
+            v.push(Box::new(SearchSub { id: *id, query: q.clone(), cfg: self.cfg.clone(),presence:self.presence.clone() }));
         }
         if self.rss_retry_until.is_some_and(|until| std::time::Instant::now() < until) && self.feeds.iter().any(|f| f.is_loading) {
             v.push(Box::new(Every::with_id(3, Duration::from_secs(1), || Msg::RssReload)));
@@ -133,7 +134,11 @@ impl Model for TuiApp {
                 match r { Ok(idx) => self.ratings = Some(idx), Err(e) => self.set_status(format!("ratings index: {e}"), true) }
                 Cmd::none()
             }
-            Msg::ApiRead(result) => self.apply_api_read(result),
+            Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
+            Msg::ApiRead {connection,result} => {
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                self.apply_api_read(result)
+            },
             Msg::Torrents(r) => {
                 self.poll_inflight = false;
                 match r {
@@ -162,7 +167,7 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
                 Err(error) => { self.set_status(error,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -249,6 +254,10 @@ impl Model for TuiApp {
                     Err(e) => { if let Some(m) = self.providers.as_mut() { m.loading = false; m.error = e; } }
                 }
                 Cmd::none()
+            }
+            Msg::ApiFiles {connection,hash,result} => {
+                if self.presence.as_ref().map(|active|active.id)!=connection {return Cmd::none();}
+                self.update(Msg::Files(hash,result))
             }
             Msg::Files(hash, r) => {
                 if let Some(m) = self.files.as_mut() {

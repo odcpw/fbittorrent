@@ -229,3 +229,33 @@ The native helper now accepts the bead's unique tmux session name. Remaining:
 push/ApiSub transport, native mutations, reconnect UI, settings service and
 Track B namespaces. The existing timer remains until the push server arrives;
 no full-suite/all.sh run for this coherent intermediate integration.
+
+P4-03 mutation checkpoint: native start/stop/seed/remove/add/open and file
+selection use the single API connection. Its bounded multiplexing worker emits
+ordered mutation refs and events, keeps heartbeats/RPCs responsive during pending
+URL fetches, caches completion before waking callers, and cancels on UI close.
+Rows remain confirmed; pending verbs dim rows and disable the same actions in
+both keys and footer. Search/RSS/Shows keep their current service implementation
+behind `remote::ScreenClient`; RSS and Shows mark downloaded only after real
+admission, including a failure control. Local provider metadata handoffs are
+private and bounded to eight unconfirmed files. Reconnect to the same daemon
+resets connection-scoped revisions and stale replies cannot overwrite new data.
+`cargo test --locked -p fbittorrent tui:: -- --nocapture`: **106 passed**, all
+**34 prior goldens unchanged** (`action_ready_units.*`). Debug build, source size
+self-test and Python compilation pass (`action_ready_binary.*`,
+`mutations_sizes.*`). Two real tmux cases pass with engine.sock hidden
+(`action_ready_live/daemon/{tui_single_connection,tui_pending_rss_failure}.jsonl`):
+file selection, start, seed, stop, one HTTP add, API target/open, keep-files
+remove, one TUI connection 0→1→0; held/failed HTTP admission stays responsive and
+leaves RSS unread. The first repeat exposed a truthful-action race: the footer
+advertised Resume before file selection settled. The catalogue now disables
+pending row actions and the test waits for their visible readiness (no timeout
+or outcome assertion relaxed). Five P1-15 lifetime cases pass in
+`lifetime_regression/native/`; q_confirms passes in
+`lifetime_confirm_verified/native/` after a minimal adjacent harness fix that
+verifies a process has exited when /proc vanishes during shutdown rather than
+throwing ProcessLookupError. Every live-child isolation check remains enforced.
+The bead remains incomplete: the branch lacks the bus/shared-client/settings
+and Track B service integrations; its two-second fallback timer remains until
+push is available. Reconnect UI is the next independent step. No full-suite or
+all.sh run at this coherent intermediate checkpoint.
