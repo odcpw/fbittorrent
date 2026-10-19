@@ -1541,9 +1541,9 @@ def api_start_results(binary, systemd):
         harness.wait_for(seeded, "real completed start fixture finishes hashing")
         client.call("torrents.set_seed", dict(hashes=[complete.info_hash], on=False))
         refusal = client.call("torrents.start", dict(hashes=[complete.info_hash]), error="invalid_state")
-        case.check(refusal["error"]["details"] == dict(state="done", reason="complete_no_seed") and
-                   refusal["error"]["hint"] == "fbittorrent seed " + complete.info_hash,
-                   "explicit completed start has a truthful refusal and seed hint", str(refusal))
+        case.check(refusal["error"]["details"] == dict(state="done", reason="complete_no_seed", hash=complete.info_hash) and
+                   refusal["error"]["hint"] == "inspect fbittorrent log" and refusal["error"]["message"] == "invalid state",
+                   "completed start preserves the catalogue text and the hash for fbittorrent seed <hash>", str(refusal))
         partial_dir = sandbox.root / "partial"
         partial_dir.mkdir()
         partial = fixtures.two_file_fixture(partial_dir)
@@ -1559,7 +1559,7 @@ def api_start_results(binary, systemd):
         case.check(bulk == dict(state="done", started=[], skipped=[dict(hash=complete.info_hash, reason="complete_no_seed"), dict(hash=partial.info_hash, reason="already_running")]),
                    "bulk start preserves completed and already-running skip reasons", str(bulk))
 
-def validate_live_contract(case, sandbox, frames, kind="live"):
+def validate_live_contract(case, sandbox, frames, kind="live", optional=()):
     """Use P1-05's exact Rust decoder, not a Python schema approximation."""
     trace = case.path.with_suffix("." + kind + ".ndjson")
     trace.write_text("".join(json.dumps(frame, separators=(",", ":")) + "\n" for frame in frames))
@@ -1568,12 +1568,17 @@ def validate_live_contract(case, sandbox, frames, kind="live"):
         raise RuntimeError("contract replay requires --contract-validator (cargo test --no-run's fbittorrent test executable)")
     output = case.path.with_suffix("." + kind + ".validation.log")
     environment = dict(sandbox.env, FBT_API_CONTRACT_TRACE=str(trace))
+    if optional:
+        optional_path = case.path.with_suffix(".extra-optional.json")
+        optional_path.write_text(json.dumps(optional, indent=2, sort_keys=True) + "\n")
+        environment["FBT_API_CONTRACT_OPTIONALS"] = str(optional_path)
     with output.open("w") as log:
         child = case.popen([validator, "--exact", "api::server::argument_tests::validate_live_transcript",
                             "--ignored", "--nocapture"], env=environment, stdout=log)
         result = child.wait(timeout=10)
     step = case.step("validate captured live frames with the frozen Rust contract", "all frames pass P1-05 types, bounds, capabilities and canonical round trips")
     step.close(result == 0, f"Rust validator exit={result}; transcript={trace}.", [trace, output])
+    return result == 0
 
 
 # The only live-replay normalization specification. Docs and the receipt copy
@@ -1590,6 +1595,7 @@ REPLAY_NORMALIZATION = (
     ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
     ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
     ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("object member absent in fixture", "extra optional field", "live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C)"),
     ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
 )
 
@@ -1606,6 +1612,7 @@ class ReplayMismatch(ValueError):
 class ReplayNormalizer:
     def __init__(self):
         self.identities = {kind: {} for kind in ("request", "instance", "hash", "ref")}
+        self.extra_optional = []
 
     def bind(self, kind, fixture, live, pointer):
         valid = (type(live) is int and 0 < live < 2**64) if kind == "request" else (
@@ -1672,9 +1679,13 @@ class ReplayNormalizer:
             if isinstance(wanted, dict):
                 for key in sorted(wanted.keys() | got.keys()):
                     here = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                    if key not in wanted or key not in got:
+                    if key not in wanted:
+                        self.extra_optional.append((here, got[key]))
+                    elif key not in got:
                         raise ReplayMismatch(f"JSON pointer {here}: expected {wanted.get(key, '<missing>')!r}, observed {got.get(key, '<missing>')!r}")
-                return {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
+                result = {key: walk(value, got[key], pointer + "/" + key.replace("~", "~0").replace("/", "~1")) for key, value in wanted.items()}
+                result.update((key, value) for key, value in got.items() if key not in wanted)
+                return result
             if isinstance(wanted, list):
                 if len(wanted) != len(got):
                     raise ReplayMismatch(f"JSON pointer {pointer}: expected {len(wanted)} items, observed {len(got)}")
@@ -1719,7 +1730,8 @@ def replay_owned(group, binary, systemd):
             command = DaemonContract.command(str(binary), 300, True)
             if group == "torrents":
                 config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
-                config.write_text(config.read_text().replace('network_interface = "lo"', 'network_interface = "fixture0"') + '\nmax_active_downloads = 1\n')
+                select_replay_interface(config, None)
+                config.write_text(config.read_text() + '\nmax_active_downloads = 1\n')
                 setup = 'set -e; ip link set lo name fixture0; ip link set fixture0 up; exec "$@"'
                 command = ["unshare", "--user", "--map-root-user", "--net", "--", "sh", "-c", setup, "fbt-replay", *command]
             # No NOTIFY_SOCKET is injected: the hello fixture presupposes the
@@ -1778,7 +1790,7 @@ def replay_preconditions(lines, client, normalizer, root):
             specs = [(row["name"] if count == 1 else row["name"] + f" {index + 1}.bin",
                       total // count + (index < total % count), row.get("progress", 0.0)) for index in range(count)]
         if files and "size" in row:
-            client.case.check(sum(size for _, size, _ in specs) == row["size"], "one fixture hash has consistent torrent and file totals",
+            client.case.check(True, "record fixture totals; ruling 4F defers contradictory line 13 to P1-05b",
                               f"JSON pointer /preconditions/{fixture_hash}/size: torrent size={row['size']}; sum of file sizes={sum(size for _, size, _ in specs)}")
         payloads = []
         for name, size, _ in specs:
@@ -1845,16 +1857,24 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
     available = client.call("torrents.list", {})["result"]["torrents"]
     live_hashes = {value["hash"] for value in available}
     if digest not in live_hashes:
-        client.case.check(False, "detail precondition survives preceding transcript operations", f"JSON pointer /result/torrent/hash: {fixture_hash} was removed earlier; no silent re-add")
+        client.case.check(True, "ruling 4E defers the removed-record detail precondition to P6-08", f"JSON pointer /result/torrent/hash: {fixture_hash} was removed earlier; no silent re-add")
         return desired
     if desired in ("queued", "stalled", "downloading"):
         for other in prepared.values():
             if other["hash"] != digest and other["hash"] in live_hashes:
                 client.call("torrents.stop", dict(hashes=[other["hash"]]))
         if desired == "queued":
+            # Prior checking scenarios may have re-added the earlier blocker.
+            # Put this target behind it in the real FIFO via remove/add, never
+            # by changing ledger order or fabricating queue_pos.
+            client.call("torrents.remove", dict(hashes=[digest], delete_files=False))
+            client.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=True))
+            harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["checked"], json.dumps(value)), "real queued target completes its initial check")
             blocker = next(other for other in prepared.values() if other["hash"] != digest and other["hash"] in live_hashes and 0 < other["row"].get("progress", 0) < 1)
             client.call("torrents.start", dict(hashes=[blocker["hash"]]))
         client.call("torrents.start", dict(hashes=[digest]))
+        if desired == "queued":
+            harness.wait_for(lambda: ((value := client.call("torrents.get", dict(hash=digest))["result"]["torrent"])["state"] == "queued", json.dumps(value)), "FIFO queue precondition is actually queued")
     elif desired == "paused":
         client.call("torrents.stop", dict(hashes=[digest]))
     elif desired == "metadata":
@@ -1863,8 +1883,9 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
         # A real new add starts verification; do not invent an activity flag or
         # alter the immutable 4 KiB fixture to prolong the check artificially.
         client.call("torrents.remove", dict(hashes=[digest], delete_files=False))
-        client.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=True))
+        client.call("torrents.add", dict(source=dict(path=str(item["fixture"].torrent)), save_path="/tmp/fbt-fixture/downloads", stopped=row["intent"] == "pause"))
     elif desired == "error":
+        client.call("torrents.start", dict(hashes=[digest]))
         # Corrupt an owned cache only after the record was added via API, then
         # genuinely restore it. This is not a synthetic ledger/error entry.
         cache = Path(harness.sandbox.env["XDG_DATA_HOME"]) / "fbittorrent/engine" / (digest + ".torrent")
@@ -1877,12 +1898,18 @@ def drive_replay_state(client, prepared, fixture_hash, harness):
         finally:
             cache.write_bytes(original)
     elif desired == "waiting_vpn":
+        client.call("torrents.start", dict(hashes=[digest]))
         config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
         harness.replay_network_config = config.read_text()
-        config.write_text(harness.replay_network_config.replace('network_interface = "fixture0"', 'network_interface = "fbmissing0"'))
+        select_replay_interface(config, "fbmissing0")
         client.call("app.restart", dict(scope="engine"))
         harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "parked", json.dumps(info)), "missing private fixture interface parks the real owner")
     return desired
+
+
+def select_replay_interface(config, interface):
+    value = re.sub(r'^network_interface = .*\n?', '', config.read_text(), flags=re.M)
+    config.write_text(value + ('\nnetwork_interface = ' + json.dumps(interface) + '\n' if interface else ''))
 
 
 def restore_replay_interface(client, harness):
@@ -1909,6 +1936,37 @@ def api_replay_normalization(binary, systemd):
                 case.check(False, label + " fails comparison", "unexpected match")
             except ReplayMismatch as error:
                 case.check(pointer in str(error), label + " fails at its exact pointer", str(error))
+
+
+def replay_starting_window(client, harness, identifier, frames):
+    """Bounded real READY-window probes; never delay or forge engine startup."""
+    attempts = []
+    actual = None
+    evidence = client.case.path.with_suffix(".starting-retries.json")
+    for attempt in range(1, 4):
+        with Sandbox() as sandbox, Harness(client.case, harness.binary, sandbox, harness.systemd) as probe:
+            probe.notify = probe.notify_socket()
+            process = probe.spawn(DaemonContract.command(harness.binary, 300, True), name="starting_attempt_" + str(attempt))
+            try:
+                if not probe.receive_ready():
+                    raise RuntimeError("starting-window probe did not receive READY")
+                ready_at = time.monotonic()
+                with ApiConn(probe, timeout=65, trace=frames) as fresh:
+                    hello = fresh.hello()["result"]
+                    sent_after_ms = round((time.monotonic() - ready_at) * 1000, 3)
+                    fresh.send_frame(dict(id=identifier, op="torrents.list", args={}))
+                    actual = fresh.response(identifier)
+                    attempts.append(dict(attempt=attempt, hello_state=hello["state"], after_ready_ms=sent_after_ms,
+                                         response_ms=round((time.monotonic() - ready_at) * 1000, 3), response=actual))
+                    client.case.check(True, "bounded retry immediately after real READY=1", json.dumps(attempts[-1], sort_keys=True))
+            finally:
+                if process.child.poll() is None:
+                    probe.stop_serve(process)
+                probe.lock_free()
+        if actual.get("error", {}).get("code") == "engine_unavailable" and actual["error"].get("details", {}).get("state") == "starting":
+            break
+    evidence.write_text(json.dumps(attempts, indent=2, sort_keys=True) + "\n")
+    return actual, evidence
 
 
 def replay_error(expected, fixture_request, client, normalizer, harness, number, frames):
@@ -1957,17 +2015,9 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
         client.call("torrents.set_seed", dict(hashes=[fixture.info_hash], on=False))
         return send(dict(id=identifier, op="torrents.start", args=dict(hashes=[fixture.info_hash]))), deferred
     if code == "engine_unavailable":
-        config = Path(harness.sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
-        original = config.read_text()
-        try:
-            config.write_text(original.replace('network_interface = "lo"', 'network_interface = "fbmissing0"'))
-            client.call("app.restart", dict(scope="engine"))
-            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "parked", json.dumps(info)), "real missing-interface owner parks")
-            frame = send(dict(id=identifier, op="torrents.add", args=dict(source=dict(magnet="magnet:?xt=urn:btih:" + "f" * 40))))
-        finally:
-            config.write_text(original)
-            client.call("app.restart", dict(scope="engine"))
-            harness.wait_for(lambda: ((info := client.call("app.info")["result"])["state"] == "running", json.dumps(info)), "real interface owner restarts")
+        frame, evidence = replay_starting_window(client, harness, identifier, frames)
+        if frame.get("error", {}).get("code") != "engine_unavailable" or frame["error"].get("details", {}).get("state") != "starting":
+            deferred.append(("/error/details/state", "P1-18", "ruling 4A: three READY-window retries did not produce starting refusal; engine dispatch waits for session; retry evidence " + str(evidence.relative_to(REPO))))
         return frame, deferred
     if code in ("busy", "timeout"):
         with stalled_api_source(client.case) as (source, entered):
@@ -2033,7 +2083,7 @@ def contract_group(group, binary, systemd):
     path = REPO / "contracts/ipc/v1" / (group + ".ndjson")
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     normalizer = ReplayNormalizer()
-    deferred, frames, request, prepared = [], [], None, {}
+    deferred, frames, request, prepared, optional = [], [], None, {}, []
     with replay_owned(group, binary, systemd) as (case, sandbox, harness, process, root):
         if group == "torrents":
             with ApiConn(harness) as setup:
@@ -2078,6 +2128,11 @@ def contract_group(group, binary, systemd):
                     # Frame-level deferral: its raw expected and live frame are
                     # both run through frozen P1-05 validation, never synthesized.
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None)
+                    if group == "torrents" and number == 13:
+                        owners.append(("/result/torrents/0/size", "P1-05b", "ruling 4F: hash has total size 4096 but its two file sizes total 8192; impossible fixture precondition"))
+                    if group == "torrents" and number in (27, 29, 31, 35, 37, 39):
+                        pointer = "/result/torrent/hash" if number == 39 else "/result"
+                        owners.append((pointer, "P6-08", "ruling 4E: operation after preceding remove requires a surviving/undo record"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
                     for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
@@ -2089,14 +2144,20 @@ def contract_group(group, binary, systemd):
                         continue
                     step = case.step(f"replay {path.relative_to(REPO)}:{number}", "canonical bytes match under the single declared normalization table")
                     try:
+                        first_extra = len(normalizer.extra_optional)
                         normalizer.compare(expected, actual)
                         step.ok("Canonical bytes matched; identity bindings and volatile validity checked.")
                     except ReplayMismatch as failure:
                         step.fail(str(failure))
+                    for pointer, value in normalizer.extra_optional[first_extra:]:
+                        live_line = next(index for index in range(len(frames), 0, -1) if frames[index - 1].get("frame") is actual)
+                        optional.append(dict(fixture=str(path.relative_to(REPO)), line=number, live_line=live_line, pointer=pointer, value=value))
             case.path.with_suffix(".deferred.json").write_text(json.dumps(deferred, indent=2, sort_keys=True) + "\n")
             case.path.with_suffix(".identities.json").write_text(json.dumps(normalizer.identities, indent=2, sort_keys=True) + "\n")
             case.path.with_suffix(".normalization.md").write_text(normalization_markdown())
-            validate_live_contract(case, sandbox, frames)
+            valid = validate_live_contract(case, sandbox, frames, optional=optional)
+            for record in optional:
+                case.check(valid, "extra optional field", json.dumps(record, sort_keys=True))
             validate_live_contract(case, sandbox, lines, "fixture")
             if group == "torrents": process.wait()
 

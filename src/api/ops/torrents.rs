@@ -357,15 +357,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 let row = rows.iter().find(|row| &row.hash == *hash).unwrap();
                 if !row.seed && (row.completed_at.is_some() || row.state == TorrentState::Done) {
                     if requested.len() == 1 {
-                        let mut failure = error(
-                            InvalidState,
-                            "already complete; seeding is off for this torrent",
-                            None,
-                        );
-                        failure.hint = Some(format!("fbittorrent seed {hash}"));
+                        let mut failure = error(InvalidState, "invalid state", None);
+                        failure.hint = Some("inspect fbittorrent log".into());
                         failure.details = Some(serde_json::Map::from_iter([
                             ("state".into(), json!(row.state)),
                             ("reason".into(), json!("complete_no_seed")),
+                            ("hash".into(), json!(hash)),
                         ]));
                         return Err(failure);
                     }

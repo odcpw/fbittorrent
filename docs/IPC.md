@@ -350,7 +350,12 @@ user/network namespace; it never adopts an existing directory or edits a ledger.
 The following single table is defined in daemon.py and reproduced verbatim here
 and in the P1-06 receipt. Identity bindings are bijective and checked at every
 occurrence. Volatile fields retain their presence/type/validity checks. All other
-fields compare byte-for-byte after canonical P1-05 typed re-serialization. A
+fields asserted by the fixture compare byte-for-byte after canonical P1-05
+typed re-serialization. Under ruling 4C an optional member absent in the
+fixture may be present live: the frozen Rust checker validates the live frame
+and its form with that member removed. Every occurrence is logged as "extra
+optional field" with its JSON pointer and reproduced verbatim in the receipt.
+Missing or changed fixture-asserted members still fail. A
 future-capability/proto-2/unreachable-error frame is validated with the frozen
 P1-05 checker and recorded by file, line, JSON pointer and target bead. No other
 mismatch is deferred. A failed precondition or non-deferred mismatch fails replay.
@@ -368,6 +373,7 @@ mismatch is deferred. A failed precondition or non-deferred mismatch fails repla
 | `/result/server/pid` | timestamp | positive u64; presence preserved |
 | `/result/server/build` | text | nonempty string; presence preserved (declared fixture volatile path) |
 | `/result/server/version` | version | semantic version string; presence preserved |
+| `object member absent in fixture` | extra optional field | live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C) |
 | `all other JSON pointers` | exact | canonical bytes through the P1-05 types; no extra masks or value substitution |
 
 ```ndjson

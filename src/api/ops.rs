@@ -138,11 +138,19 @@ pub fn error(code: crate::api::ErrorCode, message: &str, key: Option<&str>) -> c
     use crate::api::ErrorCode::*;
     crate::api::Error {
         code,
-        message: message.chars().take(200).collect(),
+        message: match code {
+            ProtoUnsupported => "proto unsupported".into(),
+            UnknownOp => "unknown op".into(),
+            NotFound => "not found".into(),
+            EngineUnavailable => "engine unavailable".into(),
+            Busy => "busy".into(),
+            Timeout => "timeout".into(),
+            _ => message.chars().take(200).collect(),
+        },
         retryable: matches!(code, EngineUnavailable | Busy | Upstream | Timeout),
         hint: match code {
-            EngineUnavailable => Some("fbittorrent status --json".into()),
-            Busy => Some("retry in a moment".into()),
+            EngineUnavailable | Busy | Timeout => Some("retry in a moment".into()),
+            ProtoUnsupported | UnknownOp | NotFound => Some("inspect fbittorrent log".into()),
             _ => None,
         },
         details: key.map(|key| serde_json::Map::from_iter([("key".into(), key.into())])),
@@ -186,7 +194,10 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
         } else {
             "stopping"
         };
-        failure.details = Some(serde_json::Map::from_iter([("state".into(), state.into())]));
+        failure.details = Some(serde_json::Map::from_iter([
+            ("state".into(), state.into()),
+            ("message".into(), format!("engine is {state}").into()),
+        ]));
     }
     if text.contains("already complete") {
         failure.hint = Some("enable seeding for this torrent, then retry".into());
