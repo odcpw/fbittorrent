@@ -42,7 +42,7 @@ mod text;
 use text::*;
 pub use connection::run;
 pub(crate) use connection::SignalTermination;
-mod actions;
+pub(crate) mod actions;
 mod store;
 mod format;
 mod palette;

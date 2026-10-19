@@ -37,12 +37,17 @@ impl TuiApp {
         self.search_input.set_focused(self.screen == Screen::Search && self.search_focus_input);
     }
 
-    pub(super) fn on_prompt_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_prompt_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Prompt, key)
+    }
+
+    pub(super) fn on_prompt_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let Some(p) = self.prompt.as_mut() else { return Cmd::none() };
         if p.yes_no {
             let kind = p.kind.clone();
-            match k.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') if k.modifiers.is_empty() || k.modifiers == Modifiers::SHIFT => {
+            match intent {
+                actions::Intent::Confirm => {
                     self.close_prompt();
                     return match kind {
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
@@ -69,12 +74,12 @@ impl TuiApp {
                 _ => { self.close_prompt(); return Cmd::none(); }
             }
         }
-        match k.code {
-            KeyCode::Escape => { self.close_prompt(); Cmd::none() }
-            KeyCode::F(2) if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.0 = !p.add_flags.0; Cmd::none() }
-            KeyCode::F(3) if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
-            KeyCode::F(4) if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
-            KeyCode::Enter => {
+        match intent {
+            actions::Intent::Cancel => { self.close_prompt(); Cmd::none() }
+            actions::Intent::Sequential if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.0 = !p.add_flags.0; Cmd::none() }
+            actions::Intent::FirstLast if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
+            actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
+            actions::Intent::Primary => {
                 let value = p.input.value().trim().to_string();
                 let kind = p.kind.clone();
                 let (seq, fl, seed) = p.add_flags;
@@ -96,7 +101,7 @@ impl TuiApp {
                     _ => Cmd::none(),
                 }
             }
-            _ => { p.input.handle_event(&Event::Key(k)); Cmd::none() }
+            _ => Cmd::none()
         }
     }
 }

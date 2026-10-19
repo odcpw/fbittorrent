@@ -35,20 +35,25 @@ impl TuiApp {
         self.load_plugins()
     }
 
-    pub(super) fn on_providers_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_providers_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Modal(actions::ModalKind::Providers), key)
+    }
+
+    pub(super) fn on_providers_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let Some(m) = self.providers.as_ref() else { return Cmd::none() };
         let n = m.plugins.len();
         let cur = m.list.borrow().selected().and_then(|i| m.plugins.get(i)).cloned();
         let all: Vec<String> = m.plugins.iter().map(|p| p.name.clone()).collect();
-        match k.code {
-            KeyCode::Escape | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('s') => { self.providers = None; }
-            KeyCode::Down | KeyCode::Char('j') => { if n > 0 { m.list.borrow_mut().select_next(n); } }
-            KeyCode::Up | KeyCode::Char('k') => m.list.borrow_mut().select_previous(),
-            KeyCode::Char(' ') => if let Some(p) = cur { return self.set_plugins(vec![p.name], !p.enabled); },
-            KeyCode::Char('a') => return self.set_plugins(all, true),
-            KeyCode::Char('n') => return self.set_plugins(all, false),
-            KeyCode::Char('o') => if let Some(p) = cur { if !p.url.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&p.url).spawn(); } },
-            KeyCode::Char('r') => return self.load_plugins(),
+        match intent {
+            actions::Intent::Cancel => { self.providers = None; }
+            actions::Intent::Down => { if n > 0 { m.list.borrow_mut().select_next(n); } }
+            actions::Intent::Up => m.list.borrow_mut().select_previous(),
+            actions::Intent::Toggle => if let Some(p) = cur { return self.set_plugins(vec![p.name], !p.enabled); },
+            actions::Intent::All => return self.set_plugins(all, true),
+            actions::Intent::None => return self.set_plugins(all, false),
+            actions::Intent::Open => if let Some(p) = cur { if !p.url.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&p.url).spawn(); } },
+            actions::Intent::Reload => return self.load_plugins(),
             _ => {}
         }
         Cmd::none()

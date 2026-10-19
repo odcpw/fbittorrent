@@ -76,3 +76,33 @@ passes all 104 files (`sizes.*`). The bead's ONE full
 `cargo test --locked -- --nocapture` passes 282 tests/2 ignored (`full.*`),
 matching the preceding bead's count. All three acceptance criteria pass.
 No release/all.sh between beads. Continue with P4-02 on this branch.
+
+## P4-02 — fbt-p4-02-6bx
+
+One 127-row action catalogue now drives scoped dispatch, conditional native/legacy
+bindings, footer priorities, paged help, `robot-docs keys --surface` and generated
+README/keymap output. Removal confirms only on lowercase `y`; native `f`/`F`
+follows and Search `P` opens Providers. Static key docs skip app/config startup.
+An unchanged footer reuses its cached widgets; cache tests cover query, width,
+feedback and read-state changes. CLI declarations/local helpers moved out of
+`main.rs` (781 lines): 31 existing function bodies are byte-identical; only
+`run` gains static docs dispatch (`cli-move-proof.json`). All changed source
+files are ≤900 lines; the strict TUI/CLI size gate passes 80 files (`sizes.*`).
+Evidence root: `target/test-logs/fbt-p4-02-6bx/`. **All three criteria pass**:
+invariants in `cargo test --locked tui:: -- --nocapture` pass (`tui_final.*`;
+78 tests at that point, 79 including the final cache regression in `full.*`);
+`footer-overflow-80x24.txt` prints the cue with nine or more enabled actions,
+and the real `native.py --case file_modal_shows_help_80x24` passes all 9 steps
+(`live/native/file_modal_shows_help_80x24.jsonl`, actual 80×24 pane retained);
+`scripts/gen-keymap.sh --check` matches both committed consumers
+(`generated_check.*`). The bead's ONE full `cargo test --locked -- --nocapture`
+passes **294 tests, 2 ignored**, including all 34 render goldens, the CLI check
+and all action invariants (`full.*`, `full-summary.json`); the gate's background
+failure scan is clean (`background.*`). Outside help, existing golden changes
+are confined to the final two footer rows (`golden-review.json`). No release
+build or all.sh between track beads. Neighbour edits: CLI split, capabilities
+row, README, generated plugin JSON, native harness assertions. P1-15 must port
+the catalogue's two lifetime callbacks when its connection/quit change lands;
+P1-11 must reconcile the additive key-doc command with its contract-version
+and command-discovery changes. Future feature beads add their own action rows;
+this table does not advertise handlers that have not landed.

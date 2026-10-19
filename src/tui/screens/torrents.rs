@@ -6,54 +6,59 @@ impl TuiApp {
         self.tor_list.borrow().selected().and_then(|i| self.torrents.get(i))
     }
 
-    pub(super) fn on_torrents_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_torrents_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Screen(Screen::Torrents), key)
+    }
+
+    pub(super) fn on_torrents_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let n = self.torrents.len();
-        match k.code {
-            KeyCode::Down | KeyCode::Char('j') => { if n > 0 { self.tor_list.borrow_mut().select_next(n); } }
-            KeyCode::Up | KeyCode::Char('k') => self.tor_list.borrow_mut().select_previous(),
-            KeyCode::Home | KeyCode::Char('g') => self.tor_list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
-            KeyCode::End | KeyCode::Char('G') => self.tor_list.borrow_mut().select(n.checked_sub(1)),
-            KeyCode::Char('p') | KeyCode::Char(' ') => {
+        match intent {
+            actions::Intent::Down => { if n > 0 { self.tor_list.borrow_mut().select_next(n); } }
+            actions::Intent::Up => self.tor_list.borrow_mut().select_previous(),
+            actions::Intent::First => self.tor_list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
+            actions::Intent::Last => self.tor_list.borrow_mut().select(n.checked_sub(1)),
+            actions::Intent::Pause => {
                 if let Some(t) = self.selected_torrent().cloned() {
                     let stopped = t.is_stopped();
                     return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
                 }
             }
-            KeyCode::Char('s') if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::Sequential if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
                 return self.action("toggled sequential", move |c| c.toggle_sequential(&[t.hash]));
             },
-            KeyCode::Char('f') if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::FirstLast if !self.cfg.native() => if let Some(t) = self.selected_torrent().cloned() {
                 return self.action("toggled first/last", move |c| c.toggle_first_last(&[t.hash]));
             },
-            KeyCode::Char('u') => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
                 let allow = !t.seed_allowed();
                 return self.action(if allow { "seeding allowed" } else { "seeding off · upload capped" },
                     move |c| if allow { c.allow_seeding(&[t.hash]) } else { c.deny_seeding(&[t.hash]) });
             },
-            KeyCode::Char('d') | KeyCode::Delete => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::Remove => if let Some(t) = self.selected_torrent().cloned() {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: false },
                     &format!("Remove '{}' (keep files)? y/N", short(&t.name, 50)), true);
             },
-            KeyCode::Char('D') => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::DeleteFiles => if let Some(t) = self.selected_torrent().cloned() {
                 self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: true },
                     &format!("DELETE '{}' AND ITS FILES? y/N", short(&t.name, 50)), true);
             },
-            KeyCode::Char('o') => if let Some(t) = self.selected_torrent() {
+            actions::Intent::Open => if let Some(t) = self.selected_torrent() {
                 let _ = std::process::Command::new("xdg-open").arg(crate::qbt::open_target(t)).spawn();
             },
-            KeyCode::Char('i') => if let Some(t) = self.selected_torrent() {
+            actions::Intent::Imdb => if let Some(t) = self.selected_torrent() {
                 let name = t.name.clone();
                 return self.open_imdb(name, None);
             },
-            KeyCode::Char('w') => if let Some(t) = self.selected_torrent() {
+            actions::Intent::Wiki => if let Some(t) = self.selected_torrent() {
                 let name = t.name.clone();
                 return self.open_wiki(name, None);
             },
-            KeyCode::Char('F') => if let Some(t) = self.selected_torrent() {
+            actions::Intent::Follow => if let Some(t) = self.selected_torrent() {
                 let name = t.name.clone();
                 return self.follow(name, None);
             },
-            KeyCode::Enter => if let Some(t) = self.selected_torrent().cloned() {
+            actions::Intent::Primary => if let Some(t) = self.selected_torrent().cloned() {
                 return self.open_files(&t);
             },
             _ => {}

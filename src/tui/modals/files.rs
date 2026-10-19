@@ -35,29 +35,34 @@ impl TuiApp {
         })
     }
 
-    pub(super) fn on_files_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_files_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Modal(actions::ModalKind::Files), key)
+    }
+
+    pub(super) fn on_files_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let Some(m) = self.files.as_ref() else { return Cmd::none() };
         let n = m.files.len();
         let hash = m.hash.clone();
         let sel = m.list.borrow().selected();
         let cur = sel.and_then(|i| m.files.get(i)).cloned();
         let all_ids: Vec<i64> = m.files.iter().map(|f| f.index).collect();
-        match k.code {
-            KeyCode::Escape | KeyCode::Char('q') | KeyCode::Enter => { self.files = None; }
-            KeyCode::Down | KeyCode::Char('j') => { if n > 0 { m.list.borrow_mut().select_next(n); } }
-            KeyCode::Up | KeyCode::Char('k') => m.list.borrow_mut().select_previous(),
-            KeyCode::Home | KeyCode::Char('g') => m.list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
-            KeyCode::End | KeyCode::Char('G') => m.list.borrow_mut().select(n.checked_sub(1)),
-            KeyCode::Char(' ') => if let Some(f) = cur {
+        match intent {
+            actions::Intent::Cancel => { self.files = None; }
+            actions::Intent::Down => { if n > 0 { m.list.borrow_mut().select_next(n); } }
+            actions::Intent::Up => m.list.borrow_mut().select_previous(),
+            actions::Intent::First => m.list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
+            actions::Intent::Last => m.list.borrow_mut().select(n.checked_sub(1)),
+            actions::Intent::Toggle => if let Some(f) = cur {
                 let prio = if f.priority == 0 { 1 } else { 0 };
                 return self.set_file_prio(hash, vec![f.index], prio);
             },
-            KeyCode::Char('1') => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 1); },
-            KeyCode::Char('2') if !self.cfg.native() => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 6); },
-            KeyCode::Char('3') if !self.cfg.native() => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 7); },
-            KeyCode::Char('a') => return self.set_file_prio(hash, all_ids, 1),
-            KeyCode::Char('n') => return self.set_file_prio(hash, all_ids, 0),
-            KeyCode::Char('r') => return self.reload_files(hash),
+            actions::Intent::Include => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 1); },
+            actions::Intent::High if !self.cfg.native() => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 6); },
+            actions::Intent::Max if !self.cfg.native() => if let Some(f) = cur { return self.set_file_prio(hash, vec![f.index], 7); },
+            actions::Intent::All => return self.set_file_prio(hash, all_ids, 1),
+            actions::Intent::None => return self.set_file_prio(hash, all_ids, 0),
+            actions::Intent::Reload => return self.reload_files(hash),
             _ => {}
         }
         Cmd::none()

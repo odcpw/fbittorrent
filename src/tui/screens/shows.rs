@@ -107,24 +107,29 @@ impl TuiApp {
         })
     }
 
-    pub(super) fn on_shows_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_shows_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Screen(Screen::Shows), key)
+    }
+
+    pub(super) fn on_shows_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let ns = self.shows.shows.len() + 1;
         let ne = self.episode_count();
-        let navigation = match k.code {
-            KeyCode::Left | KeyCode::Char('h') => { self.shows_focus_eps = false; true }
-            KeyCode::Right | KeyCode::Char('l') => {
+        let navigation = match intent {
+            actions::Intent::Left => { self.shows_focus_eps = false; true }
+            actions::Intent::Right => {
                 self.shows_focus_eps = true;
                 if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
                 true
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Up | KeyCode::Char('k') | KeyCode::Home | KeyCode::Char('g') | KeyCode::End | KeyCode::Char('G') => {
+            actions::Intent::Down | actions::Intent::Up | actions::Intent::First | actions::Intent::Last => {
                 let state = if self.shows_focus_eps { &self.ep_list } else { &self.show_list };
                 let n = if self.shows_focus_eps { ne } else { ns };
                 let old = state.borrow().selected();
-                match k.code {
-                    KeyCode::Down | KeyCode::Char('j') => if n > 0 { state.borrow_mut().select_next(n); },
-                    KeyCode::Up | KeyCode::Char('k') => state.borrow_mut().select_previous(),
-                    KeyCode::Home | KeyCode::Char('g') => state.borrow_mut().select((n > 0).then_some(0)),
+                match intent {
+                    actions::Intent::Down => if n > 0 { state.borrow_mut().select_next(n); },
+                    actions::Intent::Up => state.borrow_mut().select_previous(),
+                    actions::Intent::First => state.borrow_mut().select((n > 0).then_some(0)),
                     _ => state.borrow_mut().select(n.checked_sub(1)),
                 }
                 if !self.shows_focus_eps {
@@ -136,27 +141,27 @@ impl TuiApp {
             _ => false,
         };
         if navigation { return Cmd::none(); }
-        match k.code {
-            KeyCode::Char('n') | KeyCode::Char('+') => { self.open_prompt(PromptKind::FollowShow, "Follow show: title or IMDb id (tt…)", false); }
-            KeyCode::Char('x') => if let Some(s) = self.selected_show() {
+        match intent {
+            actions::Intent::New => { self.open_prompt(PromptKind::FollowShow, "Follow show: title or IMDb id (tt…)", false); }
+            actions::Intent::Remove => if let Some(s) = self.selected_show() {
                 let (imdb, title) = (s.imdb.clone(), s.label());
                 self.open_prompt(PromptKind::ConfirmUnfollow { imdb, title: title.clone() }, &format!("Unfollow '{title}'? y/N"), true);
             },
-            KeyCode::Char('r') => return self.refresh_shows(true),
-            KeyCode::Char('R') => if let Some(s) = self.release_show() { let id = s.imdb.clone(); return self.refresh_show(id); },
-            KeyCode::Char('m') | KeyCode::Char(' ') => {
+            actions::Intent::Refresh => return self.refresh_shows(true),
+            actions::Intent::Reload => if let Some(s) = self.release_show() { let id = s.imdb.clone(); return self.refresh_show(id); },
+            actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
                 } else if let Some(label) = self.mark_selected_release() {
                     if self.save_shows() { self.set_status(label, false); }
                 }
             }
-            KeyCode::Char('u') if self.shows_inbox() => {
+            actions::Intent::Undo if self.shows_inbox() => {
                 if let Some(label) = self.undo_inbox_read() {
                     if self.save_shows() { self.set_status(label, false); }
                 }
             }
-            KeyCode::Char('M') => {
+            actions::Intent::MarkAll => {
                 if let Some(s) = self.selected_show() {
                     let (imdb, title) = (s.imdb.clone(), s.title.clone());
                     let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
@@ -167,7 +172,7 @@ impl TuiApp {
                     self.set_status("Shift+M applies to one show. Select a followed show on the left first.", false);
                 }
             }
-            KeyCode::Enter => {
+            actions::Intent::Primary => {
                 if !self.shows_focus_eps {
                     self.shows_focus_eps = true;
                     if ne > 0 && self.ep_list.borrow().selected().is_none() { self.ep_list.borrow_mut().select(Some(0)); }
@@ -186,15 +191,15 @@ impl TuiApp {
                     });
                 }
             }
-            KeyCode::Char('i') => if let Some(s) = self.release_show() {
+            actions::Intent::Imdb => if let Some(s) = self.release_show() {
                 let (name, id) = (s.label(), Some(s.imdb.clone()));
                 return self.open_imdb(name, id);
             },
-            KeyCode::Char('w') => if let Some(s) = self.release_show() {
+            actions::Intent::Wiki => if let Some(s) = self.release_show() {
                 let (name, id) = (s.label(), Some(s.imdb.clone()));
                 return self.open_wiki(name, id);
             },
-            KeyCode::Char('O') => if let Some(s) = self.release_show() {
+            actions::Intent::Source => if let Some(s) = self.release_show() {
                 let _ = std::process::Command::new("xdg-open").arg(format!("https://eztvx.to/search/{}", crate::qbt::urlencode(&s.title))).spawn();
             },
             _ => {}

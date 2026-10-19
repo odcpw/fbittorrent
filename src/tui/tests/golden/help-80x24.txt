@@ -1,24 +1,24 @@
 ╭ Keys ────────────────────────────────────────────────────────────────────────╮
 │                                                                              │
-│ GLOBAL   (1) Torrents · (2) Search · (3) Shows · (4) RSS                     │
-│          (Tab/Shift+Tab) Next/previous screen                                │
-│          (?) Help · (Esc) Leave input, close a dialog or return              │
-│          Letters in parentheses use lowercase; Shift is explicit.            │
-│          (F6) Download queue, encryption and VPN (native engine)             │
-│          (Q)uit and stop the engine · Shift+Q also quits                     │
-│          (A)dd URL/magnet · F4 toggles seeding in the add prompt             │
-│          (C)lipboard · arrows or j/k move · g/Shift+G first/last             │
+│ GLOBAL                                                                       │
+│   (1) Torrents                                                               │
+│   (2) Search                                                                 │
+│   (3) Shows                                                                  │
+│   (4) RSS                                                                    │
+│   (Tab) Next screen                                                          │
+│   (Shift+Tab) Previous screen                                                │
+│   (?) Help                                                                   │
+│   (F6/,) Settings                                                            │
+│   (q/Ctrl+C) Close this UI                                                   │
+│   (Q) Stop fbittorrent                                                       │
+│   (c) Clipboard                                                              │
+│   (r) Refresh                                                                │
+│   (a) Add                                                                    │
 │                                                                              │
-│ TORRENTS (Enter) Files · (O)pen downloaded file/folder                       │
-│          (P)ause/resume · (U) Allow/stop seeding                             │
-│          (D) Remove, keep files · (Shift+D) Delete with files                │
-│          (I) IMDb · (W)ikipedia · (Shift+F) Follow this show                 │
-│          Streaming priority is automatic; file selection supports include/sk │
-│                                                                              │
-│ SEARCH   Query: type + (Enter) Search; empty query browses lists             │
-│          (Down/Esc) Leave query · (/) Edit query from results                │
-│          Results: (Enter) Download · (Shift+O) Source page                   │
-│          (S) Providers · (B)rowse lists · (F)ollow show                      │
-│ j/k ↑/↓ wheel scroll · PgUp/PgDn · Esc or click close                        │
+│ SCREEN:TORRENTS                                                              │
+│   (j/↓) Next                                                                 │
+│   (k/↑) Previous                                                             │
+│   (g/Home) First                                                             │
+│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                          │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

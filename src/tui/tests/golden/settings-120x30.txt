@@ -26,5 +26,5 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Settings] (↑↓) Choose  (←→) Change  (Enter) Save                                                           (Esc) Cancel
-
+[Settings] (Esc) Cancel  (Enter) Save  (j) Next setting  (k) Previous setting  (h) Decrease  (l) Increase       (?) Help
+The Diplomat S04E01 1080p WEB-DL H264-GROUP

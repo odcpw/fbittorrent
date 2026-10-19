@@ -55,42 +55,52 @@ impl TuiApp {
         self.feed_list.borrow().selected().and_then(|i| self.feeds.get(i))
     }
 
-    pub(super) fn on_rss_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_rss_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Screen(Screen::Rss), key)
+    }
+
+    pub(super) fn on_rss_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let nf = self.feeds.len();
         let ni = self.selected_feed().map(|f| f.articles.len()).unwrap_or(0);
-        match k.code {
-            KeyCode::Left | KeyCode::Char('h') => self.rss_focus_items = false,
-            KeyCode::Right | KeyCode::Char('l') => { if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } } }
-            KeyCode::Down | KeyCode::Char('j') => {
+        match intent {
+            actions::Intent::Left => self.rss_focus_items = false,
+            actions::Intent::Right => { if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } } }
+            actions::Intent::Down => {
                 if self.rss_focus_items { if ni > 0 { self.item_list.borrow_mut().select_next(ni); } }
                 else if nf > 0 { self.feed_list.borrow_mut().select_next(nf); self.item_list.borrow_mut().select(None); }
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            actions::Intent::Up => {
                 if self.rss_focus_items { self.item_list.borrow_mut().select_previous(); }
                 else { self.feed_list.borrow_mut().select_previous(); self.item_list.borrow_mut().select(None); }
             }
-            KeyCode::Char('n') => { self.open_prompt(PromptKind::AddFeed, "Add RSS feed URL", false); }
-            KeyCode::Char('x') => if let Some(f) = self.selected_feed() {
+            actions::Intent::First | actions::Intent::Last => {
+                let (state,count)=if self.rss_focus_items { (&self.item_list,ni) } else { (&self.feed_list,nf) };
+                state.borrow_mut().select(if intent==actions::Intent::First { (count>0).then_some(0) } else { count.checked_sub(1) });
+                if !self.rss_focus_items { self.item_list.borrow_mut().select(None); }
+            }
+            actions::Intent::New => { self.open_prompt(PromptKind::AddFeed, "Add RSS feed URL", false); }
+            actions::Intent::Remove => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
                 self.open_prompt(PromptKind::ConfirmRemoveFeed { name: name.clone() }, &format!("Remove feed '{name}'? y/N"), true);
             },
-            KeyCode::Char('r') => return self.refresh_rss(),
-            KeyCode::Char('R') => return self.load_rss(),
-            KeyCode::Char('m') | KeyCode::Char(' ') => {
+            actions::Intent::Refresh => return self.refresh_rss(),
+            actions::Intent::Reload => return self.load_rss(),
+            actions::Intent::Mark => {
                 if !self.rss_focus_items {
                     self.set_status("Enter opens items · Shift+M marks this feed's items read", false);
                 } else if let Some((feed, id, read)) = self.selected_feed().and_then(|f| self.item_list.borrow().selected().and_then(|i| f.articles.get(i)).map(|a| (f.name.clone(), a.id.clone(), !self.cfg.native() || !a.is_read))) {
                     return self.rss_action(format!("item marked {}", if read { "read" } else { "unread" }), move |c| c.rss_set_read(&feed, &id, read));
                 }
             },
-            KeyCode::Char('M') => if let Some(f) = self.selected_feed() {
+            actions::Intent::MarkAll => if let Some(f) = self.selected_feed() {
                 let name = f.name.clone();
                 return self.rss_action(format!("marked {name} as read"), move |c| c.rss_mark_read(&name, None));
             },
-            KeyCode::Enter if !self.rss_focus_items => {
+            actions::Intent::Primary if !self.rss_focus_items => {
                 if ni > 0 { self.rss_focus_items = true; if self.item_list.borrow().selected().is_none() { self.item_list.borrow_mut().select(Some(0)); } }
             },
-            KeyCode::Enter => if self.rss_focus_items {
+            actions::Intent::Primary => if self.rss_focus_items {
                 let selected = self.item_list.borrow().selected();
                 if let (Some(f), Some(i)) = (self.selected_feed(), selected) {
                     if let Some(a) = f.articles.get(i) {
@@ -101,12 +111,12 @@ impl TuiApp {
                     }
                 }
             },
-            KeyCode::Char('i') => if self.rss_focus_items {
+            actions::Intent::Imdb => if self.rss_focus_items {
                 let idx = self.item_list.borrow().selected();
                 let name = idx.and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i)).map(|a| a.title.clone()));
                 if let Some(name) = name { return self.lookup_imdb(name, None); }
             },
-            KeyCode::Char('f') => if self.rss_focus_items {
+            actions::Intent::Follow => if self.rss_focus_items {
                 let idx = self.item_list.borrow().selected();
                 let name = idx.and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i)).map(|a| a.title.clone()));
                 if let Some(name) = name { return self.follow(name, None); }

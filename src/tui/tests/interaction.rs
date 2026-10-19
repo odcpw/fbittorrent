@@ -2,7 +2,7 @@
     use super::*;
 
     fn destructive_keys(open: fn(&mut TuiApp), unfollow: bool) {
-        for code in [KeyCode::Enter, KeyCode::Escape, KeyCode::Char('n'), KeyCode::Char(' '), KeyCode::Char('q'), KeyCode::Char('y'), KeyCode::Char('Y')] {
+        for code in [KeyCode::Enter, KeyCode::Escape, KeyCode::Char('n'), KeyCode::Char(' '), KeyCode::Char('q'), KeyCode::Char('y'), KeyCode::Char('Y'), KeyCode::Char('Q'), KeyCode::Char('?'), KeyCode::Char('1'), KeyCode::Tab] {
             let mut app = inbox_app();
             app.torrents = vec![Torrent { hash: "fixture-hash".into(), name: "Fixture".into(), ..Default::default() }];
             app.tor_list.borrow_mut().select(Some(0));
@@ -14,7 +14,8 @@
             assert!(text.contains("(y) Remove") && text.contains("(Esc) Cancel") && text.contains("default: No"));
             let command = app.on_key(KeyEvent::new(code));
             assert!(app.prompt.is_none());
-            let yes = matches!(code, KeyCode::Char('y') | KeyCode::Char('Y'));
+            let yes = matches!(code, KeyCode::Char('y'));
+            assert!(app.lifecycle.pending_request().is_none(), "confirmation key {code:?} must not stop the owner");
             if unfollow {
                 assert!(matches!(command, Cmd::None));
                 assert_eq!(app.shows.shows.len(), if yes { 1 } else { 2 });
@@ -202,7 +203,7 @@
         assert!(!app.shows.shows[0].seen.contains("S01E01"));
         assert_eq!(app.selected_episode().unwrap().0.imdb, "tt111");
         let text = render(&app, 80, 24);
-        assert!(text.lines().nth(22).unwrap().contains("(U)ndo"));
+        assert!(text.lines().nth(22).unwrap().contains("(u) Undo read"));
         app.undo_inbox_read();
         assert_eq!(app.selected_episode().unwrap().0.imdb, "tt222");
         assert!(!app.shows.shows[1].seen.contains("S01E01"));
@@ -454,15 +455,17 @@
         app.rss_focus_items = true;
         let text = render(&app, 80, 24);
         let action_row = text.lines().nth(22).unwrap();
-        assert!(action_row.contains("(M)ark read"), "{action_row}");
-        assert!(action_row.contains("(Shift+M) All read"), "{action_row}");
+        assert!(action_row.contains("(m) Mark read"), "{action_row}");
+        assert!(action_row.contains("…"), "{action_row}");
+        assert!(app.help_text().contains("(M) All read"));
         assert!(action_row.contains("(?) Help"), "{action_row}");
         app.set_status("A long action result that explains what happened without covering any command in the row above", false);
         app.feeds[0].articles[0].is_read = true;
         let text = render(&app, 80, 24);
         let action_row = text.lines().nth(22).unwrap();
-        assert!(action_row.contains("(M)ark unread"), "{action_row}");
-        assert!(action_row.contains("(Shift+M) All read"), "{action_row}");
+        assert!(action_row.contains("(m) Mark unread"), "{action_row}");
+        assert!(action_row.contains("…"), "{action_row}");
+        assert!(app.help_text().contains("(M) All read"));
         assert!(action_row.contains("(?) Help"), "{action_row}");
         assert!(text.lines().nth(23).unwrap().contains("A long action result"));
     }
@@ -592,8 +595,8 @@
             assert!(render(&app, width, height).contains("GLOBAL"));
             app.on_key(KeyEvent::new(KeyCode::End));
             let text = render(&app, width, height);
-            assert!(text.contains("Defaults:"), "help end {width}x{height}: {text}");
-            assert!(text.contains("Esc or click close"));
+            assert!(text.contains("Native streaming priority"), "help end {width}x{height}: {text}");
+            assert!(text.contains("(Esc/q/?) Close"));
             app.show_help = false;
         }
         app.screen = Screen::Shows;

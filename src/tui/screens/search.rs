@@ -39,15 +39,23 @@ impl TuiApp {
         Cmd::none()
     }
 
-    pub(super) fn on_search_key(&mut self, k: KeyEvent) -> Cmd<Msg> {
+    #[cfg(test)]
+    pub(super) fn on_search_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
+        actions::dispatch_scope(self, actions::Scope::Screen(Screen::Search), key)
+    }
+
+    pub(super) fn on_search_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
+        if intent==actions::Intent::Providers { return self.open_providers(); }
         if self.search_browse {
             let n = self.browse_entries.len();
-            match k.code {
-                KeyCode::Escape | KeyCode::Char('b') => { self.search_browse = false; }
-                KeyCode::Down | KeyCode::Char('j') => self.browse_list.borrow_mut().select_next(n),
-                KeyCode::Up | KeyCode::Char('k') => self.browse_list.borrow_mut().select_previous(),
-                KeyCode::Char('/') | KeyCode::Char('e') => { self.search_browse = false; self.search_focus_input = true; self.search_input.set_focused(true); }
-                KeyCode::Enter => {
+            match intent {
+                actions::Intent::Cancel | actions::Intent::Browse => { self.search_browse = false; }
+                actions::Intent::Down => self.browse_list.borrow_mut().select_next(n),
+                actions::Intent::Up => self.browse_list.borrow_mut().select_previous(),
+                actions::Intent::First => self.browse_list.borrow_mut().select((n>0).then_some(0)),
+                actions::Intent::Last => self.browse_list.borrow_mut().select(n.checked_sub(1)),
+                actions::Intent::Query => { self.search_browse = false; self.search_focus_input = true; self.search_input.set_focused(true); }
+                actions::Intent::Primary => {
                     let sel = self.browse_list.borrow().selected();
                     if let Some(e) = sel.and_then(|i| self.browse_entries.get(i)).cloned() { return self.load_browse(e); }
                 }
@@ -56,36 +64,35 @@ impl TuiApp {
             return Cmd::none();
         }
         let n = self.search_results.len();
-        match k.code {
-            KeyCode::Char('s') => return self.open_providers(),
-            KeyCode::Char('b') => {
+        match intent {
+            actions::Intent::Browse => {
                 self.search_browse = true;
                 if self.browse_list.borrow().selected().is_none() { self.browse_list.borrow_mut().select(Some(0)); }
             }
-            KeyCode::Char('/') | KeyCode::Char('e') => { self.search_focus_input = true; self.search_input.set_focused(true); }
-            KeyCode::Escape => { self.search_sub = None; self.search_running = false; }
-            KeyCode::Down | KeyCode::Char('j') => { if n > 0 { self.search_list.borrow_mut().select_next(n); } }
-            KeyCode::Up | KeyCode::Char('k') => {
+            actions::Intent::Query => { self.search_focus_input = true; self.search_input.set_focused(true); }
+            actions::Intent::Cancel => { self.search_sub = None; self.search_running = false; }
+            actions::Intent::Down => { if n > 0 { self.search_list.borrow_mut().select_next(n); } }
+            actions::Intent::Up => {
                 if self.search_list.borrow().selected() == Some(0) { self.search_focus_input = true; self.search_input.set_focused(true); }
                 else { self.search_list.borrow_mut().select_previous(); }
             }
-            KeyCode::Home | KeyCode::Char('g') => self.search_list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
-            KeyCode::End | KeyCode::Char('G') => self.search_list.borrow_mut().select(n.checked_sub(1)),
-            KeyCode::Enter => if let Some(r) = self.selected_result().cloned() {
+            actions::Intent::First => self.search_list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
+            actions::Intent::Last => self.search_list.borrow_mut().select(n.checked_sub(1)),
+            actions::Intent::Primary => if let Some(r) = self.selected_result().cloned() {
                 return self.add_search_result(r);
             },
-            KeyCode::Char('i') => if let Some(r) = self.selected_result() {
+            actions::Intent::Imdb => if let Some(r) = self.selected_result() {
                 let (name, id) = (r.file_name.clone(), (!r.imdb.is_empty()).then(|| r.imdb.clone()));
                 return self.open_imdb(name, id);
             },
-            KeyCode::Char('w') => if let Some(r) = self.selected_result() {
+            actions::Intent::Wiki => if let Some(r) = self.selected_result() {
                 let (name, id) = (r.file_name.clone(), (!r.imdb.is_empty()).then(|| r.imdb.clone()));
                 return self.open_wiki(name, id);
             },
-            KeyCode::Char('O') => if let Some(r) = self.selected_result() {
+            actions::Intent::Source => if let Some(r) = self.selected_result() {
                 if !r.descr_link.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&r.descr_link).spawn(); }
             },
-            KeyCode::Char('f') => if let Some(r) = self.selected_result() {
+            actions::Intent::Follow => if let Some(r) = self.selected_result() {
                 let id = if !r.imdb.is_empty() { Some(r.imdb.clone()) } else { self.name_ids.get(&r.file_name).filter(|i| !i.is_empty()).cloned() };
                 let name = r.file_name.clone();
                 return self.follow(name, id);

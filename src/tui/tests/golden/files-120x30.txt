@@ -26,5 +26,5 @@
 │     │ 2/3 · 512.0 MiB · Space include/skip · a/n all/none · Esc close                                          │     │
 │     ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────╯     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Files] (Space) Include/skip  (1) Include  (A)ll  (N)one                                                     (Esc) Close
-
+[Files] (Esc) Close  (Space) Include/skip  (a) All  (n) None  (g) First  (G) Last  (1) Include  (j) Next …      (?) Help
+The.Diplomat.S04E01.mkv

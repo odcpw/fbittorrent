@@ -22,9 +22,13 @@ impl TuiApp {
     }
 
     pub(super) fn on_settings_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
-        if key.code == KeyCode::Escape { self.settings = None; return Cmd::none(); }
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(Modifiers::CTRL) { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
-        if key.code == KeyCode::Enter {
+        actions::dispatch_scope(self, actions::Scope::Modal(actions::ModalKind::Settings), key)
+    }
+
+    pub(super) fn on_settings_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
+        if intent == actions::Intent::Cancel { self.settings = None; return Cmd::none(); }
+        if intent == actions::Intent::CloseUi { self.lifecycle.request_stop(StopReason::Quit); return Cmd::quit(); }
+        if intent == actions::Intent::Primary {
             let values = self.settings.as_ref().unwrap().cfg.clone();
             let result = (|| -> Result<Config> {
                 let mut latest = Config::load()?;
@@ -53,11 +57,11 @@ impl TuiApp {
         }
         let modal = self.settings.as_mut().unwrap();
         let selected = modal.list.borrow().selected().unwrap_or(0);
-        match key.code {
-            KeyCode::Down | KeyCode::Tab | KeyCode::Char('j') => modal.list.borrow_mut().select(Some((selected + 1) % 3)),
-            KeyCode::Up | KeyCode::BackTab | KeyCode::Char('k') => modal.list.borrow_mut().select(Some((selected + 2) % 3)),
-            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') | KeyCode::Char(' ') => {
-                let forward = !matches!(key.code, KeyCode::Left | KeyCode::Char('h'));
+        match intent {
+            actions::Intent::Down => modal.list.borrow_mut().select(Some((selected + 1) % 3)),
+            actions::Intent::Up => modal.list.borrow_mut().select(Some((selected + 2) % 3)),
+            actions::Intent::Left | actions::Intent::Right => {
+                let forward = !matches!(intent, actions::Intent::Left);
                 match selected {
                     0 => modal.cfg.max_active_downloads = if forward { modal.cfg.max_active_downloads.saturating_add(1) } else { modal.cfg.max_active_downloads.saturating_sub(1).max(1) },
                     1 => {
