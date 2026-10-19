@@ -9,11 +9,13 @@ import "../DetailText.js" as DetailText
 
 ScrollView {
   id:root
+  objectName:"torrent-overview"
   required property var service
   required property var torrent
   property var card:null
   readonly property var actionState:actions.state
   readonly property bool editing:titleEditor.editing
+  readonly property bool rechecking:{var revision=service.actionRevision;var action=service.pendingAction(torrent.hash);return torrent.state==="checking" || !!(action && action.op==="torrents.recheck")}
   function renameTitle(){titleEditor.begin()}
   function key(event){return titleEditor.key(event)}
   readonly property bool posterLoaded:poster.loaded
@@ -60,7 +62,7 @@ ScrollView {
       Ui.Button {text:"Wikipedia (w)";onClicked:root.service.openUrl(root.card && root.card.wiki_url ? root.card.wiki_url : "https://en.wikipedia.org/w/index.php?search="+encodeURIComponent(root.torrent.name))}
     }
     RowLayout {
-      Ui.Button {visible:root.service.hasCap("recheck");text:"Recheck…";onClicked:root.recheckRequested(root.torrent.hash)}
+      Ui.Button {objectName:"torrent-recheck";visible:root.service.hasCap("recheck");enabled:!root.rechecking;text:root.rechecking ? "Checking files…" : "Recheck…";onClicked:root.recheckRequested(root.torrent.hash)}
     }
     Item {Layout.preferredHeight:Commons.Style.spacing.sm}
   }
