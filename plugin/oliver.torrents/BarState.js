@@ -48,6 +48,10 @@ function describe(svc) {
     var remaining=summary.daemon && summary.daemon.idle_exit_in_s
     result.tooltip=remaining!==undefined ? "Idle · stops in " + Math.ceil(remaining/60) + " min" : "Idle" + (counts.done>0 ? " · " + counts.done + " done" : "")
   }
+  // Named observations from the current bounded summary, never a swarm total
+  // or cached detail rows after the peer pane has been hidden.
+  var peerRows=(summary.top || []).filter(function(t){return t.peers!==undefined || t.seeds!==undefined})
+  if(peerRows.length)result.tooltip+="\n"+peerRows.slice(0,3).map(function(t){return String(t.name).slice(0,60)+": "+Model.peerCount(t,false)}).join("\n")
   if (result.turtle) result.tooltip+=" · turtle limits on"
   result.tooltip=Model.plainTip(result.tooltip)
   return result

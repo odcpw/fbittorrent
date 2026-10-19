@@ -26,6 +26,7 @@ pub(super) fn pane(app: &TuiApp, screen: Screen) -> Scope {
     }
 }
 pub(in crate::tui) fn focused(app: &TuiApp) -> Scope {
+    if app.clipboard_visible() {return Scope::Modal(ModalKind::Clipboard);}
     if app.prompt.is_some() {
         Scope::Prompt
     } else if app.settings.is_some() {
@@ -149,17 +150,7 @@ pub(super) fn refresh(app: &mut TuiApp) -> Cmd<Msg> {
     if app.online {
         return app.poll();
     }
-    if app.cfg.native() {
-        return if app.presence.as_ref().is_some_and(|connection|connection.alive()) {app.poll()} else {app.start_daemon()};
-    }
-    let cfg = app.cfg.clone();
-    Cmd::task(move || {
-        let client = LegacyClient::from_config(&cfg);
-        match crate::backend::ensure_running(&cfg, &client) {
-            Ok(_) => Msg::ActionDone(Ok("torrent engine ready".into())),
-            Err(error) => Msg::ActionDone(Err(error.to_string())),
-        }
-    })
+    if app.presence.as_ref().is_some_and(|connection|connection.alive()) {app.poll()} else {app.start_daemon()}
 }
 
 pub(super) fn query_submit(app: &mut TuiApp) -> Cmd<Msg> {

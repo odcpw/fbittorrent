@@ -45,7 +45,7 @@ impl TuiApp {
         let mut releases: Vec<_> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
             .filter(move |episode| show.is_new(&episode.key))
             .map(move |episode| (show, episode))).collect();
-        releases.sort_by(|(a_show, a), (b_show, b)| b.released.cmp(&a.released)
+        releases.sort_by(|(a_show, a), (b_show, b)| release_sort::episode_order(a,b,self.release_sort,self.release_descending)
             .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
         self.inbox_rows = releases.into_iter().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() }).collect();
         self.ep_list.borrow_mut().hovered = None;
@@ -71,44 +71,18 @@ impl TuiApp {
         if self.shows_inbox() { self.selected_episode().map(|(show, _)| show) } else { self.selected_show() }
     }
 
-    pub(super) fn save_shows(&mut self) -> bool {
-        if self.cfg.native(){return true;}
-        if let Err(e) = self.shows.save() { self.set_status(format!("saving shows: {e:#}"), true); false } else { true }
-    }
-
-    /// Fetch the episode list of one followed show in the background.
     pub(super) fn refresh_show(&mut self, imdb: String) -> Cmd<Msg> {
-        if self.cfg.native(){return self.service_action("shows.check",serde_json::json!({"imdb":imdb}),"shows checked");}
-        let Some(show) = self.shows.get(&imdb).cloned() else { return Cmd::none() };
-        if !self.shows_refreshing.insert(imdb.clone()) { return Cmd::none(); }
-        let quality = self.cfg.show_quality.clone();
-        Cmd::task(move || {
-            let r = shows::fetch_updates(&show, &quality).map_err(|e| format!("{e:#}"));
-            Msg::Episodes(imdb, r)
-        })
+        self.service_action("shows.check",serde_json::json!({"imdb":imdb}),"shows checked")
     }
 
-    /// On launch and on `r`: refresh what is stale (or everything when forced).
     pub(super) fn refresh_shows(&mut self, force: bool) -> Cmd<Msg> {
-        if self.cfg.native(){return if force {self.service_action("shows.check",serde_json::json!({}),"shows checked")}else{Cmd::none()};}
-        let now = shows::now();
-        let ids: Vec<String> = self.shows.shows.iter().filter(|s| force || s.is_stale(now)).map(|s| s.imdb.clone()).collect();
-        if ids.is_empty() { return Cmd::none(); }
-        if force { self.set_status(format!("checking {} show(s)…", ids.len()), false); }
-        Cmd::batch(ids.into_iter().map(|id| self.refresh_show(id)).collect())
+        if force {self.service_action("shows.check",serde_json::json!({}),"shows checked")}else{Cmd::none()}
     }
 
-    /// Follow the show behind a release name (or a known IMDb id); resolved off-thread.
     pub(super) fn follow(&mut self, query: String, id: Option<String>) -> Cmd<Msg> {
-        if self.cfg.native(){let id=id.or_else(||crate::imdb::service::valid_id(&query).then(||query.clone()));let args=if let Some(id)=id{serde_json::json!({"imdb":id})}else{serde_json::json!({"query":query})};return self.service_action("shows.follow",args,"show followed");}
-        self.set_status(format!("looking up {}…", short(&query, 40)), false);
-        Cmd::task(move || {
-            let r = match id.filter(|i| i.starts_with("tt")) {
-                Some(i) => imdb::lookup_id(&i).map_err(|e| e.to_string()).and_then(|t| t.ok_or_else(|| format!("IMDb knows no title {i}"))),
-                None => shows::resolve_title(&query).map_err(|e| format!("{e:#}")),
-            };
-            Msg::Followed(r)
-        })
+        let id=id.or_else(||crate::imdb::service::valid_id(&query).then(||query.clone()));
+        let args=if let Some(id)=id{serde_json::json!({"imdb":id})}else{serde_json::json!({"query":query})};
+        self.service_action("shows.follow",args,"show followed")
     }
 
     #[cfg(test)]
@@ -156,25 +130,17 @@ impl TuiApp {
             actions::Intent::Mark => {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
-                } else if self.cfg.native(){
+                } else {
                     if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
-                } else if let Some(label) = self.mark_selected_release() {
-                    if self.save_shows() { self.set_success(label); }
                 }
             }
             actions::Intent::Undo if self.shows_inbox() => {
-                if self.cfg.native(){return self.service_action("shows.undo_read",serde_json::json!({}),"release restored to unread");}
-                if let Some(label) = self.undo_inbox_read() {
-                    if self.save_shows() { self.set_success(label); }
-                }
+                return self.service_action("shows.undo_read",serde_json::json!({}),"release restored to unread");
             }
             actions::Intent::MarkAll => {
                 if let Some(s) = self.selected_show() {
                     let (imdb, title) = (s.imdb.clone(), s.title.clone());
-                    if self.cfg.native(){return self.service_action("shows.mark_show_read",serde_json::json!({"imdb":imdb}),format!("{title}: releases marked read"));}
-                    let n = self.shows.get_mut(&imdb).map(|s| s.mark_all_seen()).unwrap_or(0);
-                    self.rebuild_inbox();
-                    if self.save_shows() { self.set_success(format!("{title}: {n} release(s) marked read")); }
+                    return self.service_action("shows.mark_show_read",serde_json::json!({"imdb":imdb}),format!("{title}: releases marked read"));
                 } else {
                     self.set_status("Shift+M applies to one show. Select a followed show on the left first.", false);
                 }
@@ -190,15 +156,7 @@ impl TuiApp {
                     let token = format!("{imdb}:{}", e.key);
                     if self.service_busy{return Cmd::none();}
                     if !self.show_grabbing.insert(token) { return Cmd::none(); }
-                    if self.cfg.native(){return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":self.cfg.seed_by_default}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));}
-                    let cfg = self.cfg.clone();
-                    let presence = self.presence.clone();
-                    let opts = self.add_opts();
-                    return Cmd::task(move || {
-                        let c = Client::from_config(&cfg, presence.clone());
-                        let result = c.login().and_then(|_| c.add_url(&e.magnet, &opts)).map_err(|err| err.to_string());
-                        Msg::ShowGrab { imdb, episode: e, result }
-                    });
+                    return self.service_action("shows.grab",serde_json::json!({"imdb":imdb,"key":e.key,"seed":self.cfg.seed_by_default}),format!("added {} {}",self.shows.get(&imdb).map(|s|s.title.as_str()).unwrap_or(&imdb),e.key));
                 }
             }
             actions::Intent::Imdb => if let Some(s) = self.release_show() {
@@ -217,6 +175,7 @@ impl TuiApp {
         Cmd::none()
     }
 
+    #[cfg(test)]
     pub(super) fn mark_selected_release(&mut self) -> Option<String> {
         let target = self.selected_release_target()?;
         let inbox = self.shows_inbox();
@@ -228,6 +187,7 @@ impl TuiApp {
         Some(label)
     }
 
+    #[cfg(test)]
     pub(super) fn undo_inbox_read(&mut self) -> Option<String> {
         let target = self.inbox_last_read.take()?;
         let show = self.shows.get_mut(&target.imdb)?;
@@ -274,7 +234,7 @@ impl TuiApp {
         let left = Flex::vertical()
             .constraints([Constraint::Fill, Constraint::Fixed(card_h)])
             .split(cols[0]);
-        let unread = self.inbox_rows.len();
+        let unread = self.shows_unread();
         let title = format!(" Shows › Followed ({}) ", self.shows.shows.len());
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -384,7 +344,7 @@ impl TuiApp {
         }
         let inbox = self.shows_inbox();
         let title = if inbox {
-            format!(" Shows › All unread · {unread} releases · newest first ")
+            format!(" Shows › All unread · {unread} releases · {} {} ",self.release_sort.label(),if self.release_descending {"↓"}else{"↑"})
         } else if let Some(show) = self.selected_show() {
             format!(
                 " Shows › {} · {} releases ",

@@ -31,7 +31,7 @@ def tui_service_screens(binary,systemd):
                 with d.ApiConn(h) as c:
                     c.hello('bar')
                     before=c.call('app.stats')['result']['active_clients']['tui']
-                    hidden=h.engine_path.with_name('unused-engine.sock');h.engine_path.rename(hidden)
+                    hidden=h.engine_path.with_name('engine.sock');case.check(not hidden.exists(),'only API v1 socket is created')
                     ui=native.AttachedTui(case,str(binary),SimpleNamespace(root=box.root,env=dict(box.env,XDG_DATA_HOME=str(client_data))),h,session='fbt-fbt-p4-03-r5p-services')
                     target,done=ui.start()
                     ui.keys(target,'4');ui.keys(target,'n');ui.keys(target,http.base+'/feed.xml');ui.keys(target,'Enter',literal=False)
@@ -77,7 +77,7 @@ def tui_service_screens(binary,systemd):
                     ui.keys(target,'q');h.wait_for(lambda:(done.exists()and done.read_text()=='0'and p.child.poll()is None,str(done)),'q detaches while service owner survives')
             finally:
                 if ui:ui.close()
-                if hidden.exists()and not h.engine_path.exists():hidden.rename(h.engine_path)
+                assert not hidden.exists()
                 if p.child.poll()is None:h.stop_serve(p)
 
 

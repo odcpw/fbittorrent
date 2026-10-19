@@ -41,5 +41,5 @@
 │                                                                                           ││                                                                 │
 │                                                                                           ││                                                                 │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────────────────────────╯
-[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (D) Delete with files  (a) Add  (j) Next  (g) First …   (?) Help
+[Torrents] (Enter) Details  (o) Open  (p) Pause  (v) Card  (u) Seed on  (d) Remove, keep files  (D) Delete with files  (a) Add  (s) Sort  (j) Next …    (?) Help
 The Diplomat S04E01 1080p WEB-DL H264-GROUP

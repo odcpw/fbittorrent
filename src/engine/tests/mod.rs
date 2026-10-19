@@ -1,5 +1,7 @@
+pub(crate) mod fixture;
+use fixture::*;
     fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<String>> {
-        super::dispatch_parked_in(request, directory, &Lifecycle::default())
+        fixture::dispatch_parked_in(request, directory, &Lifecycle::default())
     }
 
     include!("info_fixture.rs");
@@ -140,7 +142,6 @@
         AppEngine {
             dispatcher,
             runtime: Some(runtime),
-            server: None,
             instance: Arc::new(instance),
         }
     }
@@ -173,6 +174,7 @@ include!("ownership.rs");
 include!("startup.rs");
 include!("dormant.rs");
 include!("dormant_delete.rs");
+include!("tracker_edit.rs");
 include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");

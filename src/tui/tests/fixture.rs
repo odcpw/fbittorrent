@@ -1,8 +1,8 @@
 //! Local render state only: never init/update the model or start subscriptions.
 use super::*;
 
-pub(super) const SURFACES: [&str; 11] = [
-    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done",
+pub(super) const SURFACES: [&str; 12] = [
+    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done", "clipboard",
 ];
 
 pub(super) fn app(surface: &str) -> TuiApp {
@@ -74,6 +74,8 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "details-trackers"=>crate::tui::tracker_tests::prepare(&mut app),
+        "peers"=>crate::tui::peer_tests::prepare(&mut app),
         "disk"=>crate::tui::disk_tests::prepare(&mut app),
         "pieces" => {
             let lines=include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().collect::<Vec<_>>();
@@ -113,6 +115,9 @@ pub(super) fn app(surface: &str) -> TuiApp {
             app.open_prompt(PromptKind::AddMagnet, " Add magnet link or URL ", false);
             app.prompt.as_mut().unwrap().input.set_value("magnet:?xt=urn:btih:0000000000000000000000000000000000000001");
         },
+        "clipboard" => app.clipboard_event(&serde_json::from_value(serde_json::json!({
+            "ev":"clipboard.magnet","seq":1,"ts":1,"hash":"c7".repeat(20),"name":"Sintel.2010.1080p","already_added":false
+        })).unwrap()),
         "help" => app.show_help = true,
         "confirm" => { let _ = app.on_torrents_key(KeyEvent::new(KeyCode::Char('D'))); },
         _ => panic!("unknown render fixture: {surface}"),

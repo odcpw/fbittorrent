@@ -114,7 +114,7 @@ pub(super) enum Cmd {
     Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
-    /// Close the app and stop its engine (legacy mode stops the service)
+    /// Stop the daemon and its engine
     Down,
     /// List torrents
     #[command(alias = "ls")]
@@ -134,12 +134,6 @@ pub(super) enum Cmd {
         /// Attribution retained by the daemon.
         #[arg(long, default_value="manual", value_parser=["manual","handler","agent"])]
         origin: String,
-        /// Do not enable sequential download
-        #[arg(long)]
-        no_seq: bool,
-        /// Do not prioritise first and last pieces
-        #[arg(long)]
-        no_first_last: bool,
         /// Add in stopped state
         #[arg(long)]
         stopped: bool,
@@ -202,20 +196,10 @@ pub(super) enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Toggle sequential download (legacy mode; native scheduling is intrinsic)
-    Seq { selectors: Vec<String> },
-    /// Toggle first/last piece priority (legacy mode; native scheduling is intrinsic)
-    FirstLast { selectors: Vec<String> },
     /// Allow uploading/seeding
     Seed { selectors: Vec<String> },
     /// Limit uploading and stop when complete (default for new torrents)
     Noseed { selectors: Vec<String> },
-    /// Native scheduling stub; legacy mode applies defaults to outside additions
-    Reconcile {
-        /// Only touch torrents added within the last N seconds (0 = all)
-        #[arg(long, default_value_t = 0)]
-        recent: i64,
-    },
     /// Add whatever magnet/URL is on the Wayland clipboard
     AddClipboard,
     /// Open the file (single-file torrent) or folder in the desktop
@@ -253,7 +237,7 @@ pub(super) enum Cmd {
         #[arg(long, default_value_t = 30)]
         limit: usize,
     },
-    /// Configure the app download folder (explicit legacy mode also sets up its service)
+    /// Configure the app download folder and desktop integration
     Setup {
         #[arg(long, default_value_t = 8080)]
         port: u16,
@@ -389,6 +373,15 @@ pub(super) enum ShowsCmd {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_current_native_commands_and_add_options_are_exposed() {
+        for command in ["seq","first-last","reconcile"] {
+            assert!(Cli::try_parse_from(["fbittorrent",command]).is_err());
+        }
+        for option in ["--no-seq","--no-first-last"] {
+            assert!(Cli::try_parse_from(["fbittorrent","add","magnet:?xt=urn:btih:0000000000000000000000000000000000000000",option]).is_err());
+        }
+    }
     #[test]
     fn serve_idle_override_preserves_config_default_and_short_test_delays() {
         let cli = Cli::try_parse_from(["fbittorrent", "serve"]).unwrap();

@@ -121,6 +121,13 @@ impl Notifier {
             actions,
         });
     }
+    pub fn new_episodes(&self, count:u64, names:&[String]) {
+        if count==0 {return;}
+        static NEXT:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1);
+        let (title,body)=episodes_text(count,names);
+        self.enqueue(Notice {kind:"shows".into(),hash:NEXT.fetch_add(1,std::sync::atomic::Ordering::Relaxed).to_string(),
+            serial:0,title,body,target:None,actions:vec![("window","Open Shows")]});
+    }
     pub fn disk_low(&self) {
         self.enqueue(Notice { kind:"disk".into(), hash:"disk".into(), serial:0,
             title:"Disk almost full".into(), body:String::new(), target:None,
@@ -287,16 +294,21 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
         "window" | "log" => {
             run_action(
                 shared,
-                Command::new(std::env::current_exe()?).arg(if action == "window" {
-                    "dashboard"
-                } else {
-                    "log"
-                }),
+                Command::new(std::env::current_exe()?).args(if action=="window" {window_args(&n.kind)}else{&["log"]}),
             )?;
         }
         _ => {}
     }
     Ok(())
+}
+fn episodes_text(count:u64,names:&[String])->(String,String) {
+    let title=format!("{count} new episode{}",if count==1 {""}else{"s"});
+    let mut body=names.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
+    if count>3 {body.push_str(&format!(", + {} more",count-3));}
+    (title,body)
+}
+fn window_args(kind:&str)->&'static [&'static str] {
+    if kind=="shows" {&["dashboard","--view","shows"]}else{&["dashboard"]}
 }
 fn live(shared: &Shared) -> bool {
     let q = shared.queue.lock().unwrap();
@@ -382,6 +394,23 @@ mod tests {
         drop(q);
         owner.enabled(false);
         assert!(owner.shared.queue.lock().unwrap().pending.is_empty());
+    }
+    #[test]
+    fn new_episodes_body() {
+        use super::*;
+        let names=["Slow <& Horses S05E03","South Park S27E06","Third S01E01","Fourth S01E02","Fifth S01E03"].map(str::to_owned);
+        for (count,title,body) in [
+            (1,"1 new episode","Slow &lt;&amp; Horses S05E03"),
+            (3,"3 new episodes","Slow &lt;&amp; Horses S05E03, South Park S27E06, Third S01E01"),
+            (5,"5 new episodes","Slow &lt;&amp; Horses S05E03, South Park S27E06, Third S01E01, + 2 more"),
+        ] {
+            let (actual_title,actual_body)=episodes_text(count,&names[..count as usize]);
+            assert_eq!(escape_markup(&actual_title),title);
+            assert_eq!(escape_markup(&actual_body),body);
+            println!("notice title={actual_title:?}, delivered body={:?}",escape_markup(&actual_body));
+        }
+        assert_eq!(window_args("shows"),["dashboard","--view","shows"]);
+        assert_eq!(window_args("torrent.completed"),["dashboard"]);
     }
     #[test]
     fn escape_markup() {

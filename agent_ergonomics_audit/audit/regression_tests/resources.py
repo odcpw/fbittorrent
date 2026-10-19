@@ -143,7 +143,7 @@ def measure_idle(args, case):
                 reader = threading.Thread(target=drain, daemon=True)
                 reader.start()
                 try:
-                    endpoint = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+                    endpoint = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
                     while not endpoint.exists():
                         if process.poll() is not None or time.monotonic() - began > 15:
                             raise RuntimeError("app did not open: " + error_path.read_text())

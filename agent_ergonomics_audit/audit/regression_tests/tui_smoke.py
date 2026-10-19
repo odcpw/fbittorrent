@@ -270,10 +270,11 @@ def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
         with Case('tui_smoke','turtle_limits')as case:
             ui.case=case
             ui.observe('receive confirmed summary','the initial turtle indicator arrives by push',lambda pane:'󰢃 Turtle'in pane.splitlines()[0])
-            ui.tmux('send-keys','-t',ui.target,'-l','z')
-            ui.observe('toggle z off','the indicator disappears within the one-second TUI push interval',lambda pane:'󰢃 Turtle'not in pane.splitlines()[0]and'turtle limits off'in pane.splitlines()[-1],timeout=1)
-            ui.tmux('send-keys','-t',ui.target,'-l','z')
-            ui.observe('toggle z on','the indicator returns within the one-second TUI push interval',lambda pane:'󰢃 Turtle'in pane.splitlines()[0]and'turtle limits on'in pane.splitlines()[-1],timeout=1)
+            for cycle in range(5):
+                ui.tmux('send-keys','-t',ui.target,'-l','z')
+                ui.observe('toggle z off '+str(cycle+1),'the indicator disappears within the one-second TUI push interval',lambda pane:'󰢃 Turtle'not in pane.splitlines()[0]and'turtle limits off'in pane.splitlines()[-1],timeout=1)
+                ui.tmux('send-keys','-t',ui.target,'-l','z')
+                ui.observe('toggle z on '+str(cycle+1),'the indicator returns within the one-second TUI push interval',lambda pane:'󰢃 Turtle'in pane.splitlines()[0]and'turtle limits on'in pane.splitlines()[-1],timeout=1)
             ui.contains('F6','Download settings',literal=False)
             for _ in range(4):ui.press('Down','select next settings field',lambda pane:'Download settings'in pane,literal=False)
             ui.contains('Right','Download limit · B/s',literal=False)

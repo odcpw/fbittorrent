@@ -26,6 +26,7 @@ impl TuiApp {
                 }
             },
             Scope::Modal(kind) => match kind {
+                ModalKind::Clipboard => "Clipboard",
                 ModalKind::Log => "Log",
                 ModalKind::Files => "Files",
                 ModalKind::Details => "Details",
@@ -34,7 +35,6 @@ impl TuiApp {
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",
                 ModalKind::Stopped => "Stopped",
-                ModalKind::Clipboard => "Clipboard",
             },
             Scope::Prompt => {
                 if self.prompt.as_ref().is_some_and(|p| p.yes_no) {

@@ -74,7 +74,6 @@ fn card_toggle_is_centered_and_static_at_80_columns() {
 #[test]
 fn imdb_id_is_shared_by_release_aliases_and_debounce_is_300ms() {
     let mut app = fixture::app("torrents");
-    app.cfg.engine = "qbittorrent".into();
     assert!(matches!(
         app.lookup_imdb("alias one".into(), Some(title().id)),
         Cmd::Task(..)
@@ -159,7 +158,6 @@ fn wide_shows_card_uses_full_pane_height_and_retains_its_poster() {
 #[test]
 fn resolved_aliases_keep_an_existing_poster_and_bound_the_session_cache() {
     let mut app = fixture::app("torrents");
-    app.cfg.engine = "qbittorrent".into();
     app.lookup_imdb("first release".into(), None);
     app.lookup_imdb("second release".into(), None);
     app.remember_imdb("first release".into(), Ok(Some((title(), Some(image())))));

@@ -8,9 +8,9 @@ mod pending;
 mod snapshot;
 mod sort;
 mod search_sort;
-pub(super) use search_sort::{SearchSort,search_order,legacy_search_order};
+pub(super) use search_sort::{SearchSort,search_order,display_search_order};
 use snapshot::Snapshot;
-pub(super) use sort::{TorrentSort,legacy_order};
+pub(super) use sort::{TorrentSort,display_order};
 #[cfg(test)]
 mod tests;
 
@@ -45,6 +45,7 @@ pub(super) struct Store {
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
     pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
     pub peers: BTreeMap<api::Hash, BTreeMap<String, api::Peer>>,
+    pub trackers: BTreeMap<api::Hash,BTreeMap<String,api::Tracker>>,
     pub rss_feeds:BTreeMap<String,api::Feed>,
     pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
     pub releases_topic:Option<String>,
@@ -127,6 +128,7 @@ impl Store {
                         .collect(),
                 );
             }
+            (api::Call::TorrentsTrackers{args},api::Reply::TorrentsTrackers(result))=>{ensure!(result.trackers.len()<=4096,"tracker list exceeds UI row budget");self.trackers.clear();self.trackers.insert(args.hash.clone(),result.trackers.into_iter().map(|row|(row.url.clone(),row)).collect());},
             (api::Call::TorrentsPeers {args},api::Reply::TorrentsPeers(result))=>{
                 ensure!(result.peers.len()<=MAX_ITEMS,"peer list exceeds UI row budget");
                 self.peers.clear();self.peers.insert(args.hash.clone(),result.peers.into_iter().map(|p|(p.addr.clone(),p)).collect());
@@ -284,6 +286,7 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Trackers(hash)=>patch(self.trackers.entry(hash.clone()).or_default(),changed,added,removed,|item|match item{api::Item::Tracker(row)=>Some((row.url.clone(),row.clone())),_=>None})?,
                 api::Topic::Peers(hash) => patch(self.peers.entry(hash.clone()).or_default(),changed,added,removed,|item|match item{api::Item::Peer(p)=>Some((p.addr.clone(),p.clone())),_=>None})?,
                 api::Topic::Files(hash) => patch(
                     self.files.entry(hash.clone()).or_default(),
@@ -328,6 +331,7 @@ impl Store {
         }
     }
     fn push_event(&mut self, event: api::Event) {
+        if matches!(&event,api::Event::ClipboardMagnet {..}) {return;}
         self.settle(&event);
         if self.events.len() == MAX_EVENTS {
             self.events.pop_front();
@@ -346,6 +350,7 @@ impl Store {
                 self.stale = false;
                 self.fresh_rows();
             }
+            api::Topic::Trackers(hash)=>{self.trackers.clear();self.trackers.insert(hash.clone(),snapshot.trackers);},
             api::Topic::Peers(hash)=>{self.peers.clear();self.peers.insert(hash.clone(),snapshot.peers);},
             api::Topic::Files(hash) => {
                 self.files.clear();

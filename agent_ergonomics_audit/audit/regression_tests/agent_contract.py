@@ -145,26 +145,22 @@ def json_determinism(binary,systemd):
             if process.child.poll() is None:h.stop_serve(process)
 
 
-def version_skew_warning(binary,systemd):
-    with Case('agent_contract','version_skew_warning') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
-        sandbox.env['FBT_BUILD_ID_OVERRIDE']='fixture-daemon';sandbox.keys.append('FBT_BUILD_ID_OVERRIDE')
-        process=h.start_serve()
-        try:
-            h.receive_ready();h.wait_engine()
-            value,r=cli(case,sandbox,binary,'list','--json',extra={'FBT_BUILD_ID_OVERRIDE':'fixture-client'})
-            case.check(any(w['code']=='version_skew' and 'fixture-daemon' in w['message'] and 'fixture-client' in w['message'] for w in value.get('warnings',[])) and not r.stderr,'different builds produce a typed JSON warning on data stdout only',json.dumps(value))
-            _,r=cli(case,sandbox,binary,'list',valid=False,extra={'FBT_BUILD_ID_OVERRIDE':'fixture-client'})
-            case.check(len(r.stderr.splitlines())==1 and 'fbittorrent restart' in r.stderr,'human mode prints exactly one actionable skew line',r.stderr)
-        finally:
-            if process.child.poll() is None:h.stop_serve(process)
+def obsolete_commands_removed(binary,systemd):
+    with Case('agent_contract','obsolete_commands_removed') as case,Sandbox() as sandbox:
+        caps,_=cli(case,sandbox,binary,'capabilities','--json')
+        names={row['name'] for row in caps['commands']}
+        for verb in ('seq','first-last','reconcile'):
+            value,r=cli(case,sandbox,binary,verb,'--json',code=2)
+            case.check(verb not in names and 'unrecognized subcommand' in value.get('error',''),
+                       'obsolete command is absent rather than retained as a compatibility stub',json.dumps(dict(verb=verb,exit=r.returncode,envelope=value)))
+        case.check(not (Path(sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock').exists(),'rejected obsolete commands never start a daemon')
 
-
-def deprecation_warning_legacy_mode(binary,systemd):
-    with Case('agent_contract','deprecation_warning_legacy_mode') as case,Sandbox() as sandbox:
+def removed_backend_refused(binary,systemd):
+    with Case('agent_contract','removed_backend_refused') as case,Sandbox() as sandbox:
         config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
         config.write_text(config.read_text().replace('engine = "native"','engine = "qbittorrent"')+'\nurl="http://127.0.0.1:1"\n')
-        value,r=cli(case,sandbox,binary,'status','--json')
-        case.check(len(r.stderr.splitlines())==1 and 'deprecated' in r.stderr and any(w['code']=='deprecated_engine' for w in value.get('warnings',[])),'legacy mode has one stderr warning and a JSON warnings entry',json.dumps(dict(value=value,stderr=r.stderr)))
+        value,r=cli(case,sandbox,binary,'status','--json',code=2)
+        case.check('engine must be native' in value.get('error','') and not r.stderr,'removed backend is rejected at configuration validation',json.dumps(value))
 
 def exit_code_dictionary_total(binary,systemd):
     with Case('agent_contract','exit_code_dictionary_total') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
@@ -336,7 +332,7 @@ from daemon_show_quality import shows_quality_verb
 from daemon_limits import limits_verb
 from daemon_download_limit import limit_verb
 
-CASES={f.__name__:f for f in [status_history_field,shows_quality_verb,limit_verb,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,version_skew_warning,deprecation_warning_legacy_mode,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

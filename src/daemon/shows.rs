@@ -18,12 +18,23 @@ fn check(shared:&Shared,selector:Option<&str>,stale_only:bool)->Result<Report> {
     let mut all=Shows::load()?;let mut report=Report {new:0,warnings:Vec::new(),checked:0};
     if let Some(id)=selector {anyhow::ensure!(all.get(id).is_some(),"show not found");}
     let cfg=crate::config::Config::load()?;
+    let mut new_unread=0;let mut names=Vec::with_capacity(3);
     for show in all.shows.iter_mut().filter(|s|selector.is_none_or(|id|id==s.imdb)) {
         if shared.stopped.load(Ordering::Acquire){break;}
         if stale_only && (!show.is_stale(shows::now())||shared.state.lock().unwrap().clients.is_empty()){continue;}
         report.checked+=1;shared.state.lock().unwrap().checking.insert(show.imdb.clone());wake(shared);
         match shows::fetch_updates_cancelled(show,&cfg.show_quality,&shared.stopped) {
-            Ok(check)=>{report.new+=show.apply_check(check) as u64;},
+            Ok(check)=>{
+                let mut known:BTreeSet<_>=show.episodes.iter().map(|e|e.key.as_str()).collect();
+                for episode in &check.episodes {
+                    if known.insert(episode.key.as_str()) && show.is_new(&episode.key) {
+                        new_unread+=1;
+                        if names.len()<3 {names.push(format!("{} {}",show.title.chars().take(128).collect::<String>(),episode.key.chars().take(64).collect::<String>()));}
+                    }
+                }
+                drop(known);
+                report.new+=show.apply_check(check) as u64;
+            },
             Err(error)=>{let message=format!("{error:#}");show.error=Some(message.clone());report.warnings.push(api::ShowWarning {imdb:show.imdb.clone(),message});},
         }
         shared.state.lock().unwrap().checking.remove(&show.imdb);wake(shared);
@@ -34,6 +45,7 @@ fn check(shared:&Shared,selector:Option<&str>,stale_only:bool)->Result<Report> {
         let mut event=json!({"ev":"shows.checked","new":report.new,"warnings":report.warnings});
         if let Some(id)=selector {event["imdb"]=json!(id);}
         bus.publish(event);
+        if shared.state.lock().unwrap().clients.is_empty(){bus.new_episodes(new_unread,&names);}
     }
     wake(shared);Ok(report)
 }

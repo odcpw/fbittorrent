@@ -61,7 +61,7 @@ fn table_covers_appendix_b() {
     assert_eq!(all().find(|a| a.id == "torrents.seed").unwrap().keys[0].label(), "u");
     let popup = keymap("popup").to_string();
     assert!(!popup.contains("screen.torrents") && !popup.contains("torrents.wiki"));
-    assert_eq!(fixture::SURFACES.len(), 11);
+    assert_eq!(fixture::SURFACES.len(), 12);
     println!(
         "{} catalogue actions cover TUI and both documented popup exceptions",
         all().count()
@@ -96,18 +96,14 @@ fn action_ids_are_unique_across_surfaces() {
 
 #[test]
 fn no_duplicate_key_per_scope() {
-    for native in [true, false] {
+    for native in [true] {
         let mut app = fixture::app("torrents");
-        if !native {
-            app.cfg.engine = "qbittorrent".into();
-        }
         app.prompt = Some(Prompt {
             kind: PromptKind::AddMagnet,
             label: "Add".into(),
             input: TextInput::new(),
             yes_no: false,
             add_flags: (true, true, false),
-            native_streaming: native,
         });
         for surface in [Surface::Tui, Surface::Dashboard, Surface::Popup] {
             let mut seen = HashMap::new();
@@ -227,13 +223,9 @@ fn focused_dispatch_text_entry_and_backend_conditions() {
     dispatch(&mut app, KeyEvent::new(KeyCode::PageDown));
     assert_eq!(app.help_scroll, 10);
     dispatch(&mut app, KeyEvent::new(KeyCode::Escape));
-    let legacy = all().find(|a| a.id == "legacy.first_last").unwrap();
+    assert!(!all().any(|a| a.id.starts_with("legacy.") || matches!(a.id,"files.high"|"files.max"|"prompt.sequential"|"prompt.first_last")));
     let follow = all().find(|a| a.id == "torrents.follow").unwrap();
-    assert!(!(legacy.enabled)(&app));
     assert!((follow.enabled)(&app));
-    app.cfg.engine = "qbittorrent".into();
-    assert!((legacy.enabled)(&app));
-    assert!(!(follow.enabled)(&app));
     assert!(
         KeyChord::plain(KeyCode::Char('P')).matches(KeyEvent::new(KeyCode::Char('P')).with_modifiers(Modifiers::SHIFT))
     );
@@ -331,4 +323,19 @@ fn pending_row_mutations_are_disabled_in_both_keys_and_footer() {
     let labels = app.footer_labels();
     assert!(!labels.iter().any(|(_, label)| label.contains("(p)") || label.contains("(u)") || label.contains("(d)") || label.contains("(D)")));
     assert!(app.prompt.is_none());
+}
+
+#[test]
+fn native_sort_and_follow_replace_scheduling_toggles() {
+    let mut app=fixture::app("torrents");
+    let selected=app.selected_torrent().map(|row|row.hash.clone());
+    dispatch(&mut app,KeyEvent::new(KeyCode::Char('s')));
+    assert_eq!(app.torrent_sort,store::TorrentSort::Name);
+    assert_eq!(app.selected_torrent().map(|row|row.hash.clone()),selected);
+    let descending=app.torrent_descending;
+    dispatch(&mut app,KeyEvent::new(KeyCode::Char('S')));
+    assert_eq!(app.torrent_sort,store::TorrentSort::Name);
+    assert_eq!(app.torrent_descending,!descending);
+    assert!(app.status.starts_with("Sorted by name"));
+    assert!(all().find(|a|a.id=="torrents.follow").unwrap().keys.contains(&KeyChord::plain(KeyCode::Char('f'))));
 }

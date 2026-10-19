@@ -18,7 +18,7 @@ FocusScope {
   property var selection:({})
   property bool detailsOpen:false
   readonly property int tier:TableLayout.tier(windowLogicalWidth)
-  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened
+  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || (pane && pane.trackerEditing)
   readonly property var pane:docked.item || floating.item
   readonly property bool editing:filterInput.activeFocus || (pane ? pane.editing : false)
   readonly property real scale:Commons.Style.effectiveSpacingScale

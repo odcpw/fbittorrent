@@ -2,11 +2,6 @@
 use super::*;
 
 /// Expand selectors (hash prefix, unique name substring, or `all`) to full hashes.
-pub(super) fn resolve(c: &Client, selectors: &[String]) -> Result<Vec<String>> {
-    let ts = c.torrents()?;
-    resolve_in(&ts, selectors)
-}
-
 pub(super) fn resolve_in(ts: &[Torrent], selectors: &[String]) -> Result<Vec<String>> {
     if selectors.is_empty() {
         return Err(AppError::new(Code::Usage, "no torrent selector given").hint("fbittorrent list --json | jq -r '.torrents[].hash'   # then pass a hash prefix, a unique part of the name, or `all`").into());

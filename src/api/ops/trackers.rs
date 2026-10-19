@@ -23,44 +23,13 @@ fn execute(daemon: &Daemon, op: EngineOp, hash: Option<String>) -> ApiResult<Eng
         failure
     })
 }
-fn unix(value: Option<std::time::SystemTime>) -> Option<u64> {
-    value
-        .and_then(|v| v.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|v| v.as_secs())
+pub(crate) fn read(daemon: &Daemon, hash: &Hash)->ApiResult<Vec<Tracker>> {
+    let EngineResult::Trackers(rows)=execute(daemon,EngineOp::Trackers{hash:hash.to_string()},Some(hash.to_string()))? else {unreachable!("typed tracker result")};
+    Ok(rows.into_iter().map(crate::api::trackers::wire).collect())
 }
 pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
     match call {
-        Call::TorrentsTrackers { args } => {
-            let EngineResult::Trackers(rows) = execute(
-                daemon,
-                EngineOp::Trackers {
-                    hash: args.hash.to_string(),
-                },
-                Some(args.hash.to_string()),
-            )?
-            else {
-                unreachable!("tracker result")
-            };
-            Ok(Reply::TorrentsTrackers(TrackersResult {
-                trackers: rows
-                    .into_iter()
-                    .map(|row| Tracker {
-                        url: row.url.to_string(),
-                        tier: None,
-                        status: match row.status {
-                            librqbit::TrackerStatus::Ok => TrackerStatus::Ok,
-                            librqbit::TrackerStatus::Error => TrackerStatus::Error,
-                            librqbit::TrackerStatus::Updating => TrackerStatus::Updating,
-                            librqbit::TrackerStatus::NotContacted => TrackerStatus::NotContacted,
-                        },
-                        last_announce_at: unix(row.last_announce_at),
-                        next_announce_at: unix(row.next_announce_at),
-                        peers: row.peers,
-                        message: row.message,
-                    })
-                    .collect(),
-            }))
-        }
+        Call::TorrentsTrackers { args } => Ok(Reply::TorrentsTrackers(TrackersResult {trackers:read(daemon,&args.hash)?})),
         Call::TorrentsReannounce { args } => {
             execute(
                 daemon,

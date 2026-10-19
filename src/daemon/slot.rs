@@ -1,40 +1,6 @@
 //! Replaceable engine state; the daemon owns the listener, lock and lifecycle.
-use crate::{engine::{AppEngine, ParkedLedger}, ipc::Request};
+use crate::{engine::{AppEngine, ParkedLedger}, engine::ops::{EngineOp, EngineResult, HashSelection}};
 use anyhow::{bail, Result};
-
-// Only legacy wording is adapted here. The typed engine ledger retains saved
-// intent execution and one generation/Condvar across every parked request.
-pub fn dispatch_parked(
-    ledger: &ParkedLedger,
-    request: &Request,
-    interface: &str,
-) -> Option<Result<String>> {
-    ledger.dispatch(request).map(|result| {
-        result
-            .map(|text| {
-                if request.path == "app/version" {
-                    text.replace("ProtonVPN", interface)
-                } else {
-                    text
-                }
-            })
-            .map_err(|error| {
-                let message = format!("{error:#}");
-                if message.starts_with("connect ProtonVPN")
-                    || message.starts_with("saved torrent metadata is unavailable; connect ProtonVPN")
-                {
-                    crate::agent::AppError::new(
-                        crate::agent::Code::Backend,
-                        format!("engine_unavailable state=parked; {}", message.replace("ProtonVPN", interface)),
-                    )
-                    .hint(format!("connect {interface} then retry"))
-                    .into()
-                } else {
-                    error
-                }
-            })
-    })
-}
 
 pub enum Slot {
     Starting,
@@ -118,11 +84,9 @@ mod tests {
         let ledger = ParkedLedger::new(directory.clone(), crate::daemon::lifecycle::Lifecycle::default());
         let generation = ledger.ledger_generation();
         for expected in 1..=2 {
-            let stop = Request { method: "POST".into(), path: "torrents/stop".into(),
-                args: vec![("hashes".into(), "all".into())], file: None };
-            dispatch_parked(&ledger, &stop, "fbmissing0").unwrap().unwrap();
-            let read = Request { method: "GET".into(), path: "torrents/info".into(), args: vec![], file: None };
-            assert_eq!(dispatch_parked(&ledger, &read, "fbmissing0").unwrap().unwrap(), "[]");
+            ledger.execute(EngineOp::Stop { hashes: HashSelection::All }).unwrap();
+            let EngineResult::Torrents(rows) = ledger.execute(EngineOp::Info).unwrap() else { panic!("expected torrent list") };
+            assert!(rows.is_empty());
             assert_eq!(generation.wait_after(expected - 1, std::time::Duration::ZERO), Some(expected));
             println!("parked adapter durable save/read: expected generation={expected} observed={}", generation.current());
         }

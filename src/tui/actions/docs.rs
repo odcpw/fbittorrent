@@ -59,12 +59,10 @@ pub(crate) fn markdown(filter: &str) -> String {
     out
 }
 
-pub(in crate::tui) fn help_text(native: bool) -> &'static str {
+pub(in crate::tui) fn help_text(_native: bool) -> &'static str {
     use std::sync::OnceLock;
     static NATIVE: OnceLock<String> = OnceLock::new();
-    static LEGACY: OnceLock<String> = OnceLock::new();
-    let cache = if native { &NATIVE } else { &LEGACY };
-    cache.get_or_init(|| {
+    NATIVE.get_or_init(|| {
         let mut out = String::new();
         let mut scopes = Vec::new();
         for action in all() { if !scopes.contains(&action.scope) { scopes.push(action.scope); } }
@@ -79,10 +77,7 @@ pub(in crate::tui) fn help_text(native: bool) -> &'static str {
             Scope::Modal(ModalKind::Settings)=>14,Scope::Prompt=>15,Scope::Modal(ModalKind::Help)=>16,_=>17,
         });
         for scope in scopes {
-            let rows: Vec<_> = all().filter(|a|a.scope==scope).filter(|a| a.surfaces.contains(&Surface::Tui)
-            && !(native && a.id.starts_with("legacy."))
-            && !(native && matches!(a.id,"files.high"|"files.max"|"prompt.sequential"|"prompt.first_last"))
-            && !(!native && matches!(a.id,"torrents.follow"|"settings"))).collect();
+            let rows: Vec<_> = all().filter(|a|a.scope==scope).filter(|a| a.surfaces.contains(&Surface::Tui)).collect();
             if rows.is_empty() { continue; }
             if !out.is_empty() { out.push('\n'); }
             out.push_str(&scope.name().to_uppercase());

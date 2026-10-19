@@ -5,7 +5,7 @@ mod fixture;
 #[test]
 fn peer_port_edit_cancel_range_and_patch() {
     let mut app = fixture::app("settings");
-    app.on_key(KeyEvent::new(KeyCode::Up));
+    app.settings.as_ref().unwrap().list.borrow_mut().select(Some(settings_fields::PORT_ROW));
     assert_eq!(
         app.settings.as_ref().unwrap().list.borrow().selected(),
         Some(settings_fields::PORT_ROW)

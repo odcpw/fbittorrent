@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run native unit and isolated app integration checks. Legacy/Desktop checks
-# require explicit opt-in because they control the configured live service/UI.
+# Run native unit and isolated app integration checks. Desktop checks
+# require explicit opt-in because they control the configured live UI.
 set -euo pipefail
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   cat <<'HELP'
@@ -24,7 +24,6 @@ Environment flags (opt-ins default to 0; set exactly 1 to enable):
   FBT_TEST_VERBOSE=1    Mirror every JSONL line to stderr, including pane polls.
   FBT_TEST_FORCE_FAIL=<suite>/<case>
                        Force that case's first step to fail; retain its logs.
-  FBT_TEST_LEGACY=1     Legacy CLI checks; controls the configured live service.
 
 Unavailable opted-in fixture scripts fail explicitly. QS/visual scripts arrive
 in their named P2 beads. No live-service or live-widget suite runs by default.
@@ -126,10 +125,6 @@ if [[ "${FBT_TEST_DAEMON_RESOURCES:-0}" == 1 ]]; then
     --daemon --matrix --runs 3 --seconds 60 \
     --baseline agent_ergonomics_audit/audit/regression_tests/baselines/resources.json \
     --output target/test-logs/daemon_budget/measurement.json
-fi
-if [[ "${FBT_TEST_LEGACY:-0}" == 1 ]]; then
-  echo "## Configured legacy CLI"
-  agent_ergonomics_audit/audit/regression_tests/run.sh
 fi
 if [[ "${FBT_TEST_WIDGET:-0}" == 1 ]]; then
   echo "## Live widget keyboard controls"

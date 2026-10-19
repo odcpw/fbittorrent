@@ -79,9 +79,9 @@ pub enum Pane {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalKind {
+    Clipboard,
     Log,
     Poster,
-    Clipboard,
     Details,
     Files,
     Providers,
@@ -142,8 +142,6 @@ pub(super) enum Intent {
     Left,
     Right,
     Pause,
-    Sequential,
-    FirstLast,
     Seed,
     Remove,
     DeleteFiles,
@@ -163,8 +161,6 @@ pub(super) enum Intent {
     Undo,
     Toggle,
     Include,
-    High,
-    Max,
     All,
     None,
     CloseUi,

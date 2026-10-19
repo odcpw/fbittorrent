@@ -40,7 +40,7 @@ fn hashes(values: &Hashes) -> HashSelection {
 }
 pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
     let legacy: serde_json::Value =
-        serde_json::from_str(&view.to_legacy_json().map_err(engine_error)?).unwrap();
+        serde_json::from_str(&view.to_cli_json().map_err(engine_error)?).unwrap();
     let mut value = serde_json::to_value(view).unwrap();
     if value["upload_limit_bps"] == 0 {
         value.as_object_mut().unwrap().remove("upload_limit_bps");

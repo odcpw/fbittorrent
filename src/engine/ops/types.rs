@@ -300,7 +300,8 @@ pub enum EngineResult {
     Network(crate::network_app::NetworkState),
 }
 impl EngineResult {
-    pub fn to_legacy_json(&self) -> Result<String> {
+    #[cfg(test)]
+    pub fn to_cli_json(&self) -> Result<String> {
         match self {
             Self::Move(_) => bail!("payload relocation has no legacy route"),
             Self::Trackers(_) => bail!("tracker observations have no legacy route"),
@@ -313,7 +314,7 @@ impl EngineResult {
             Self::Torrents(rows) => Ok(format!(
                 "[{}]",
                 rows.iter()
-                    .map(|row| row.to_legacy_json())
+                    .map(|row| row.to_cli_json())
                     .collect::<Result<Vec<_>>>()?
                     .join(",")
             )),

@@ -37,8 +37,7 @@ fn rev_monotonic() {
         logs: json!([]),
         searches: BTreeMap::new(),
         files: BTreeMap::new(),
-        peers: BTreeMap::new(),
-        pieces:BTreeMap::new(),
+        peers:BTreeMap::new(),pieces:BTreeMap::new(),trackers:BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
@@ -130,6 +129,24 @@ fn merged_search_and_show_inbox_keep_distinct_removal_keys() {
 }
 
 #[test]
+fn fast_engine_transitions_are_delivered_once_per_connection_without_sampling() {
+    let sink=EventSink::testing();
+    let mut registry=Registry::default();
+    for sub in [1,2] {
+        registry.subscriptions.insert((sink.id(),sub),Subscription {
+            sub,sink:sink.clone(),rev:0,topics:vec![],since:None,epoch:None,active:true,
+        });
+    }
+    registry.engine_changed(2,"starting");
+    registry.engine_changed(2,"running");
+    let frames=sink.take_frames();
+    assert_eq!(frames.len(),2,"two topics on one connection cannot duplicate phases");
+    assert_eq!(frames.iter().map(|f|f["state"].as_str().unwrap()).collect::<Vec<_>>(),["starting","running"]);
+    assert!(frames.iter().all(|f|f["epoch"]==2&&f["reason"]=="engine_restart"));
+    assert_eq!(registry.events.replay(None).2,frames,"both phases remain replayable even without a sampler tick");
+}
+
+#[test]
 fn peer_counters_coalesce_but_seed_and_direction_are_structural(){
     let topic=Topic::Peers(Hash::new("12".repeat(20)).unwrap());
     let old=json!([{"addr":"127.0.0.1:1","seed":false,"downloaded":1,"uploaded":2,"dl_bps":3,"ul_bps":4}]);
@@ -159,7 +176,7 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
@@ -178,7 +195,7 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
         topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
         since:None,epoch:None,active:true};
     // The worker collected its topic set before this subscription arrived.
-    let mut sample=Sample {history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+    let mut sample=Sample {trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
         rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
         network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
         shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),

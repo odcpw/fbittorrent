@@ -16,7 +16,6 @@ function describe(s) {
     r.banner="Waiting for ProtonVPN ("+(network.interface || network.selection || "proton0")+"). Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
-  else if(info.installed_version && (hello.server || {}).version && info.installed_version!==(hello.server || {}).version)r.banner="fbittorrent "+(hello.server || {}).version+" runs; "+info.installed_version+" is installed. Restart to update."
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
   if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
   if(daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"
@@ -28,8 +27,7 @@ function meta(t,parked) {
   if(!parked && t.progress!==undefined && t.progress!==null)parts.push(Model.percent(t.progress,t.state==="done" || t.state==="seeding"))
   if(t.dl_bps!==undefined)parts.push("↓ "+Model.rate(t.dl_bps))
   if(t.eta_s!==undefined)parts.push(Model.eta(t.eta_s,false))
-  if(t.peers!==undefined)parts.push(t.peers+" peers")
-  if(t.seeds!==undefined)parts.push(t.seeds+" seeds")
+  if(t.peers!==undefined || t.seeds!==undefined)parts.push(Model.peerCount(t,false))
   if(t.playable && t.playable.ready){if(t.playable.buffered_s!==undefined)parts.push(Model.eta(t.playable.buffered_s,false)+" buffered");if(t.playable.stall_free===false){parts.push("may stall");if(t.playable.finishes_in_s!==undefined)parts.push("finishes in "+Model.eta(t.playable.finishes_in_s,false))}}
   return parts.join(" · ")
 }

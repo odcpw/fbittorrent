@@ -17,6 +17,7 @@ fn key_field(topic:&Topic)->&'static str {
         Topic::Files(_) => "index",
         Topic::Search(_) => "key",
         Topic::Peers(_) => "addr",
+        Topic::Trackers(_) => "url",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
     }

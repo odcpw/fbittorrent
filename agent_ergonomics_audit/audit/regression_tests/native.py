@@ -174,62 +174,19 @@ def launcher_never_called(binary):
             cleanup.wait(timeout=5)
         case.check(config.read_text() == config_text,
                    "Invocation flags leave the stored autostart setting enabled.")
-        case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock").exists(),
+        case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock").exists(),
                    "No probe has started a native engine socket.")
         legacy_endpoint.bind(("127.0.0.1", 0))
         legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
                          f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
         config.write_text(legacy_config)
-        for args, overrides in ((("--no-start", "setup"), {}),
-                                (("setup",), {"FBITTORRENT_NO_START": "1"})):
-            argv = [binary, *args, "--json"]
-            step = case.step("Legacy setup " + shlex.join(argv),
-                             "Typed exit 4 with the opening hint, zero systemctl calls, and no setup writes.")
-            child = case.popen(argv, env=dict(env, **overrides), stdout=subprocess.PIPE, text=True)
-            try:
-                stdout, _ = child.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.communicate()
-                step.fail("Legacy setup timed out.", [calls])
-                continue
-            value = json.loads(stdout)
-            step.close(child.returncode == 4 and value.get("code") == 4 and
-                       value.get("code_name") == "backend" and value.get("hint") == "fbittorrent up" and
-                       value.get("error") == "legacy setup cannot start qBittorrent while --no-start or FBITTORRENT_NO_START=1 is active" and
-                       not calls.read_text() and not (home / ".config").exists() and
-                       config.read_text() == legacy_config,
-                       f"argv={argv!r}, env={overrides!r}; exit {child.returncode}; JSON={value!r}; "
-                       f"launcher/systemctl calls={calls.read_text()!r}; setup writes={(home / '.config').exists()}.", [calls])
-
-        # Ordinary setup must still reach its explicit service start. Refuse
-        # that start in a recording shim; no real systemd service is controlled.
-        control = case.path.with_suffix(".setup-systemctl.log")
-        control.write_text("")
-        (shims / "systemctl").write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> " +
-            shlex.quote(str(control)) + '\n[ "$2" != start ]\n')
-        step = case.step("Ordinary legacy setup without startup restrictions",
-                         "Installed nox reaches the recording service-start refusal; missing nox retains its dependency error.")
-        child = case.popen([binary, "setup", "--save", str(root / "downloads"), "--json"],
-                           env=env, stdout=subprocess.PIPE, text=True)
-        try:
-            stdout, _ = child.communicate(timeout=5)
-            value = json.loads(stdout)
-            if Path("/usr/bin/qbittorrent-nox").exists():
-                expected_calls = ["--user daemon-reload", "--user disable qbittorrent-nox.service",
-                                  "--user start qbittorrent-nox.service"]
-                ok = (child.returncode == 1 and control.read_text().splitlines() == expected_calls and
-                      value.get("error") == "systemctl --user start qbittorrent-nox.service failed")
-            else:
-                ok = child.returncode == 4 and "qbittorrent-nox is not installed" in value.get("error", "") and not control.read_text()
-            step.close(ok and not calls.read_text(),
-                       f"exit {child.returncode}; JSON={value!r}; systemctl argv={control.read_text()!r}; "
-                       f"automatic-path launcher calls={calls.read_text()!r}.", [control, calls])
-        except subprocess.TimeoutExpired:
-            child.kill()
-            child.communicate()
-            step.fail("Ordinary setup timed out.", [control, calls])
-
+        for args in [("--no-start","setup"),("setup",),("status",)]:
+            argv=[binary,*args,"--json"]
+            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 naming v0.4.0, with no launch, network or settings writes")
+            child=case.popen(argv,env=env,stdout=subprocess.PIPE,text=True)
+            stdout,_=child.communicate(timeout=5);value=json.loads(stdout)
+            step.close(child.returncode==2 and "removed in v0.4.0" in value.get("error","") and not calls.read_text() and config.read_text()==legacy_config,
+                       f"exit={child.returncode}; envelope={value}; calls={calls.read_text()!r}",[calls])
 
 
 def terminal_close_is_graceful(binary):
@@ -291,7 +248,7 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             child = case.popen([binary, *args, "--json"], env=env, stdout=subprocess.PIPE, text=True)
             out, _ = child.communicate(timeout=5)
             return child.returncode, json.loads(out)
-        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         lock_path = socket_path.with_name("engine.lock")
         owner = NativeHarness(lambda: case, binary, env)
         try:
@@ -394,7 +351,7 @@ class NativeHarness:
 
     def ensure_serve(self):
         """Existing adapter cases own a disposable foreground daemon explicitly."""
-        path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        path = Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         if getattr(self, "serve", None) is not None and self.serve.poll() is None:
             return
         if not Path(self.binary).exists():
@@ -423,11 +380,9 @@ class NativeHarness:
         self.wait_for(lambda: path.exists() and self.serve.poll() is None, "disposable daemon listener opens")
         def ready():
             try:
-                response = daemon.Harness.engine_call(self, "app/version", timeout=1)
-                return isinstance(response.get("value"), str) and not response.get("error")
-            except (OSError, EOFError):
-                return False
-        self.wait_for(ready, "disposable daemon answers its legacy version request")
+                return self.api("app.info").get("state") in ("running","parked")
+            except (OSError,EOFError): return False
+        self.wait_for(ready,"disposable daemon answers API v1")
 
     def api(self, op, args=None):
         """Read real daemon state independently of the CLI's legacy/API shaper."""
@@ -438,7 +393,7 @@ class NativeHarness:
 
     @property
     def engine_path(self):
-        return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        return Path(self.env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
 
     def close_serve(self):
         process = getattr(self, "serve", None)
@@ -938,7 +893,7 @@ def startup_survives_bad_record(binary):
         def rows():
             return {row["hash"]: row for row in harness.cli("list")["torrents"]}
 
-        socket_path = root / "runtime/fbittorrent/engine.sock"
+        socket_path = root / "runtime/fbittorrent/api.sock"
         try:
             app_launch = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
             launch = f"exec script -qef -c {shlex.quote(app_launch)} {shlex.quote(str(root / 'terminal.typescript'))}"
@@ -1088,7 +1043,7 @@ def stop_during_hashing(binary):
         def capture():
             return tmux("capture-pane", "-t", session, "-p").stdout
 
-        socket_path = root / "runtime/fbittorrent/engine.sock"
+        socket_path = root / "runtime/fbittorrent/api.sock"
         stderr_offset = case.stderr_offset
         try:
             command = shlex.join([binary, "tui"]) + " 2>>" + shlex.quote(str(case.suite.stderr_path))
@@ -1244,9 +1199,9 @@ def local_download(case, binary, leech):
             if not (seedh.receive_ready() and seedh.wait_engine()):
                 raise RuntimeError("loopback seed failed to start")
             seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
-            seedh.wait_for(lambda: ((row := json.loads(seedh.engine_call("torrents/info")["value"])[0])["state"] == "uploading", str(row)), "verified local seed")
-            reply = seedh.engine_call("torrents/setUploadLimit", "POST", [("hashes", torrent.info_hash), ("limit", "32768")])
-            case.check(reply.get("value") == "Ok.", "seed upload is capped so the download remains active", str(reply))
+            seedh.wait_for(lambda: ((row := seedh.api("torrents.list")["torrents"][0])["state"] == "seeding", str(row)), "verified local seed")
+            reply = seedh.api("torrents.set_upload_limit",dict(hashes=[torrent.info_hash],bps=32768))
+            case.check(reply.get("state") == "done", "seed upload is capped so the download remains active", str(reply))
             leech.cli("add", str(torrent.torrent), "--quiet")
             leech.wait_for(lambda: ((row := leech.cli("show", torrent.info_hash))["completed"] >= 32768 and
                                    row["progress"] < 1, str(row)), "real local payload begins", timeout=20)
@@ -1504,7 +1459,7 @@ def main():
         def click_text(text):
             mouse_text(text, 0)
 
-        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/engine.sock"
+        socket_path = Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock"
         error_file = None  # suite capture is assigned before the first launch
         terminal_bytes = root / "terminal.typescript"
         try:
@@ -1829,7 +1784,7 @@ def main():
                 keys("q")
                 parked_harness.ensure_serve()
                 harness.start_tmux(tmux, session, parked_launch)
-                parked_socket = parked_root / "runtime/fbittorrent/engine.sock"
+                parked_socket = parked_root / "runtime/fbittorrent/api.sock"
                 def parked_without_session():
                     if not parked_socket.exists(): return False
                     owner = parked_harness.api("app.info")

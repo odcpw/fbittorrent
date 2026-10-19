@@ -19,12 +19,12 @@
 │                 │   (v) Card                                                                       │                 │
 │                 │                                                                                  │                 │
 │                 │ SCREEN:TORRENTS                                                                  │                 │
+│                 │   (s) Sort                                                                       │                 │
+│                 │   (S) Reverse sort                                                               │                 │
 │                 │   (j/↓) Next                                                                     │                 │
 │                 │   (k/↑) Previous                                                                 │                 │
 │                 │   (g/Home) First                                                                 │                 │
-│                 │   (G/End) Last                                                                   │                 │
-│                 │   (PgDn) Page down                                                               │                 │
-╰─────────────────│   (PgUp) Page up                                                                 │─────────────────╯
+╰─────────────────│   (G/End) Last                                                                   │─────────────────╯
 ↓ Down · downloadi│ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                              │
 [Help] (Esc) Close│                                                                                  │ast       (?) Help
 The Diplomat S04E0╰──────────────────────────────────────────────────────────────────────────────────╯

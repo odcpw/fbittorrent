@@ -845,10 +845,16 @@ observations return saved URLs as `not_contacted`. `tracker_count` counts every
 metainfo URL, including private secondary and unsupported URLs. Forced announces
 wake interval and backoff waits, use event=none, and coalesce within 60 seconds.
 Reannounce requires every selected torrent to be live (`invalid_state` otherwise);
-a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription awaits P1-08 integration: keyed by
-URL, a 5,000 ms tick for times and immediate structural status changes. Its typed
-topic/item registration and pushed-delivery qualification remain pending that
-integration, alongside the TUI/dashboard rendering owned by their tracks.
+a parked engine returns `engine_unavailable`. The `torrent:<hash>.trackers` subscription is keyed by the complete URL, with
+one typed `Tracker` per snapshot item and ordinary keyed deltas. Its default
+cadence is 1,000 ms; status changes are structural. The daemon reads observations
+only for subscribed tracker details, releases them when the last subscriber
+leaves, and resets the snapshot across engine epochs. Paused torrents retain
+their last available observations. Clients render URLs without userinfo,
+queries or fragments. Tracker failure messages and ordinary CLI diagnostics
+also strip URL credentials and known echoed credential values; the private URL
+identity is retained for explicit socket tracker operations.
+
 
 ### Payload moves (P7-02, contract 1.2.21)
 
@@ -1056,6 +1062,11 @@ ledger add with origin shows. The new transcript covers every operation and
 inbox identity; existing hello/error arrays exactly include the shows cap.
 
 ### P5-01: connected seeds and peers (contract 1.2.26)
+
+`Summary.top[]` also carries optional `peers` and `seeds` from the same current
+connected-peer observations as the torrent list. This bounded glance projection
+lets the bar show named torrent counts while detail sampling is off. Missing
+counts stay absent; they are never swarm totals or substituted zeroes.
 
 Capability `peers` adds `torrents.peers {hash}` and `torrent:<hash>.peers`.
 The latter is keyed by `addr`, defaults to 1000 ms and releases sampling when

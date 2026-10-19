@@ -17,6 +17,7 @@ pub enum Item {
     File(File),
     Search(super::SearchItem),
     Peer(super::Peer),
+    Tracker(Tracker),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

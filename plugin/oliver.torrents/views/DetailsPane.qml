@@ -14,10 +14,11 @@ ColumnLayout {
   readonly property string networkingText:overview.item ? overview.item.networkingText : ""
   readonly property bool posterLoaded:overview.item ? overview.item.posterLoaded : false
   readonly property var piecesState:pieces.item ? pieces.item.state : null
-  readonly property bool editing:(overview.item && overview.item.editing) || (files.item && files.item.editing) || false
+  readonly property bool editing:(overview.item && overview.item.editing) || (files.item && files.item.editing) || (trackers.item && trackers.item.editing) || false
+  readonly property bool trackerEditing:trackers.item && trackers.item.editing
   function renameTitle(){flow.selectTab("overview");Qt.callLater(function(){if(overview.item)overview.item.renameTitle()})}
   signal recheckRequested(string hash)
-  function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(files.item && files.item.key(event))return true;return false}
+  function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(trackers.item && trackers.item.key(event))return true;if(files.item && files.item.key(event))return true;return false}
   spacing:Commons.Style.spacing.sm
   Rectangle {Layout.fillWidth:true;Layout.preferredHeight:Commons.Style.space(2);color:Commons.Color.accent;opacity:root.focused ? 1 : 0}
   Flow {
@@ -29,8 +30,9 @@ ColumnLayout {
   Loader {id:overview;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="overview";visible:active;sourceComponent:DetailsOverview {service:root.service;torrent:root.torrent;card:root.service.detailRevision>=0 ? root.flow.card : null;onRecheckRequested:function(hash){root.recheckRequested(hash)}}}
   Loader {id:files;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="files";visible:active;sourceComponent:DetailsFiles {service:root.service;flow:root.flow;torrent:root.torrent}}
   Loader {id:pieces;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="pieces";visible:active;sourceComponent:Components.PiecesBar {snapshot:root.service.detailRevision>=0 ? root.service.store.topics["torrent:"+root.flow.hash+".pieces"] || null : null}}
+  Loader {id:trackers;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="trackers";visible:active;sourceComponent:TrackersView {service:root.service;flow:root.flow}}
   Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="log";visible:active;sourceComponent:LogView {service:root.service;hash:root.flow.hash;consumer:"detail-log"}}
-  Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && ["overview","files","pieces","log"].indexOf(root.tab)<0;visible:active;sourceComponent:DetailCollection {service:root.service;flow:root.flow}}
+  Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && ["overview","files","trackers","pieces","log"].indexOf(root.tab)<0;visible:active;sourceComponent:DetailCollection {service:root.service;flow:root.flow}}
 
   Components.KeyHint {Layout.fillWidth:true;text:"[ / ] tabs · h table · Esc back"}
 }
