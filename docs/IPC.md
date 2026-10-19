@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
 | `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
 | `settings` | `app.settings.get/set`, topic `settings` | P3-05 |
@@ -161,7 +162,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
 | `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
-| `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
+| `app.client` | `interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
 | `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
@@ -464,7 +465,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -887,7 +888,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.22**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.23**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -919,6 +920,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.20` | `shows` |
 | `1.2.21` | `api.move` |
 | `1.2.22` | `api.staging` |
+| `1.2.23` | `app.client.dashboard_visible` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1026,3 +1028,15 @@ the one-level undo target; undo_read restores the last individual read mark to
 unread, and the next undo is empty. Grab marks read/grabbed only after a successful
 ledger add with origin shows. The new transcript covers every operation and
 inbox identity; existing hello/error arrays exactly include the shows cap.
+
+### M1a: visible dashboard presence (contract 1.2.23)
+
+The negotiated `dashboard_presence` capability adds optional boolean
+`app.client.dashboard_visible`. For the shared `bar` connection, interactive
+presence requires both `interactive:true` and `dashboard_visible:true`. A bar
+that merely claims interactive remains idle, preserving the bar-only rule.
+Hiding the dashboard sets both flags false; dropping the connection clears
+presence. Popup `glance` remains independent and freezes the idle countdown.
+The plugin declares visibility after hello and reconnect, including when the
+window was already visible before connecting. It omits the new marker for
+servers without the capability, preserving their strict request parsing.

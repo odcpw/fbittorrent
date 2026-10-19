@@ -83,7 +83,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "app.info", mutating: false, idempotent: false, since: "P1-06",
         args: "none", result: "hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08)" },
     Operation { name: "app.client", mutating: false, idempotent: false, since: "P1-06",
-        args: "`interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both)", result: "`{}`" },
+        args: "`interactive: bool?`, `glance: bool?`, `dashboard_visible: bool?` (a connection drop resets presence; bar interactive needs dashboard_visible)", result: "`{}`" },
     Operation { name: "app.shutdown", mutating: true, idempotent: false, since: "P1-06",
         args: "`reason: str?`", result: "`{state: \"pending\"}`, then `bye`" },
     Operation { name: "app.restart", mutating: true, idempotent: false, since: "P1-06",

@@ -106,6 +106,7 @@ struct Outbox {
 struct ClientState {
     client: Option<Client>,
     interactive: bool,
+    dashboard_visible: bool,
     glance: bool,
     caps: validation::NegotiatedCaps,
 }
