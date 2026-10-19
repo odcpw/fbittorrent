@@ -43,7 +43,7 @@ ShellRoot {
     f.providersOpen();s.reply("search.providers",{providers:[{name:"alpha",kind:"nova",enabled:true}]});f.providerToggle(f.providers[0]);check("providers",f.providerBusy.alpha && s.calls.slice(-1)[0].args.enabled===false,"provider switch waits for confirmed server state",s.calls.slice(-1))
     s.reply("search.set_provider",{state:"done"});s.reply("search.providers",{providers:[{name:"alpha",kind:"nova",enabled:false}]});check("providers",!f.providerBusy.alpha && !f.providers[0].enabled,"provider acknowledgement refreshes the real enabled state",f.providers)
     f.browseOpen();s.reply("search.browse_sources",{sources:[{id:"3",label:"Latest movies",provider:"YTS",in_app:true}]});f.browse(f.sources[0]);s.reply("search.browse",{items:rows})
-    check("browse",f.label==="Latest movies" && f.query==="Latest movies" && f.mode==="browse" && !s.searchTopics.length,"browse rows replace the old query label and release the search session",f.snapshot())
+    check("browse",f.label==="YTS · Latest movies" && f.query==="YTS · Latest movies" && f.mode==="browse" && !s.searchTopics.length,"browse rows replace the old query label and release the search session",f.snapshot())
     var many=[];for(var i=0;i<700;i++)many.push({key:String(i),name:String(i),size:i,providers:["alpha"]})
     f.browse(f.sources[0]);s.reply("search.browse",{items:many});check("row_limit",f.rows.length===500 && f.total===700,"no more than500 search rows are rendered",f.snapshot().total)
     f.sort="size";f.reverse=false;f.resort();check("row_limit",f.rows[0].size===699,"browse sorting retains the hidden results before taking the500-row display window",f.rows[0])
