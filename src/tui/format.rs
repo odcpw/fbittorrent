@@ -1,7 +1,7 @@
 //! Adapter to the current screen rows. The confirmed mirror retains optional values.
 use super::*;
 mod state;
-mod columns;
+pub(super) mod columns;
 pub(super) use columns::Columns;
 pub(super) use state::{state_cell,state_word,STATE_WIDTH,reason};
 use crate::api;
@@ -155,7 +155,7 @@ impl Metrics<'_> {
             |row| {
                 row.peers.map_or_else(
                     || "unknown".into(),
-                    |peers| format!("{peers} peers connected"),
+                    |peers| row.seeds.map_or_else(||format!("{peers} peers connected"),|seeds|format!("{seeds} seeds / {peers} peers connected")),
                 )
             },
         )

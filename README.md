@@ -527,6 +527,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:clipboard` | Add | `y` | — | — |  |
 | `modal:clipboard` | Dismiss | `Esc` | — | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Next peer | `↓`, `j` | — | — |  |
+| `modal:details` | Previous peer | `↑`, `k` | — | — |  |
 | `modal:details` | Back | `Esc`, `h` | — | — |  |
 | `modal:details` | Next tab | `]` | — | — |  |
 | `modal:details` | Previous tab | `[` | — | — |  |

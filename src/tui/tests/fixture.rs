@@ -75,6 +75,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
     }
     match surface {
         "torrents" => {},
+        "peers"=>crate::tui::peer_tests::prepare(&mut app),
         "disk"=>crate::tui::disk_tests::prepare(&mut app),
         "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
         "poster" => {let key=app.torrents[0].name.clone();crate::tui::poster_tests::ready(&mut app,&key);let _=app.on_key(KeyEvent::new(KeyCode::Char('v')));},

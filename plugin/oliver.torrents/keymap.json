@@ -307,6 +307,32 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "peers.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓",
+          "j"
+        ]
+      },
+      "label": "Next peer",
+      "scope": "modal:details"
+    },
+    {
+      "id": "peers.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑",
+          "k"
+        ]
+      },
+      "label": "Previous peer",
+      "scope": "modal:details"
+    },
+    {
       "id": "details.close",
       "keys": {
         "dashboard": null,

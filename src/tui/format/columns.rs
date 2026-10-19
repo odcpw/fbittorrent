@@ -63,7 +63,7 @@ impl Columns {
                         String::new()
                     }
                 },
-                |p| p.to_string(),
+                |p| row.and_then(|r|r.seeds).map_or_else(||p.to_string(),|s|format!("{s}/{p}")),
             ),
         }
     }

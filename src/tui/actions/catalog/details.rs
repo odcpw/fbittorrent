@@ -24,6 +24,10 @@ macro_rules! detail {
     };
 }
 pub(super) const ACTIONS: &[Action] = &[
+    action!("peers.down",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Down),KeyChord::plain(KeyCode::Char('j'))],"Next peer",90,
+        |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Peers),Some(|a|a.scroll_peers(true)),T,None,None,None),
+    action!("peers.up",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Up),KeyChord::plain(KeyCode::Char('k'))],"Previous peer",90,
+        |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Peers),Some(|a|a.scroll_peers(false)),T,None,None,None),
     action!(
         "details.close",
         Scope::Modal(ModalKind::Details),

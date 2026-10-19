@@ -29,6 +29,11 @@ use modals_files::*;
 #[path = "modals/details.rs"]
 mod modals_details;
 use modals_details::*;
+#[path = "modals/peers.rs"]
+mod modals_peers;
+#[cfg(test)]
+#[path = "tests/peers.rs"]
+mod peer_tests;
 #[path = "modals/poster.rs"]
 mod modals_poster;
 #[path = "modals/providers.rs"]
