@@ -2648,7 +2648,8 @@ def contract_errors(binary, systemd):
 
 
 def contract_torrents(binary, systemd):
-    contract_group("torrents", binary, systemd)
+    from daemon_torrent_contract import run
+    run(binary, systemd)
 
 
 class InstalledUnit:
@@ -4956,6 +4957,8 @@ CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
 from daemon_staging import staged_not_busy
 CASES["staged_not_busy"] = staged_not_busy
+from daemon_torznab import CASES as TORZNAB_CASES
+CASES.update((function.__name__,function) for function in TORZNAB_CASES)
 from daemon_watch import CASES as WATCH_CASES
 from daemon_catalog import CASES as CATALOG_CASES
 CASES.update((function.__name__,function) for function in CATALOG_CASES)

@@ -1,4 +1,5 @@
 //! Native Torznab requests; private keys never enter argv or public diagnostics.
+mod bound;
 mod config;
 #[cfg(test)]
 mod tests;
@@ -6,9 +7,14 @@ mod worker;
 mod xml;
 use super::*;
 pub(crate) use config::{indexers, install, Indexer, Invalid};
-const KEY_TOKEN: &str = "__FBT_TORZNAB_KEY__";
+pub(crate) const KEY_TOKEN: &str = "__FBT_TORZNAB_KEY__";
 const RESPONSE_CAP: u64 = 4 * 1024 * 1024;
 pub(crate) use worker::run_if_requested as run_worker;
+
+/// Diagnostics may identify the failed endpoint but never echo inline credentials.
+pub(crate) fn public_source(source: &str) -> String {
+    worker::redact_url(source, None)
+}
 
 fn exchange(
     request: &worker::Request,

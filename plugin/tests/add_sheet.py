@@ -79,28 +79,51 @@ def drop_routing(binary):
 
 def handler(binary,suite='qs_dashboard_add',name='handler_confirm_mode'):
     with Case(suite,name) as case,running(binary,'empty',case) as (sandbox,harness,client,row):
-        torrent,files=fixture(sandbox);q=Session(case,sandbox)
+        torrent,files=fixture(sandbox);original={p:p.read_bytes() for p in files};q=Session(case,sandbox)
+        target=sandbox.root/'handler downloads';target.mkdir()
         try:
             q.wait(lambda:q.ipc('ready')=='true')
-            command=[str(binary),'add','--origin','handler',str(torrent.torrent),'--json']
-            unavailable=subprocess.run(command,env=q.env,capture_output=True,text=True,timeout=12)
-            case.check(unavailable.returncode==5 and client.call('torrents.list',{})['result']['torrents']==[], 'missing dashboard refuses confirmation without adding',json.dumps(dict(exit=unavailable.returncode,stdout=unavailable.stdout,stderr=unavailable.stderr)))
+            command=[str(binary),'add','--origin','handler','--seed','--save',str(target),str(torrent.torrent),'--json']
+            def invoke():return subprocess.run(command,env=q.env,capture_output=True,text=True,timeout=12)
+            def rows():return client.call('torrents.list',{})['result']['torrents']
+            def outcome(result):return json.dumps(dict(exit=result.returncode,stdout=result.stdout,stderr=result.stderr))
+            unavailable=invoke()
+            case.check(unavailable.returncode==5 and rows()==[], 'missing dashboard refuses confirmation without adding',outcome(unavailable))
             link=Path(sandbox.env['XDG_CONFIG_HOME'])/'omarchy/plugins/oliver.torrents';link.parent.mkdir(parents=True);link.symlink_to(q.config/'Plugin',target_is_directory=True)
+            fixtures.path_shim('omarchy-shell','exit 7',sandbox.root)
+            unavailable=invoke()
+            case.check(unavailable.returncode==5 and rows()==[],'an installed but unavailable dashboard refuses before staging',outcome(unavailable))
+            counter=sandbox.root/'summon-count'
+            failing='count=0; [ ! -f '+shlex.quote(str(counter))+' ] || count=$(cat '+shlex.quote(str(counter))+'); count=$((count+1)); printf %s "$count" > '+shlex.quote(str(counter))+'; [ "$count" -ne 2 ] || exit 7; exec /usr/share/omarchy/bin/omarchy-shell "$@"'
+            fixtures.path_shim('omarchy-shell',failing,sandbox.root)
+            unavailable=invoke()
+            case.check(unavailable.returncode==5 and rows()==[] and not list(target.iterdir()),'a failed staged handoff discards only its new record without creating payload',outcome(unavailable))
             fixtures.path_shim('omarchy-shell','exec /usr/share/omarchy/bin/omarchy-shell "$@"',sandbox.root)
-            command=[str(binary),'add','--origin','handler',str(torrent.torrent),'--json']
-            result=subprocess.run(command,env=q.env,capture_output=True,text=True,timeout=12)
-            case.check(result.returncode==0,'handler confirm routes through actual private shell CLI',json.dumps(dict(argv=command,exit=result.returncode,stdout=result.stdout,stderr=result.stderr)))
-            value=json.loads(result.stdout);preview=wait_sheet(q,'preview')
-            log=(sandbox.root/'shims/omarchy-shell.log').read_text()
-            case.check(value['confirmation_required'] and value['count']==0 and not value['staged'] and client.call('torrents.list',{})['result']['torrents']==[],'without staging cap the handler opens review and creates no torrent record',json.dumps(dict(result=value,argv=log,state=preview)))
-            case.check(preview['origin']=='handler' and preview['source']==dict(path=str(torrent.torrent)),'handler source and origin reach the actual sheet as structured data',json.dumps(preview))
+            result=invoke()
+            case.check(result.returncode==0,'handler confirm routes through actual private shell CLI',outcome(result))
+            value=json.loads(result.stdout);preview=wait_sheet(q,'ready');staged=rows()
+            case.check(value['confirmation_required'] and value['count']==1 and value['staged'] and len(staged)==1 and staged[0]['staged'] and staged[0]['state']=='paused' and not staged[0]['checked'],'confirmation creates one metadata-only stage with no hashing or download',json.dumps(dict(result=value,rows=staged,sheet=preview)))
+            case.check(preview['origin']=='handler' and preview['hash']==torrent.info_hash and preview['owned'] and preview['seed'] and preview['savePath']==str(target) and len(preview['files'])==2 and preview['neededBytes']==sum(p.stat().st_size for p in files) and preview['destinationReady'],'the actual staged sheet adopts origin, seed, destination and API file sizes',json.dumps(preview))
+            counter.write_text('0');fixtures.path_shim('omarchy-shell',failing,sandbox.root)
+            duplicate=invoke();retained=rows()
+            case.check(duplicate.returncode==5 and len(retained)==1 and retained[0]['staged'] and retained[0]['hash']==torrent.info_hash,'a failed duplicate handoff never discards the existing stage',outcome(duplicate))
+            fixtures.path_shim('omarchy-shell','exec /usr/share/omarchy/bin/omarchy-shell "$@"',sandbox.root)
             q.keys(['-k','Escape'],lambda:not state(q).get('visible'))
+            case.check(rows()==[] and not list(target.iterdir()) and all(p.read_bytes()==body for p,body in original.items()),'Discard removes the stage and preserves every source and destination byte',str(target))
+            result=invoke();wait_sheet(q,'ready')
+            case.check(result.returncode==0,'a fresh confirmation after Discard opens a new stage',outcome(result))
+            q.keys(['-k','Return'],lambda:not state(q).get('visible'))
+            def committed():
+                current=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']
+                return current if not current['staged'] else None
+            committed_row=q.wait(committed)
+            case.check(committed_row['origin']=='handler' and committed_row['seed'] and committed_row['save_path']==str(target) and committed_row['intent']=='run','Enter commits the staged handler request with the reviewed settings',json.dumps(committed_row))
             cfg=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml';cfg.write_text(cfg.read_text()+'\nhandler = "add"\n')
-            before=(sandbox.root/'shims/omarchy-shell.log').read_bytes()
-            result=subprocess.run(command,env=q.env,capture_output=True,text=True,timeout=12)
-            case.check(result.returncode==0 and json.loads(result.stdout).get('hash')==torrent.info_hash,'ordinary handler add mode still creates the actual torrent immediately',result.stdout+result.stderr)
+            source=sandbox.root/'ordinary source';source.mkdir();file=source/'ordinary.bin';file.write_bytes(b'ordinary handler mode')
+            immediate=fixtures.torrent_fixture(source,[file]);command[-2]=str(immediate.torrent)
+            before=(sandbox.root/'shims/omarchy-shell.log').read_bytes();result=invoke()
+            case.check(result.returncode==0 and json.loads(result.stdout).get('hash')==immediate.info_hash and not client.call('torrents.get',dict(hash=immediate.info_hash))['result']['torrent']['staged'],'ordinary handler add mode still creates the actual torrent immediately',outcome(result))
             case.check((sandbox.root/'shims/omarchy-shell.log').read_bytes()==before,'add mode does not summon confirmation',str(command))
-            case.check(True,'record live staging qualification boundary','UNMET until staging capability is merged; current compatibility path is real and verified')
         finally:q.close()
 
 if __name__=='__main__':

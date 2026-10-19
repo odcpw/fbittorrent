@@ -61,7 +61,7 @@ pub(crate) fn install(cfg: &Config, sources: &[String]) -> api::InstalledResult 
         ) {
             Ok(()) => result.installed.push(source.clone()),
             Err(error) => result.failed.push(api::InstallFailure {
-                source: source.clone(),
+                source: search::torznab::public_source(source),
                 message: format!("{error:#}").chars().take(200).collect(),
             }),
         }

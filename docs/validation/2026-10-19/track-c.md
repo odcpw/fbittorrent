@@ -135,3 +135,59 @@ Shared binary-unit disk warning now appears in the popup, dashboard and urgent b
 ## P6-13 shell UI — fbt-p6-13-dxe
 
 Bar subscribes to live events whenever the daemon advertises clipboard; bounded ClipboardFlow consumes only new clipboard offers, rejects ledger/sequence/hash duplicates and ignores historical snapshot offers on reload. The shared Add/Dismiss component renders in popup and dashboard, with real buttons and y/Esc; Add sends `torrents.add {origin:clipboard}` using only the offered hash, Dismiss sends its required hash. The UI owns no watcher and never logs selection contents. `python3 plugin/tests/clipboard_ui.py --binary target/fbt-p3-11-verification/debug/fbittorrent` passed both private native cases (`target/test-logs/qs_clipboard/`, producer traces, notification argv, PNGs): default off/no reader, offer received while both UIs closed, actual Add/Dismiss popup clicks and dashboard keys, real clipboard-origin ledger record, repeated selection dedupe, off reaps reader, exactly one daemon-owned wl-paste and empty stderr/app.log selection-text scan. Qt frozen clipboard reducer5 cases and client16 cases pass (`qs_clipboard_flow/`, `qs_client/`); lint and generated keymap check pass (`p6_13_lint_final/`, `p6_13_keymap/`). Full Rust passed475/0/3ignored without worker failures (`p6_13_full_rust/`). Added the clipboard scope/label to the shared catalogue and footer enum so IDs/keys remain authoritative; no TUI consumer was added (Track D's half remains). Earlier missing exhaustive enum arm is retained (`p6_13_build/`), corrected build green (`p6_13_build_fixed/`). Window item captures now include the actual opaque window background so translucent banners render faithfully in PNGs. No backward compatibility was added; no all.sh between track beads.
+
+
+## P3-15 — fbt-p3-15-tsg
+
+Landed Settings sheet for all20 current writable keys, shell controls and validation, four K/M limit fields with empty/null clearing, live network choices and peer port. Controls wait for pushed confirmation; a set acknowledgement no longer replaces the settings snapshot. Restart banner stays visible through a short transition and records completion without losing the daemon connection. Global Log has level/source chips, exact source/hash filters, bounded newest-last auto-follow and shares the Details consumer. Help renders the generated dashboard catalogue by scope. Added L metadata and wired the already-declared refresh r / window-only Ctrl+C. Shared banners now use the body font token.
+
+`plugin/tests/qs-dashboard.sh --preferences --binary target/fbt-p3-11-verification/debug/fbittorrent` passes the four named acceptance cases plus setup (`target/test-logs/qs_preferences/`,204 steps, native PNGs): per-key UI control requests/results/actual pushed settings frames for20 settings plus3 edge resets and real keyboard Enter; exact restart banner and same instance/bar1 after engine epoch changes; actual injected engine error/source and clicked filter chips; every101 generated dashboard row matched, literal global/details/offer keys pinned, Esc leaves the UI running and Ctrl+C closes only its window. Qt controller7 cases (`qs_settings_flow/`), frozen Store27 cases (`qs_store/`), keymap/lint/size checks (`p3_15_keymap_final/`, `p3_15_lint_final/`, `p3_15_sizes/`) pass. Full Rust once:475 passed,0 failed,3 ignored, no worker failures (`p3_15_full_rust/`). Details regression8 cases/31 steps plus its real daemon setup pass (`qs_details/`, `daemon/details_setup.jsonl`): explicit focus restoration after the Files filter fixes the discovered lost-Space action; durable skip/restart and hash-filtered Log pass. This minimal neighbouring `DetailsFiles.qml` edit is included. Earlier parse/test-driver errors and the failing focus regression remain in the bead's runs archives; no assertion or timeout was weakened.
+
+All four dashboard acceptance criteria met for the current authoritative key catalogue; not an owner-desktop qualification. Shows/RSS views and staged confirmation remain dependent on Track A/B merges. Existing `api::server::connection::Shared::presence` still excludes interactive bar-kind connections despite the shared dashboard connection; its known policy mismatch remains a daemon-owner follow-up. No legacy/compat work added, no release/all.sh between track beads.
+
+## P3-17 — fbt-p3-17-71l
+
+Landed the default empty-Search YTS browse grid, actual Browse-sheet TPB selection, named query box and v grid/rows toggle. Three-to-six columns use120×180 local asynchronous Images with sourceSize, at most60 cells; a four-request queue and128-card cache bound IMDb work and hide drops queued reads. Native focus returns to the grid; cursor/End stay within its visible60 cells. The unchanged shared add controller handles Enter; no compatibility path was added. Neighbouring src/browse.rs adds a debug-only literal-loopback fixture root (unit rejects non-loopback/credentials/query/fragment) so tests run the real YTS/TPB parsers. The shared key catalogue/generated consumers include v.
+
+`FBT_PLUGIN_SOURCE=plugin/tests/target/fbt-p3-17-71l/Plugin plugin/tests/qs-dashboard.sh --grid --binary target/fbt-p3-11-verification/debug/fbittorrent`: grid_renders and grid_frame_budget PASS plus owned lifecycle (`target/test-logs/qs_grid/`, two native PNGs). Seventy real parsed source rows yield60 distinct daemon-local poster files: YTS 533.4ms, TPB 154.8ms; every one of102 renderer frames during loading/toggle/navigation <=17ms (32ms ceiling, missing samples fail). Five Qt poster cases and eight Search controller cases pass (`qs_browse_posters/`, `qs_search_flow/`), including queue/cache/hide/dedupe/3–6-column bounds. Locked check/build, lint/keymap/size checks pass (`p3_17_check/`, `p3_17_build/`, `p3_17_lint_final/`, `p3_17_keymap_check/`, `p3_17_sizes/`). Full locked Rust suite once:476 passed/0 failed/3 ignored, no worker failures (`p3_17_full_rust/`). Earlier transient delegate-state null reads, initial focus issue and test-driver mistakes are retained under fbt-p3-17-71l/runs and corrected; no assertion or time limit was weakened. QML <=418 lines; changed Rust <=261. No release/all.sh between track beads or owner shell/data/public-network traffic.
+
+UNMET: grid_enter_stages cannot run because this branch's real hello lacks P3-06 staging; no passing staging case was recorded. Existing AddFlow unit controls cover stage:true when negotiated; orchestrator must merge P3-06 then run that live case. This receipt proves warm local metadata/poster fixtures on the private software renderer, not public cold-image or owner-desktop performance.
+
+
+## Integration of P3-15 and the P3-17 checkpoint (2026-10-19)
+
+Merged b608266 (0eb213a/ac00bc5 P3-15 and b608266 P3-17) onto c1a13e0.
+The automatic merge duplicated log.open: this track's dashboard-only entry and
+main's shared TUI/dashboard handler had the same ID. The unchanged Rust
+uniqueness/key/Appendix-B assertions and QML Help uniqueness assertion caught it.
+Removed only the duplicate catalogue entry and its generated README/keymap rows;
+main's functional Log handler, D's asynchronous Settings handler, and all other
+track actions survive. The final catalogue has 164 unique IDs. No API surface
+changed, so contract 1.2.28 and all IPC fixture/example bytes remain unchanged.
+The older dashboard-presence follow-up above is already resolved by integrated
+main; its client control passes here.
+
+Integration evidence: target/test-logs/integration/batch14-track-c-final/.
+cargo check --locked --tests, regression Python compilation, daemon case listing,
+source size lint and plugin lint pass. Focused Rust tests: action catalogue 12
+(including generated keymap/README equality), browse 2; 14 passed. Isolated QML:
+Settings/Log/Help 7, browse posters 5, search flow 8, store 35, client 17; 72 passed.
+Initial duplicate-action failures and the suite-slug setup error remain under
+batch14-track-c; no test assertion or deadline changed.
+
+Inspected the owner's retained qs_preferences and qs_grid JSONL: their native
+settings/log/help and rendering/frame-budget cases pass, indexed by
+owner-evidence.jsonl. These are owner-run results, not integrator reruns.
+P3-17 grid_enter_stages remains UNMET as disclosed above; staging is now integrated
+but that native criterion was not rerun in this focused integration. P3-17 stays
+open pending that qualification. No new native case, full suite, release build or
+all.sh was run; no backward-compatibility work was added.
+
+
+## Gate8 fix-first — P3-11 / P3-04 (2026-10-19)
+
+Fast-forwarded the track to main dcc7db5 after preserving and SHA-256-verifying the unfinished P6-02 files under ignored target/p6-02-preserved-1792411591658233020. Handler confirmation now summons the actual installed dashboard before any stage mutation; a later failed handoff discards only its own new stage, never an existing duplicate. Removed the superseded unstaged handler fallback and its payload-only unit in accordance with the owner’s no-compatibility instruction; the live test now exercises the current staging service. Existing-stage review adopts the persisted origin/seed/destination, and selected-byte accounting uses the API’s File.size rather than the nonexistent length. IMDb service code needed no change: store_modes now verifies the CLI-returned title-ID poster path (also pinned to the isolated expected path), payload bytes, 0600 permission repair, stable returned path and exactly one local HTTP request. No cache alias or old-path reader was added.
+
+Focused native commands: FBT_PLUGIN_SOURCE=plugin/tests/target/track-c-gate8/Plugin FBT_TEST_SWAY=$PWD/plugin/tests/target/headless-tools/usr/bin/sway python3 agent_ergonomics_audit/audit/regression_tests/daemon.py target/fbt-p3-11-verification/debug/fbittorrent --case handler_confirm_stages --no-systemd --log-root target/test-logs/track_c_gate8/fixed — PASS,39 steps (missing/unavailable dashboard refuses with zero records; post-stage shell failure cleans up; duplicate survives failed handoff; actual Discard/Enter and ordinary handler add). python3 agent_ergonomics_audit/audit/regression_tests/native.py target/fbt-p3-11-verification/debug/fbittorrent --case store_modes --log-root target/test-logs/track_c_gate8/store_fixed — PASS,107 steps,poster requests1 then1 and all saved permissions private. JSONL: those roots’ daemon/handler_confirm_stages.jsonl and native/store_modes.jsonl. Retained owner failures copied read-only into target/test-logs/track_c_gate8/baseline/. Updated Qt controls fail against unchanged main (staging and space_refusal) and pass all10 cases against the isolated fixed copy: python3 plugin/tests/run-qs.py gate8_add_flow_before plugin/tests/add-flow; FBT_PLUGIN_SOURCE=plugin/tests/target/track-c-gate8/Plugin python3 plugin/tests/run-qs.py gate8_add_flow_fixed plugin/tests/add-flow; JSONL under qs_gate8_add_flow_{before,fixed}/. Promoted only that tested AddFlow.js.
+
+One full cargo test --locked --target-dir target/fbt-p3-11-verification -- --nocapture:543 passed,0 failed,3 ignored; no worker failures (gate8_fix_full_rust/command.jsonl). Debug build, plugin lint and source-size gate pass (gate8_fix_build/,gate8_fix_lint/,gate8_fix_sizes_checked/). The initial size command omitted its required directory argument; failure retained in gate8_fix_sizes/, corrected invocation uses src. No assertion/deadline weakened, no release/all.sh or live owner state/shell touched. Both priority regressions met; unrelated Pieces work remains outside this commit.

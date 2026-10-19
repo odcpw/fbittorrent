@@ -1,7 +1,6 @@
 //! A session-owned native HTTP worker. Stop/quit can kill a stalled TLS request.
 use super::*;
 use base64::Engine;
-use std::os::fd::AsRawFd;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Request {
@@ -28,19 +27,51 @@ impl Reply {
 fn origin(u: &url::Url) -> (&str, Option<&str>, Option<u16>) {
     (u.scheme(), u.host_str(), u.port_or_known_default())
 }
-fn encoded(value: &str) -> String {
+pub(super) fn encoded(value: &str) -> String {
     url::form_urlencoded::Serializer::new(String::new())
         .append_pair("", value)
         .finish()[1..]
         .to_owned()
 }
-fn redact(value: &str, key: Option<&str>) -> String {
+pub(super) fn redact(value: &str, key: Option<&str>) -> String {
     match key {
         Some(key) => value
             .replace(&encoded(key), KEY_TOKEN)
             .replace(key, KEY_TOKEN),
         None => value.into(),
     }
+}
+pub(super) fn redact_url(value: &str, key: Option<&str>) -> String {
+    let value = redact(value, key);
+    let Ok(mut url) = url::Url::parse(&value) else {
+        return value;
+    };
+    let sensitive = !url.username().is_empty()
+        || url.password().is_some()
+        || url
+            .query_pairs()
+            .any(|(name, _)| matches!(name.to_ascii_lowercase().as_str(), "apikey" | "api_key"));
+    if !sensitive {
+        return value;
+    }
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    let pairs: Vec<_> = url
+        .query_pairs()
+        .map(|(name, value)| {
+            let value = if matches!(name.to_ascii_lowercase().as_str(), "apikey" | "api_key") {
+                KEY_TOKEN.to_owned()
+            } else {
+                value.into_owned()
+            };
+            (name.into_owned(), value)
+        })
+        .collect();
+    if !pairs.is_empty() {
+        url.set_query(None);
+        url.query_pairs_mut().extend_pairs(pairs);
+    }
+    url.into()
 }
 fn fetch(
     indexer: &Indexer,
@@ -50,7 +81,7 @@ fn fetch(
     let key = indexer.key()?;
     let base = config::endpoint(&indexer.url, key.is_some())?;
     let mut target = if let Some(source) = download {
-        let source = source.replace(KEY_TOKEN, key.as_deref().unwrap_or(""));
+        let source = source.replace(KEY_TOKEN, &key.as_deref().map(encoded).unwrap_or_default());
         let url =
             url::Url::parse(&source).map_err(|_| anyhow!("Torznab download URL is invalid"))?;
         anyhow::ensure!(
@@ -61,69 +92,91 @@ fn fetch(
     } else {
         base.clone()
     };
-    let deadline = Instant::now() + Duration::from_secs(30);
-    for _ in 0..6 {
-        if let Some(query) = query {
-            // Retain indexer-specific path/query parameters; own these three.
-            let pairs: Vec<_> = target
-                .query_pairs()
-                .filter(|(k, _)| !matches!(k.as_ref(), "t" | "q" | "apikey"))
-                .map(|(k, v)| (k.into_owned(), v.into_owned()))
-                .collect();
-            target.set_query(None);
-            let mut qs = target.query_pairs_mut();
-            for (k, v) in pairs {
-                qs.append_pair(&k, &v);
-            }
-            qs.append_pair("t", "search").append_pair("q", query);
-            if let Some(key) = &key {
-                qs.append_pair("apikey", key);
-            }
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        anyhow::ensure!(!remaining.is_zero(), "Torznab request timed out");
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .max_redirects(0)
-            .proxy(None)
-            .timeout_global(Some(remaining))
-            .build()
-            .into();
-        let mut response = agent
-            .get(target.as_str())
-            .call()
-            .map_err(|_| anyhow!("Torznab upstream request failed"))?;
-        let status = response.status().as_u16();
-        if (300..400).contains(&status) {
-            let location = response
-                .headers()
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .ok_or_else(|| anyhow!("Torznab redirect omitted its location"))?;
-            let next = target
-                .join(location)
-                .map_err(|_| anyhow!("Torznab redirect URL is invalid"))?;
-            anyhow::ensure!(
-                origin(&next) == origin(&base),
-                "Torznab cross-origin redirect refused"
-            );
-            target = next;
-            continue;
-        }
-        anyhow::ensure!(status == 200, "Torznab upstream HTTP failure");
-        let cap = if download.is_some() {
-            super::super::MAX_TORRENT_BYTES
-        } else {
-            RESPONSE_CAP
-        };
-        let bytes = response
-            .body_mut()
-            .with_config()
-            .limit(cap)
-            .read_to_vec()
-            .map_err(|_| anyhow!("Torznab response cap or body read failed"))?;
-        return Ok((bytes, key));
+    if download.is_some()
+        && key.is_some()
+        && !target
+            .query_pairs()
+            .any(|(name, _)| name.eq_ignore_ascii_case("apikey"))
+    {
+        target
+            .query_pairs_mut()
+            .append_pair("apikey", key.as_deref().unwrap());
     }
-    bail!("Torznab redirect limit exceeded")
+    let bound = super::bound::Context::configured()?;
+    let result = (|| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        for _ in 0..6 {
+            if let Some(query) = query {
+                // Retain indexer-specific path/query parameters; own these three.
+                let pairs: Vec<_> = target
+                    .query_pairs()
+                    .filter(|(k, _)| !matches!(k.as_ref(), "t" | "q" | "apikey"))
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect();
+                target.set_query(None);
+                let mut qs = target.query_pairs_mut();
+                for (k, v) in pairs {
+                    qs.append_pair(&k, &v);
+                }
+                qs.append_pair("t", "search").append_pair("q", query);
+                if let Some(key) = &key {
+                    qs.append_pair("apikey", key);
+                }
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            anyhow::ensure!(!remaining.is_zero(), "Torznab request timed out");
+            let config = ureq::Agent::config_builder()
+                .max_redirects(0)
+                .max_idle_connections(0)
+                .proxy(None)
+                .timeout_global(Some(remaining))
+                .build();
+            let agent = if let Some(context) = &bound {
+                context.agent(config)
+            } else {
+                ureq::Agent::new_with_config(config)
+            };
+            let mut response = agent
+                .get(target.as_str())
+                .call()
+                .map_err(|_| anyhow!("Torznab upstream request failed"))?;
+            let status = response.status().as_u16();
+            if (300..400).contains(&status) {
+                let location = response
+                    .headers()
+                    .get("location")
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| anyhow!("Torznab redirect omitted its location"))?;
+                let next = target
+                    .join(location)
+                    .map_err(|_| anyhow!("Torznab redirect URL is invalid"))?;
+                anyhow::ensure!(
+                    origin(&next) == origin(&base),
+                    "Torznab cross-origin redirect refused"
+                );
+                target = next;
+                continue;
+            }
+            anyhow::ensure!(status == 200, "Torznab upstream HTTP failure");
+            let cap = if download.is_some() {
+                super::super::MAX_TORRENT_BYTES
+            } else {
+                RESPONSE_CAP
+            };
+            let bytes = response
+                .body_mut()
+                .with_config()
+                .limit(cap)
+                .read_to_vec()
+                .map_err(|_| anyhow!("Torznab response cap or body read failed"))?;
+            return Ok((bytes, key));
+        }
+        bail!("Torznab redirect limit exceeded")
+    })();
+    if let Some(context) = bound {
+        context.close()?;
+    }
+    result
 }
 pub(crate) fn run_if_requested() -> Option<i32> {
     if std::env::var_os("FBT_TORZNAB_WORKER").as_deref() != Some(std::ffi::OsStr::new("1")) {
@@ -162,8 +215,8 @@ pub(crate) fn run_if_requested() -> Option<i32> {
         }
         let mut rows = xml::parse(&bytes, &indexer)?;
         for row in &mut rows {
-            row.file_url = redact(&row.file_url, key.as_deref());
-            row.descr_link = redact(&row.descr_link, key.as_deref());
+            row.file_url = redact_url(&row.file_url, key.as_deref());
+            row.descr_link = redact_url(&row.descr_link, key.as_deref());
             row.file_name = redact(&row.file_name, key.as_deref());
         }
         Ok(Reply {
