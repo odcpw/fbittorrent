@@ -801,3 +801,50 @@ runs. The integrated default foreground selection is now 203 cases, versus the
 older reported 186; wall-budget work will measure every currently selected case.
 The previously recorded tracker-topic/UI follow-ups remain; this merge proves
 current-set RPC observations and announce control.
+
+### P5-01 / P0 truth gate — connected seeds versus unknown
+
+Updated `native/no_fake_seed_counts` to require the exact current capability
+note: connected seed counts are measured for live torrents, and optional
+`seeds` distinguishes unknown. Retained every pane assertion and added real
+CLI observations: a paused torrent omits `seeds`; the live trackerless fixture
+reports zero alongside an empty actual peer list. The terminal stream now
+honors `--log-root` (the initial run passed all assertions but failed at the old
+hardcoded artifact path). Private-XDG commands: `native.py
+target/debug/fbittorrent --case no_fake_seed_counts --log-root <root>` passed
+43/43 steps, with its terminal artifact retained, under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-native-final/processes/native/`;
+`daemon.py target/debug/fbittorrent --no-systemd --case peers_local_swarm
+--log-root <root>` passed 112/112 steps under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-swarm-foreground/processes/daemon/`
+(one actual seed plus an incomplete leecher; CLI count one; paused count absent).
+Python compilation and `git diff --check` passed. Test-only delta; no Rust product
+or contract changes, full Cargo suite or umbrella rerun. The merge's unchanged
+Rust source already passed 547 tests in `fbt-p7-04-aq7/merge-full/`.
+
+### P5-07 gate regression — release each summary probe's own subscription
+
+Gate8 child failures 277–310 were `busy` replies after the test helper consumed
+an old queued summary frame and unsubscribed its ID instead of the newly
+allocated subscription. The helper now matches the returned subscription ID,
+releases it in `finally`, removes its own queued trailing frames and preserves
+other subscriptions. The tmpfs cases additionally assert zero summary
+subscriptions after polling. New real-API case
+`disk_summary_subscription_cleanup` takes 24 samples with another subscription's
+real state frame queued: the prior helper fails all 24 preservation checks and
+leaves a live subscription (`gate-fix-old-summary/`, intentional negative
+control); the fixed helper passes 115/115 steps in each launch mode.
+Private-XDG `daemon.py target/debug/fbittorrent --case
+disk_summary_subscription_cleanup --case disk_full_reason --case
+disk_full_recovers --case disk_low_banner --case add_warns_disk --log-root
+<root>` is green for both modes (foreground helper run separately): JSONL under
+`target/test-logs/fbt-p5-07-gei/gate-fix-summary/processes/daemon/`,
+`gate-fix-disk-foreground/processes/` and `gate-fix-disk-systemd/processes/`.
+All four disk cases actually mounted the owned 64 MiB tmpfs, with no skips;
+namespace child JSONL in each run's `processes/workers/<case>/disk-workers/`
+retains low-space, ENOSPC, explicit retry and automatic recovery observations.
+The disk children intentionally use foreground daemons inside their private
+mount namespace even in the outer `--systemd` matrix; the subscription-only
+case uses a real transient unit there. No product/contract thresholds or wall
+budget changed. Python compilation and diff checks pass; test-only delta,
+so no new Cargo or umbrella run. No acceptance checks removed or relaxed.
