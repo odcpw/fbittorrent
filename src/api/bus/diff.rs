@@ -13,7 +13,7 @@ fn key(topic: &Topic, value: &Value) -> String {
     let v = &value[match topic {
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
-        Topic::Events => "seq",
+        Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
     }];
     v.as_str()
@@ -64,7 +64,7 @@ pub(super) fn diff(topic: &Topic, old: &Value, new: &Value) -> (Changed, Vec<Val
     }
     // Events are append-only. Ring eviction is retention, never a deletion in
     // the client's event history.
-    if *topic != Topic::Events {
+    if !matches!(topic, Topic::Events | Topic::Log) {
         for (k, v) in before {
             if !after.contains_key(&k) {
                 removed.push(

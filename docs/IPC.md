@@ -77,7 +77,7 @@ when a required cap is missing.
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
-| `log` | Reserved for P1-14 | P1-14 |
+| `log` | `app.log`, `app.stats`, topic `log` | P1-14 |
 | `settings` | `app.settings.get/set`, topic `settings` | P3-05 |
 | `staging` | `stage: true`, `torrents.commit/discard` | P3-06 |
 | `search` | `search.*`, topic `search:<id>` | P3-01 |
@@ -151,6 +151,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | Op | Args | Result | Mutating | Since |
 |---|---|---|---|---|
 | `hello` | See handshake | HelloResult | no | P1-06 |
+| `app.log` | `since_seq?: u64`, `limit?: u64` ≤1000 (default 200), `level?: enum(error\|warn\|info\|debug)`, `source?: str`, `hash?: hash` | `{entries: [LogEntry], next_seq: u64}` | no | P1-14 |
+| `app.stats` | none | `{active_clients: ClientCounts, connections: ClientCounts}`; current connections and connections since start | no | P1-14 |
 | `app.info` | none | hello's `proto`, `server`, `engine`, `instance`, `engine_epoch`, `state`, `caps`, `limits`, `policy` plus `uptime_s: u64`, `upgrade_pending: bool`, `clients: {cli: u64, agent: u64, tui: u64, bar: u64, test: u64}` (connections since start), `subscriptions: {total: u64, by_topic: {str: u64}}` (live subscriptions, P1-08) | no | P1-06, P1-08 |
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
@@ -576,3 +578,26 @@ saves the private config without starting the daemon when stopped.
 Adds capability `settings`, the two operation-table rows, and the independent
 `settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
 `applied`, `restart` and `running`; existing CLI settings keys remain available.
+
+### P1-14: daemon log history and usage
+
+`log` is a keyed, append-only collection of `LogEntry`, keyed by `seq`. Subscribe
+uses the normal snapshot/delta revision rules. The server retains the latest
+2,000 entries; retention eviction never means deleting client history. Entries
+are fed from daemon stderr, preserving the original journald byte stream. Stored
+messages are capped at 8,192 characters; source names at 64. Unstructured stderr
+is represented as debug/daemon without rewriting its journald copy.
+
+`app.log` returns the latest matching 200 entries by default. With `since_seq`,
+it returns the first matching entries strictly after that sequence, up to limit.
+`next_seq` is the last returned sequence (or current sequence if none matched),
+an exclusive cursor for the next call. Levels are minimum severity: warn includes
+error and warn, debug includes all levels. Source and hash filters match exactly.
+`app.info.clients` and `app.stats.connections` are cumulative successful hello
+counts, reset per daemon instance. `app.stats.active_clients` tracks currently
+connected clients; reconnects increment cumulative counts again. Both are local
+memory only. CLI `log --follow` emits one LogEntry JSON object per line; `log`
+never starts a daemon and exits 4 when closed, with up/journalctl hints.
+
+Changelog: P1-14 adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
+existing fixture files remain byte-for-byte unchanged.

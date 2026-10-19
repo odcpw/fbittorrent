@@ -107,6 +107,20 @@ pub struct Client {
     pub kind: ClientKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogArgs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_seq: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<LogLevel>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<Hash>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HelloArgs {
@@ -262,6 +276,10 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "app.log")]
+    AppLog { #[serde(skip_serializing_if = "Option::is_none")] args: Option<LogArgs> },
+    #[serde(rename = "app.stats")]
+    AppStats { #[serde(skip_serializing_if = "Option::is_none")] args: Option<EmptyArgs> },
     #[serde(rename = "app.settings.get")]
     AppSettingsGet {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -327,6 +345,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::AppLog { .. } => "app.log",
+            Self::AppStats { .. } => "app.stats",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",
             Self::ImdbLookup { .. } => "imdb.lookup",

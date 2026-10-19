@@ -3212,6 +3212,8 @@ from daemon_notify import (notify_completed, notify_action_open, notify_action_d
     notify_action_folder, notify_added_undo, notify_off, notify_failed, notify_queue_bounded,
     notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
 
+from daemon_log import log_injected_error, log_follow, hello_counters, log_down_never_starts
+
 from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
@@ -3765,7 +3767,7 @@ def tui_single_connection(binary, systemd):
         fixture, _ = mutation_add_path(client,sandbox)
         cache=Path(sandbox.env["XDG_CACHE_HOME"]) / "fbittorrent/imdb/by-name-v2/two_files.json"
         cache.write_text('{"missing":true}')
-        before=client.call("app.info")["result"]["clients"]
+        before=client.call("app.stats")["result"]["active_clients"]
         case.check(before["tui"]==0,"no TUI presence before the real terminal starts",json.dumps(before))
         hidden=harness.engine_path.with_name("hidden-compat.sock")
         harness.engine_path.rename(hidden)
@@ -3774,8 +3776,8 @@ def tui_single_connection(binary, systemd):
             target,done=ui.start()
             ui.assert_pane(target,"two-files")
             def one_client():
-                info=client.call("app.info")["result"]
-                return info["clients"]["tui"]==1,json.dumps(info["clients"])
+                info=client.call("app.stats")["result"]
+                return info["active_clients"]["tui"]==1,json.dumps(info["active_clients"])
             harness.wait_for(one_client,"one TUI connection after loading its real API rows")
             ui.keys(target,"Enter",literal=False)
             ui.assert_pane(target,"first.bin")
@@ -3795,7 +3797,7 @@ def tui_single_connection(binary, systemd):
             harness.wait_for(one_client,"data and file operations retain the same one TUI connection")
             ui.keys(target,"q")
             harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches the API client")
-            harness.wait_for(lambda:((counts:=client.call("app.info")["result"]["clients"])["tui"]==0,json.dumps(counts)),
+            harness.wait_for(lambda:((counts:=client.call("app.stats")["result"]["active_clients"])["tui"]==0,json.dumps(counts)),
                              "TUI presence is released on detach")
         finally:
             ui.close()
@@ -3803,7 +3805,8 @@ def tui_single_connection(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
+         (log_injected_error, log_follow, hello_counters, log_down_never_starts,
+          settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
           settings_offline_no_start, tui_single_connection, offline_stop_ledger,
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
           notify_completed, notify_action_open, notify_action_default, notify_action_folder,

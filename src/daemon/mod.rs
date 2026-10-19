@@ -1,6 +1,8 @@
 pub mod lifecycle;
 pub(crate) mod policy;
 pub(crate) mod notify;
+pub(crate) mod log;
+mod log_capture;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
@@ -32,6 +34,7 @@ pub struct Daemon {
     pub(crate) settings: crate::api::ops::settings::Service,
     pub no_notify: bool,
     pub(crate) notifier: notify::Notifier,
+    pub(crate) logs: Arc<log::Ring>,
     pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
@@ -330,6 +333,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     )?);
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
+    let log_capture = log_capture::Capture::install()?;
     let panicked = Arc::new(AtomicBool::new(false));
     let hook = PanicHook::install(lifecycle.clone(), panicked.clone());
     let notify = sdnotify::Notify::from_env()?;
@@ -348,6 +352,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         settings: Default::default(),
         no_notify,
         notifier: notify::Notifier::new(cfg.notify)?,
+        logs: log_capture.ring.clone(),
         imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),

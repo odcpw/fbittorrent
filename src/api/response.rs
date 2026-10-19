@@ -202,6 +202,8 @@ pub struct SubscribeResult {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    AppLog(LogResult),
+    AppStats(StatsResult),
     AppSettingsGet(Settings),
     AppSettingsSet(SettingsSetResult),
     ImdbLookup(ImdbLookupResult),
@@ -229,6 +231,8 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "app.log" => serde_json::from_value(result).map(Self::AppLog),
+            "app.stats" => serde_json::from_value(result).map(Self::AppStats),
             "app.settings.get" => serde_json::from_value(result).map(Self::AppSettingsGet),
             "app.settings.set" => serde_json::from_value(result).map(Self::AppSettingsSet),
             "imdb.lookup" => serde_json::from_value(result).map(Self::ImdbLookup),
@@ -279,3 +283,8 @@ pub struct SettingsSetResult {
     pub applied: Vec<String>,
     pub restart: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatsResult { pub active_clients: ClientCounts, pub connections: ClientCounts }

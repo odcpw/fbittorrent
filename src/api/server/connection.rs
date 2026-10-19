@@ -325,6 +325,15 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 ClientKind::Test => counts.test += 1,
             }
             drop(counts);
+            let mut total = shared.connections_since_start.lock().unwrap();
+            match args.client.kind {
+                ClientKind::Cli => total.cli += 1,
+                ClientKind::Agent => total.agent += 1,
+                ClientKind::Tui => total.tui += 1,
+                ClientKind::Bar => total.bar += 1,
+                ClientKind::Test => total.test += 1,
+            }
+            drop(total);
             let hello = ops::app::hello(&shared.daemon);
             *connection.client.lock().unwrap() = ClientState {
                 client: Some(args.client.clone()),

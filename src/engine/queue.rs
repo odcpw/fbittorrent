@@ -1,5 +1,6 @@
 //! FIFO queue admission, live limits and network suspension policy.
 use super::*;
+static INJECTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 impl Inner {
     /// Apply durable running intent in FIFO order. Pause displaced torrents
@@ -90,6 +91,14 @@ impl Inner {
     }
     pub(super) async fn maintain(&self, cx: &Cx) -> Result<()> {
         let mut ledger = OwnedMutexGuard::lock(self.ledger.clone(), cx).await?;
+        if !INJECTED_ERROR.load(Ordering::Acquire) {
+            if let Ok(hash) = std::env::var("FBT_TEST_INJECT_ERROR") {
+                if ledger.records.iter().any(|record| record.hash == hash)
+                    && !INJECTED_ERROR.swap(true, Ordering::AcqRel) {
+                    bail!("injected engine error hash={hash}");
+                }
+            }
+        }
         self.reconcile_queue(cx, &mut ledger, &HashSet::new()).await
     }
     pub(super) async fn set_download_limit(&self, cx: &Cx, limit: usize) -> Result<()> {

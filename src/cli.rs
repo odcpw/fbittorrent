@@ -1,6 +1,7 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
 pub mod shapes;
+pub(super) mod logs;
 mod native;
 mod offline;
 pub(super) mod settings;
@@ -30,6 +31,15 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Cmd {
+    /// Read daemon history without starting it; --follow streams NDJSON
+    Log {
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, value_parser=["error","warn","info","debug"])]
+        level: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+    },
     /// Run the torrent engine daemon (other commands start it on demand)
     Serve {
         /// Override the configured idle delay (default 300); 0 disables it

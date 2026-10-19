@@ -227,6 +227,15 @@ rapid flaps. `notify = false` and `serve --no-notify` disable desktop delivery.
 `$XDG_DATA_HOME/icons/hicolor/scalable/apps` (normally `~/.local/share/icons/…`);
 desktop entries and notifications use fbittorrent.
 
+Daemon diagnostics are available with `fbittorrent log --json`, filtered with
+`--level error|warn|info|debug` and `--source engine` (or another source).
+`fbittorrent log --follow` streams NDJSON entries. These commands never start the
+daemon; when it is down they point to `fbittorrent up` and the journal's longer
+history (`journalctl --user -u fbittorrent`). The in-memory ring holds 2,000
+entries. `app.info.clients` counts successful connections since this daemon
+started; `app.stats.active_clients` reports current connections. Nothing is sent
+outside the machine.
+
 ### For agents
 
 ```

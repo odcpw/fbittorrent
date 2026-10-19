@@ -134,3 +134,41 @@ Unmet acceptance criteria: none. Follow-ups: Open-log is wired to the CLI log
 verb supplied by P1-14; actual desktop notification rendering/action selection
 remains outside these recording-shim checks. P1-14 keeps the existing app.info counts cumulative (connections since start),
 as its canonical rule requires.
+
+## Integration batch 2 — merge `6ec496e`
+
+Reconciled main's canonical CLI/server/TUI/settings modules with the bus, idle
+policy and notifications. Private-XDG checks in `target/test-logs/track-a-batch2/`:
+`run.py check` and Python harness compilation passed; all 38 bus/idle/notification/
+settings/TUI cases passed in each launch mode; `run.py full` passed 359 tests,
+zero failures, two intentional ignores. Main's structural layout is retained.
+
+## P1-14 — log ring and connection usage (`fbt-p1-14-bqf`)
+
+Added the 2,000-entry stderr-fed ring while preserving original diagnostic bytes,
+filtered/cursor API history, bounded append-only log subscriptions, read-only
+`log`/NDJSON follow and separate active/cumulative hello counters. Production no
+longer writes last-error.txt. Added the authorized app.log/app.stats contract
+extension, independent log transcript and capability/version bookkeeping; all ten
+existing transcript SHA-256 values remain unchanged. Minimal neighbouring edits
+let the TUI's all-fixture mirror consume log snapshots/deltas within the same
+2,000-entry bound, and its real one-connection test now reads active app.stats
+counts while retaining every original equality assertion.
+
+Evidence root: `target/test-logs/fbt-p1-14-bqf/`; private-XDG commands use its
+`run.py`. `policy` (`ring-units/`) passed all three named ring tests; `api`
+(`module-tests-fixed/`) passed 86 tests with one bridge ignore; debug `build`
+(`final-build/`) passed. `cases log_injected_error log_follow hello_counters
+log_down_never_starts tui_single_connection` passed five cases in each mode
+(`foreground-final/daemon/`, `FBT_BUS_SYSTEMD=1` in `systemd/daemon/`): one real
+injected engine failure with its hash/source through CLI JSON and original stderr,
+no last-error file, exact per-kind cumulative increments and live detach counts,
+follow entry within one second and clean exit on owner stop, closed read exits 4
+without starting anything, real TUI uses one API connection. `full`
+(`full-fixed/development_full/`) passes the full locked suite (363 passed, zero failed, two intentional
+ignores), including all fixtures and the added bounded mirror regression; the earlier full failure that
+identified the unsupported TUI log topic is retained in `full-final/`. Python
+compilation, diff whitespace and changed-source 900-line checks pass. No all.sh
+between track beads per owner instruction. Unmet criteria: none. Follow-up:
+notification Open-log still needs a visible terminal/log pane; these checks prove
+CLI history/stream delivery, not desktop presentation.

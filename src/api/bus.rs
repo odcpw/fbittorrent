@@ -115,6 +115,7 @@ struct Sample {
     state: String,
     rows: Vec<Torrent>,
     completions: Vec<Value>,
+    logs: Value,
     files: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
@@ -129,6 +130,7 @@ impl Sample {
             Topic::Settings => self.settings.clone(),
             Topic::Summary => self.summary(),
             Topic::Events => unreachable!(),
+            Topic::Log => self.logs.clone(),
         }
     }
     fn summary(&self) -> Value {
@@ -196,6 +198,8 @@ impl Bus {
         })
     }
     pub fn start(self: &Arc<Self>) -> std::io::Result<JoinHandle<()>> {
+        let wake = self.wake.clone();
+        self.daemon.logs.set_waker(Arc::new(move || wake.signal()));
         let bus = self.clone();
         thread::Builder::new()
             .name("fbt-api-bus".into())
@@ -279,7 +283,7 @@ impl Bus {
                     .cloned()
                     .map(|topic| TopicState {
                         interval: match topic {
-                            Topic::Network | Topic::Settings | Topic::Events => {
+                            Topic::Network | Topic::Settings | Topic::Events | Topic::Log => {
                                 Duration::from_secs(86400)
                             }
                             Topic::Summary => {
@@ -420,6 +424,7 @@ impl Bus {
             state,
             rows,
             completions,
+            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
             files,
             network,
             settings,
@@ -656,7 +661,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Files(_) | Topic::Events
+                Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log
             )
         });
         for index in order {
@@ -669,7 +674,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Events);
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log);
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Files(_));
             if t.sent.is_none() || reset {

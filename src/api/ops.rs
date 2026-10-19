@@ -7,6 +7,8 @@ pub struct Operation {
     pub since: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14" },
+    Operation { name: "app.stats", mutating: false, idempotent: false, since: "P1-14" },
     Operation { name: "app.settings.get", mutating: false, idempotent: false, since: "P3-05" },
     Operation { name: "app.settings.set", mutating: true, idempotent: true, since: "P3-05" },
     Operation {
