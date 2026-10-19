@@ -1,5 +1,9 @@
 .pragma library
 .import "Model.js" as Model
+function diskBanner(disk) {
+  if(!disk || !disk.low)return ""
+  return "Not enough space for the running downloads: "+Model.size(disk.needed_bytes,false)+" needed, "+(disk.free_bytes===undefined ? "free space unknown" : Model.size(disk.free_bytes,false)+" free")
+}
 function describe(s) {
   if(!s)return {message:"fbittorrent is not running",banner:"",urgent:false,dim:false}
   var client=s.client || {},hello=client.hello || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
@@ -14,7 +18,7 @@ function describe(s) {
   else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
   else if(info.installed_version && (hello.server || {}).version && info.installed_version!==(hello.server || {}).version)r.banner="fbittorrent "+(hello.server || {}).version+" runs; "+info.installed_version+" is installed. Restart to update."
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
-  if(summary.disk && summary.disk.low){r.banner="Low disk space. Downloads may pause until space is available.";r.urgent=true}
+  if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
   if(daemon.idle_exit_in_s!==undefined && daemon.idle_exit_in_s!==null)r.idle="Idle · stops in "+Math.ceil(daemon.idle_exit_in_s/60)+" min"
   return r
 }

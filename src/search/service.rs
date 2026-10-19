@@ -35,10 +35,13 @@ pub(crate) fn missing(id: u64) -> Error {
     e
 }
 pub(crate) fn upstream(e: anyhow::Error) -> Error {
+    if let Some(invalid)=e.downcast_ref::<torznab::Invalid>() {
+        return error(ErrorCode::InvalidArgs,"Torznab configuration refused",Some(if invalid.0.starts_with("url"){"url"}else if invalid.0.starts_with("credential") || invalid.0.starts_with("api_key_file"){"api_key_file"}else{"indexers"}));
+    }
     let mut failure = error(ErrorCode::Upstream, &format!("{e:#}"), None);
     failure.details = Some(serde_json::Map::from_iter([(
         "source".into(),
-        "search".into(),
+        if e.to_string().starts_with("Torznab ") {"torznab".into()}else{"search".into()},
     )]));
     failure
 }
@@ -175,13 +178,7 @@ impl Service {
             if !session.done_sent && job.done.load(Ordering::Acquire) {
                 session.done_sent = true;
                 let rows = job.state.lock().unwrap();
-                let warnings: Vec<_> = (!rows.error.is_empty())
-                    .then(|| crate::api::ProviderWarning {
-                        provider: "nova".into(),
-                        message: rows.error.chars().take(200).collect(),
-                    })
-                    .into_iter()
-                    .collect();
+                let warnings=jobs::warnings(&rows);
                 events.push(serde_json::json!({"ev":"search.done","search_id":id,
                     "total":normalize::aggregate_with_hashes(&rows.results,session.limit,&rows.hashes).len(),"warnings":warnings}));
             }

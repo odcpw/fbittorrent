@@ -1330,7 +1330,11 @@ def api_torrent_operations(binary, systemd):
         after_restore=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
         case.check(duplicate_restore["duplicate"] and all(before_restore.get(key)==after_restore.get(key) for key in ("seed","origin","save_path","upload_policy")),
                    "P6-08 restore of an existing row is an idempotent duplicate preserving policy",json.dumps(dict(reply=duplicate_restore,before=before_restore,after=after_restore)))
-        client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False), error="invalid_args")
+        explicit_duplicate = client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stage=False))["result"]
+        unchanged = client.call("torrents.get", dict(hash=fixture.info_hash))["result"]["torrent"]
+        case.check(explicit_duplicate["duplicate"] is True and explicit_duplicate["hash"] == fixture.info_hash
+                   and all(before_restore.get(key) == unchanged.get(key) for key in ("seed", "origin", "save_path", "upload_policy", "staged")),
+                   "stage:false is an ordinary successful duplicate preserving the existing record", json.dumps(dict(reply=explicit_duplicate, row=unchanged)))
         link = sandbox.root / "symlink.torrent"
         link.symlink_to(fixture.torrent)
         client.call("torrents.add", dict(source=dict(path=str(link))), error="invalid_args")
@@ -3567,7 +3571,7 @@ MUTATION_CASES = (ref_replay_remove, ref_per_client, remove_requires_flag, add_u
                   stale_instance_stop_applies, hashes_cap_257, mutation_magnets_and_file_removal, mutation_url_input_bounds, ref_survives_engine_restart)
 
 @contextmanager
-def imdb_owned(name, binary, systemd, oversized=False):
+def imdb_owned(name, binary, systemd, oversized=False, with_process=False):
     """Real daemon + local IMDb HTTP endpoints in one private cache tree."""
     import gzip
     import shutil
@@ -3595,9 +3599,11 @@ def imdb_owned(name, binary, systemd, oversized=False):
                 if not (harness.receive_ready() and harness.wait_engine()):
                     raise RuntimeError("private IMDb daemon did not start")
                 try:
-                    yield case, sandbox, harness, source, directory, cache
+                    values = (case, sandbox, harness, source, directory, cache)
+                    yield (*values, process) if with_process else values
                 finally:
-                    harness.stop_serve(harness.imdb_process)
+                    if harness.imdb_process.child.poll() is None:
+                        harness.stop_serve(harness.imdb_process)
                     harness.lock_free()
 
 
@@ -3892,8 +3898,11 @@ def tui_single_connection(binary, systemd):
             assert not hidden.exists()
 
 
-from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
+from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, disk_summary_subscription_cleanup
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_trackers import tracker_add_remove
+from daemon_download_limit import download_cap_holds
+from daemon_peers import peers_local_swarm, peer_rates_move
 from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
 from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
@@ -4057,18 +4066,21 @@ def recheck_restart_fixture(name,binary,systemd,staged=False):
         try:
             with ApiConn(h) as client:
                 client.hello()
-                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
-                h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
-            h.stop_serve(process); h.notify.close()
-            ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
-            if staged:
-                record=json.loads(ledger.read_text());record["records"][0].update(staged=True,paused=True)
-                ledger.write_text(json.dumps(record))
-            process=h.start_serve();h.receive_ready();h.wait_engine()
+                client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),stage=staged))
+                if staged:
+                    ledger=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/torrents.json"
+                    record=next(row for row in json.loads(ledger.read_text())["records"] if row["hash"]==fixture.info_hash)
+                    case.check(record["staged"] and record["paused"], "API staging durably saves paused intent before recheck", json.dumps(record))
+                else:
+                    h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done" and row.get("completed_at",0)>0,json.dumps(row)),"completed fixture durably saved before dormant restart")
+            if not staged:
+                h.stop_serve(process); h.notify.close()
+                process=h.start_serve();h.receive_ready();h.wait_engine()
             with ApiConn(h) as client:
                 client.hello()
                 before=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"]
                 if staged:
+                    case.check(before["staged"] and before["checked"] is False, "live staged record remains visible without payload validation", json.dumps(before))
                     refusal=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),error="invalid_state")
                     case.check(refusal["error"].get("details",{}).get("reason")=="staged",
                                "a real saved staged record is refused with invalid_state/exit-1 code",json.dumps(refusal))
@@ -4880,7 +4892,7 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
@@ -4915,6 +4927,12 @@ CASES.update((function.__name__, function) for function in MUTATION_CASES)
 CASES.update((function.__name__, function) for function in SEARCH_CASES)
 from daemon_staging import staged_not_busy
 CASES["staged_not_busy"] = staged_not_busy
+from daemon_torznab import CASES as TORZNAB_CASES
+CASES.update((function.__name__,function) for function in TORZNAB_CASES)
+from daemon_watch import CASES as WATCH_CASES
+from daemon_catalog import CASES as CATALOG_CASES
+CASES.update((function.__name__,function) for function in CATALOG_CASES)
+CASES.update((function.__name__,function) for function in WATCH_CASES)
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES

@@ -535,3 +535,27 @@ The TUI subscribes to live clipboard events on its existing connection and rende
 Evidence: `target/test-logs/fbt-p6-13-dxe/`. `check.*` passes. `full.*` (`cargo test --locked -- --nocapture`) passes: **522 passed, 3 ignored**, including six clipboard unit controls and the three new 80/120/160-column goldens. `live.*` runs `daemon.py target/debug/fbittorrent --case clipboard_tui_offer --case clipboard_watch_offer --case clipboard_watch_add --case clipboard_watch_dedupe --case clipboard_watch_off_kills_child --case clipboard_never_logged --jobs 1 --log-root …/live_cases`: **6/6 pass**. The new real tmux case renders the strip and exact keys at all three widths, Esc leaves the ledger empty, repeated copies stay suppressed, and y adds the second hash with clipboard origin. Existing cases prove default-off, one event/notice, reader+descendant shutdown and no clipboard text in daemon/app.log. `static.*` passes the size gate, generated-key check, Python syntax, diff hygiene and unchanged frozen IPC contracts. Initial unit-only failures were fixture setup (ambiguous test hash conversion, old surface count, and an invalid snapshot reason); corrected without relaxing assertions.
 
 TUI scope complete. Popup/dashboard visual acceptance is owned by the other UI track and was not requalified here. The human one-day opt-in evaluation remains Q11; the owner's clipboard and live state were untouched. No release/all.sh/hosted Actions run.
+
+### Integration of the M1a regression fix / P4-03 checkpoint (2026-10-19)
+
+Merged 915eed0 onto the services integration ab3b5e8 without textual conflicts.
+Inspected all four automatically merged files: daemon case registration keeps the
+IMDb replacement-owner cleanup; global actions keep clipboard and limits actions;
+the remote client keeps Torznab provider kinds; the store keeps peer and search
+projections alongside daemon-owned RSS/Shows. No contract patch change: 1.2.28
+remains current, and IPC fixtures/examples are byte-identical to the parent.
+
+Integration evidence: target/test-logs/integration/batch13-track-d/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests pass: service projections 2, action table 12,
+store 10, interaction 34; 58 passed, no failures. The initial interaction filter
+selected zero tests; unit-interaction.log records the corrected module's 34 tests.
+The four native release cases and three daemon/TUI release cases listed above
+were inspected in cod_4's retained JSONL, all passing; owner-evidence.jsonl indexes
+them without claiming integrator reruns. No full suite, release build, native gate
+or all.sh was repeated here. P4-03 remains a checkpoint pending the owner's
+remaining old-path cleanup; no compatibility work was added.
+
+### Main integration before P5-02 (2026-10-19)
+
+Resolved the eight merge conflicts preserving P4-09 removals and every incoming peer, tracker-edit, download-cap, watch, Torznab and contract feature. API-only provider mapping retains Torznab kinds; CLI search/IMDb use main’s catalogue handlers; unioned test registration and receipts. Removed duplicate automatically merged Clipboard enum/match entries while keeping dashboard/popup and TUI actions. `cargo check --locked --tests` PASS (`target/test-logs/track-d-main-merge/check_final.{jsonl,log}`); one full `cargo test --locked -- --nocapture` PASS, **550 passed, 3 ignored** (`full.{jsonl,log}`). `static.{jsonl,log}`: Python syntax, source size gate (333 files), diff hygiene and removed backend/socket source check PASS. Private XDG roots for all runs. No release/all.sh/hosted CI run.

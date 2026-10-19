@@ -16,6 +16,7 @@ pub enum Item {
     Torrent(Torrent),
     File(File),
     Search(super::SearchItem),
+    Peer(super::Peer),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

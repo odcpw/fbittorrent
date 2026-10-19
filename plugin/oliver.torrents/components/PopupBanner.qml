@@ -20,7 +20,7 @@ Rectangle {
     id:labels
     anchors {left:parent.left;right:parent.right;verticalCenter:parent.verticalCenter; margins:Commons.Style.spacing.md}
     spacing:Commons.Style.spacing.md
-    Text {width:parent.width;textFormat:Text.PlainText;text:root.text;color:root.urgent ? Commons.Color.urgent : Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall;wrapMode:Text.Wrap}
+    Text {width:parent.width;textFormat:Text.PlainText;text:root.text;color:root.urgent ? Commons.Color.urgent : Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;wrapMode:Text.Wrap}
     Ui.Button {visible:root.showLog;text:"Show log";onClicked:root.logRequested()}
   }
 }

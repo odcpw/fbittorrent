@@ -16,6 +16,7 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::EditTracker { hash, .. }
         | EngineOp::Commit {hash, ..}
         | EngineOp::Discard {hash}
         | EngineOp::Files { hash }
@@ -58,7 +59,9 @@ pub fn list(daemon: &Daemon) -> ApiResult<Vec<Torrent>> {
     let EngineResult::Torrents(rows) = execute(daemon, EngineOp::Info)? else {
         unreachable!("typed info result")
     };
-    rows.into_iter().map(torrent).collect()
+    let mut rows=rows.into_iter().map(torrent).collect::<ApiResult<Vec<_>>>()?;
+    daemon.watch.lock().unwrap().decorate(&mut rows);
+    Ok(rows)
 }
 fn files(daemon: &Daemon, hash: &Hash) -> ApiResult<Vec<File>> {
     let EngineResult::Files(rows) = execute(
@@ -79,7 +82,7 @@ fn files(daemon: &Daemon, hash: &Hash) -> ApiResult<Vec<File>> {
             progress: file.progress,
             included: file.priority != 0,
             sort_key: sort_key(&file.name),
-            ready: None,
+            ready: daemon.watch.lock().unwrap().file_ready(hash.as_str(),file.index as u64),
         })
         .collect())
 }
@@ -205,9 +208,11 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             else {
                 unreachable!("typed detail result")
             };
+            let mut rows=vec![torrent(detail.torrent)?];
+            daemon.watch.lock().unwrap().decorate(&mut rows);
             Reply::TorrentsGet(GetResult {
                 torrent: TorrentDetail {
-                    torrent: torrent(detail.torrent)?,
+                    torrent: rows.remove(0),
                     private: detail.private,
                     file_count: detail.file_count,
                     piece_count: detail.piece_count,
@@ -219,6 +224,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
+            execute(daemon,EngineOp::EditTracker{hash:args.hash.to_string(),url:args.url.clone(),add:matches!(call,Call::TorrentsAddTracker{..})})?;
+            if matches!(call,Call::TorrentsAddTracker{..}) {Reply::TorrentsAddTracker(DoneResult{state:DoneState::Done})}
+            else {Reply::TorrentsRemoveTracker(DoneResult{state:DoneState::Done})}
+        },
+        Call::TorrentsPeers { args } => Reply::TorrentsPeers(PeersResult { peers: daemon.peers.read(daemon, &args.hash)? }),
         Call::TorrentsFiles { args } => Reply::TorrentsFiles(FilesResult {
             files: files(daemon, &args.hash)?,
         }),
@@ -558,6 +569,16 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 state: DoneState::Done,
             })
         }
+        Call::TorrentsSetDownloadLimit{args}=>{
+            let rows=list(daemon)?;
+            if let Some(hash)=args.hashes.as_slice().iter().find(|h|!rows.iter().any(|row|&row.hash==*h)){
+                let mut failure=error(NotFound,"torrent record not found",None);
+                failure.details=Some(serde_json::Map::from_iter([("hash".into(),json!(hash))]));
+                return Err(failure);
+            }
+            if !matches!(args.bps,Update::Unset){execute(daemon,EngineOp::SetDownloadLimit{hashes:hashes(&args.hashes),bps:match args.bps{Update::Set(bps)=>Some(bps),_=>None}})?;}
+            Reply::TorrentsSetDownloadLimit(DoneResult{state:DoneState::Done})
+        },
         Call::TorrentsSetUploadLimit { args } => {
             match args.bps {
                 Update::Unset => {}
@@ -599,6 +620,9 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             else {
                 unreachable!("typed target result")
             };
+            if args.file.is_none() {
+                if let Some(video)=daemon.watch.lock().unwrap().target(args.hash.as_str()) {path=video;}
+            }
             if let Some(index) = args.file {
                 let entries = files(daemon, &args.hash)?;
                 let entry = entries.get(index as usize).ok_or_else(|| {
@@ -618,6 +642,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             } else {
                 TargetKind::File
             };
+            daemon.watch.lock().unwrap().acknowledge(Some(args.hash.as_str()));
             Reply::TorrentsOpenTarget(OpenTargetResult {
                 path: path.to_string_lossy().into(),
                 kind,

@@ -41,6 +41,8 @@ pub fn torrent(t: &api::Torrent) -> Value {
         ("origin", json!(t.origin)),
         ("eta_s", json!(t.eta_s)),
         ("seeds", json!(t.seeds)),
+        ("download_limit_bps",json!(t.download_limit_bps)),
+        ("effective_download_limit_bps",json!(t.effective_download_limit_bps)),
         ("playable", json!(t.playable)),
     ] {
         if !field.is_null() {
@@ -59,9 +61,59 @@ pub fn legacy(values: &[api::Torrent]) -> anyhow::Result<Vec<qbt::Torrent>> {
         .collect::<Result<_, _>>()?)
 }
 
+/// Keep the selected result's legacy engine name while retaining every deduped provider.
+pub(crate) fn search_legacy(item:&api::SearchItem,providers:&[api::Provider]) -> qbt::SearchResult {
+    let mut row=crate::search::normalize::legacy(item);
+    if let Some(primary)=item.providers.iter().find(|name|providers.iter().any(|p|&p.name==*name && p.url.as_ref().is_some_and(|url|Some(url)==item.provider_url.as_ref()))) {
+        row.engine=primary.clone();
+    }
+    row
+}
+pub(crate) fn search(item:&api::SearchItem,providers:&[api::Provider]) -> Value {
+    let mut value=serde_json::to_value(search_legacy(item,providers)).expect("legacy search fields serialize");
+    value["providers"]=json!(item.providers);
+    value
+}
+pub(crate) fn providers(values:&[api::Provider]) -> Vec<qbt::SearchPlugin> {
+    values.iter().map(|p|qbt::SearchPlugin {kind:if p.kind==api::ProviderKind::Torznab {"torznab"}else{"nova"}.into(),name:p.name.clone(),full_name:p.full_name.clone().unwrap_or_default(),
+        enabled:p.enabled,url:p.url.clone().unwrap_or_default(),version:p.version.clone().unwrap_or_default()}).collect()
+}
+
+pub(crate) fn imdb_legacy(card:&api::ImdbCard) -> crate::imdb::Title {
+    crate::imdb::Title {id:card.id.clone(),name:card.title.clone(),year:card.year,kind:card.kind.clone(),
+        stars:card.stars.clone().unwrap_or_default(),poster_url:card.poster_url.clone().unwrap_or_default(),
+        rating:card.rating.map(|v|v as f32),votes:card.votes,blurb:card.blurb.clone().unwrap_or_default(),wiki_url:card.wiki_url.clone().unwrap_or_default()}
+}
+pub(crate) fn imdb(card:&api::ImdbCard) -> Value {
+    let mut value=serde_json::to_value(imdb_legacy(card)).expect("IMDb legacy fields serialize");
+    value["ok"]=json!(true);value["found"]=json!(true);value["url"]=json!(card.url);value["poster_path"]=json!(card.poster_path);value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn search_preserves_characterized_legacy_fields_and_provider_provenance() {
+        let before:Value=serde_json::from_str(include_str!("../../agent_ergonomics_audit/audit/regression_tests/golden/cli/search-212c3cd.json")).unwrap();
+        let rows:Vec<qbt::SearchResult>=serde_json::from_value(before["results"].clone()).unwrap();
+        let items=crate::search::normalize::aggregate(&rows,5000);
+        let providers=vec![api::Provider {name:"shape".into(),kind:api::ProviderKind::Nova,enabled:true,full_name:Some("Shape provider".into()),url:Some("https://shape.invalid".into()),version:None}];
+        let shaped:Vec<_>=items.iter().map(|item|{
+            let mut row=search(item,&providers);assert_eq!(row["providers"],json!(["shape"]));row.as_object_mut().unwrap().remove("providers");row
+        }).collect();
+        assert_eq!(json!(shaped),before["results"]);
+        let mut item=items[0].clone();item.providers=vec!["alpha".into(),"shape".into()];
+        assert_eq!(search_legacy(&item,&providers).engine,"shape","engineName follows the selected result source, not alphabetical provenance");
+        println!("every characterized pre-P3-07 field unchanged; additive sorted providers retained; winning provider identity preserved");
+    }
+    #[test]
+    fn imdb_roundtrip_retains_legacy_required_and_nullable_fields() {
+        let old=crate::imdb::Title {id:"tt1".into(),name:"Fixture".into(),year:None,rating:Some(8.2),..Default::default()};
+        let card:api::ImdbCard=serde_json::from_value(json!({"id":"tt1","title":"Fixture","kind":"","url":old.url(),"rating":8.2})).unwrap();
+        let new=imdb(&card);let mut expected=serde_json::to_value(old).unwrap();
+        expected["ok"]=json!(true);expected["found"]=json!(true);expected["url"]=json!("https://www.imdb.com/title/tt1/");expected["poster_path"]=Value::Null;
+        assert_eq!(new,expected);println!("IMDb legacy floats, empty strings, absent-source nulls and key names unchanged");
+    }
     #[test]
     #[ignore = "process-level live CLI shape bridge; requires private input/output paths"]
     fn live_shape_bridge() {

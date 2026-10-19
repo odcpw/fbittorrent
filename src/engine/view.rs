@@ -134,10 +134,16 @@ pub struct TorrentView {
     pub eta_s: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peers: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seeds: Option<u64>,
     pub seed: bool,
     pub upload_policy: UploadPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upload_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub download_limit_bps: Option<u64>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub effective_download_limit_bps: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ratio: Option<f64>,
     pub save_path: String,
@@ -206,6 +212,7 @@ impl TorrentView {
             ul_bps: None,
             eta_s: None,
             peers: None,
+            seeds: None,
             seed: !record.stop_on_complete(),
             upload_policy: if record.upload_limit == 0 && record.ratio_limit == -2.0 {
                 UploadPolicy::Unlimited
@@ -215,6 +222,8 @@ impl TorrentView {
                 UploadPolicy::Custom
             },
             upload_limit_bps: u64::try_from(record.upload_limit).ok(),
+            download_limit_bps: record.download_limit,
+            effective_download_limit_bps: None,
             ratio: None,
             save_path: record.output_folder.clone(),
             content_path: None,
@@ -273,6 +282,8 @@ impl TorrentView {
         let mut view = Self::record(record, facts, Source::Handle);
         let metadata = handle.metadata.load_full();
         view.populate_stats(&stats, metadata.is_some());
+        view.effective_download_limit_bps=handle.effective_download_bps();
+        view.seeds = handle.live().map(|live| live.connected_seed_count() as u64);
         if let Some(metadata) = metadata {
             view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));
             let content = if metadata.file_infos.len() == 1 {
@@ -493,7 +504,7 @@ impl TorrentView {
             } else {
                 8640000
             },
-            num_seeds: 0,
+            num_seeds: self.seeds.unwrap_or(0) as i64,
             num_leechs: self.peers.unwrap_or(0) as i64,
             ratio: self.ratio.unwrap_or(0.0),
             seq_dl: true,

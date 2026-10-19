@@ -1,12 +1,16 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
 pub mod shapes;
+pub(super) mod catalog_search;
+pub(super) mod catalog_imdb;
+mod fallback;
 pub(super) mod logs;
 pub(super) mod stream;
 pub(super) mod raw;
 pub(super) mod restart;
 mod native;
 mod handler;
+mod download_limit;
 mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
@@ -101,6 +105,8 @@ pub(super) enum Cmd {
         #[arg(long)] alt_down: Option<String>,
         #[arg(long)] alt_up: Option<String>,
     },
+    /// Set a torrent download cap in bytes/s (K/M suffix); none clears
+    Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Stop the daemon and its engine
@@ -157,6 +163,9 @@ pub(super) enum Cmd {
     /// Block until torrents complete. Progress on stderr, result on stdout. Exit 8 on timeout.
     Wait {
         selectors: Vec<String>,
+        /// Wait for completion, the verified playback threshold or stall-free playback
+        #[arg(long, value_enum, default_value_t = Until::Complete)]
+        until: Until,
         /// Give up after N seconds (0 = forever)
         #[arg(long, default_value_t = 0)]
         timeout: u64,
@@ -223,6 +232,12 @@ pub(super) enum Cmd {
         /// Install a search plugin from a URL (repeatable), then exit
         #[arg(long = "install-url")]
         install_url: Vec<String>,
+        /// Install a native Jackett/Prowlarr endpoint (credentials stay in a private file)
+        #[arg(long, value_name="URL",conflicts_with_all=["install","install_url","plugins"])]
+        install_torznab:Option<String>,
+        /// Existing 0600 API-key file; the key itself never belongs on argv
+        #[arg(long,value_name="PATH",requires="install_torznab")]
+        key_file:Option<std::path::PathBuf>,
         /// List installed providers, then exit
         #[arg(long)]
         plugins: bool,
@@ -402,3 +417,6 @@ pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Cod
 
 pub(crate) mod local_client;
 pub(crate) mod local_add;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Until { Complete, Playable, StallFree }

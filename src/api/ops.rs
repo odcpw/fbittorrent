@@ -9,6 +9,9 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
+    Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
+
     Operation {
         name: "app.free_space",
         mutating: false,
@@ -32,11 +35,11 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "search.stop", mutating: true, idempotent: false, since: "P3-01",
         args: "`search_id`", result: "`{state: \"done\"}`" },
     Operation { name: "search.providers", mutating: false, idempotent: false, since: "P3-01",
-        args: "none", result: "`{providers: [Provider]}`" },
+        args: "none", result: "`{providers: [Provider]}`; kind nova or torznab (P7-01)" },
     Operation { name: "search.set_provider", mutating: true, idempotent: true, since: "P3-01",
         args: "`name`, `enabled`", result: "`{state: \"done\"}`" },
     Operation { name: "search.install", mutating: true, idempotent: false, since: "P3-01",
-        args: "`curated?` or `sources?`", result: "pending ref, then `{installed, failed}`" },
+        args: "`curated?` or `sources?` (HTTPS Nova .py or Torznab endpoint; P7-01)", result: "pending ref, then `{installed, failed}`" },
     Operation { name: "search.browse_sources", mutating: false, idempotent: false, since: "P3-01",
         args: "none", result: "`{sources: [BrowseSource]}`" },
     Operation { name: "search.browse", mutating: false, idempotent: false, since: "P3-01",
@@ -49,6 +52,8 @@ pub const TABLE: &[Operation] = &[
         args: "`hash: hash`, `to: enum(top|up|down|bottom)`", result: "`{state: \"done\", queue_pos: u64}`" },
     Operation { name: "torrents.recheck", mutating: true, idempotent: false, since: "P5-03",
         args: "`hashes: [hash]` (1..256)", result: "`{state: \"pending\", ref}`; then `mutation.result` with `{rechecked: [hash], failed: [{hash, message}], have_bytes: {hash: bytes}}`" },
+    Operation{name:"torrents.set_download_limit",mutating:true,idempotent:true,since:"P7-06",args:"`hashes: [hash]`, `bps?: bps|null` (16384..4294967295; omission retains)",result:"`{state: \"done\"}`"},
+    Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
     Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
     Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },

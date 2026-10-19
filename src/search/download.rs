@@ -13,6 +13,7 @@ pub(crate) fn resolve_download(
     result: &SearchResult,
     timeout_secs: u64,
 ) -> Result<ResolvedDownload> {
+    if let Some(download)=torznab::resolve(result)? {return Ok(download);}
     resolve_download_in(&ProviderStore::default(), result, timeout_secs)
 }
 

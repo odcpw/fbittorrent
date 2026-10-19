@@ -2,12 +2,17 @@
 .import "AddSource.js" as Source
 .import "Model.js" as Model
 function create(service,changed,debug) {
-  var f={},epoch=0,trace=[],s={},readPending=false,filesRequested=false,seedDirty=false,pathDirty=false,spaceSerial=0,spaceDue=0
+  var f={},epoch=0,trace=[],s={},readPending=false,filesRequested=false,seedDirty=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
   function publish(){changed()}
   function record(kind,op,data){if(debug){trace.push({kind:kind,op:op,data:data});if(trace.length>32)trace.shift()}}
-  function reset(){s={visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,stageSupported:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};readPending=false;filesRequested=false;seedDirty=false;pathDirty=false;spaceDue=0}
+  function reset(){s={visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,stageSupported:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};readPending=false;filesRequested=false;seedDirty=false;pathDirty=false;spaceDue=0;adopting=false}
   reset()
-  function spaceReady(){return !s.space.supported || (!s.space.pending && s.space.writable===true && s.space.path===s.savePath)}
+  function requiredBytes(){
+    if(s.files.length)return s.files.reduce(function(total,row){return total+(s.included[row.index] ? row.size : 0)},0)
+    return s.size
+  }
+  function tooLarge(){var needed=requiredBytes();return needed!==undefined && s.space.free_bytes!==undefined && needed>s.space.free_bytes}
+  function spaceReady(){return !s.space.supported || (!s.space.pending && s.space.writable===true && s.space.path===s.savePath && !tooLarge())}
   function checkSpace(){
     if(!s.visible || service.client.caps.indexOf("free_space")<0)return
     spaceDue=0;var path=s.savePath,generation=epoch,serial=++spaceSerial
@@ -54,6 +59,7 @@ function create(service,changed,debug) {
   }
   function metadata(row) {
     if(!row || ["committing","keeping","discarding","cancel_wait"].indexOf(s.phase)>=0)return
+    if(adopting){adopting=false;s.origin=row.origin || s.origin;settings({seed:row.seed,save_path:row.save_path})}
     s.name=row.name || s.name;s.size=row.size
     if(row.size!==undefined && !filesRequested){
       filesRequested=true
@@ -122,7 +128,7 @@ function create(service,changed,debug) {
   f.existing=function(hash){
     if(s.visible)return false
     epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.stageSupported=true;s.owned=true
-    inspect();settings({});publish();return true
+    adopting=true;inspect();publish();return true
   }
   f.toggle=function(index){if(busy())return;var next=Object.assign({},s.included);next[index]=!next[index];s.included=next;publish()}
   f.seed=function(value){if(busy())return;seedDirty=true;s.seed=!!value;publish()}
@@ -174,6 +180,6 @@ function create(service,changed,debug) {
       var files=service.store.topics[frame.topic] || {};fileRows(Object.keys(files).map(function(key){return files[key]}))
     }
   }
-  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!s.searchArgs,hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,stageSupported:s.stageSupported,elapsed_s:s.elapsed_s,busy:busy(),trace:trace}}
+  f.snapshot=function(){return {visible:s.visible,phase:s.phase,source:s.source,origin:s.origin,search:!!s.searchArgs,hash:s.hash,name:s.name,size:s.size,files:s.files,included:s.included,seed:s.seed,savePath:s.savePath,space:s.space,destinationReady:spaceReady(),neededBytes:requiredBytes(),insufficientSpace:tooLarge(),error:s.error,duplicate:s.duplicate,stopped:s.stopped===true,owned:s.owned,stageSupported:s.stageSupported,elapsed_s:s.elapsed_s,busy:busy(),trace:trace}}
   return f
 }

@@ -1,6 +1,34 @@
 {
   "actions": [
     {
+      "id": "clipboard.accept_offer",
+      "keys": {
+        "dashboard": [
+          "y"
+        ],
+        "popup": [
+          "y"
+        ],
+        "tui": null
+      },
+      "label": "Add offered magnet",
+      "scope": "modal:clipboard"
+    },
+    {
+      "id": "clipboard.dismiss_offer",
+      "keys": {
+        "dashboard": [
+          "Esc"
+        ],
+        "popup": [
+          "Esc"
+        ],
+        "tui": null
+      },
+      "label": "Dismiss offered magnet",
+      "scope": "modal:clipboard"
+    },
+    {
       "id": "limits.toggle",
       "keys": {
         "dashboard": [
@@ -868,6 +896,19 @@
       },
       "label": "Follow show",
       "scope": "screen:torrents"
+    },
+    {
+      "id": "search.browse_grid",
+      "keys": {
+        "dashboard": [
+          "v"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Browse grid/rows",
+      "note": "Browse lists only.",
+      "scope": "screen:search"
     },
     {
       "id": "search.sort",

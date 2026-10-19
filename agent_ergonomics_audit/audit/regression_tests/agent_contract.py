@@ -68,7 +68,7 @@ def contract(binary,systemd):
             value,r1=cli(case,sandbox,binary,'capabilities','--json')
             _,r2=cli(case,sandbox,binary,'capabilities','--json')
             case.check(r1.stdout==r2.stdout,'R-008 capabilities is byte-identical',hashlib.sha256(r1.stdout.encode()).hexdigest())
-            case.check(value.get('contract_version')=='1.2.23' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.23 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
+            case.check(value.get('contract_version')=='1.2.30' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.30 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
             cli(case,sandbox,binary,'triage','--json') # R-002
             added,_=cli(case,sandbox,binary,'add',fixture.torrent,'--stopped','--origin','agent','--json') # R-003
             digest=added['hash']
@@ -286,11 +286,20 @@ def move_disconnect_proxy(h):
 def move_verb(binary,systemd):
     from daemon import recheck_local_fixture
     with Case('agent_contract','move_verb') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        # Move verifies local private payloads and has no tracker/peer. Make its
+        # engine precondition explicit; interface safety is tested by vpn.py.
+        config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
+        select_replay_interface(config,None)
         process=h.start_serve()
         try:
             h.receive_ready();h.wait_engine();fixture=recheck_local_fixture(sandbox)
             with ApiConn(h) as client:
-                client.hello();client.call('torrents.add',dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
+                client.hello()
+                network=client.call('app.network')['result']['state']
+                owner=client.call('app.info')['result']
+                case.check(network['ready'] is True and network.get('selection') is None and owner['state']=='running',
+                           'local move fixture has binding off and a running engine before admission',json.dumps(dict(network=network,owner=owner)))
+                client.call('torrents.add',dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent)))
                 h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=fixture.info_hash))['result']['torrent'])['state']=='done' and row.get('completed_at',0)>0,json.dumps(row)),'fixture is durably done')
                 original=hashlib.sha256(fixture.files[0].read_bytes()).hexdigest();destination=sandbox.root/'cli-move'
                 moved,_=cli(case,sandbox,binary,'move',fixture.info_hash,str(destination),'--json')
@@ -320,8 +329,9 @@ def move_verb(binary,systemd):
 from agent_stream import (events_follow_completion, events_since_seq_replay, events_resync_when_older, events_down_exit_4, api_list_matches, api_list_matches_ipc_md, api_unknown_op_hint, api_mutating_starts_daemon_read_does_not)
 
 from daemon_limits import limits_verb
+from daemon_download_limit import limit_verb
 
-CASES={f.__name__:f for f in [stubs_still_refuse_with_hint,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [limit_verb,stubs_still_refuse_with_hint,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

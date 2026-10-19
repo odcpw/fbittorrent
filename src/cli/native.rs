@@ -27,6 +27,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Noseed { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
+            | Cmd::Limit { .. }
             | Cmd::Restart
     )
 }
@@ -69,11 +70,10 @@ fn emit(json_mode: bool, value: Value) {
         } else if value["action"] == "wait" {
             println!(
                 "{}",
-                if value["complete"] == true {
-                    "complete"
-                } else {
-                    value["reason"].as_str().unwrap_or("waiting")
-                }
+                if value["complete"] == true { "complete" }
+                else if value["stall_free"] == true {"ready to watch"}
+                else if value["playable"] == true {"playable"}
+                else {value["reason"].as_str().unwrap_or("waiting")}
             );
         } else if value["dry_run"] == true {
             let rows = value["torrents"].as_array();
@@ -229,6 +229,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     vec![added["hash"].as_str().context("add omitted hash")?.into()],
                     *timeout,
                     2,
+                    Until::Complete,
                     json_mode,
                 );
             }
@@ -298,6 +299,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     value["open_target"] = json!(t.content_path.as_deref().unwrap_or(&t.save_path));
                     value["seed_allowed"] = json!(t.seed);
                     value["complete"] = json!(t.progress.map(|v| v >= 1.0));
+                    value["peers"] = if let Some(c)=&client {if c.hello.caps.iter().any(|cap|cap=="peers"){c.call("torrents.peers",json!({"hash":hashes[0]}))?["peers"].clone()}else{json!([])}}else{json!([])};
                     value["files"] = if let Some(c) = &client {
                         c.call("torrents.files", json!({"hash":hashes[0]}))
                             .map(|v| json!(v["files"].as_array().map(|files|files.iter().map(|f|json!({"index":f["index"],"name":f["path"],"size":f["size"],"progress":f["progress"],"progress_known":t.checked && t.state!=api::TorrentState::WaitingVpn,"priority":if f["included"]==true{1}else{0}})).collect::<Vec<_>>()).unwrap_or_default()))
@@ -360,6 +362,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 json!({"ok":true,"action":if stop{"stop"}else{"delete"},"count":hashes.len(),"hashes":hashes,"running":running}),
             );
         }
+        Cmd::Limit{selector,down}=>{
+            let bps=super::download_limit::parse(down)?;
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            bulk(&c,"torrents.set_download_limit",&hashes,json!({"bps":bps}))?;
+            emit(json_mode,json!({"ok":true,"action":"limit","hashes":hashes,"download_limit_bps":bps}));
+        },
         Cmd::Start { .. }
         | Cmd::Reannounce { .. }
         | Cmd::Seed { .. }
@@ -387,8 +396,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     emit(json_mode,json!({"ok":true,"action":"reannounce","count":hashes.len(),"hashes":hashes}));
                 }
                 Cmd::Wait {
-                    timeout, interval, ..
-                } => return wait_for(cfg, c, hashes, *timeout, *interval, json_mode),
+                    timeout, interval, until, ..
+                } => return wait_for(cfg, c, hashes, *timeout, *interval, *until, json_mode),
                 Cmd::Open { .. } => {
                     let target = c.call("torrents.open_target", json!({"hash":hashes[0]}))?;
                     cfg.open_target(target["path"].as_str().context("open target omitted path")?)?;
@@ -515,7 +524,7 @@ fn await_move(c:&ApiClient,result:Value)->Result<Value> {
         }
     }
 }
-fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
+pub(super) fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
     let reference = result["ref"]
         .as_str()
         .context("pending result omitted ref")?;
@@ -622,12 +631,24 @@ fn wait_for(
     hashes: Vec<String>,
     timeout: u64,
     interval: u64,
+    until: Until,
     json_mode: bool,
 ) -> Result<Code> {
     let start = Instant::now();
+    anyhow::ensure!(until==Until::Complete || c.hello.caps.iter().any(|c|c=="watch"), AppError::new(Code::Usage,"the daemon does not advertise watch readiness"));
     c.limit_reconnects(1);
+    // Pushed changes wake the read immediately; a bounded poll remains the
+    // compatibility/reconnect fallback. The connection owns this subscription.
+    let subscription=c.hello.caps.iter().any(|cap|cap=="subscribe")
+        .then(||c.call("subscribe",json!({"topics":["torrents"],"interval_ms":1000})))
+        .and_then(Result::ok).and_then(|v|v["sub"].as_u64());
+    struct Release<'a>(&'a ApiClient,Option<u64>);
+    impl Drop for Release<'_> {fn drop(&mut self){if let Some(id)=self.1 {let _=self.0.unsubscribe(id);}}}
+    let _release=Release(&c,subscription);
+    let mut frames=api::client::Subscription::new(&c);
     loop {
         if let Some(event) = c.event(Duration::from_millis(1))? {
+            if event.get("sub").is_some(){frames.accept(event.clone())?;}
             match event["reason"].as_str() {
                 Some("idle") => {
                     emit(json_mode, timeout_value("every waited torrent is stopped"));
@@ -655,16 +676,27 @@ fn wait_for(
             )
             .into());
         }
-        if mine.iter().all(|r| r.progress.is_some_and(|v| v >= 1.0)) {
+        let complete=mine.iter().all(|r|r.progress.is_some_and(|v|v>=1.0));
+        let playable=mine.iter().all(|r|r.playable.as_ref().is_some_and(|p|p.ready));
+        let stall_free=mine.iter().all(|r|r.playable.as_ref().is_some_and(|p|p.ready && p.stall_free==Some(true)));
+        if match until {Until::Complete=>complete,Until::Playable=>playable,Until::StallFree=>stall_free} {
             let elapsed = if std::env::var_os("SOURCE_DATE_EPOCH").is_some() {
                 0
             } else {
                 start.elapsed().as_secs()
             };
-            emit(
-                json_mode,
-                json!({"ok":true,"action":"wait","complete":true,"elapsed_secs":elapsed,"torrents":mine.iter().map(|r|shapes::torrent(r)).collect::<Vec<_>>() }),
-            );
+            let mut torrents=Vec::new();
+            for row in &mine {
+                let mut value=shapes::torrent(row);
+                if let Some(play)=row.playable.as_ref().filter(|p|p.ready) {
+                    let files=c.call("torrents.files",json!({"hash":row.hash}))?;
+                    if let Some(file)=files["files"].as_array().and_then(|fs|fs.iter().find(|f|f["index"]==play.file)) {
+                        if let Some(path)=file["path"].as_str() {value["open_target"]=json!(std::path::Path::new(&row.save_path).join(path).to_string_lossy());}
+                    }
+                }
+                torrents.push(value);
+            }
+            emit(json_mode,json!({"ok":true,"action":"wait","complete":complete,"playable":playable,"stall_free":stall_free,"elapsed_secs":elapsed,"torrents":torrents}));
             return Ok(Code::Ok);
         }
         if (timeout > 0 && start.elapsed() >= Duration::from_secs(timeout))
@@ -680,9 +712,15 @@ fn wait_for(
             );
             return Ok(Code::Timeout);
         }
-        std::thread::sleep(
-            Duration::from_secs(interval.max(1)).min(Duration::from_secs(timeout.max(1))),
-        );
+        let deadline=Instant::now()+Duration::from_secs(interval.max(1)).min(if timeout==0 {Duration::MAX}else{Duration::from_secs(timeout).saturating_sub(start.elapsed())});
+        while Instant::now()<deadline {
+            let remaining=deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(100));
+            if let Some(frame)=c.event(remaining)? {
+                if frame["ev"]=="bye" || frame["ev"]=="client.disconnected" {break;}
+                let frame=frames.accept(frame)?;
+                if subscription.is_some_and(|sub|frame["sub"]==sub) && matches!(frame["ev"].as_str(),Some("delta"|"snapshot.end")) {break;}
+            }
+        }
     }
 }
 

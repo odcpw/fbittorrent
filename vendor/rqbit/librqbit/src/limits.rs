@@ -120,3 +120,15 @@ impl Limits {
         }
     }
 }
+
+/// Serial token buckets compose to the smallest finite rate; None is unlimited.
+pub fn effective_rate<const N:usize>(rates:[Option<NonZeroU32>;N])->Option<NonZeroU32>{rates.into_iter().flatten().min()}
+#[cfg(test)]mod tests{
+    use super::*;
+    #[test]fn effective_rate_is_min(){
+        for (per,global,alt,want) in [(None,None,None,None),(Some(65536),None,None,Some(65536)),(Some(131072),Some(262144),Some(65536),Some(65536)),(Some(65536),Some(32768),None,Some(32768)),(None,Some(131072),Some(262144),Some(131072))]{
+            let got=effective_rate([per.and_then(NonZeroU32::new),global.and_then(NonZeroU32::new),alt.and_then(NonZeroU32::new)]).map(|r|r.get());
+            println!("effective_rate_is_min per={per:?} global={global:?} alt={alt:?} result={got:?}");assert_eq!(got,want);
+        }
+    }
+}

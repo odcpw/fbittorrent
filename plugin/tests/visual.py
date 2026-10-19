@@ -160,7 +160,7 @@ def main():
         # The bar gallery uses the same actual native icon; its state source is explicitly presentational.
         return subprocess.run([str(Path(__file__).with_name('qs-icons.sh'))],env=dict(os.environ)).returncode
     if args.state not in STATES:parser.error('real popup fixture states: '+', '.join(STATES))
-    with Case('qs_visual',args.state+'_'+args.theme.replace('-','_')) as case,running(args.binary,args.state,case) as (sandbox,harness,client,row):
+    with Case('qs_visual',args.state.replace('-','_')+'_'+args.theme.replace('-','_')) as case,running(args.binary,args.state,case) as (sandbox,harness,client,row):
         q=Capture(case,sandbox,args.theme)
         try:
             q.wait(lambda:json.loads(q.ipc('state'))['online'])

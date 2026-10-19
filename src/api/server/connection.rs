@@ -170,7 +170,9 @@ impl Shared {
         let interactive = client.interactive && client.client.as_ref()
             .is_some_and(|c| c.kind != ClientKind::Bar || client.dashboard_visible);
         let glance = client.glance;
+        let acknowledge = glance || (interactive && client.client.as_ref().is_some_and(|c| c.kind == ClientKind::Bar));
         drop(client);
+        if acknowledge {self.daemon.watch.lock().unwrap().acknowledge(None);}
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
         self.daemon.rss.presence(connection.number,interactive);
         self.daemon.shows.presence(connection.number,interactive);

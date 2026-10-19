@@ -45,7 +45,7 @@ impl ScreenClient {
     }
     pub fn search_plugins(&self) -> Result<Vec<SearchPlugin>> {
         let result: api::ProvidersResult = request(self.connection()?, "search.providers", json!({}))?;
-        Ok(result.providers.into_iter().map(|p| SearchPlugin {name:p.name, full_name:p.full_name.unwrap_or_default(), url:p.url.unwrap_or_default(), version:p.version.unwrap_or_default(), enabled:p.enabled}).collect())
+        Ok(result.providers.into_iter().map(|p| SearchPlugin {kind:if p.kind==api::ProviderKind::Torznab {"torznab"}else{"nova"}.into(),name:p.name, full_name:p.full_name.unwrap_or_default(), url:p.url.unwrap_or_default(), version:p.version.unwrap_or_default(), enabled:p.enabled}).collect())
     }
     pub fn search_set_plugin(&self, name: &str, on: bool) -> Result<()> {
         self.mutate("search.set_provider", json!({"name":name,"enabled":on}))?;

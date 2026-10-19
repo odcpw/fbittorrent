@@ -688,10 +688,30 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
                   blank_seed_column)
     keys("Escape", "4")
     check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
-    step = case.step("Read capabilities --json", "The native zero seed sentinel is documented as unknown.")
+    step = case.step("Read capabilities --json",
+                     "Native counts describe connected seeds when live; optional seeds distinguishes unknown.")
     capabilities = cli("capabilities")
     note = capabilities.get("field_notes", {}).get("list[].num_seeds")
-    (step.ok if note == "always 0 in native mode: unknown" else step.fail)(f"Field note: {note}.")
+    expected = "connected seeds for live native torrents; read optional seeds to distinguish unknown"
+    (step.ok if note == expected else step.fail)(f"Field note: {note}.")
+    # Unknown and a measured zero are different observations. This local fixture
+    # has no tracker or peer source, so its live count is independently zero.
+    info_hash = next(row["hash"] for row in cli("list")["torrents"]
+                     if row["name"].startswith("Fixture.with.a.long.filename."))
+    cli("stop", info_hash)
+    stopped = cli("show", info_hash)
+    case.check(stopped.get("native_state") == "paused" and "seeds" not in stopped,
+               "A stopped native torrent omits unknown seeds rather than claiming a measured zero.",
+               json.dumps(stopped))
+    cli("start", info_hash)
+    live = [{}]
+    def known_zero():
+        live[0] = cli("show", info_hash)
+        return (live[0].get("native_state") == "stalled" and live[0].get("seeds") == 0
+                and live[0].get("num_seeds") == 0 and live[0].get("peers") == [])
+    wait_for(known_zero, "the trackerless local torrent reports a measured zero connected seeds")
+    case.check(known_zero(), "A live zero seed count agrees with the actual empty peer list.", json.dumps(live[0]))
+    cli("stop", info_hash)
     keys("1")
     tmux("resize-window", "-t", session, "-x", "120", "-y", "30")
 
@@ -731,15 +751,16 @@ def store_modes(case, root, env, cli, base, fixture):
         for path in [by_name, by_id, ratings]:
             path.chmod(0o644)
         result = cli("imdb", "Private cache fixture")
-        poster = cache / "posters/poster_300.jpg"
-        case.check(result.get("found") is True and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
+        poster = Path(result.get("poster_path") or root / "missing-poster")
+        expected_poster = cache / "posters/tt1234567.jpg"
+        case.check(result.get("found") is True and poster == expected_poster and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
                    "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
-                   f"found={result.get('found')}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
+                   f"found={result.get('found')}; poster={poster}; expected={expected_poster}; local poster requests={fixture['poster_requests']}; CLI umask=000.")
         if poster.is_file():
             poster.chmod(0o644)
             poster.parent.chmod(0o777)
-        cli("imdb", "Private cache fixture")
-        case.check(fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+        second = cli("imdb", "Private cache fixture")
+        case.check(second.get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
                    "The second IMDb CLI call repairs the existing poster without another HTTP request.",
                    f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
     finally:
@@ -1827,7 +1848,8 @@ def main():
             raise
         finally:
             if options.case in (None, "no_fake_seed_counts") and terminal_bytes.exists():
-                terminal_artifact = REPO / "target/test-logs/native/no_fake_seed_counts.terminal.typescript"
+                terminal_artifact = fbtlog.LOG_ROOT / "native/no_fake_seed_counts.terminal.typescript"
+                terminal_artifact.parent.mkdir(parents=True, exist_ok=True)
                 terminal_artifact.write_bytes(terminal_bytes.read_bytes())
                 print(f"Terminal stream retained: {terminal_artifact}")
             tmux("kill-server", check=False)

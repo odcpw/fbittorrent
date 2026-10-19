@@ -157,3 +157,19 @@ fn footer_overflow_80x24() {
     if std::env::var("FBT_UPDATE_GOLDEN").as_deref()==Ok("1") { fs::write(path,&actual).unwrap(); }
     else { compare(path,&fs::read_to_string(path).unwrap(),&actual).unwrap_or_else(|diff|panic!("{diff}")); }
 }
+
+#[test]
+fn watch_ready_and_may_stall_goldens() {
+    for (name,stall,buffer,finish) in [("watch-ready",true,240,42),("watch-may-stall",false,30,1080)] {
+        let mut app=fixture::app("torrents");
+        let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"default_cap","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
+        let legacy=super::format::torrent(&row);
+        app.torrents[0]=legacy.clone();app.store.torrents.insert(row.hash.to_string(),row);
+        let _=app.open_details(&legacy);
+        let actual=render(&app,80,24);let path=format!("src/tui/tests/golden/{name}-80x24.txt");
+        assert!(actual.contains(if stall {"Ready to watch"}else{"may stall"}));
+        if std::env::var("FBT_UPDATE_GOLDEN").as_deref()==Ok("1") {fs::write(&path,&actual).unwrap();}
+        else {let expected=fs::read_to_string(&path).unwrap();compare(&path,&expected,&actual).unwrap_or_else(|diff|panic!("{diff}"));}
+        println!("{path}: truthful watch detail at 80x24; synthetic rendering only");
+    }
+}

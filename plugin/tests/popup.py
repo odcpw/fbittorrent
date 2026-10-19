@@ -55,7 +55,14 @@ def run(binary):
             with Case(SUITE,'w_009') as c:
                 keys(q,['-k','Delete'],lambda:cursor(q)['confirming']);keys(q,['y'],lambda:peek(client,'torrents.get',dict(hash=row['hash']))['ok'] is False);c.check(Path(row['content_path']).exists(),'y confirms removal and keeps payload',row['content_path']);snapshot(c,q)
             with Case(SUITE,'w_010') as c:
-                keys(q,['z'],lambda:'limits' in json.loads(q.ipc('state'))['action']);c.check('limits' in json.loads(q.ipc('state'))['action'],'z is explicit unsupported when the real daemon lacks limits',q.ipc('state'));snapshot(c,q)
+                if 'limits' in client.call('app.info')['result']['caps']:
+                    before=client.call('app.settings.get')['result']['alt_limits_on']
+                    keys(q,['z'],lambda:client.call('app.settings.get')['result']['alt_limits_on'] is not before)
+                    c.check(json.loads(q.ipc('state'))['turtle'] is not before,'z toggles the real daemon limits and confirmed popup state',q.ipc('state'))
+                else:
+                    keys(q,['z'],lambda:'limits' in json.loads(q.ipc('state'))['action'])
+                    c.check('limits' in json.loads(q.ipc('state'))['action'],'z is explicit unsupported when the real daemon lacks limits',q.ipc('state'))
+                snapshot(c,q)
             with Case(SUITE,'w_011') as c:
                 keys(q,['w'],lambda:not cursor(q)['opened']);c.check(True,'w requests dashboard and closes popup (visual host intentionally has no dashboard)',q.ipc('cursor'));snapshot(c,q);q.ipc('open')
             with Case(SUITE,'w_012') as c:

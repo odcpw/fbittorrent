@@ -5,7 +5,7 @@ use crate::{
     config::Config,
 };
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub(super) fn source(source: &str) -> Result<Value> {
     let local = crate::cli_sources::local_torrent_source(source)?;
@@ -18,24 +18,12 @@ pub(super) fn source(source: &str) -> Result<Value> {
     })
 }
 
-pub(super) fn payload(
-    source: Value,
-    seed: bool,
-    save: Option<String>,
-    category: Option<String>,
-    stopped: bool,
-) -> Value {
-    let mut add = json!({"source":source,"origin":"handler","seed":seed});
-    if let Some(save) = save {
-        add["save_path"] = json!(save);
-    }
-    if let Some(category) = category {
-        add["category"] = json!(category);
-    }
-    if stopped {
-        add["stopped"] = json!(true);
-    }
-    json!({"view":"torrents","add":add})
+fn dashboard_required() -> AppError {
+    AppError::new(
+        Code::Upstream,
+        "handler confirmation requires the dashboard; no download was started",
+    )
+    .hint("fbittorrent setup --plugin=copy")
 }
 
 pub(super) fn confirm(
@@ -47,46 +35,45 @@ pub(super) fn confirm(
     save: Option<String>,
     category: Option<String>,
 ) -> Result<Value> {
-    let staging = client.hello.caps.iter().any(|cap| cap == "staging");
-    let mut result = if staging {
-        super::native::add(
-            client,
-            cfg,
-            input,
-            stopped,
-            seed,
-            save.clone(),
-            category.clone(),
-            "handler",
-            true,
-        )?
-    } else {
-        json!({})
-    };
-    let route = if staging {
-        json!({"view":"torrents","hash":result["hash"].as_str().context("staged add omitted hash")?})
-    } else {
-        payload(
-            source(input)?,
-            seed || cfg.seed_by_default,
-            save.or(cfg.save_path.clone()),
-            category.or(cfg.category.clone()),
-            stopped,
-        )
-    };
-    if !crate::backend::summon_dashboard(&route)? {
-        return Err(AppError::new(
-            Code::Upstream,
-            "handler confirmation requires the dashboard; no download was started",
-        )
-        .hint("fbittorrent setup --plugin=copy")
-        .into());
+    // Resolve installation and shell availability before the first mutation.
+    // Opening the window is part of this explicit confirmation request.
+    if !crate::backend::summon_dashboard(&json!({"view":"torrents"}))? {
+        return Err(dashboard_required().into());
+    }
+    let mut result = super::native::add(
+        client,
+        cfg,
+        input,
+        stopped,
+        seed,
+        save.clone(),
+        category.clone(),
+        "handler",
+        true,
+    )?;
+    let hash = result["hash"].as_str().context("staged add omitted hash")?;
+    let route = json!({"view":"torrents","hash":hash});
+    let summoned = crate::backend::summon_dashboard(&route);
+    if !matches!(summoned, Ok(true)) {
+        // If the shell disappeared between the two summons, remove only the
+        // stage created by this invocation. A duplicate belongs to its owner.
+        if result["duplicate"] != true {
+            let discarded = client
+                .call("torrents.discard", json!({"hash":hash}))
+                .context("dashboard unavailable; could not discard the new staged torrent")?;
+            if discarded["state"] == "pending" {
+                super::native::await_mutation(client, discarded)?;
+            }
+        }
+        return Err(summoned
+            .err()
+            .unwrap_or_else(|| dashboard_required().into()));
     }
     result["ok"] = json!(true);
     result["action"] = json!("add");
     result["confirmation_required"] = json!(true);
-    result["staged"] = json!(staging);
-    result["count"] = json!(if staging { 1 } else { 0 });
+    result["staged"] = json!(true);
+    result["count"] = json!(1);
     result["hashes"] = if let Some(hash) = result["hash"].as_str() {
         json!([hash])
     } else {
@@ -97,24 +84,6 @@ pub(super) fn confirm(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn confirmation_payload_preserves_source_and_settings_as_data() {
-        let source = serde_json::json!({"magnet":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=$(never-execute)"});
-        let value = super::payload(
-            source.clone(),
-            true,
-            Some("/tmp/a folder".into()),
-            Some("films".into()),
-            true,
-        );
-        assert_eq!(value["add"]["source"], source);
-        assert_eq!(value["add"]["origin"], "handler");
-        assert_eq!(value["add"]["seed"], true);
-        assert_eq!(value["add"]["save_path"], "/tmp/a folder");
-        assert!(value["add"].get("stage").is_none());
-        assert_eq!(value["add"]["category"], "films");
-        assert_eq!(value["add"]["stopped"], true);
-    }
     #[test]
     fn source_rejects_inaccessible_local_paths_and_keeps_magnets_literal() {
         assert!(super::source("/nonexistent/fbt-input.torrent").is_err());

@@ -1,5 +1,7 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("search.browse_grid",Scope::Screen(Screen::Search),&[],"Browse grid/rows",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('v'))]),None,Some("Browse lists only.")),
     action!("search.sort",Scope::Screen(Screen::Search),&[],"Sort results",90,
         |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('s'))]),None,None),
     action!("search.reverse_sort",Scope::Screen(Screen::Search),&[],"Reverse results sort",90,

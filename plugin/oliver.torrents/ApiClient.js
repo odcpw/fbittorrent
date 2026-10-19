@@ -3,7 +3,7 @@
 // Transport-independent API 1 session; one instance per shell service.
 var IDEMPOTENT = ["torrents.start", "torrents.stop", "torrents.set_seed", "torrents.set_files",
   "torrents.set_upload_limit", "torrents.add", "torrents.commit", "torrents.discard",
-  "torrents.force_start", "app.settings.set", "transfer.set_limits", "transfer.set_alt",
+  "torrents.force_start", "app.settings.set", "app.clipboard.dismiss", "transfer.set_limits", "transfer.set_alt",
   "search.set_provider", "rss.set_read", "rss.mark_feed_read", "shows.set_quality",
   "shows.set_read", "shows.mark_show_read", "torrents.reannounce", "torrents.set_download_limit",
   "torrents.add_tracker", "torrents.remove_tracker"]
@@ -146,7 +146,7 @@ function create(io, options) {
   function topics() {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
-    if(c.dashboardVisible)wanted.push("events")
+    if(c.dashboardVisible || c.caps.indexOf("clipboard")>=0)wanted.push("events")
     if(c.dashboardVisible && c.caps.indexOf("settings")>=0)wanted.push("settings")
     if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
     if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")

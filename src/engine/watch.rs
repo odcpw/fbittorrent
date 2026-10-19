@@ -1,0 +1,70 @@
+//! Snapshot owned verified pieces on the engine runtime; no tracker guard escapes.
+use super::*;
+use crate::daemon::watch::{self, Sample};
+impl EngineDispatcher {
+    pub(crate) fn watch_samples(&self) -> Result<Vec<Sample>> {
+        self.runtime.block_on(async {
+            let ledger =
+                OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+            let mut result = Vec::new();
+            for record in &ledger.records {
+                if record.staged {
+                    continue;
+                }
+                let Ok(handle) = self.inner.handle(&record.hash) else {
+                    continue;
+                };
+                let stats = handle.stats();
+                if stats.finished || matches!(stats.state, TorrentStatsState::Error) {
+                    continue;
+                }
+                let Some(metadata) = handle.metadata.load_full() else {
+                    continue;
+                };
+                let selected = handle.only_files();
+                let Some(index) = watch::largest_video(
+                    metadata
+                        .file_infos
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| selected.as_ref().is_none_or(|ids| ids.contains(i)))
+                        .map(|(i, f)| (i, f.relative_filename.as_path(), f.len)),
+                ) else {
+                    continue;
+                };
+                let file = &metadata.file_infos[index];
+                let Some(bits) = handle.have_pieces_snapshot() else {
+                    continue;
+                };
+                let pieces = bits.as_slice();
+                let piece = u64::from(metadata.lengths().default_piece_length());
+                let prefix = watch::prefix(file.offset_in_torrent, file.len, piece, |i| {
+                    pieces.get(i).is_some_and(|b| *b)
+                });
+                let last = file
+                    .piece_range
+                    .end
+                    .checked_sub(1)
+                    .is_some_and(|i| pieces.get(i as usize).is_some_and(|b| *b));
+                let rate = stats
+                    .live
+                    .as_ref()
+                    .map(|s| s.download_speed.mbps * 1024.0 * 1024.0)
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                    .map(|v| v as u64);
+                result.push(Sample {
+                    hash: record.hash.clone(),
+                    name: record.name.clone(),
+                    file: index as u64,
+                    path: handle.output_folder().join(&file.relative_filename),
+                    size: file.len,
+                    prefix,
+                    last,
+                    dl_bps: rate,
+                    downloading: !handle.is_paused() && rate.is_some_and(|v| v > 0),
+                });
+            }
+            Ok(result)
+        })
+    }
+}

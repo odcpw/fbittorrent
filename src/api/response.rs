@@ -3,6 +3,7 @@
 use super::{objects::*, scalar::*, search::*};
 use super::rss::*;
 use super::shows::*;
+use super::peers::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -254,9 +255,13 @@ pub enum Reply {
     TorrentsStop(StopResult),
     TorrentsRemove(RemoveResult),
     TorrentsFiles(FilesResult),
+    TorrentsPeers(PeersResult),
+    TorrentsAddTracker(DoneResult),
+    TorrentsRemoveTracker(DoneResult),
     TorrentsSetFiles(DoneResult),
     TorrentsSetSeed(DoneResult),
     TorrentsSetUploadLimit(MutationResult),
+    TorrentsSetDownloadLimit(DoneResult),
     TorrentsOpenTarget(OpenTargetResult),
     Subscribe(SubscribeResult),
     Unsubscribe(EmptyResult),
@@ -310,12 +315,16 @@ impl Reply {
             "torrents.start" => serde_json::from_value(result).map(Self::TorrentsStart),
             "torrents.stop" => serde_json::from_value(result).map(Self::TorrentsStop),
             "torrents.remove" => serde_json::from_value(result).map(Self::TorrentsRemove),
+            "torrents.add_tracker" => serde_json::from_value(result).map(Self::TorrentsAddTracker),
+            "torrents.remove_tracker" => serde_json::from_value(result).map(Self::TorrentsRemoveTracker),
+            "torrents.peers" => serde_json::from_value(result).map(Self::TorrentsPeers),
             "torrents.files" => serde_json::from_value(result).map(Self::TorrentsFiles),
             "torrents.set_files" => serde_json::from_value(result).map(Self::TorrentsSetFiles),
             "torrents.set_seed" => serde_json::from_value(result).map(Self::TorrentsSetSeed),
             "torrents.set_upload_limit" => {
                 serde_json::from_value(result).map(Self::TorrentsSetUploadLimit)
             }
+            "torrents.set_download_limit" => serde_json::from_value(result).map(Self::TorrentsSetDownloadLimit),
             "torrents.open_target" => serde_json::from_value(result).map(Self::TorrentsOpenTarget),
             "subscribe" => serde_json::from_value(result).map(Self::Subscribe),
             "unsubscribe" => serde_json::from_value(result).map(Self::Unsubscribe),

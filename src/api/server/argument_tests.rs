@@ -451,6 +451,8 @@ fn strict_type_errors_name_the_argument() {
         assert_eq!(failure.error.code, ErrorCode::InvalidArgs);
         assert_eq!(failure.error.details.unwrap()["key"], key);
     }
+    let download_clear=json!({"id":1,"op":"torrents.set_download_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
+    assert!(decode(&serde_json::to_vec(&download_clear).unwrap()).is_ok());
     let clear = json!({"id":1,"op":"torrents.set_upload_limit","args":{"hashes":["ab".repeat(20)],"bps":null}});
     assert!(decode(&serde_json::to_vec(&clear).unwrap()).is_ok());
 }
@@ -466,6 +468,18 @@ fn live_subscription_validation_retains_revision_history_and_rejects_gaps() {
     frame["frame"]["rev"] = json!(3);
     let failure = validate_live_capture(&text(&lines)).unwrap_err();
     assert!(failure.contains("must increase by exactly one"), "{failure}");
+}
+
+#[test]
+fn tracker_url_failures_name_the_key_without_echoing_values() {
+    for op in ["torrents.add_tracker","torrents.remove_tracker"] {
+        let bytes=serde_json::to_vec(&json!({"id":1,"op":op,"args":{"hash":"5656565656565656565656565656565656565656","url":"ftp://127.0.0.1/a?passkey=private"}})).unwrap();
+        let invalid=super::framing::decode(&bytes).err().expect("invalid scheme");
+        assert_eq!(invalid.error.code,ErrorCode::InvalidArgs);
+        assert_eq!(invalid.error.details.unwrap()["key"],"url");
+        assert!(!invalid.error.message.contains("private"));
+        println!("{op}: invalid URL names url, query value absent");
+    }
 }
 
 #[test]

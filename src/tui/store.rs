@@ -42,6 +42,7 @@ pub(super) struct Store {
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
     pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
+    pub peers: BTreeMap<api::Hash, BTreeMap<String, api::Peer>>,
     pub rss_feeds:BTreeMap<String,api::Feed>,
     pub rss_items:BTreeMap<String,BTreeMap<String,api::FeedItem>>,
     pub releases_topic:Option<String>,
@@ -120,6 +121,10 @@ impl Store {
                         .map(|row| (row.index.to_string(), row))
                         .collect(),
                 );
+            }
+            (api::Call::TorrentsPeers {args},api::Reply::TorrentsPeers(result))=>{
+                ensure!(result.peers.len()<=MAX_ITEMS,"peer list exceeds UI row budget");
+                self.peers.clear();self.peers.insert(args.hash.clone(),result.peers.into_iter().map(|p|(p.addr.clone(),p)).collect());
             }
             (_, api::Reply::AppNetwork(result)) => self.network = Some(result.state),
             (api::Call::Unsubscribe { args }, api::Reply::Unsubscribe(_)) => {
@@ -265,6 +270,7 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Peers(hash) => patch(self.peers.entry(hash.clone()).or_default(),changed,added,removed,|item|match item{api::Item::Peer(p)=>Some((p.addr.clone(),p.clone())),_=>None})?,
                 api::Topic::Files(hash) => patch(
                     self.files.entry(hash.clone()).or_default(),
                     changed,
@@ -327,6 +333,7 @@ impl Store {
                 self.stale = false;
                 self.fresh_rows();
             }
+            api::Topic::Peers(hash)=>{self.peers.clear();self.peers.insert(hash.clone(),snapshot.peers);},
             api::Topic::Files(hash) => {
                 self.files.clear();
                 self.files.insert(hash.clone(), snapshot.files);

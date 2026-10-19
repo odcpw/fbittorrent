@@ -54,11 +54,39 @@ fn agent() -> ureq::Agent {
 }
 
 pub(crate) fn get_json<T: for<'de> Deserialize<'de>>(url: &str) -> Result<T> {
-    let mut resp = agent().get(url).call().with_context(|| format!("GET {url}"))?;
+    let target = request_url(url)?;
+    let mut resp = agent().get(&target).call().with_context(|| format!("GET {url}"))?;
     let code = resp.status().as_u16();
     if code != 200 { return Err(anyhow!("{url}: HTTP {code}")); }
     let body = resp.body_mut().with_config().limit(16 * 1024 * 1024).read_to_string()?;
     serde_json::from_str(&body).with_context(|| format!("parsing {url}"))
+}
+
+fn request_url(url: &str) -> Result<String> {
+    // Native UI fixtures exercise the real upstream parsers inside a private
+    // network. Installed release builds always use the catalogue's endpoints.
+    #[cfg(debug_assertions)]
+    if let Some(base) = std::env::var_os("FBT_TEST_BROWSE_ROOT") {
+        return fixture_url(url, &base.to_string_lossy());
+    }
+    Ok(url.into())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn fixture_url(original: &str, base: &str) -> Result<String> {
+    let parsed = url::Url::parse(original)?;
+    let mut target = url::Url::parse(base)?;
+    let local = match target.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    };
+    anyhow::ensure!(target.scheme() == "http" && local && target.username().is_empty()
+        && target.password().is_none() && target.query().is_none() && target.fragment().is_none(),
+        "browse fixture root must be a literal loopback HTTP URL");
+    target.set_path(parsed.path());
+    target.set_query(parsed.query());
+    Ok(target.into())
 }
 
 pub fn fetch(source: &Source) -> Result<Vec<SearchResult>> {
@@ -199,6 +227,20 @@ fn yts(sort: &str) -> Result<Vec<SearchResult>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browse_fixture_root_is_loopback_only_and_preserves_paths() {
+        assert_eq!(fixture_url("https://yts.mx/api/v2/list_movies.json?limit=50",
+            "http://127.0.0.1:43210").unwrap(),
+            "http://127.0.0.1:43210/api/v2/list_movies.json?limit=50");
+        assert_eq!(fixture_url("https://apibay.org/precompiled/data_top100_207.json",
+            "http://[::1]:43210").unwrap(),
+            "http://[::1]:43210/precompiled/data_top100_207.json");
+        for invalid in ["https://127.0.0.1", "http://example.com", "http://192.0.2.1",
+            "http://user@127.0.0.1", "http://127.0.0.1?query", "http://127.0.0.1/#fragment"] {
+            assert!(fixture_url("https://yts.mx/api/v2/list_movies.json", invalid).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn yts_missing_counts_remain_unknown_and_reported_zero_is_preserved() {

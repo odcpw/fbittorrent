@@ -165,6 +165,8 @@ pub struct SearchResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchPlugin {
+    #[serde(default="nova_kind")]
+    pub kind:String,
     pub name: String,
     #[serde(rename = "fullName")]
     pub full_name: String,
@@ -172,6 +174,8 @@ pub struct SearchPlugin {
     pub url: String,
     pub version: String,
 }
+
+fn nova_kind()->String {"nova".into()}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]

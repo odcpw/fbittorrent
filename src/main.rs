@@ -6,7 +6,7 @@ mod cli_local;
 mod cli_sources;
 use cli::{Cli, Cmd, RssCmd, ShowsCmd};
 use cli_local::*;
-use cli_sources::{resolve_in, tui_free_dedupe, short, local_torrent_source};
+use cli_sources::{short, local_torrent_source};
 pub use cli_sources::{magnet_hash, magnet_name};
 mod api;
 mod backend;
@@ -37,6 +37,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn main() {
+    if let Some(code)=search::torznab::run_worker(){std::process::exit(code);}
+
     // Behave like a Unix tool when stdout is a closed pipe (`fbittorrent list | head`):
     // exit quietly instead of panicking on EPIPE.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
@@ -134,31 +136,7 @@ fn run(cli: Cli) -> Result<Code> {
             return Ok(Code::Ok);
         }
         Cmd::Imdb { name, refresh } => {
-            if refresh || imdb::ratings_stale() {
-                eprintln!("fetching IMDb ratings dataset…");
-                imdb::refresh_ratings()?;
-            }
-            let n = name.join(" ");
-            let Some(t) = imdb::lookup(&n)? else {
-                emit(json, serde_json::json!({"ok": true, "found": false, "query": n}), || println!("no match"));
-                return Ok(Code::Ok);
-            };
-            let poster = if t.poster_url.is_empty() { None } else { imdb::fetch_poster(&t.poster_url, 300).ok().map(|p| p.display().to_string()) };
-            if json {
-                let mut v = serde_json::to_value(&t)?;
-                v["ok"] = serde_json::json!(true);
-                v["found"] = serde_json::json!(true);
-                v["url"] = serde_json::json!(t.url());
-                v["poster_path"] = serde_json::json!(poster);
-                println!("{}", agent::with_warnings(v));
-                return Ok(Code::Ok);
-            }
-            println!("{} ({}) [{}]  {}", t.name, t.year.map(|y| y.to_string()).unwrap_or_default(), t.kind, t.url());
-            match (t.rating, t.votes) { (Some(r), Some(v)) => println!("★ {r:.1}  ({v} votes)"), _ => println!("★ n/a") }
-            if !t.stars.is_empty() { println!("{}", t.stars); }
-            if !t.blurb.is_empty() { println!("\n{}\n{}", t.blurb, t.wiki_url); }
-            if let Some(p) = poster { println!("poster: {p}"); }
-            return Ok(Code::Ok);
+            return cli::catalog_imdb::run(&cfg,name.join(" "),refresh,json);
         }
         Cmd::Config => {
             emit(json, serde_json::json!({"ok": true, "path": config::config_path().display().to_string(), "config": serde_json::to_value(&cfg)?}), || {
@@ -169,6 +147,7 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Events { follow, since_seq, kinds } => return cli::stream::events(&cfg, follow, since_seq, kinds),
         Cmd::Api { op, list, args, json_args, reference } => return cli::raw::run(&cfg, json, no_start, op, list, args, json_args, reference),
+        Cmd::Limit{..}=>return Err(AppError::new(Code::Usage,"per-torrent download limits require the daemon API").into()),
         Cmd::Limits { down, up, alt, alt_down, alt_up } => return cli::limits::run(&cfg, json, down, up, alt, alt_down, alt_up),
         Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
         Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
@@ -220,76 +199,21 @@ fn run(cli: Cli) -> Result<Code> {
             rss(&c, sub, json, &cfg)
         }
         Cmd::Shows(sub) => shows_cmd(&cfg, &c, sub, json),
-        Cmd::Search { query, wait, limit, install, install_url, plugins } => {
-            if plugins {
-                let ps = c.search_plugins()?;
-                emit(json, serde_json::json!({"ok": true, "count": ps.len(), "enabled": ps.iter().filter(|p| p.enabled).count(), "plugins": ps}), || {
-                    for p in &ps { println!("{:<18} {:<3} {:<8} {}", p.name, if p.enabled { "on" } else { "off" }, p.version, p.url); }
-                });
+        Cmd::Search { query, wait, limit, install, install_url, plugins, install_torznab, key_file } => {
+            if let Some(url)=install_torznab {
+                let key_file=key_file.map(|p|if p.is_absolute(){Ok(p)}else{std::env::current_dir().map(|dir|dir.join(p))}).transpose()?;
+                let name=search::torznab::install(&url,key_file)?;
+                emit(json,serde_json::json!({"ok":true,"action":"install-torznab","name":name,"url":url,"kind":"torznab"}),||println!("Torznab indexer installed: {name}"));
                 return Ok(Code::Ok);
             }
-            if install || !install_url.is_empty() {
-                let mut srcs: Vec<String> = install_url.clone();
-                if install {
-                    let base = "https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/";
-                    for n in ["eztv", "limetorrents", "piratebay", "solidtorrents", "torlock", "torrentproject", "torrentscsv"] {
-                        srcs.push(format!("{base}{n}.py"));
-                    }
-                    srcs.extend(qbt::COMMUNITY_SEARCH_PLUGINS.iter().map(|s| s.to_string()));
-                }
-                let before = c.search_plugins()?.len();
-                c.search_install_plugins(&srcs)?;
-                for _ in 0..30 {
-                    std::thread::sleep(Duration::from_millis(500));
-                    if c.search_plugins()?.len() >= before.max(srcs.len()) { break; }
-                }
-                c.search_enable_all()?;
-                let ps = c.search_plugins()?;
-                emit(json, serde_json::json!({"ok": true, "action": "install-plugins", "count": ps.len(), "plugins": ps.iter().map(|p| p.name.clone()).collect::<Vec<_>>()}),
-                    || println!("{} search plugins installed: {}", ps.len(), ps.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")));
-                return Ok(Code::Ok);
-            }
-            let q = query.join(" ");
-            if q.trim().is_empty() {
-                return Err(AppError::new(Code::Usage, "no search query given").hint("fbittorrent search \"<title>\" --json").into());
-            }
-            let plugins_now = c.search_plugins()?;
-            if plugins_now.is_empty() {
-                return Err(AppError::new(Code::Backend, "no search providers installed").hint("fbittorrent search --install").into());
-            }
-            if !plugins_now.iter().any(|p| p.enabled) {
-                return Err(AppError::new(Code::Usage, "every search provider is disabled").hint("fbittorrent search --plugins   # then enable some in the TUI with `s`, or run `search --install`").into());
-            }
-            let id = c.search_start(&q)?;
-            let deadline = Instant::now() + Duration::from_secs(wait);
-            let mut last;
-            loop {
-                last = match c.search_results(id, 1000, 0) {
-                    Ok(r) => r,
-                    Err(e) if e.to_string().contains("404") && Instant::now() < deadline => { std::thread::sleep(Duration::from_millis(500)); continue; }
-                    Err(e) => return Err(e),
-                };
-                if last.status != "Running" || Instant::now() >= deadline { break; }
-                std::thread::sleep(Duration::from_millis(700));
-            }
-            let _ = c.search_stop(id);
-            let _ = c.search_delete(id);
-            let mut rs = tui_free_dedupe(last.results);
-            rs.sort_by(|a, b| b.seeders.cmp(&a.seeders));
-            rs.truncate(limit);
-            emit(json, serde_json::json!({"ok": true, "query": q, "count": rs.len(), "complete": last.status != "Running", "results": rs}), || {
-                for r in &rs {
-                    println!("{:>5}S {:>5}L  {:>10}  {:<12}  {}", r.seeders, r.leechers, human_bytes(r.file_size), r.engine, r.file_name);
-                }
-            });
-            Ok(Code::Ok)
+            cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json)
         }
-        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seq {..} | Cmd::FirstLast {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seq {..} | Cmd::FirstLast {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
+    matches!(cmd, Cmd::Limit { .. } | Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
         | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))

@@ -122,16 +122,19 @@ impl TuiApp {
                 ),
             )];
             if let Some(playable) = api.and_then(|r| r.playable.as_ref()) {
-                let ready = if playable.ready {
-                    "▶ Ready"
-                } else {
-                    "Buffering"
-                };
+                let ready = if !playable.ready { "Buffering" }
+                    else if playable.stall_free==Some(true) || (playable.stall_free.is_none() && playable.buffered_s.is_some_and(|s|s>=120)) {"▶ Ready to watch"}
+                    else {"Playable · may stall"};
                 let buffer = playable
                     .buffered_s
                     .map(|s| format!(" · {} buffered", human_eta(s.min(i64::MAX as u64) as i64)))
                     .unwrap_or_default();
-                lines.push(kv("ready", format!("{ready}{buffer} · (o) Open")));
+                let finish=playable.finishes_in_s.map(|s|format!(" · finishes in {}",human_eta(s.min(i64::MAX as u64) as i64))).unwrap_or_default();
+                let estimate=if playable.buffered_s.is_none() {
+                    let steady=api.is_some_and(|r|crate::daemon::watch::estimate_rate(r.size.unwrap_or(0),r.dl_bps.unwrap_or(0)));
+                    if steady {" · rate estimate: keeps up with a 2 h video"}else{" · rate estimate: may stall for a 2 h video"}
+                }else{""};
+                lines.push(kv("ready", format!("{ready}{buffer}{finish}{estimate} · (o) Open")));
             }
             lines.extend([
                 kv("progress", metrics.progress()),

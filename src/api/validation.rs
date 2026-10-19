@@ -138,6 +138,17 @@ impl Validate for Request {
                 Ok(())
             },
             Call::Subscribe { args } => args.validate(),
+            Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
+                let url=url::Url::parse(&args.url).ok();
+                require(args.url.len()<=4096 && url.is_some_and(|u|u.host_str().is_some()
+                    && matches!(u.scheme(),"http"|"https"|"udp")
+                    && (u.scheme()!="udp" || u.port().is_some())),"url","http(s) or udp tracker URL with a host (UDP requires a port)")
+            },
+            Call::TorrentsSetDownloadLimit{args}=>{
+                args.validate()?;
+                if let Update::Set(bps)=args.bps {require(bps<=u32::MAX as u64,"bps","at most 4294967295 bytes/s")?;}
+                Ok(())
+            },
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
             _ => super::search::validate_call(&self.call),
@@ -229,6 +240,7 @@ impl Validate for Reply {
                 Ok(())
             }
             Self::TorrentsGet(result) => result.torrent.validate(),
+            Self::TorrentsPeers(result) => { for value in &result.peers {value.validate()?;} Ok(()) },
             Self::TorrentsFiles(result) => {
                 for value in &result.files {
                     value.validate()?;
@@ -386,7 +398,7 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
+                Item::Peer(_) | Item::File(_) | Item::Search(_) | Item::Log(_) | Item::Feed(_) | Item::FeedItem(_) | Item::Show(_) | Item::Release(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
@@ -446,6 +458,7 @@ fn items(topic: &Topic, values: &[Item]) -> Checked {
             (Topic::RssFeeds, Item::Feed(_)) | (Topic::RssItems(_), Item::FeedItem(_))=>{},
             (Topic::Log, Item::Log(entry)) => entry.validate()?,
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
+            (Topic::Peers(_), Item::Peer(p)) => p.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
             (Topic::Search(_), Item::Search(s)) => s.validate()?,
             (Topic::Events, Item::Event(e))
@@ -531,7 +544,7 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
-                                Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
+                                Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => key.is_string(),
                                 Topic::Shows | Topic::ShowReleases(_) => key.is_string(),
                                 Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
                                 Topic::Search(_) => key.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 8192),
@@ -552,7 +565,7 @@ impl Validate for Event {
                         require(
                             match topic {
                                 Topic::Torrents => lower_hex(key, 40),
-                                Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
+                                Topic::Peers(_) | Topic::RssFeeds | Topic::RssItems(_) => !key.is_empty(),
                                 Topic::Shows | Topic::ShowReleases(_) => !key.is_empty(),
                                 Topic::Files(_) => key.parse::<u64>().is_ok(),
                                 Topic::Search(_) => !key.is_empty() && key.len() <= 8192,
@@ -638,5 +651,14 @@ impl Validate for LogEntry {
         require(self.seq > 0, "seq", "starts at one")?;
         text(&self.source, 64, "source")?;
         text(&self.message, 8192, "message")
+    }
+}
+
+impl Validate for Peer {
+    fn validate(&self) -> Checked {
+        require(self.addr.parse::<std::net::SocketAddr>().is_ok(),"addr","must be a socket address")?;
+        text(&self.state,64,"state")?;
+        if let Some(client)=&self.client{text(client,1024,"client")?;}
+        Ok(())
     }
 }

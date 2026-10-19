@@ -6,11 +6,13 @@ pub(super) struct JobState {
     pub(super) raw: Vec<u8>,
     pub(super) hashes: BTreeMap<String,String>,
     pub(super) error: String,
+    pub(super) warnings:Vec<crate::api::ProviderWarning>,
 }
 pub(super) struct SearchJob {
     pub(super) pid: AtomicI32,
     pub(super) done: AtomicBool,
-    cancelled: AtomicBool,
+    pub(super) cancelled: AtomicBool,
+    pub(super) native:Mutex<BTreeSet<i32>>,
     pub(super) state: Mutex<JobState>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
@@ -36,14 +38,19 @@ pub fn begin_session() -> Result<()> {
 }
 
 pub fn start(query: &str) -> Result<i64> {
-    start_in(&ProviderStore::default(), query)
+    start_selected(&ProviderStore::default(), query,None)
 }
 
 pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
-    start_selected(store, query, None)
+    start_with(store,query,None,Vec::new())
 }
 
 pub(super) fn start_selected(store: &ProviderStore, query: &str, selected: Option<&[String]>) -> Result<i64> {
+    let preferences=store.load()?;
+    let native=torznab::indexers()?.into_iter().filter(|i|preferences.enabled.get(&i.name).copied().unwrap_or(true) && selected.is_none_or(|names|names.contains(&i.name))).collect();
+    start_with(store,query,selected,native)
+}
+fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:Vec<torznab::Indexer>)->Result<i64> {
     if query.trim().is_empty() {
         bail!("no search query given");
     }
@@ -58,21 +65,17 @@ pub(super) fn start_selected(store: &ProviderStore, query: &str, selected: Optio
         .into_iter()
         .filter(|plugin| plugin.enabled && selected.is_none_or(|names| names.contains(&plugin.name)))
         .collect();
-    if providers.is_empty() {
+    if providers.is_empty() && native.is_empty() {
         bail!("no enabled search providers; install providers with fbittorrent search --install");
     }
-    let names = providers
-        .iter()
-        .map(|plugin| plugin.name.as_str())
-        .collect::<Vec<_>>()
-        .join(",");
-    let mut command = python(&store.runtime());
-    command.arg("nova2.py").arg(names).arg("all").arg(query);
-    let mut process = ProcessGroup::spawn(command)?;
-    let stdout = process.child.stdout.take().unwrap();
-    let stderr = process.child.stderr.take().unwrap();
+    let process=if providers.is_empty(){None}else {
+        let names=providers.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(",");
+        let mut command=python(&store.runtime());command.arg("nova2.py").arg(names).arg("all").arg(query);
+        Some(ProcessGroup::spawn(command)?)
+    };
     let job = Arc::new(SearchJob {
-        pid: AtomicI32::new(process.pid),
+        pid: AtomicI32::new(process.as_ref().map_or(0,|p|p.pid)),
+        native:Mutex::new(BTreeSet::new()),
         done: AtomicBool::new(false),
         cancelled: AtomicBool::new(false),
         state: Mutex::new(JobState {
@@ -80,56 +83,21 @@ pub(super) fn start_selected(store: &ProviderStore, query: &str, selected: Optio
             raw: vec![],
             hashes: BTreeMap::new(),
             error: String::new(),
+            warnings:Vec::new(),
         }),
         worker: Mutex::new(None),
     });
     let worker_job = job.clone();
+    let query=query.to_owned();
     let worker = thread::Builder::new()
         .name("torrent-search".into())
         .spawn(move || {
-            let errors = thread::spawn(move || {
-                drain_bounded(&mut BufReader::new(stderr), 16 * 1024)
-                    .map(|(bytes,_)| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default()
-            });
-            let mut reader = BufReader::new(stdout);
-            let mut retained = 0usize;
-            let mut inspected = BTreeMap::<String, Option<String>>::new();
-            let mut line = Vec::new();
-            loop {
-                line.clear();
-                let budget = MAX_CAPTURE_BYTES.saturating_sub(retained);
-                let count = reader.by_ref().take(budget as u64 + 1).read_until(b'\n', &mut line).unwrap_or(0);
-                if count == 0 { break; }
-                if count > budget {
-                    if let Ok(mut state) = worker_job.state.lock() { state.error = "search provider output exceeded 2 MiB".into(); }
-                    process.kill(); break;
-                }
-                retained += count;
-                let result = std::str::from_utf8(&line).ok().and_then(|text| parse_result(text, &providers));
-                let hash = result.as_ref().and_then(|r| inspected.entry(r.file_url.clone()).or_insert_with(|| normalize::torrent_hash(&r.file_url)).clone());
-                if let Ok(mut state) = worker_job.state.lock() {
-                    state.raw.extend_from_slice(&line);
-                    if let Some(result) = result {
-                        if let Some(hash) = hash { state.hashes.insert(result.file_url.clone(), hash); }
-                        if state.results.len() < MAX_RESULTS { state.results.push(result); }
-                    }
-                }
-            }
-            let status = process.child.wait();
-            process.kill();
-            worker_job.pid.store(0, Ordering::Release);
-            let errors = errors.join().unwrap_or_default();
-            if !worker_job.cancelled.load(Ordering::Acquire)
-                && !status.as_ref().is_ok_and(|status| status.success())
-            {
-                if let Ok(mut state) = worker_job.state.lock() {
-                    if state.error.is_empty() { state.error = if errors.trim().is_empty() {
-                        "search providers failed to finish".into()
-                    } else {
-                        errors.trim().into()
-                    }; }
-                }
-            }
+            let natives:Vec<_>=native.into_iter().map(|indexer| {
+                let job=worker_job.clone();let query=query.clone();
+                thread::spawn(move ||torznab::query(indexer,&query,&job))
+            }).collect();
+            if let Some(process)=process {run_nova(process,providers,&worker_job);}
+            for task in natives {let _=task.join();}
             worker_job.done.store(true, Ordering::Release);
         })?;
     *job.worker
@@ -146,6 +114,60 @@ pub(super) fn start_selected(store: &ProviderStore, query: &str, selected: Optio
     }
     registry.jobs.insert(id, job);
     Ok(id)
+}
+
+fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob) {
+    let stdout=process.child.stdout.take().unwrap();let stderr=process.child.stderr.take().unwrap();
+            let errors = thread::spawn(move || {
+                drain_bounded(&mut BufReader::new(stderr), 16 * 1024)
+                    .map(|(bytes,_)| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default()
+            });
+            let mut reader = BufReader::new(stdout);
+            let mut retained = 0usize;
+            let mut inspected = BTreeMap::<String, Option<String>>::new();
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                let budget = MAX_CAPTURE_BYTES.saturating_sub(retained);
+                let count = reader.by_ref().take(budget as u64 + 1).read_until(b'\n', &mut line).unwrap_or(0);
+                if count == 0 { break; }
+                if count > budget {
+                    if let Ok(mut state) = job.state.lock() { state.error = "search provider output exceeded 2 MiB".into(); }
+                    process.kill(); break;
+                }
+                retained += count;
+                let result = std::str::from_utf8(&line).ok().and_then(|text| parse_result(text, &providers));
+                let hash = result.as_ref().and_then(|r| inspected.entry(r.file_url.clone()).or_insert_with(|| normalize::torrent_hash(&r.file_url)).clone());
+                if let Ok(mut state) = job.state.lock() {
+                    state.raw.extend_from_slice(&line);
+                    if let Some(result) = result {
+                        if let Some(hash) = hash { state.hashes.insert(result.file_url.clone(), hash); }
+                        if state.results.len() < MAX_RESULTS { state.results.push(result); }
+                    }
+                }
+            }
+            let status = process.child.wait();
+            process.kill();
+            job.pid.store(0, Ordering::Release);
+            let errors = errors.join().unwrap_or_default();
+            if !job.cancelled.load(Ordering::Acquire)
+                && !status.as_ref().is_ok_and(|status| status.success())
+            {
+                if let Ok(mut state) = job.state.lock() {
+                    if state.error.is_empty() { state.error = if errors.trim().is_empty() {
+                        "search providers failed to finish".into()
+                    } else {
+                        errors.trim().into()
+                    }; }
+                }
+            }
+
+}
+
+pub(super) fn warnings(state:&JobState)->Vec<crate::api::ProviderWarning> {
+    let mut warnings=state.warnings.clone();
+    if !state.error.is_empty(){warnings.push(crate::api::ProviderWarning{provider:"nova".into(),message:state.error.chars().take(200).collect()});}
+    warnings
 }
 
 pub(super) fn parse_result(line: &str, providers: &[SearchPlugin]) -> Option<SearchResult> {
@@ -186,6 +208,16 @@ pub(super) fn job(id: i64) -> Result<Arc<SearchJob>> {
         .ok_or_else(|| anyhow!("search job not found: {id}"))
 }
 
+/// Local catalogue clients consume the same normalized items and resolved-hash
+/// dedupe as the daemon service; legacy sentinels are introduced by the CLI only.
+pub(crate) fn normalized_snapshot(id:i64) -> Result<(Vec<crate::api::SearchItem>,bool,Vec<crate::api::ProviderWarning>)> {
+    let job=job(id)?;
+    let state=job.state.lock().map_err(|_|anyhow!("search results lock failed"))?;
+    let complete=job.done.load(Ordering::Acquire);
+    let warnings=warnings(&state);
+    Ok((normalize::aggregate_with_hashes(&state.results,MAX_RESULTS,&state.hashes),complete,warnings))
+}
+
 pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
     let job = job(id)?;
     let state = job
@@ -193,7 +225,7 @@ pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
         .lock()
         .map_err(|_| anyhow!("search results lock failed"))?;
     let done = job.done.load(Ordering::Acquire);
-    if done && state.results.is_empty() && !state.error.is_empty() {
+    if done && state.results.is_empty() && (!state.error.is_empty() || !state.warnings.is_empty()) {
         bail!("search failed: {}", state.error);
     }
     let total = state.results.len() as i64;
@@ -219,6 +251,7 @@ pub fn results(id: i64, limit: i64, offset: i64) -> Result<SearchResponse> {
 
 fn stop_job(job: &SearchJob) {
     job.cancelled.store(true, Ordering::Release);
+    for pid in job.native.lock().unwrap().iter(){unsafe{libc::kill(-*pid,libc::SIGKILL);}}
     let pid = job.pid.load(Ordering::Acquire);
     if pid > 0 {
         unsafe {

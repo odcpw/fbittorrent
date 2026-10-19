@@ -848,3 +848,183 @@ Exact staging fixture correction (other bytes retained): before SHA256 `96aa411f
 +{"dir":"c2s","frame":{"id":5,"op":"torrents.discard","args":{"hash":"0123456789abcdef0123456789abcdef01234568"}}}
  {"dir":"s2c","frame":{"id":5,"ok":true,"result":{"state":"done"}}}
 ```
+
+
+## P3-07 (fbt-p3-07-c2p) — search/IMDb checkpoint
+
+Native CLI search and IMDb probe one 200 ms hello and use only a running capable
+owner; otherwise shared normalized local sources run without launching an engine.
+One legacy JSON/human shaper serves both paths. Search waits for search.done,
+takes an atomic snapshot, dedupes/sorts before limit, releases sessions/subs,
+returns partial rows on bounded waits and reports all-provider failure as exit 5.
+IMDb refresh reaches the persistent owner and reloads exactly once. Contract
+1.2.9 adds providers[]; primary engineName follows the selected provider URL.
+A real multi-provider test exposed Nova inheriting the daemon's blocked TERM
+mask: the owned child launcher now clears that mask, so pool workers terminate
+and search.done arrives. Invalid non-HTTPS install URLs retain local rejection
+(exit 5); the API's HTTPS-only rule stays unchanged. Pending install failures
+are awaited, demonstrated by a real local TLS peer receiving ClientHello then
+closing after 500 ms; successful HTTPS installation is not newly qualified.
+
+Evidence root: target/test-logs/fbt-p3-07-c2p/. run-daemon.py <label>
+target/debug/fbittorrent <cases> used isolated retaining Sandboxes and owned
+foreground/transient-unit processes. foreground-final/daemon/ and
+systemd-final/daemon/: six cases each PASS (cli_search_both_paths_identical,
+cli_search_dedupe_both_paths, cli_search_timeout_cleans_provider,
+cli_search_parked_fallback, cli_search_silent_hello_fallback,
+cli_imdb_both_paths_identical). foreground-install/daemon/ and
+systemd-install/daemon/: cli_search_install_waits PASS each. Agreement cases
+log both stdout SHA256 and first differing byte; provider process groups are
+proven drained. IMDb refresh loads exactly one new index. cli-contract/
+agent_contract/contract.jsonl PASS 65 steps. cargo test --locked: full.log +
+full.jsonl PASS 474, 3 ignored. source-focused.log: 4 pass/1 ignored for shared
+shape/IMDb argument checks. cargo build --locked: debug-final.* PASS. size.*
+PASS (all changed src files under 900 lines); git diff --check PASS.
+Initial foreground/systemd runs retain the two-provider completion and IMDb
+fixture shutdown failures; final cases close both with no weakened assertions.
+
+Acceptance: search/IMDb JSON and human bytes agree up/down, including old search
+characterization bytes with only providers[] removed. Golden provenance is
+actual pre-change 212c3cd (package 0.1.0), captured before this implementation;
+no v0.1.2 binary/tag was available, so v0.1.2 provenance remains unmet. RSS/Shows
+verbs, their selectors/grab/refresh waits, TUI stale/fresh refresh criterion and
+RSS/Shows shape goldens remain pending track A integration: commits 07b3481
+(RSS) and a42a4a3 (Shows) are visible but not ancestors of this branch. No
+unmerged service is duplicated. Additional neighbouring edits: src/search/
+normalization export + child signal mask, src/agent.rs version/changes,
+regression registries and backward-compatible imdb_owned(with_process=True).
+No release/all.sh between beads per the owner's track cadence.
+
+
+## P5-05 (fbt-p5-05-orh) — verified ready to watch
+
+Added daemon-owned watch history and a once-per-second engine snapshot adapter.
+The largest included video starts at its own piece offset; threshold is
+max(32 MiB, ceil(3%)) plus verified last piece. MKV Info/Duration and MP4 mvhd
+reads are bounded to 1 MiB and remain absent on unknown/malformed data. Playback
+rate calculations remain absent when not downloading or rate/duration unknown.
+History is private 0600, no-follow, bounded (32,768 retained hashes / 2 MiB read),
+atomic and fsynced, survives engine-slot replacement and daemon restart, and
+re-arms after a verified lost prefix while emitting at most once per daemon life.
+Open/default actions use the existing notifier; open_target and glance acknowledge
+shared readiness. API list/get/files, Summary ready counts, events, CLI
+wait --until complete|playable|stall-free, ready file paths, truthful TUI detail
+wording and popup labels now share the same values. Existing coalescing preserves
+ready/stall-free flips while buffering counters coalesce. Contract 1.2.10 / watch
+uses the already-frozen Playable/event shapes; exact hello/error examples append
+only the new implemented capability. Legacy engine wire goldens/state table stay
+unchanged and pass the root suite. All changed src files remain below 900 lines.
+
+Evidence root target/test-logs/fbt-p5-05-orh/: run-daemon.py foreground-final
+target/debug/fbittorrent playable_before_complete playable_never_for_iso
+playable_two_file_mid_piece — 3/3 PASS on the final debug binary. The comprehensive
+case proves: (AC1) real 64 MiB Matroska / 1 MiB/s seed emits exactly one playable
+at >=32 MiB before completed; (AC2) notification Open records xdg-open with the
+video path and shared ack; (AC3) CLI playable wait exits 0 while incomplete,
+returns the video path, and stall-free wait also succeeds; (AC5) pause retains
+readiness; (AC6) restart suppresses the event, actual first-byte corruption makes
+a subsequent startup check lose the prefix, and repair re-arms exactly once.
+Each step is recorded in foreground-final/daemon/playable_before_complete.jsonl.
+AC4: foreground-final/daemon/playable_never_for_iso.jsonl proves the real ISO
+transfer never has playback metadata/event, and both watch waits time out as 8.
+The mid-piece case proves prefix 32.5 MiB from video file index 1 despite absent
+torrent piece 0, per-file readiness only on that video, and paused playable wait.
+systemd-boundary/daemon/playable_two_file_mid_piece.jsonl also PASS.
+
+cargo test --locked: full.* PASS 483, 3 ignored, run once on the final Rust code.
+Focused new-watch-goldens.* PASS 14 checks (watch, bus, TUI words and two new
+80x24 baselines); new baselines reviewed as synthetic rendering only. Earlier
+watch-unit.* PASS 7. size-final.* and git diff --check PASS. watch-cli-final.*
+is the final successful cargo build --locked (debug). No release/all.sh between
+track beads, per owner cadence. Initial live throttle of 16 KiB/s produced a
+truthful stalled/unknown-rate state instead of active slow downloading; the
+qualification now uses 512 KiB/s for the same false assertion and proves the
+faster-rate true flip within 2 seconds. Initial source compile errors were fixed;
+all final assertions remain strict.
+
+UI: qs-format.* and qs-format-artifacts/ PASS, including literal unknown/slow/
+stall-free controls. Actual private headless popup captures over real throttled
+watch daemons PASS: visual-ready-qualified.* / visual-ready-artifacts/ and
+visual-may-stall-final.* / visual-may-stall-artifacts/. PNGs visually inspected:
+target/test-logs/visual/2026-10-19/popup-ready-tokyo-night.png and
+popup-may-stall-tokyo-night.png show Ready to watch and Playable · may stall.
+The ignored headless Sway tool was reused read-only from cod_3's
+plugin/tests/target/headless-tools/usr/bin/sway through FBT_TEST_SWAY; all displays,
+network namespaces, daemons and XDG paths remained private. Early capture attempts
+record the missing-tool, relative-binary-path and hyphenated-case-slug setup
+failures; the harness fixes and qualified runs are retained. No owner shell,
+notification service or torrents were exercised. Additional neighbouring edits
+are the existing TUI details/state views, Model.js, visual fixture/case registry,
+README, capability examples and CLI contract expectations. Dashboard uses the
+existing watch fields/ready counts; a separate dashboard interaction capture is
+not newly qualified. Follow-ups: qualify immediate Open after a completed move
+against the 1-second cached target refresh; refresh P1-06's old watch-fixture
+preconditions when removing its documented watch replay deferrals.
+
+### Integration of P3-07 and P5-05 (2026-10-19)
+
+Merged through c155727 after the dashboard-presence integration. The branch-local
+contract numbers above describe the owner's qualification snapshots; integration
+allocates P3-07 search provenance to 1.2.24 and P5-05 watch readiness to 1.2.25.
+Capabilities, the changes table, IPC examples and contract assertions agree.
+Disk monitoring and sleep inhibition remain alongside watch sampling; hidden bar
+connections do not acknowledge watch readiness without dashboard visibility.
+The IMDb harness still cleans up its actual replacement daemon.
+
+Integration evidence: target/test-logs/integration/batch11-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests: agent 6, API fixtures 30, bus 6, server argument
+validation 10 (one existing harness-only ignore), watch 7; 59 passed, no failures.
+No full suite, release build or live native gate was re-run by the integrator.
+
+
+### Gate7 integration regressions (P5-03 / P3-06 / P7-02)
+
+Reconciled authorized main `027886f` with the services track, retaining disk/inhibitor/RSS/Shows/dashboard presence and watch sampling; capability bookkeeping is unioned at CLI 1.2.25 (search provenance 1.2.24, watch 1.2.25). The Torznab implementation is preserved in compiling checkpoint `3e93460`; its live acceptance remains pending. Recheck refusal now creates the staged record through `torrents.add {stage:true}` and proves its durable paused intent and unchecked visibility in the same daemon lifetime; daemon startup deliberately discards staged records (IPC staging section). Duplicate `stage:false` now requires successful `duplicate:true`, the original hash and preserved policy, matching IPC's explicit duplicate-success contract. Move's private, trackerless local-file fixture explicitly disables binding and verifies `app.network.ready=true` plus a running engine before admission. The reported transient `Waiting for lo` was not reproduced: the supplied release binary and previous debug binary both reported loopback ready in foreground/systemd probes; no unsupported causal claim is made. Deferred CLI helper imports remove the watch/catalogue registration cycle. Main's Log tab is added to the two watch goldens without changing readiness expectations.
+
+`python3 target/test-logs/track-B-regressions/run-cases.py {foreground,systemd}-release /home/oliver/Projects/odcpw/fbittorrent-gate/target/release/fbittorrent recheck_staged_invalid_state api_torrent_operations move_verb`: all three pass in each mode; logs `target/test-logs/track-B-regressions/{foreground,systemd}-release/{daemon,agent_contract}/*.jsonl`. The same three plus `staged_discarded_at_restart`, `recheck_dormant`, `playable_two_file_mid_piece` pass on the merged debug binary in each mode, under `{foreground,systemd}-debug/` (12 cases). `cargo check --locked --tests`, `cargo build --locked`, the size ratchet, and catalogue `api_list_matches` pass (`check.*`, `debug.*`, `sizes.*`, `catalogue/`). The first full root test run passed 534 tests and exposed two integration-only assertions: missing patch-history documentation and the watch golden's missing Log tab. After correcting them, focused `cargo test --locked -p fbittorrent agent:: -- --nocapture` passes 7/7 (`merged-agent.*`) and the watch golden test passes (`merged-watch.*`); the failed full attempt is retained in `full.*`. No release build or all.sh was repeated for this requested focused repair.
+
+Final merged-tree `cargo test --locked`: **536 passed, 0 failed, 3 ignored** in 9.38 s (`target/test-logs/track-B-regressions/full-final.{log,jsonl}`); this second invocation only reran the now-cached suite after the first run identified the two repaired integration assertions. The requested three regression fixes are met. Follow-up: capture the actual kernel readiness error if the transient loopback failure recurs; existing logs showed only its waiting label.
+
+### Integration of the gate fixes and Torznab checkpoint (2026-10-19)
+
+Merged services tip b5ae95a, including the authorized partial P7-01 checkpoint
+3e93460, onto f086ed9. The checkpoint stays open: this integration does not
+claim live Torznab qualification. Current peers/download-limit capabilities,
+disk/inhibitor/watch ordering, and the actual IMDb replacement-daemon cleanup
+are preserved. The additive Torznab CLI/provider surface receives unique contract
+patch 1.2.28; preceding patches 1.2.26 and 1.2.27 remain unchanged.
+
+Integration evidence: target/test-logs/integration/batch13-track-b/checks.jsonl.
+cargo check --locked --tests, regression Python compilation, daemon case listing
+and size lint pass. Focused tests pass: search 27 (including four Torznab controls),
+agent 6, API fixtures 30, watch rendering 1; 64 passed, no failures. The owner's
+retained foreground/systemd debug JSONL for recheck_staged_invalid_state,
+api_torrent_operations and move_verb was inspected: all six cases passed. Those
+are owner-run evidence, not new live runs by the integrator. No full suite, release
+build or all.sh was run for integration.
+
+
+### P7-01 — native Torznab indexers (fbt-p7-01-cje)
+
+Native Torznab now shares provider preferences, sessions, normalized dedupe and results with Nova, including CLI installation and API search.install; TUI provider labels show kind (the dashboard already does). Private indexers/key files enforce owned regular 0600 files and O_NOFOLLOW, with refusal rather than repair. Queries have 30 s / 4 MiB bounds, 16 configured indexers and bounded XML/results; owned native workers are killed/reaped by cancellation. Credentials stay out of argv, public frames, config output and diagnostics, including rejected-install URLs/messages and echoed/encoded credentials in XML. Redacted download references are redeemed only inside the worker at the configured origin; selected-interface queries and metainfo downloads use existing bound DNS/TCP with ordinary TLS verification, exact interface guards and an observed runtime close before success. Bound localhost resolves directly to loopback. Capability torznab, CLI patch 1.2.26, command flags, the operation catalogue, exact capability arrays/examples and new typed torznab.ndjson are reconciled. Existing wire field meanings are unchanged; no compatibility mode or migration shim was added.
+
+All four criteria pass via `python3 target/test-logs/fbt-p7-01-cje/run-daemon.py {foreground,systemd}-qualified target/debug/fbittorrent torznab_results torznab_http_key_refused torznab_redirect_refused torznab_key_not_logged torznab_boundaries torznab_tui_kind torznab_localhost`: 7/7 each, JSONL under `target/test-logs/fbt-p7-01-cje/{foreground,systemd}-qualified/daemon/`. Results dedupe a real Nova response and Torznab RSS by hash; remote keyed HTTP and unsafe/symlinked files refuse before network; a cross-origin redirect reaches no target and yields upstream/torznab; a held actual worker's argv, real secret-bearing XML, metainfo redemption and a deliberately rejected inline-credential install remain secret-free. Same-origin redirects, 4 MiB HTTP refusal, cancellation within two seconds, missing-interface no-fallback and keyed localhost are controls. Real private tmux modal captures are `torznab_tui_kind.pane.txt` in those roots; q leaves the owner alive. Native-only query/grab succeeds with Python shimmed to fail. Eight focused Torznab unit/typed-fixture tests passed (`native-unit.*`); three reviewed provider goldens passed (`provider-goldens.*`). Final `cargo test --locked`: **540 passed, 0 failed, 3 ignored**, 15.37 s runtime (`bound-full.*`); latest debug build (`bound-final-debug.*`), check (`bound-check-final.*`) and size gate pass. Earlier failed traces retain the fixture-only credential echo and the corrected catalogue-table mismatch; the qualified traces contain no fixture credential. One terminal setup attempt used Tab (which moves screens); Escape correctly leaves the query before P, retaining the original modal/kind assertions. No criteria remain unmet; no release/all.sh between track beads, per owner policy. Follow-up: the previously pending P3-07 RSS/Shows client wiring is now dependency-ready on this branch.
+
+### Integration of qualified P7-01 (2026-10-19)
+
+Merged 12fd97c onto dcc7db5. Retained the integrated peers/download-limit caps,
+watch and P7-06 documentation, earlier checkpoint history and D's harness
+registration. Torznab's implemented API capability/search.install extension is
+patch 1.2.29, following the CLI/provider checkpoint at 1.2.28. All 25 exact caps
+and the unique ordered patch history agree across code, hello/error fixtures,
+docs and Python assertions; the README link names the integrated patch.
+
+Evidence: target/test-logs/integration/batch15-track-b/checks.jsonl. Locked
+check --tests, Python compilation, daemon case registration and size lint pass.
+Focused tests: Torznab/typed fixture 8, agent 6, API fixtures 30, provider goldens 3;
+47 passed, no failures. Inspected all seven owner-retained qualified cases in
+both foreground and systemd modes: 14 passed, indexed by owner-evidence.jsonl.
+Those are owner-run native results, not new integrator reruns. No full suite,
+release build or all.sh was run. P7-01's previously pending qualification is now
+supplied by the owner's retained evidence; no bead state was changed.

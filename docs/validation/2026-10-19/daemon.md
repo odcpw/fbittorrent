@@ -574,6 +574,21 @@ Evidence: `target/test-logs/fbt-p3-03-oyg/`, mirrored in
 between track beads. Follow-up: legacy EZTV episodes do not distinguish a missing
 source seed/size from zero; API omits nonpositive legacy values conservatively.
 
+## P5-01 checkpoint — seed/peer engine and API (fbt-p5-01-c1a)
+
+Connected seed flags ignore padding bits, expose actual encryption/direction,
+and count seeds without allocating detail tables. Added typed `torrents.peers`,
+addr-keyed detail snapshots/deltas with one-second counter baselines, bounded
+caches and release after unsubscribe; CLI show and contract 1.2.12 bookkeeping.
+`FBT_BEAD=fbt-p5-01-c1a python3 /tmp/fbt-track-a-run.py fork peer_stats_seed_flag`
+passes with a real local seed and incomplete leecher, including six padding bits.
+`build` passes. `api` was 90 pass/1 failure (stale documented caps); the example
+was corrected and `checkpoint/source/documented_fixture_lines.jsonl` verifies
+all examples against exact fixture lines. Logs under
+`target/test-logs/fbt-p5-01-c1a/`. Intermediate compiling checkpoint: daemon
+swarm cases, final fork suite and full app suite remain pending while the
+owner-priority M1a dashboard-presence fix is taken next. No P5-01 closure claimed.
+
 ## M1a priority — visible dashboard presence (fbt-m1a-kug)
 
 The shared bar/dashboard socket now declares negotiated
@@ -604,3 +619,232 @@ logs **13/13**, including visible-connect, hide and old-server declarations
 Evidence: `target/test-logs/fbt-m1a-kug/`, mirrored under
 `/tmp/fbt-track-a-evidence/fbt-m1a-kug/`. No live shell or owner state was used;
 no all.sh between track commits. All requested criteria met; no follow-up.
+
+P5-01 acceptance after the priority repair: `FBT_BEAD=fbt-p5-01-c1a python3
+/tmp/fbt-track-a-run.py cli_cases peers_local_swarm peer_rates_move contract_hello
+contract_errors` passes **4/4 foreground and 4/4 systemd** (`foreground/`,
+`systemd/`). The observer reports exactly two connected peers, seed flags
+false/true and seeds=1; CLI show agrees; a paused torrent omits seeds. Real peer
+counters and positive rates move in RPC and one-second addr-keyed deltas (one
+observed sample 6,998 B/s foreground, 31,634 B/s systemd). `peers.ndjson` now
+contains both seed and leecher; a minimal neighbour change keys the Quickshell
+store by addr and handles the peer read result, with no Peers UI renderer added.
+`qs store` passes **26/26** shared-corpus/store cases (`qs-store/`); `full` once
+passes **384/0/3 ignored** (`full-final/`), including typed fixture round trips.
+The required full fork command (`fork` without a filter) exits **0**, with
+**139 passed/0 failed/3 ignored** across the two crates (`fork-full/`). Its
+unchanged generic wrapper scan is retained **failed** because eight deliberate
+existing panic-injection diagnostics from spawn_utils/{owner_tests,
+owned_frame_tests}.rs match the blanket worker-panic expression; the focused
+peer_stats_seed_flag test passes without a panic. No scan was weakened or
+excluded. Follow-up for the orchestrator: classify deliberate fork fault
+injection diagnostics without suppressing unexpected worker panics. All three
+P5-01 acceptance criteria are met; a globally green wrapper scan is not claimed.
+Evidence is under `target/test-logs/fbt-p5-01-c1a/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p5-01-c1a/`. UI rendering remains P5-02/C/D.
+
+## P7-06 — per-torrent download cap (fbt-p7-06-6mh)
+
+Durable optional download_limit is installed before restore admission and
+changed through the same live shared limiter without rebuilding. Added typed
+idempotent API operation, configured/effective torrent fields, `limit <sel>
+--down N[K|M]|none`, 256-hash client batches, explicit null clear and identity
+validation even for an omitted/no-op bps. Contract 1.2.14 bookkeeping and exact
+hello/error caps are complete. Today's records without the optional field keep
+loading. Mechanical Record literal initializers include the new None field;
+no new legacy implementation. Dashboard input is deferred to C/D.
+
+`FBT_BEAD=fbt-p7-06-6mh python3 /tmp/fbt-track-a-run.py check`, `fork
+ effective_rate_is_min`, final `build`, and single `full` pass (**386/0/3
+ignored**). `cli_cases download_cap_holds contract_hello contract_errors`
+passes 3/3 foreground/systemd (`foreground-final/`, `systemd-final/`); `agent
+ limit_verb` passes in both modes (`agent-{foreground,systemd}-final/`). Every
+one-second dl_bps sample satisfies the unchanged ±25% bound, after exactly 5 s
+warmup over the 20 s window; independent byte rates are **65,527.09/65,531.31
+B/s**. Live cap change remains downloading, no pushed checking state, same
+engine epoch. CLI 0/2 exits, exact JSON, all/none, restart persistence and
+omission/identity checks pass. Initial failed runs are retained: the new
+operation needed null permission in the server argument filter, and the first
+fixture measured payload requested before its cap existed. Final setup pauses,
+installs the baseline cap, resumes, then keeps the same warmup/window/bounds;
+the later change is still during active transfer. Minimal neighbours are wire
+catalogue/validation/framing, CLI dispatch and typed shapes, and Record literal
+initializers. Evidence: `target/test-logs/fbt-p7-06-6mh/`, mirrored in
+`/tmp/fbt-track-a-evidence/fbt-p7-06-6mh/`. Both acceptance criteria met. One
+Do-step ruling remains pending: the literal min of both configured primary and
+alt conflicts with accepted P5-04's test requiring unlimited alt to override a
+finite primary. Current code preserves that selection and reports min of the
+per-torrent cap and the selected global/turtle bucket; no frozen P5-04 test was
+changed. Owner clarification requested; independent suite-budget work continues.
+
+
+### Owner rate-limit ruling (2026-10-19)
+
+The active global rate is the alternative/turtle value while turtle is on and
+otherwise the primary value. Effective per-torrent download/upload rate is the
+minimum of the configured per-torrent rate and that active global rate; an
+unlimited/unset value drops out. The default per-torrent upload cap remains
+32 KiB/s. P7-06 already implements this rule; no rate code change was needed.
+This supersedes the earlier pending primary-versus-alt question. The isolated
+5 s warmup/20 s byte-window and turtle-minimum tests in the P7-06 evidence above
+remain the observed proof. Suite wall-budget work is deferred until integration
+brings main's complete harness into this branch; the interrupted pre-integration
+baseline is retained as interrupted evidence, not a suite result.
+
+
+### P7-04 — tracker add/remove, daemon/API/CLI half (fbt-p7-04-aq7)
+
+Landed an ordered, watch-driven mutable tracker set in the fork, bounded live
+monitor admission/removal (including an empty set), handle-preserving edits,
+and durable `Record.trackers` additions plus removal tombstones merged with
+metainfo on restore. The ledger is saved before publishing an edit; a forced
+atomic-save failure proves the old live set and saved record remain intact.
+Private torrents keep the first-metainfo-tracker policy and exclude public
+session trackers. Tracker counts reflect edits for live and ledger-only reads.
+Added strict/idempotent `torrents.add_tracker` and `torrents.remove_tracker`
+(`http(s)`/`udp`, host required, UDP port required, 4096-byte URL bound), raw CLI
+coverage, and query-redacted diagnostics. Contract 1.2.15 adds `tracker_edit`,
+its changes[] entry, TABLE rows, documentation and tracker-edit.ndjson. Per the
+owner's exact-cap ruling, existing hello/error capability arrays and the hello
+doc example were updated to the live list; no comparison mask was introduced.
+Neighbour edits are the one-line server error-key recovery for `url` plus its
+regression, live/saved detail counts, mechanical Record initializers (including
+the existing importer), and fork persistence readers of the changed set type.
+No compatibility mode or adapter was added.
+
+Evidence root: `target/test-logs/fbt-p7-04-aq7/` (mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p7-04-aq7/`). Commands below were executed through
+`/tmp/fbt-track-a-run.py` with `FBT_BEAD=fbt-p7-04-aq7`, distinct FBT_RUN_NAME,
+CARGO_BUILD_JOBS=4, the rch shim, and validated private HOME/TMPDIR/XDG/download
+paths before any product process. All end-to-end steps retained E.1 JSONL.
+
+- `cargo check --locked --tests`: exit 0; `check/development_check/check.jsonl`.
+- `cargo test --locked -p librqbit-tracker-comms tracker_set_mutation -- --nocapture`:
+  1 passed; `fork-set/development_trackerset/trackerset.jsonl` and stdout log.
+- `cargo test --locked -p librqbit-core -p librqbit --features librqbit/rust-tls --lib private_ -- --nocapture`:
+  4 fork + 2 core regressions passed; `fork-private/development_fork/fork.jsonl`.
+- `cargo build --locked`: exit 0; `build-final/development_build/build.jsonl`.
+- `daemon.py target/debug/fbittorrent --no-systemd --case tracker_add_remove --case contract_hello --case contract_errors`
+  and the identical `--systemd` selection: 3/3 cases each, exit 0;
+  `{foreground-final,systemd-final}/processes/daemon/*.jsonl`. Both modes:
+  A stayed at 2 announces while newly added B advanced 2 -> 4 over two actual
+  further cycles; the same removal survived a real daemon restart. Empty-set
+  re-add, paused edits, idempotence, unknown hash, invalid URLs, raw CLI and
+  failed-save rollback also passed. Actual received HTTP request inventories:
+  `processes/workers/tracker_add_remove/daemon/tracker_add_remove.tracker-requests.json`.
+- `cargo test --locked -- --nocapture` (one full invocation): **389 passed,
+  0 failed, 3 existing opt-in tests ignored**;
+  `full-final/development_full/full.jsonl`, stdout and daemon stderr logs.
+  Includes the new typed URL, exact error-key and durable-record/count tests.
+- `python3 -m py_compile .../daemon.py .../daemon_trackers.py`, `git diff --check`:
+  exit 0. Every changed/new src file remains <=900 lines. No unexpected panic,
+  obligation leak or drain failure in the final runs. No all.sh between track
+  beads, per the owner's track policy.
+
+The initial foreground/systemd evidence is retained: only the invalid-URL
+`details.key` assertions failed (server returned `args`); the decoder was fixed
+and assertions kept unchanged before the final green runs. UI +/x and confirmation
+criteria are deferred to tracks C/D. P6-01 is absent on this branch, so the
+`torrent:<h>.trackers` not_contacted/removed delta hook remains an explicit
+integration follow-up, not claimed proven here. Both named announce acceptance
+criteria pass. Main f086ed9 arrived after these edits were underway; this tested
+commit must be included by the integrator before the branch can fast-forward
+and the complete-harness wall-budget work can run.
+### Integration of P5-01 and P7-06 (2026-10-19)
+
+Merged track A through e31703d onto 50188d2. The already-applied M1a presence
+implementation, fixture, connection handler and QML presence regression are
+byte-identical to the integration parent. Existing search/watch/staging/origin
+paths remain alongside peer topics and download caps; the daemon has one log
+ring. Global/turtle selection keeps the previously integrated policy.
+
+Branch-local contract 1.2.12 (P5-01) and 1.2.14 (P7-06) above refer to the
+owner's qualification snapshots. Integration assigns 1.2.26 and 1.2.27;
+presence remains 1.2.23. The 27 patch entries, 24 capabilities, hello/error
+fixtures, documented examples and version assertions agree.
+
+Evidence: target/test-logs/integration/batch12-track-a/checks.jsonl. Cargo check
+--locked --tests, regression Python compilation, daemon case listing and size
+lint pass. Focused Rust tests: 73 passed, zero failed; one existing live-capture
+harness entry point ignored. Isolated QML: 17 client and 35 store cases pass
+under batch12-track-a/qs/. No full suite, release build or native case re-run.
+
+
+### P7-04 / P6-01 semantic merge of main c1a13e0
+
+Reconciled all 15 conflicts, retaining main's features and P7-04 edits. The live
+ordered tracker set now owns the same observation store used by the monitors;
+remove retires its row immediately, cancelled/stale requests cannot recreate it
+or overwrite a re-added row, and saved reads merge edits without admitting a
+handle. Reannounce keeps its original sixty-second throttle owner across edits
+and handle replacement. Mutation edits respect main's operation/move exclusion.
+Main's complete contract history was retained; P7-04 uses the next unique slot
+1.2.29 above main's 1.2.28, as required by the unchanged history-uniqueness test;
+the integrator can renumber this additive entry. Exact 25-cap hello/error
+fixtures and docs agree. No existing assertion was weakened.
+
+Evidence under `target/test-logs/fbt-p7-04-aq7/` (private-XDG wrapper as above):
+`cargo check --locked --tests` green (`merge-check-final/`);
+`cargo test --locked --bin fbittorrent api:: -- --nocapture` 104 passed, one
+existing opt-in ignored (`merge-api/`);
+`cargo test --locked -p librqbit-tracker-comms -- --nocapture` ten passed,
+including stale-response/removal and throttle ownership (`merge-tracker-units/`);
+`daemon.py --case tracker_saved_views --case tracker_status --case reannounce
+--case reannounce_rate_limited --case reannounce_not_live_invalid_state --case
+tracker_url_redacted --case tracker_add_remove` seven passed with each of
+`--no-systemd` and `--systemd` (`merge-{foreground,systemd}/processes/daemon/*.jsonl`);
+`cargo test --locked -- --nocapture` 547 passed, zero failed, three existing
+opt-in tests ignored (`merge-full/`). Python compilation and diff checks passed.
+Initial merge check exposed one missing origin field in a test initializer;
+fixed before the final check. No unexpected panic/leak/drain failure in final
+runs. The integrated default foreground selection is now 203 cases, versus the
+older reported 186; wall-budget work will measure every currently selected case.
+The previously recorded tracker-topic/UI follow-ups remain; this merge proves
+current-set RPC observations and announce control.
+
+### P5-01 / P0 truth gate — connected seeds versus unknown
+
+Updated `native/no_fake_seed_counts` to require the exact current capability
+note: connected seed counts are measured for live torrents, and optional
+`seeds` distinguishes unknown. Retained every pane assertion and added real
+CLI observations: a paused torrent omits `seeds`; the live trackerless fixture
+reports zero alongside an empty actual peer list. The terminal stream now
+honors `--log-root` (the initial run passed all assertions but failed at the old
+hardcoded artifact path). Private-XDG commands: `native.py
+target/debug/fbittorrent --case no_fake_seed_counts --log-root <root>` passed
+43/43 steps, with its terminal artifact retained, under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-native-final/processes/native/`;
+`daemon.py target/debug/fbittorrent --no-systemd --case peers_local_swarm
+--log-root <root>` passed 112/112 steps under
+`target/test-logs/fbt-p5-01-c1a/gate-fix-swarm-foreground/processes/daemon/`
+(one actual seed plus an incomplete leecher; CLI count one; paused count absent).
+Python compilation and `git diff --check` passed. Test-only delta; no Rust product
+or contract changes, full Cargo suite or umbrella rerun. The merge's unchanged
+Rust source already passed 547 tests in `fbt-p7-04-aq7/merge-full/`.
+
+### P5-07 gate regression — release each summary probe's own subscription
+
+Gate8 child failures 277–310 were `busy` replies after the test helper consumed
+an old queued summary frame and unsubscribed its ID instead of the newly
+allocated subscription. The helper now matches the returned subscription ID,
+releases it in `finally`, removes its own queued trailing frames and preserves
+other subscriptions. The tmpfs cases additionally assert zero summary
+subscriptions after polling. New real-API case
+`disk_summary_subscription_cleanup` takes 24 samples with another subscription's
+real state frame queued: the prior helper fails all 24 preservation checks and
+leaves a live subscription (`gate-fix-old-summary/`, intentional negative
+control); the fixed helper passes 115/115 steps in each launch mode.
+Private-XDG `daemon.py target/debug/fbittorrent --case
+disk_summary_subscription_cleanup --case disk_full_reason --case
+disk_full_recovers --case disk_low_banner --case add_warns_disk --log-root
+<root>` is green for both modes (foreground helper run separately): JSONL under
+`target/test-logs/fbt-p5-07-gei/gate-fix-summary/processes/daemon/`,
+`gate-fix-disk-foreground/processes/` and `gate-fix-disk-systemd/processes/`.
+All four disk cases actually mounted the owned 64 MiB tmpfs, with no skips;
+namespace child JSONL in each run's `processes/workers/<case>/disk-workers/`
+retains low-space, ENOSPC, explicit retry and automatic recovery observations.
+The disk children intentionally use foreground daemons inside their private
+mount namespace even in the outer `--systemd` matrix; the subscription-only
+case uses a real transient unit there. No product/contract thresholds or wall
+budget changed. Python compilation and diff checks pass; test-only delta,
+so no new Cargo or umbrella run. No acceptance checks removed or relaxed.

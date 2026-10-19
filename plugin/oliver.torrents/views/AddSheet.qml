@@ -79,8 +79,8 @@ FocusScope {
       Text {
         visible:root.model.phase!=="input" && !root.model.duplicate
         Layout.fillWidth:true;textFormat:Text.PlainText;wrapMode:Text.Wrap
-        text:root.model.space.pending ? "Checking folder…" : (root.model.space.message ? root.model.space.message+" · " : "")+(root.model.space.free_bytes!==undefined ? Model.size(root.model.space.free_bytes,false)+" free" : "—")
-        color:root.model.space.writable===false ? Commons.Color.urgent : Model.dim(Commons.Color.foreground,Commons.Color.popups.background)
+        text:root.model.insufficientSpace ? "Needs "+Model.size(root.model.neededBytes,false)+" · "+Model.size(root.model.space.free_bytes,false)+" free" : root.model.space.pending ? "Checking folder…" : (root.model.space.message ? root.model.space.message+" · " : "")+(root.model.space.free_bytes!==undefined ? Model.size(root.model.space.free_bytes,false)+" free" : "—")
+        color:root.model.insufficientSpace || root.model.space.writable===false ? Commons.Color.urgent : Model.dim(Commons.Color.foreground,Commons.Color.popups.background)
         font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall
       }
       Text {visible:root.model.error!=="";Layout.fillWidth:true;textFormat:Text.PlainText;text:root.model.error;wrapMode:Text.Wrap;color:Commons.Color.urgent;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall}

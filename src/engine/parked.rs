@@ -99,6 +99,7 @@ impl ParkedLedger {
             | EngineOp::Info
             | EngineOp::Files { .. }
             | EngineOp::Trackers { .. }
+            | EngineOp::Peers { .. }
             | EngineOp::Start { .. }
             | EngineOp::Stop { .. }
             | EngineOp::Delete { .. } | EngineOp::ForceStart { .. } | EngineOp::QueueMove { .. } => {}
@@ -184,6 +185,10 @@ impl ParkedLedger {
                 }).collect::<Result<Vec<_>>>()?;
                 rows.sort_by(|a,b|b.added_at.cmp(&a.added_at));
                 return Ok(EngineResult::Torrents(rows));
+            }
+            EngineOp::Peers{hash}=>{
+                anyhow::ensure!(ledger.records.iter().any(|r|&r.hash==hash),"torrent record not found");
+                return Ok(EngineResult::Peers(Vec::new()));
             }
             EngineOp::Files { hash } => {
                 let record = ledger

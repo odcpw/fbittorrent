@@ -59,6 +59,8 @@ pub enum EngineOp {
     Files {
         hash: String,
     },
+    Peers { hash: String },
+    EditTracker { hash: String, url: String, add: bool },
     // Typed engine entry points for the daemon adapter. These do not add routes
     // to the legacy transport or advertise v1 operations before that API lands.
     OpenTarget {
@@ -109,6 +111,7 @@ pub enum EngineOp {
         ids: Vec<usize>,
         priority: u8,
     },
+    SetDownloadLimit { hashes: HashSelection, bps: Option<u64> },
     SetUploadLimit {
         hashes: HashSelection,
         limit: i64,
@@ -135,6 +138,7 @@ impl EngineOp {
             Self::FilePriority { priority, .. } if !matches!(priority, 0 | 1) => bail!(
                 "the native engine supports skip (0) and normal (1) file priorities; high and maximum are unavailable"
             ),
+            Self::SetDownloadLimit{bps:Some(bps),..} if !(16384..=u32::MAX as u64).contains(bps)=>bail!("download cap must be between 16 KiB/s and the engine maximum"),
             Self::SetUploadLimit { limit, .. } if *limit < 0 => {
                 bail!("upload limit must be zero (unlimited) or a positive byte rate")
             }
@@ -165,6 +169,7 @@ impl EngineOp {
             | Self::Stop { hashes }
             | Self::Delete { hashes, .. }
             | Self::SetUploadLimit { hashes, .. }
+            | Self::SetDownloadLimit { hashes, .. }
             | Self::SetShareLimits { hashes, .. }
             | Self::AddTags { hashes, .. }
             | Self::RemoveTags { hashes, .. } => Some(hashes),
@@ -282,6 +287,7 @@ pub enum EngineResult {
     Detail(TorrentDetails),
     Added(Vec<AddedTorrent>),
     Files(Vec<TorrentFile>),
+    Peers(Vec<super::super::peers::Peer>),
     OpenTarget(PathBuf),
     Transfer(TransferInfo),
     Queue(QueueInfo),
@@ -299,7 +305,7 @@ impl EngineResult {
             Self::QueuePosition(_) => bail!("queue movement has no legacy route"),
             Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
             Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
-            Self::Detail(_) => bail!("torrent detail has no legacy route"),
+            Self::Peers(_) | Self::Detail(_) => bail!("torrent detail has no legacy route"),
             Self::Version(version) => Ok(version.clone()),
             Self::Torrents(rows) => Ok(format!(
                 "[{}]",

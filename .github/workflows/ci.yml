@@ -1,18 +1,9 @@
 name: CI
 
 on:
-  push:
-    paths-ignore:
-      - '.beads/**'
-      - 'docs/validation/**'
-      - 'docs/plan-2026-10-18/**'
-  pull_request:
-    paths-ignore:
-      - '.beads/**'
-      - 'docs/validation/**'
-      - 'docs/plan-2026-10-18/**'
-  schedule:
-    - cron: '27 4 * * 1'
+  # Manual only: the private repo's Actions minutes ran out under per-push runs
+  # (2026-10-19); the local gate (all.sh + daemon.py + agent_contract.py) is the
+  # release check. Run with `gh workflow run CI` when hosted CI is wanted.
   workflow_dispatch:
     inputs:
       force_fail:

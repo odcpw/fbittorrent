@@ -122,6 +122,20 @@ ShellRoot {
     check("typed_sort","advance one second","numeric rate order updates and absent progress stays last",store.sort("↓",false).join(","),
       store.sort("↓",false)[0]===hash && store.sort("Progress",true)[1]===hash)
     console.log("FBTQS-PASS typed_sort")
+    store=Store.create()
+    var topic="torrent:"+hash+".peers", seed={addr:"127.0.0.1:1",conn:"tcp_mse",incoming:false,state:"live",downloaded:1,uploaded:0,seed:true}
+    var leecher={addr:"127.0.0.1:2",conn:"tcp",incoming:true,state:"live",downloaded:0,uploaded:1,seed:false}
+    store.apply({id:1,ok:true,result:{peers:[seed,leecher]}},{op:"torrents.peers",args:{hash:hash}})
+    check("peer_details","read peers","two distinct addr identities survive the read",JSON.stringify(store.topics[topic]),Object.keys(store.topics[topic]).length===2)
+    store.apply({id:2,ok:true,result:{sub:1,topics:[topic]}},{op:"subscribe"})
+    store.apply({ev:"snapshot.begin",sub:1,topic:topic,rev:1,count:2,reason:"subscribe"})
+    store.apply({ev:"snapshot.chunk",sub:1,topic:topic,rev:2,items:[seed,leecher]})
+    store.apply({ev:"snapshot.end",sub:1,topic:topic,rev:3})
+    var changes={};changes[seed.addr]={downloaded:16385,dl_bps:16384}
+    store.apply({ev:"delta",sub:1,topic:topic,rev:4,changed:changes})
+    check("peer_details","apply addr-keyed rates","seed rate changes without losing the other peer",JSON.stringify(store.topics[topic]),store.topics[topic][seed.addr].dl_bps===16384 && store.topics[topic][leecher.addr].seed===false)
+    console.log("FBTQS-PASS peer_details")
+
   }
   Component.onCompleted: {
     corpus(); controls(); benchmark()

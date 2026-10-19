@@ -25,7 +25,7 @@ pub fn dispatch(daemon: &Daemon, owner: u64, call: &Call) -> ApiResult<Reply> {
                 .into_iter()
                 .map(|p| Provider {
                     name: p.name,
-                    kind: ProviderKind::Nova,
+                    kind: if p.kind=="torznab" {ProviderKind::Torznab}else{ProviderKind::Nova},
                     enabled: p.enabled,
                     full_name: (!p.full_name.is_empty()).then_some(p.full_name),
                     url: (!p.url.is_empty()).then_some(p.url),
@@ -66,7 +66,7 @@ pub fn dispatch(daemon: &Daemon, owner: u64, call: &Call) -> ApiResult<Reply> {
                 match search::install(std::slice::from_ref(&source), remaining.min(10)) {
                     Ok(()) => report.installed.push(source),
                     Err(e) => report.failed.push(InstallFailure {
-                        source,
+                        source: search::torznab::public_source(&source),
                         message: format!("{e:#}").chars().take(200).collect(),
                     }),
                 }
@@ -180,7 +180,8 @@ fn grab(daemon: &Daemon, args: &SearchGrabArgs) -> ApiResult<Reply> {
         .is_file();
     let http =
         url::Url::parse(&legacy.file_url).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
-    let resolved = if cfg.network_interface.is_some() {
+    let native = search::torznab::resolve(&legacy).map_err(upstream)?;
+    let resolved = if let Some(download)=native { download } else if cfg.network_interface.is_some() {
         if direct || (!known_provider && http) {
             search::ResolvedDownload::Url(legacy.file_url)
         } else {
@@ -246,4 +247,11 @@ fn grab(daemon: &Daemon, args: &SearchGrabArgs) -> ApiResult<Reply> {
     };
     drop(temporary);
     Ok(Reply::SearchGrab(result))
+}
+
+
+#[cfg(test)]
+#[test]
+fn torznab_contract_fixture() {
+    crate::api::fixtures::check_group("torznab",include_str!("../../../contracts/ipc/v1/torznab.ndjson")).unwrap();
 }
