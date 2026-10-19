@@ -75,7 +75,9 @@ def run(args):
         source=box.root/'instrumented-plugin';shutil.copytree(args.plugin_source,source)
         path=source/'Dashboard.qml';text=path.read_text().replace('  id:root\n','  id:root\n  readonly property var perfWindow:window\n  property var perfPublish:({calls:0,ms:0})\n',1)
         method='publishNow' if '  function publishNow() {' in text else 'publish'
-        text=text.replace('  function '+method+'() {','  function '+method+'() {var at=Date.now();try{return publishMeasured()}finally{perfPublish.calls++;perfPublish.ms+=Date.now()-at}}\n  function publishMeasured() {',1);path.write_text(text)
+        # Deferred publication can run during destruction. Preserve the production
+        # disposal guard before entering the extra measurement helper.
+        text=text.replace('  function '+method+'() {','  function '+method+'() {if(disposing)return;var at=Date.now();try{return publishMeasured()}finally{perfPublish.calls++;perfPublish.ms+=Date.now()-at}}\n  function publishMeasured() {',1);path.write_text(text)
         path=source/'Service.qml';text=path.read_text().replace('  id: root\n','  id: root\n  property int perfSyncRows:0\n  property int perfFrames:0\n',1)
         text=text.replace('  function syncRows() {','  function syncRows() {\n    perfSyncRows++')
         text=text.replace('  function applyFrame(frame, request) {','  function applyFrame(frame, request) {\n    perfFrames++');path.write_text(text)
