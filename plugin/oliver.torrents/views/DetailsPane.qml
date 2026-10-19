@@ -20,7 +20,7 @@ ColumnLayout {
   Flow {
     Layout.fillWidth:true;height:childrenRect.height
     spacing:Commons.Style.spacing.xs
-    Repeater {model:root.service.detailRevision>=0 && root.flow ? root.flow.tabs() : [];Ui.Button {required property string modelData;text:modelData.charAt(0).toUpperCase()+modelData.slice(1);hasCursor:root.tab===modelData;onClicked:root.flow.selectTab(modelData)}}
+    Repeater {model:root.service.detailRevision>=0 && root.flow ? root.flow.tabs() : [];Ui.Button {required property string modelData;objectName:"details-tab-"+modelData;text:modelData.charAt(0).toUpperCase()+modelData.slice(1);hasCursor:root.tab===modelData;onClicked:root.flow.selectTab(modelData)}}
   }
   Text {visible:!root.torrent;Layout.fillWidth:true;text:"Select a torrent and press Enter.";wrapMode:Text.Wrap;textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
   Loader {id:overview;Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="overview";visible:active;sourceComponent:DetailsOverview {service:root.service;torrent:root.torrent;card:root.service.detailRevision>=0 ? root.flow.card : null;onRecheckRequested:function(hash){root.recheckRequested(hash)}}}

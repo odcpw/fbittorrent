@@ -27,8 +27,7 @@ function meta(t,parked) {
   if(!parked && t.progress!==undefined && t.progress!==null)parts.push(Model.percent(t.progress,t.state==="done" || t.state==="seeding"))
   if(t.dl_bps!==undefined)parts.push("↓ "+Model.rate(t.dl_bps))
   if(t.eta_s!==undefined)parts.push(Model.eta(t.eta_s,false))
-  if(t.peers!==undefined)parts.push(t.peers+" peers")
-  if(t.seeds!==undefined)parts.push(t.seeds+" seeds")
+  if(t.peers!==undefined || t.seeds!==undefined)parts.push(Model.peerCount(t,false))
   if(t.playable && t.playable.ready){if(t.playable.buffered_s!==undefined)parts.push(Model.eta(t.playable.buffered_s,false)+" buffered");if(t.playable.stall_free===false){parts.push("may stall");if(t.playable.finishes_in_s!==undefined)parts.push("finishes in "+Model.eta(t.playable.finishes_in_s,false))}}
   return parts.join(" · ")
 }

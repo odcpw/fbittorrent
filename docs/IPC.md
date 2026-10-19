@@ -1049,6 +1049,11 @@ inbox identity; existing hello/error arrays exactly include the shows cap.
 
 ### P5-01: connected seeds and peers (contract 1.2.26)
 
+`Summary.top[]` also carries optional `peers` and `seeds` from the same current
+connected-peer observations as the torrent list. This bounded glance projection
+lets the bar show named torrent counts while detail sampling is off. Missing
+counts stay absent; they are never swarm totals or substituted zeroes.
+
 Capability `peers` adds `torrents.peers {hash}` and `torrent:<hash>.peers`.
 The latter is keyed by `addr`, defaults to 1000 ms and releases sampling when
 its final subscriber disconnects or unsubscribes. `Peer` contains `addr`,

@@ -26,6 +26,7 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;label:"Downloaded";value:Model.size(root.torrent.completed_bytes,false)}
     Components.DetailField {Layout.fillWidth:true;label:"Uploaded";value:Model.size(root.torrent.uploaded_bytes,false)}
     Components.DetailField {Layout.fillWidth:true;label:"Ratio · ETA";value:(root.torrent.ratio===undefined ? "—" : Number(root.torrent.ratio).toFixed(2))+" · "+Model.eta(root.torrent.eta_s,false)}
+    Components.DetailField {Layout.fillWidth:true;label:"Seeds / Peers";value:Model.peerCount(root.torrent,false)}
     Components.DetailField {Layout.fillWidth:true;label:"Save";value:root.torrent.save_path || "—"}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.content_path;label:"Content";value:root.torrent.content_path || ""}
     RowLayout {

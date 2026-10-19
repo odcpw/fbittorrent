@@ -59,7 +59,7 @@ ShellRoot {
     s.backendState="running";s.store.summary={}
     console.log("FBTQS-PASS disk")
     var row={state:"downloading",progress:0.42,dl_bps:4200000,eta_s:720,peers:41,playable:{ready:true,buffered_s:240,stall_free:false,finishes_in_s:1080}}
-    var meta=State.meta(row,false);check("rows","truthful ordered fields and playable warning",meta,meta.indexOf("Playable · may stall · 42% · ↓ 4.2 MB/s · 12 min · 41 peers")===0 && meta.indexOf("may stall · finishes in 18 min")>=0)
+    var meta=State.meta(row,false);check("rows","truthful ordered fields and playable warning",meta,meta.indexOf("Playable · may stall · 42% · ↓ 4.2 MB/s · 12 min · 41 peers connected · seeds unknown")===0 && meta.indexOf("may stall · finishes in 18 min")>=0)
     check("rows","parked omits progress",State.meta(row,true),State.meta(row,true).indexOf("42%")<0)
     check("rows","unknown peers and ETA omitted",State.meta({state:"metadata"},false),State.meta({state:"metadata"},false)==="Metadata")
     check("rows","error message and action verb",State.meta({state:"error",error:"Missing files"},false),State.meta({state:"error",error:"Missing files"},false)==="Missing files" && State.verb({op:"torrents.stop"})==="pausing…")

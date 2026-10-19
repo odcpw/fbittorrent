@@ -159,25 +159,7 @@ impl Sample {
     }
     fn summary(&self) -> Value {
         let counts = summary_counts(&self.rows);
-        let top: Vec<_> = self
-            .rows
-            .iter()
-            .filter(|row| !row.staged)
-            .take(5)
-            .map(|r| {
-                let mut v = json!({"hash":r.hash,"name":r.name,"state":r.state});
-                for (key, value) in [
-                    ("progress", json!(r.progress)),
-                    ("dl_bps", json!(r.dl_bps)),
-                    ("eta_s", json!(r.eta_s)),
-                ] {
-                    if !value.is_null() {
-                        v[key] = value;
-                    }
-                }
-                v
-            })
-            .collect();
+        let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();

@@ -93,6 +93,19 @@ ShellRoot {
       var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null
       return JSON.stringify({search:!!view,active:view ? view.activeFocus : null,visible:view ? view.visible : null,query:query ? {active:query.activeFocus,focus:query.focus,text:query.text,visible:query.visible} : null,state:service.dashboardState})
     }
+    function clickDetailTab(tab:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var button=root.find(dashboard.item.torrents,"details-tab-"+tab);if(!button)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
+    function peerCountCell():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "refused"
+      var cell=root.find(dashboard.item ? dashboard.item.torrents : null,"connected-peer-count");return cell ? cell.renderedText : ""
+    }
+    function peerRows():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "[]"
+      var list=root.find(dashboard.item ? dashboard.item.torrents : null,"peer-list");return JSON.stringify(list ? list.renderedRows() : [])
+    }
     function fileEditing():bool{return dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? dashboard.item.torrents.pane.editing : false}
     function logEntries():string{return JSON.stringify(service.store.logEntries(service.detailFlow ? service.detailFlow.hash : ""))}
     function confirmed(hash:string):string{return JSON.stringify(service.store.torrents[hash] || null)}
