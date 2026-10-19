@@ -52,6 +52,8 @@ def run(binary):
                     q.wait(lambda:q.ipc('ready')=='true')
                     q.shell('summon',json.dumps(dict(view='torrents',hash=torrent.info_hash)))
                     q.wait(lambda:detail(q).get('hash')==torrent.info_hash)
+                    q.wait(lambda:'no DHT, no PeX' in detail(q).get('networking',''))
+                    setup.check(True,'real dashboard Overview identifies private networking',detail(q)['networking'])
                     with Case('qs_pieces_live','pieces_bar') as case:
                         # Click the actual Pieces control directly; unrelated
                         # diagnostic tabs are exercised by their own cases.
@@ -86,6 +88,8 @@ def run(binary):
                         wait(lambda:'fixture.mkv' in capture())
                         tmux('send-keys','-t',session,'Enter')
                         wait(lambda:'[Overview]' in capture())
+                        wait(lambda:'no DHT, no PeX' in capture())
+                        case.check(True,'real TUI Overview identifies private networking',capture())
                         tmux('send-keys','-t',session,'-l',']]]')
                         wait(lambda:'257 / 1000 verified pieces' in capture())
                         text=capture();case.path.with_suffix('.txt').write_text(text)

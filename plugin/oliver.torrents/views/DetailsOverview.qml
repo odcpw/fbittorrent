@@ -13,6 +13,7 @@ ScrollView {
   required property var torrent
   property var card:null
   readonly property bool posterLoaded:poster.loaded
+  readonly property string networkingText:DetailText.networking(root.torrent)
   signal recheckRequested(string hash)
   clip:true
   contentWidth:availableWidth
@@ -44,7 +45,7 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;value:DetailText.policy(root.torrent)}
     Components.DetailField {Layout.fillWidth:true;label:"Queue position";visible:root.torrent.queue_pos!==undefined;value:String(root.torrent.queue_pos)}
     Components.DetailField {Layout.fillWidth:true;label:"Files · Pieces";value:Model.count(root.torrent.file_count)+" · "+Model.count(root.torrent.piece_count)+" × "+Model.size(root.torrent.piece_size,false)}
-    Components.DetailField {Layout.fillWidth:true;visible:root.torrent.private!==undefined;value:root.torrent.private ? "Private torrent" : "Public torrent"}
+    Components.DetailField {Layout.fillWidth:true;visible:root.networkingText!=="";value:root.networkingText}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.comment;label:"Comment";value:root.torrent.comment || ""}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.created_by;label:"Created by";value:root.torrent.created_by || ""}
     RowLayout {

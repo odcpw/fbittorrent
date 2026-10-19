@@ -12,6 +12,7 @@ pub(super) struct DetailsModal {
     pub hash: String,
     pub name: String,
     pub tab: DetailsTab,
+    pub loading: bool,
     pub pieces:Option<Arc<PiecesSession>>,
     pub canvas:RefCell<PiecesCanvas>,
 }
@@ -34,10 +35,36 @@ impl TuiApp {
             hash: torrent.hash.clone(),
             name: torrent.name.clone(),
             tab: DetailsTab::Overview,
+            loading: false,
             pieces:None,
             canvas:RefCell::new(PiecesCanvas::default()),
         });
-        close
+        let overview=self.refresh_details();
+        Cmd::batch(vec![close,overview])
+    }
+    /// Fetch immutable metainfo once, and again when metadata becomes known.
+    /// One outstanding read belongs to the visible detail on this connection.
+    pub(super) fn refresh_details(&mut self)->Cmd<Msg> {
+        let Some(connection)=self.presence.clone().filter(|c|c.alive()) else {return Cmd::none();};
+        let Some(details)=self.details.as_mut().filter(|d|!d.loading) else {return Cmd::none();};
+        let hash=crate::api::Hash::new(details.hash.clone()).unwrap();
+        let size=self.store.torrents.get(hash.as_str()).and_then(|row|row.size);
+        if self.store.details.get(&hash).is_some_and(|row|row.torrent.size==size) {return Cmd::none();}
+        details.loading=true;
+        Cmd::task(move|| {
+            let result=connection.request("torrents.get",serde_json::json!({"hash":hash}))
+                .and_then(|value|Ok(serde_json::from_value(value)?)).map_err(|e|e.to_string());
+            Msg::ApiDetail {connection:connection.id,hash,result}
+        })
+    }
+    pub(super) fn detail_loaded(&mut self,connection:u64,hash:crate::api::Hash,result:Result<crate::api::GetResult,String>)->Cmd<Msg> {
+        if self.presence.as_ref().is_none_or(|c|c.id!=connection || !c.alive()) {return Cmd::none();}
+        let Some(details)=self.details.as_mut().filter(|d|d.hash==hash.as_str()) else {return Cmd::none();};
+        details.loading=false;
+        match result.and_then(|result|self.store.reply(&crate::api::Call::TorrentsGet {args:crate::api::HashArgs {hash}},crate::api::Reply::TorrentsGet(result)).map_err(|e|e.to_string())) {
+            Ok(())=>{}, Err(error)=>self.set_status(format!("Torrent details: {error}"),true),
+        }
+        Cmd::none()
     }
     pub(super) fn resume_pieces(&mut self)->Cmd<Msg> {
         let Some(details)=self.details.as_mut().filter(|d|d.tab==DetailsTab::Pieces) else {return Cmd::none();};
@@ -69,6 +96,7 @@ impl TuiApp {
         let close=self.details.take().and_then(|mut d|d.pieces.take()).map(|p|p.close()).unwrap_or_else(Cmd::none);
         self.files=None;
         self.store.pieces.clear();
+        self.store.details.clear();
         close
     }
     pub(super) fn view_details(&self, frame: &mut Frame) {
@@ -172,6 +200,9 @@ impl TuiApp {
                     "origin",
                     row.origin.clone().unwrap_or_else(|| "unknown".into()),
                 ));
+            }
+            if let Some(detail)=self.store.details.values().find(|row|row.torrent.hash.as_str()==details.hash && row.torrent.size.is_some()) {
+                lines.push(kv("network",if detail.private {"Private torrent (no DHT, no PeX)"}else{"Public torrent"}.into()));
             }
             if let Some(error) = &t.error_message {
                 lines.push(Line::styled(error.clone(), th.err().bold()));

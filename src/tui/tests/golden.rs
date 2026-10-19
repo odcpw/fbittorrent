@@ -173,3 +173,21 @@ fn watch_ready_and_may_stall_goldens() {
         println!("{path}: truthful watch detail at 80x24; synthetic rendering only");
     }
 }
+
+#[test]
+fn private_overview_explains_networking_only_for_known_private_metainfo() {
+    for (private,known) in [(true,true),(false,true),(true,false)] {
+        let mut app=fixture::app("details");
+        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"default_cap","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
+        if known {value["size"]=serde_json::json!(1024);}
+        let detail:crate::api::TorrentDetail=serde_json::from_value(value).unwrap();
+        let hash=detail.torrent.hash.clone();
+        app.store.reply(&crate::api::Call::TorrentsGet {args:crate::api::HashArgs {hash}},crate::api::Reply::TorrentsGet(crate::api::GetResult {torrent:detail})).unwrap();
+        for width in [80,120,160] {
+            let text=render(&app,width,30);
+            assert_eq!(text.contains("no DHT, no PeX"),private && known,"private={private}; known={known}; width={width}\n{text}");
+            assert_eq!(text.contains("Public torrent"),!private && known);
+        }
+        let _=app.close_details();assert!(app.store.details.is_empty(),"closing releases immutable detail state");
+    }
+}

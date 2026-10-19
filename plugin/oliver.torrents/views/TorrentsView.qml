@@ -27,7 +27,7 @@ FocusScope {
   readonly property bool showingDetail:visible && (tier>=2 || detailsOpen)
   readonly property var detailState:({visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
     hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
-    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,poster:pane && pane.posterLoaded ? "loaded" : "none"})
+    mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,networking:pane ? pane.networkingText : "",poster:pane && pane.posterLoaded ? "loaded" : "none"})
   function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
   function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
   onCursorHashChanged:scheduleDetail()
