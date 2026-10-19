@@ -13,6 +13,7 @@ fn key(topic: &Topic, value: &Value) -> String {
     let v = &value[match topic {
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
+        Topic::Search(_) => "key",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
     }];
@@ -70,6 +71,8 @@ pub(super) fn diff(topic: &Topic, old: &Value, new: &Value) -> (Changed, Vec<Val
                 removed.push(
                     v[if *topic == Topic::Torrents {
                         "hash"
+                    } else if matches!(topic, Topic::Search(_)) {
+                        "key"
                     } else {
                         "index"
                     }]

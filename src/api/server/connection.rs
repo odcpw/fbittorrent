@@ -80,7 +80,7 @@ impl Connection {
             });
         }
         let generation = self.sequence.fetch_add(1, Ordering::Relaxed);
-        let after = if matches!(request.call, Call::TorrentsAdd { .. }) {
+        let after = if matches!(request.call, Call::TorrentsAdd { .. } | Call::SearchGrab { .. } | Call::SearchInstall { .. }) {
             95
         } else {
             15
@@ -180,6 +180,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
     impl Drop for Presence<'_> {
         fn drop(&mut self) {
             self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
+            self.0.daemon.search.disconnected(self.1);
             self.0.bus.remove_connection(self.1);
             self.0.bus.refresh();
         }

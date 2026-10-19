@@ -116,6 +116,7 @@ struct Sample {
     rows: Vec<Torrent>,
     completions: Vec<Value>,
     logs: Value,
+    searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
@@ -129,6 +130,7 @@ impl Sample {
             Topic::Network => self.network.clone(),
             Topic::Settings => self.settings.clone(),
             Topic::Summary => self.summary(),
+            Topic::Search(id) => self.searches.get(id).cloned().unwrap_or(json!([])),
             Topic::Events => unreachable!(),
             Topic::Log => self.logs.clone(),
         }
@@ -242,6 +244,9 @@ impl Bus {
     /// Prepare without emitting: the server must queue the successful response
     /// before activation. Otherwise a fast sampler could precede that response.
     pub fn subscribe(&self, sink: EventSink, args: &SubscribeArgs) -> ApiResult<Reply> {
+        for topic in &args.topics {
+            if let Topic::Search(id) = topic { self.daemon.search.reclaim(sink.id(), *id)?; }
+        }
         let sample = self.sample(&args.topics)?;
         for topic in &args.topics {
             if let Topic::Files(hash) = topic {
@@ -286,6 +291,7 @@ impl Bus {
                             Topic::Network | Topic::Settings | Topic::Events | Topic::Log => {
                                 Duration::from_secs(86400)
                             }
+                            Topic::Search(_) => Duration::from_millis(args.effective_interval_ms(500)),
                             Topic::Summary => {
                                 Duration::from_millis(args.effective_interval_ms(summary_interval))
                             }
@@ -404,10 +410,20 @@ impl Bus {
             .collect();
         let cfg = crate::config::Config::load().map_err(ops::engine_error)?;
         let activity = crate::daemon::policy::Transfers::from_torrents(&rows, &state, restoring);
+        let mut searches = BTreeMap::new();
+        for id in topics.iter().filter_map(|t| if let Topic::Search(id) = t { Some(*id) } else { None }).collect::<BTreeSet<_>>() {
+            let mut items = self.daemon.search.items(id).unwrap_or_default();
+            let hashes: BTreeSet<_> = rows.iter().map(|r| r.hash.clone()).collect();
+            for item in &mut items {
+                item.added = Hash::new(&item.key).ok().filter(|h| hashes.contains(h));
+            }
+            searches.insert(id, json!(items));
+        }
         let mut daemon = {
             let mut policy = self.daemon.policy.lock().unwrap();
             let now = Instant::now();
             policy.configure(cfg.idle_exit_secs, now);
+            policy.searches(self.daemon.search.count(), now);
             policy.transfers(activity, now);
             serde_json::to_value(policy.snapshot(now)).unwrap()
         };
@@ -425,6 +441,7 @@ impl Bus {
             rows,
             completions,
             logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            searches,
             files,
             network,
             settings,
@@ -444,6 +461,19 @@ impl Bus {
         let mut generation_stop: Option<Arc<AtomicBool>> = None;
         let mut config_stamp = None;
         while !self.stopping.load(Ordering::Acquire) {
+            self.daemon.search.sweep();
+            self.daemon.policy.lock().unwrap().searches(self.daemon.search.count(), Instant::now());
+            for event in self.daemon.search.completed() {
+                let mut r = self.registry.lock().unwrap();
+                let event = r.events.append(event);
+                let id = event["search_id"].as_u64().unwrap();
+                let mut sent = BTreeSet::new();
+                for sub in r.subscriptions.values().filter(|s| s.active && s.topics.iter().any(|t| t.topic == Topic::Search(id))) {
+                    if sent.insert(sub.sink.id()) { let _ = sub.sink.send(serde_json::from_value(event.clone()).unwrap()); }
+                }
+                dirty = true;
+            }
+
             {
                 let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
                 let current = (slot.engine_epoch, slot.slot.state().name().to_owned());
@@ -661,7 +691,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log
+                Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log
             )
         });
         for index in order {
@@ -674,7 +704,7 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Events | Topic::Log);
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log);
             let reset =
                 restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Files(_));
             if t.sent.is_none() || reset {

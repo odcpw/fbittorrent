@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const GROUPS: &[(&str, &str)] = &[
     ("origin",include_str!("../../contracts/ipc/v1/origin.ndjson")),
     ("queue",include_str!("../../contracts/ipc/v1/queue.ndjson")),
+    ("search", include_str!("../../contracts/ipc/v1/search.ndjson")),
     ("recheck", include_str!("../../contracts/ipc/v1/recheck.ndjson")),
     ("log", include_str!("../../contracts/ipc/v1/log.ndjson")),
     ("settings", include_str!("../../contracts/ipc/v1/settings.ndjson")),
@@ -439,6 +440,8 @@ fn operation_event_error_and_document_coverage() {
     let required_operations = [
         "torrents.force_start",
         "torrents.queue_move",
+        "search.start", "search.stop", "search.providers", "search.set_provider",
+        "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
         "app.log",
         "app.stats",

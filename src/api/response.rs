@@ -1,6 +1,6 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
-use super::{objects::*, scalar::*};
+use super::{objects::*, scalar::*, search::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -204,6 +204,15 @@ pub struct SubscribeResult {
 pub enum Reply {
     TorrentsForceStart(DoneResult),
     TorrentsQueueMove(QueueMoveResult),
+    SearchStart(SearchStarted),
+    SearchStop(DoneResult),
+    SearchProviders(ProvidersResult),
+    SearchSetProvider(DoneResult),
+    SearchInstall(InstallReply),
+    SearchBrowseSources(BrowseSourcesResult),
+    SearchBrowse(SearchItemsResult),
+    SearchGrab(AddResult),
+
     TorrentsRecheck(RecheckReply),
     AppLog(LogResult),
     AppStats(StatsResult),
@@ -236,6 +245,15 @@ impl Reply {
         let reply = match op {
             "torrents.force_start" => serde_json::from_value(result).map(Self::TorrentsForceStart),
             "torrents.queue_move" => serde_json::from_value(result).map(Self::TorrentsQueueMove),
+            "search.start" => serde_json::from_value(result).map(Self::SearchStart),
+            "search.stop" => serde_json::from_value(result).map(Self::SearchStop),
+            "search.providers" => serde_json::from_value(result).map(Self::SearchProviders),
+            "search.set_provider" => serde_json::from_value(result).map(Self::SearchSetProvider),
+            "search.install" => serde_json::from_value(result).map(Self::SearchInstall),
+            "search.browse_sources" => serde_json::from_value(result).map(Self::SearchBrowseSources),
+            "search.browse" => serde_json::from_value(result).map(Self::SearchBrowse),
+            "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
+
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),

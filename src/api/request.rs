@@ -1,6 +1,6 @@
 //! Strict client input. Runtime policies (in-flight IDs, hello deadlines,
 //! capabilities, path opening and mutation refs) belong to the server.
-use super::scalar::*;
+use super::{scalar::*, search::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -280,6 +280,41 @@ pub enum Call {
     TorrentsForceStart { args: SetSeedArgs },
     #[serde(rename="torrents.queue_move")]
     TorrentsQueueMove { args: QueueMoveArgs },
+    #[serde(rename = "search.start")]
+    SearchStart {
+        args: SearchStartArgs,
+    },
+    #[serde(rename = "search.stop")]
+    SearchStop {
+        args: SearchIdArgs,
+    },
+    #[serde(rename = "search.providers")]
+    SearchProviders {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.set_provider")]
+    SearchSetProvider {
+        args: SetProviderArgs,
+    },
+    #[serde(rename = "search.install")]
+    SearchInstall {
+        args: SearchInstallArgs,
+    },
+    #[serde(rename = "search.browse_sources")]
+    SearchBrowseSources {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.browse")]
+    SearchBrowse {
+        args: SearchBrowseArgs,
+    },
+    #[serde(rename = "search.grab")]
+    SearchGrab {
+        args: SearchGrabArgs,
+    },
+
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
     #[serde(rename = "app.log")]
@@ -353,6 +388,15 @@ impl Call {
         match self {
             Self::TorrentsForceStart {..} => "torrents.force_start",
             Self::TorrentsQueueMove {..} => "torrents.queue_move",
+            Self::SearchStart { .. } => "search.start",
+            Self::SearchStop { .. } => "search.stop",
+            Self::SearchProviders { .. } => "search.providers",
+            Self::SearchSetProvider { .. } => "search.set_provider",
+            Self::SearchInstall { .. } => "search.install",
+            Self::SearchBrowseSources { .. } => "search.browse_sources",
+            Self::SearchBrowse { .. } => "search.browse",
+            Self::SearchGrab { .. } => "search.grab",
+
             Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",

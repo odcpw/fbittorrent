@@ -134,7 +134,7 @@ impl Validate for Request {
             Call::Subscribe { args } => args.validate(),
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),
-            _ => Ok(()),
+            _ => super::search::validate_call(&self.call),
         }
     }
 }
@@ -178,6 +178,9 @@ impl Validate for TorrentDetail {
         torrent(&self.torrent, false)
     }
 }
+impl Validate for SearchItem {
+    fn validate(&self) -> Checked { SearchItem::validate(self) }
+}
 impl Validate for File {
     fn validate(&self) -> Checked {
         progress(self.progress)
@@ -215,6 +218,11 @@ impl Validate for Reply {
                     value.validate()?;
                 }
                 Ok(())
+            }
+            Self::SearchStart(result) if result.search_id == 0 => Err(Violation("search_id: must be positive".into())),
+            Self::SearchBrowse(result) => {
+                require(result.items.len() <= 5000, "items", "search result cap is 5000")?;
+                for value in &result.items { value.validate()?; } Ok(())
             }
             Self::Subscribe(result) => count(result.topics.len(), MAX_SUBSCRIPTIONS, "topics"),
             _ => Ok(()), // Pending refs are required by their serde variants.
@@ -353,7 +361,7 @@ impl NegotiatedCaps {
             let result = match value {
                 Item::Torrent(torrent) => self.torrent(torrent),
                 Item::Event(event) => self.event(event),
-                Item::File(_) | Item::Log(_) => Ok(()),
+                Item::File(_) | Item::Search(_) | Item::Log(_) => Ok(()),
             };
             result.map_err(|error| Violation(format!("{field}[{index}].{error}")))?;
         }
@@ -412,6 +420,7 @@ fn items(topic: &Topic, values: &[Item]) -> Checked {
             (Topic::Log, Item::Log(entry)) => entry.validate()?,
             (Topic::Torrents, Item::Torrent(t)) => t.validate()?,
             (Topic::Files(_), Item::File(f)) => f.validate()?,
+            (Topic::Search(_), Item::Search(s)) => s.validate()?,
             (Topic::Events, Item::Event(e))
                 if e.subscription_revision().is_none()
                     && !matches!(
@@ -496,6 +505,7 @@ impl Validate for Event {
                             match topic {
                                 Topic::Torrents => key.as_str().is_some_and(|h| lower_hex(h, 40)),
                                 Topic::Files(_) | Topic::Events | Topic::Log => key.as_u64().is_some(),
+                                Topic::Search(_) => key.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 8192),
                                 _ => false,
                             },
                             "removed",
@@ -514,6 +524,7 @@ impl Validate for Event {
                             match topic {
                                 Topic::Torrents => lower_hex(key, 40),
                                 Topic::Files(_) => key.parse::<u64>().is_ok(),
+                                Topic::Search(_) => !key.is_empty() && key.len() <= 8192,
                                 _ => false,
                             },
                             "changed",

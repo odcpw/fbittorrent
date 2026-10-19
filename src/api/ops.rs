@@ -9,6 +9,22 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name: "search.start", mutating: true, idempotent: false, since: "P3-01",
+        args: "`query`, `providers?`, `limit?`", result: "`{search_id}`" },
+    Operation { name: "search.stop", mutating: true, idempotent: false, since: "P3-01",
+        args: "`search_id`", result: "`{state: \"done\"}`" },
+    Operation { name: "search.providers", mutating: false, idempotent: false, since: "P3-01",
+        args: "none", result: "`{providers: [Provider]}`" },
+    Operation { name: "search.set_provider", mutating: true, idempotent: true, since: "P3-01",
+        args: "`name`, `enabled`", result: "`{state: \"done\"}`" },
+    Operation { name: "search.install", mutating: true, idempotent: false, since: "P3-01",
+        args: "`curated?` or `sources?`", result: "pending ref, then `{installed, failed}`" },
+    Operation { name: "search.browse_sources", mutating: false, idempotent: false, since: "P3-01",
+        args: "none", result: "`{sources: [BrowseSource]}`" },
+    Operation { name: "search.browse", mutating: false, idempotent: false, since: "P3-01",
+        args: "`source`", result: "`{items: [SearchResult]}`" },
+    Operation { name: "search.grab", mutating: true, idempotent: false, since: "P3-01",
+        args: "`search_id` and `key`, or `result`; add options", result: "as `torrents.add`" },
     Operation { name: "torrents.force_start", mutating: true, idempotent: true, since: "P6-05",
         args: "`hashes: [hash]` (1..256), `on: bool`", result: "`{state: \"done\"}`" },
     Operation { name: "torrents.queue_move", mutating: true, idempotent: false, since: "P6-05",
@@ -68,6 +84,7 @@ pub const TABLE: &[Operation] = &[
 ];
 
 pub mod app;
+pub mod search;
 pub mod recheck;
 pub mod queue;
 pub mod imdb;

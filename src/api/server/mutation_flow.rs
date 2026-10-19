@@ -268,7 +268,9 @@ impl Shared {
             }
             let result = match entry.confirmation {
                 Some(Confirmation::Recheck(batch)) => batch.result().map(|report| Ok(ops::recheck::complete(report))),
-                Some(Confirmation::Metadata(Reply::TorrentsAdd(mut added))) => {
+                Some(Confirmation::Metadata(reply)) => {
+                    let search = matches!(&reply, Reply::SearchGrab(_));
+                    let mut added = match reply { Reply::TorrentsAdd(added) | Reply::SearchGrab(added) => added, _ => unreachable!("metadata add receipt") };
                     let hash = added.hash.as_ref().unwrap().as_str();
                     // Reading the restore receipt never waits on a runtime or on
                     // payload I/O, including while the owner replaces a slot.
@@ -290,7 +292,7 @@ impl Shared {
                                 added.name = Some(detail.torrent.name);
                             }
                             added.status = MutationResult::Done;
-                            Some(Ok(Reply::TorrentsAdd(added)))
+                            Some(Ok(if search { Reply::SearchGrab(added) } else { Reply::TorrentsAdd(added) }))
                         }
                         Some(crate::engine::RestoreOutcome::Failed { message, .. }) => {
                             Some(Err(error(

@@ -39,6 +39,7 @@ pub struct Daemon {
     pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) logs: Arc<log::Ring>,
     pub(crate) imdb: crate::imdb::service::Service,
+    pub(crate) search: crate::search::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -341,6 +342,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         directory.clone(),
         Duration::from_secs(5),
     )?);
+    crate::search::begin_session()?;
+    struct SearchDrain;
+    impl Drop for SearchDrain { fn drop(&mut self) { crate::search::shutdown_all(); } }
+    let _search_drain = SearchDrain;
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
     let log_capture = log_capture::Capture::install()?;
@@ -366,6 +371,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         logs: log_capture.ring.clone(),
         imdb: Default::default(),
         undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
+        search: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
@@ -402,6 +408,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();
     api.stop_accepting();
+    daemon.search.shutdown();
     let began = Instant::now();
     if daemon
         .slot

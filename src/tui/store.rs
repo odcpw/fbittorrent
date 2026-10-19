@@ -39,6 +39,7 @@ pub(super) struct Store {
     pub torrents: BTreeMap<String, api::Torrent>,
     pub details: BTreeMap<api::Hash, api::TorrentDetail>,
     pub files: BTreeMap<api::Hash, BTreeMap<String, api::File>>,
+    pub searches: BTreeMap<u64, BTreeMap<String, api::SearchItem>>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
     pub network: Option<api::NetworkState>,
@@ -253,6 +254,10 @@ impl Store {
                         _ => None,
                     },
                 )?,
+                api::Topic::Search(id) => patch(
+                    self.searches.entry(*id).or_default(), changed, added, removed,
+                    |item| match item { api::Item::Search(row) => Some((row.key.clone(),row.clone())), _ => None },
+                )?,
                 api::Topic::Events => {
                     for item in added.iter().flatten() {
                         let api::Item::Event(event) = item else {
@@ -299,6 +304,10 @@ impl Store {
             api::Topic::Files(hash) => {
                 self.files.clear();
                 self.files.insert(hash.clone(), snapshot.files);
+            }
+            api::Topic::Search(id) => {
+                self.searches.clear(); // The TUI retains only its current search.
+                self.searches.insert(*id, snapshot.searches);
             }
             api::Topic::Events => {
                 for event in snapshot.events {

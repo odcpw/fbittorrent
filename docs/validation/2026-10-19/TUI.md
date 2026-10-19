@@ -327,3 +327,20 @@ compilation, size gate and diff checks pass. settings_queue_vpn_restart was
 verified byte-identical and passed locally; its main-gate repair remains the
 integrator's. No release/all.sh run, frozen fixture change, or state-table
 change. All log paths above are under target/test-logs/fbt-p4-03-r5p/.
+
+### P3-01 search extraction checkpoint
+
+Moved search download resolution, process capture/lifetime, job registry and all existing tests into `src/search/*`; existing function bodies and test bytes are identical, with only sibling visibility and facade wiring added (`split_isomorphism.jsonl`). `cargo test --locked -p fbittorrent search:: -- --nocapture`: 15 passed, including three search goldens; `bash scripts/lint-sizes.sh --baseline scripts/size-baseline.txt src`: passed. Evidence: `target/test-logs/fbt-p3-01-mrt/split_{units_fixed,sizes,isomorphism}.*`. The daemon integration is still in progress; no search acceptance criterion is claimed at this checkpoint.
+
+### P3-01 — daemon search
+
+Added daemon-owned search sessions (four admissions, reclaimable thirty-second disconnect lease, process-group cancellation and drain), typed API operations and keyed bus snapshots/deltas/completion events, provider/browse/grab adapters, ledger `added` annotations, deterministic deduplication and conservative mojibake repair. Provider output/raw session retention is bounded to 2 MiB; metainfo inspection is bounded and runs outside the bus. Added `contracts/ipc/v1/search.ndjson`, capability/operation metadata and contract 1.2.4. Existing IPC records/examples and existing search tests remain unchanged. Neighbouring TUI mirror changes support the additive fixture's search items; the search screen migration follows in P4-03.
+
+| Acceptance | Command | JSONL evidence under `target/test-logs/fbt-p3-01-mrt/` | Observed |
+|---|---|---|---|
+| Dedupe both providers and repair the name | `python3 …/daemon-case.py live search_dedupe_and_repair` | `live/daemon/search_dedupe_and_repair.jsonl` | PASS; one `辛特尔`, alpha+beta, nine seeds; original damaged UTF-8 bytes retained |
+| Disconnect expires at 30 s and kills the process group | `python3 …/daemon-case.py live search_process_group_gone` | `live/daemon/search_process_group_gone.jsonl` | PASS; live children at 28 s, no members at 30.070 s; session not found |
+| Fifth session is busy | `python3 …/daemon-case.py live search_fifth_busy` | `live/daemon/search_fifth_busy.jsonl` | PASS; retryable `busy`, `details.limit=sessions`; stop frees admission |
+| Reconnect reclaims retained results | `python3 …/daemon-case.py live search_session_grace` | `live/daemon/search_session_grace.jsonl` | PASS; identical results and provider group; search busy reason |
+
+Additional live proof: `grab_live/daemon/search_grab_and_ledger.jsonl` PASS (real loopback metainfo, pending/confirmed ref, origin search, ledger annotation, parked refusal with VPN hint). The first combined live run caught a URL receipt waiting for a magnet-only outcome; fixed and this extra case rerun green. Focused `cargo test --locked -p fbittorrent search:: -- --nocapture`: 19 passed (`service_units.*`). One full `cargo test --locked`: 384 passed, one failed, two ignored (`search_full.*`): the additive fixture exposed the TUI reducer's missing search-item support. Added the reducer and regression; `cargo test --locked -p fbittorrent tui:: -- --nocapture`: 112 passed, including all 34 unchanged goldens and nine original expect models (`search_consumer_units.*`). Per owner cadence the full suite was not repeated; final source size gate passes (`search_final_sizes.*`). All four bead criteria are met; the initial full-suite failure and its focused repair are recorded explicitly. No release build/all.sh (track-level instruction). Follow-up: P3-07 CLI shaping remains with its owner; P4-03 search screen migration is next.
