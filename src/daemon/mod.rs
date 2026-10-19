@@ -28,6 +28,7 @@ pub struct Daemon {
     pub launcher: &'static str,
     pub idle_exit_secs: u64,
     pub no_notify: bool,
+    pub(crate) imdb: crate::imdb::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -295,6 +296,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: u64, no_notify: bool) -> Resul
         },
         idle_exit_secs,
         no_notify,
+        imdb: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });

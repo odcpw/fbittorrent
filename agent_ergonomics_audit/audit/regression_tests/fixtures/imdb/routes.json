@@ -1,4 +1,39 @@
 {
-  "/suggestion/x/fixture.json": {"file": "suggestion.json", "content_type": "application/json"},
-  "/poster.png": {"content_type": "image/png", "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}
+  "/suggestion/x/fixture.json": {
+    "file": "suggestion.json",
+    "content_type": "application/json"
+  },
+  "/poster.png": {
+    "content_type": "image/png",
+    "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+  },
+  "/suggestion/l/local_fixture.json": {
+    "file": "suggest.json"
+  },
+  "/suggestion/t/tt1234001.json": {
+    "file": "suggest.json"
+  },
+  "/w/api.php": {
+    "json": {
+      "query": {
+        "search": [
+          {
+            "title": "Local Fixture"
+          }
+        ]
+      }
+    }
+  },
+  "/api/rest_v1/page/summary/Local_Fixture": {
+    "file": "wiki.json",
+    "content_type": "application/json"
+  },
+  "/poster.jpg": {
+    "file": "poster.jpg",
+    "content_type": "image/jpeg"
+  },
+  "/title.ratings.tsv.gz": {
+    "file": "ratings.tsv.gz",
+    "content_type": "application/gzip"
+  }
 }

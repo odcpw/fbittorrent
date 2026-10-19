@@ -249,8 +249,21 @@ pub struct UploadLimitArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImdbLookupArgs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "imdb.lookup")]
+    ImdbLookup { args: ImdbLookupArgs },
     #[serde(rename = "hello")]
     Hello { args: HelloArgs },
     #[serde(rename = "app.info")]
@@ -304,6 +317,7 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::ImdbLookup { .. } => "imdb.lookup",
             Self::Hello { .. } => "hello",
             Self::AppInfo { .. } => "app.info",
             Self::AppClient { .. } => "app.client",
