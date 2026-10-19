@@ -26,6 +26,8 @@ pub(super) enum PromptKind {
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
     FollowShow,
+    ShowQuality {imdb:String},
+    ShowFilters,
     Shutdown,
     ConfirmUnfollow { imdb: String, title: String },
 }
@@ -105,6 +107,8 @@ impl TuiApp {
                 }
                 if kind==PromptKind::SettingDestination {return self.apply_destination(&value);}
                 if kind==PromptKind::SettingIdleExit {return self.apply_idle_exit(&value);}
+                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
+                if kind==PromptKind::ShowFilters {return self.apply_show_filters(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

@@ -92,6 +92,7 @@ pub struct TuiApp {
     pub(super) show_grabbing: HashSet<String>,
     // shows
     pub(super) shows: Shows,
+    pub(super) show_controls: ShowControls,
     pub(super) show_list: RefCell<ListState>,
     pub(super) ep_list: RefCell<ListState>,
     pub(super) shows_focus_eps: bool,
@@ -147,6 +148,7 @@ pub enum Msg {
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
     TopicsSelected{connection:u64,active:Vec<(u64,crate::api::Topic)>,result:Result<(),String>},
     ServiceDone{connection:Option<u64>,op:&'static str,args:serde_json::Value,label:String,result:Result<serde_json::Value,String>},
+    ShowFilterRead {connection:u64,revision:u64,result:Result<crate::api::ReleasesResult,String>},
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
     Hover,
@@ -250,6 +252,7 @@ impl TuiApp {
             rss_retry_until: None,
             show_grabbing: HashSet::new(),
             shows,
+            show_controls:ShowControls::default(),
             show_list: RefCell::new(ListState::default()),
             ep_list: RefCell::new(ListState::default()),
             shows_focus_eps: true,

@@ -23,6 +23,9 @@ use screens_search::*;
 mod screens_rss;
 #[path = "screens/shows.rs"]
 mod screens_shows;
+#[path="screens/show_controls.rs"]
+mod show_controls;
+use show_controls::{ShowControls,ReadFilter};
 #[path = "modals/files.rs"]
 mod modals_files;
 use modals_files::*;
@@ -231,7 +234,7 @@ impl Model for TuiApp {
                 self.refresh_details()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); self.store.details.clear();if let Some(details)=self.details.as_mut(){details.loading=false;}let overview=self.refresh_details(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,overview,self.subscribe_ui()]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.reset_topics();self.show_controls.inflight=None;self.show_controls.rows=None;self.show_controls.dirty=true;self.settings_loading=false;self.service_busy=false;self.rss_busy=false;self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume();let pieces=self.resume_pieces(); self.store.details.clear();if let Some(details)=self.details.as_mut(){details.loading=false;}let overview=self.refresh_details(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,pieces,overview,self.subscribe_ui()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
@@ -361,6 +364,7 @@ impl Model for TuiApp {
                 }
                 Cmd::none()
             }
+            Msg::ShowFilterRead {connection,revision,result}=>self.show_filter_read(connection,revision,result),
             Msg::TopicsSelected {connection,active,result}=>self.topics_selected(connection,active,result),
             Msg::Trackers {connection,hash,request,forced,result}=>self.trackers_loaded(connection,hash,request,forced,result),
             Msg::ServiceDone {connection,op,args,label,result}=>self.service_done(connection,op,args,label,result),

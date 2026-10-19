@@ -1667,6 +1667,32 @@
       "scope": "pane:shows.releases"
     },
     {
+      "id": "shows.quality",
+      "keys": {
+        "dashboard": [
+          "="
+        ],
+        "popup": null,
+        "tui": [
+          "="
+        ]
+      },
+      "label": "Show quality",
+      "scope": "screen:shows"
+    },
+    {
+      "id": "shows.filters",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "F"
+        ]
+      },
+      "label": "Inbox filters",
+      "scope": "screen:shows"
+    },
+    {
       "id": "shows.next",
       "keys": {
         "dashboard": [

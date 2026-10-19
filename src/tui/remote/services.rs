@@ -62,6 +62,7 @@ impl TuiApp {
         self.service_busy = false;
         self.rss_busy = false;
         self.show_grabbing.clear();
+        if op.starts_with("shows."){self.show_controls.dirty=true;}
         match result {
             Ok(value) => {
                 if op=="torrents.remove" {
@@ -263,6 +264,8 @@ impl TuiApp {
             .filter(|s| s.checking)
             .map(|s| s.imdb.clone())
             .collect();
+        let full=self.show_controls.rows.as_ref().filter(|_|self.full_show_inbox());
+        let release_topic=if full.is_some(){Some("inbox")}else{self.store.releases_topic.as_deref()};
         self.shows.shows = self
             .store
             .shows
@@ -276,15 +279,13 @@ impl TuiApp {
                 show.last_checked = s.last_check_at.unwrap_or(0) as i64;
                 show.catalogue_complete = s.catalogue_complete;
                 show.error = s.warning.clone();
-                if let Some(topic) = &self.store.releases_topic {
-                    if topic == "inbox" || topic == &s.imdb {
+                if let Some(topic) = release_topic {
+                    if topic == "inbox" || topic == s.imdb.as_str() {
                         show.episodes.clear();
                         show.seen.clear();
                         show.grabbed.clear();
-                        for r in self
-                            .store
-                            .show_releases
-                            .values()
+                        for r in self.store.show_releases.values().filter(|_|full.is_none())
+                            .chain(full.into_iter().flat_map(|rows|rows.iter()))
                             .filter(|r| r.show_imdb == s.imdb)
                         {
                             show.episodes.push(Episode {

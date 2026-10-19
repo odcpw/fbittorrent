@@ -647,6 +647,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:shows` | Sort releases | `s` | — | — |  |
 | `screen:shows` | Reverse releases sort | `S` | — | — |  |
 | `pane:shows.releases` | Copy magnet | `y` | — | — |  |
+| `screen:shows` | Show quality | `=` | `=` | — |  |
+| `screen:shows` | Inbox filters | `F` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |

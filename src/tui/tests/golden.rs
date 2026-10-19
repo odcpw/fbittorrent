@@ -200,3 +200,30 @@ fn private_overview_explains_networking_only_for_known_private_metainfo() {
 
 #[test]
 fn details_trackers_medium() {assert_render("details-trackers",120,30);}
+
+#[test]
+fn shows_quality_key_and_independent_inbox_filters() {
+    let mut app=fixture::app("shows");
+    app.select_show_parent(1);
+    let original=app.selected_show().unwrap().quality.clone();
+    let _=app.on_key(KeyEvent::new(KeyCode::Char('=')));
+    assert!(matches!(app.prompt.as_ref().unwrap().kind,PromptKind::ShowQuality {..}));
+    app.prompt.as_mut().unwrap().input.set_value("4k");
+    let _=app.on_prompt_key(KeyEvent::new(KeyCode::Enter));
+    assert!(!app.service_busy && app.selected_show().unwrap().quality==original,"invalid preference never sends or edits a show");
+    let _=app.on_key(KeyEvent::new(KeyCode::Char('=')));
+    app.prompt.as_mut().unwrap().input.set_value("720p");
+    let command=app.on_prompt_key(KeyEvent::new(KeyCode::Enter));
+    assert!(matches!(command,Cmd::Task(..)) && app.service_busy);
+    assert_eq!(app.selected_show().unwrap().quality,original,"preference waits for confirmed daemon state");
+    app.service_busy=false;
+    app.shows.shows[0].episodes[0].quality="720p".into();
+    let key=app.shows.shows[0].episodes[0].key.clone();app.shows.shows[0].seen.insert(key);
+    for (filter,count) in [("unread all",1),("all all",2),("read 720p",1),("unread 720p",0),("all 1080p",1)] {
+        let _=app.apply_show_filters(filter);assert_eq!(app.inbox_rows.len(),count,"{filter}");
+        assert!(app.shows_inbox());
+    }
+    let _=app.apply_show_filters("read 720p");
+    let rendered=render(&app,120,30);assert!(rendered.contains("read 720p"));
+    let _=app.apply_show_filters("all 4k");assert!(app.show_controls.read==ReadFilter::Read);
+}
