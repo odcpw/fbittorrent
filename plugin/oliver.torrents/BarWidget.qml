@@ -6,9 +6,11 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import "components"
+import "components" as Components
 import qs.Ui
 import qs.Ui as Ui
 import "Model.js" as Model
+import "Glyphs.js" as Glyphs
 
 Ui.Panel {
   id: root
@@ -33,7 +35,7 @@ Ui.Panel {
   readonly property int headerCount: 4
   // The widget only exists while the backend runs: launching fbittorrent brings
   // it up, stopping the backend makes it leave the bar again.
-  visible: !!svc && svc.online
+  visible: !!svc && (svc.online || setting("showWhenStopped",false) || root.opened || svc.stoppedRecently || svc.reconnecting)
   readonly property var rows: svc ? svc.torrents : []
   property var pendingRemoval: null
 
@@ -171,18 +173,24 @@ Ui.Panel {
     }
   }
 
-  BarIconButton {
+  function barClick(buttonCode) {
+    if (!svc) return
+    if (buttonCode===Qt.RightButton) { root.open(); svc.addFromClipboard() }
+    else if (buttonCode===Qt.MiddleButton) {
+      if (root.setting("middleClick","dashboard")==="tui") root.openTui()
+      else svc.openDashboard("torrents")
+    } else {
+      if (!svc.online && root.setting("showWhenStopped",false)) {svc.startDaemon();root.open()}
+      else root.toggle()
+    }
+  }
+  Components.BarIndicator {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: svc && svc.online && svc.activeTorrents.length > 0 ? "󰇚" : "󰕒"
-    foreground: root.barIconColor
-    tooltipText: svc && svc.online ? Model.heroMeta(svc ? svc.status : {ok:false}) : "fbittorrent is closed"
-    onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) svc.addFromClipboard()
-      else if (buttonCode === Qt.MiddleButton) root.openTui()
-      else root.toggle()
-    }
+    service: svc
+    showRates: !!root.setting("showRates",false)
+    onPressed: function(buttonCode) { root.barClick(buttonCode) }
   }
 
   KeyboardPanel {
@@ -203,10 +211,11 @@ Ui.Panel {
         if (!root.cursorActive) { root.cursorActive = true; return }
         root.moveCursor(dx, dy)
       }
-      onActivateRequested: { if (root.pendingRemoval) root.cancelRemove(); else if (root.cursorActive) root.activateCursor() }
-      onCloseRequested: { if (root.pendingRemoval) root.cancelRemove(); else root.close() }
+      onActivateRequested: { if (svc.clipboardOffer) svc.acceptOffer(); else if (root.pendingRemoval) root.cancelRemove(); else if (root.cursorActive) root.activateCursor() }
+      onCloseRequested: { if (svc.clipboardOffer) svc.cancelOffer(); else if (root.pendingRemoval) root.cancelRemove(); else root.close() }
       onTabRequested: function(direction) { if (!root.pendingRemoval) root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (svc.clipboardOffer) { if (t==="y" || t==="Y") svc.acceptOffer(); return }
         if (root.pendingRemoval) { if (t === "y" || t === "Y") root.confirmRemove(); return }
         if (t === "a" || t === "A") svc.addFromClipboard()
         else if (t === "t" || t === "T") root.openTui()
@@ -246,7 +255,7 @@ Ui.Panel {
             iconComponent: Component {
               Text {
                 textFormat: Text.PlainText
-                text: svc && svc.activeTorrents.length > 0 ? "󰇚" : "󰕒"
+                text: svc && svc.activeTorrents.length > 0 ? Glyphs.download : Glyphs.upload
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
@@ -255,13 +264,15 @@ Ui.Panel {
             trailingControl: Component {
               Row {
                 spacing: Style.space(4)
-                HeaderAction { host: root; index: 0; iconText: "󰐕"; tooltipText: "Add magnet from clipboard (a)"; onClicked: svc.addFromClipboard() }
-                HeaderAction { host: root; index: 1; iconText: "󰆍"; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
-                HeaderAction { host: root; index: 2; iconText: "󰑐"; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
-                HeaderAction { host: root; index: 3; iconText: "󰐥"; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
+                HeaderAction { host: root; index: 0; iconText: Glyphs.add; tooltipText: "Add magnet from clipboard (a)"; onClicked: svc.addFromClipboard() }
+                HeaderAction { host: root; index: 1; iconText: Glyphs.terminal; tooltipText: "Open fbittorrent TUI (t)"; onClicked: root.openTui() }
+                HeaderAction { host: root; index: 2; iconText: Glyphs.refresh; tooltipText: "Refresh (r)"; onClicked: svc.refresh() }
+                HeaderAction { host: root; index: 3; iconText: Glyphs.power; tooltipText: "Close fbittorrent (q)"; onClicked: { svc.stopBackend(); root.close() } }
               }
             }
           }
+
+          ClipboardOffer { width:parent.width; service:root.svc }
 
           Column {
             visible: !!root.pendingRemoval

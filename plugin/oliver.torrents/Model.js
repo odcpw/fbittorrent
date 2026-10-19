@@ -1,4 +1,5 @@
 .pragma library
+.import "Glyphs.js" as Glyphs
 
 function parseStatus(raw) {
   try {
@@ -37,7 +38,11 @@ function isStopped(t) {
 }
 function isDone(t) { return t.state === "done" || t.state === "seeding" || (t.progress_known !== false && Number(t.progress) >= 1) }
 
+var words={metadata:"Metadata",checking:"Checking",downloading:"Downloading",stalled:"Stalled",queued:"Queued",paused:"Paused",done:"Done",seeding:"Seeding",waiting_vpn:"Waiting for VPN",error:"Error",disk_full:"Disk full",ready:"Ready to watch",added_before:"Added before",in_list:"In your list",unread:"Unread",pending:"Pending",reason:"Reason"}
+var stateRoles={metadata:"metadata",checking:"checking",downloading:"download",stalled:"stalled",queued:"queued",paused:"paused",done:"done",seeding:"upload",waiting_vpn:"vpn",error:"error",disk_full:"error",ready:"ready",added_before:"add",in_list:"add",unread:"unread",pending:"paused",reason:"error"}
 function stateLabel(t) {
+  if (t.state==="error" && t.reason==="disk_full") return "Disk full"
+  if (words[t.state]) return words[t.state]
   switch (t.state) {
     case "downloading": case "forcedDL": return "Downloading"
     case "metadata": case "metaDL": case "forcedMetaDL": return "Fetching metadata"
@@ -57,10 +62,11 @@ function stateLabel(t) {
 }
 
 function glyph(t) {
-  if (isStopped(t)) return isDone(t) ? "󰄬" : "󰏤"
-  if (isActive(t)) return "󰇚"
-  if (t.state === "error" || t.state === "missingFiles") return "󰀦"
-  return "󰕒"
+  if (stateRoles[t.state]) return Glyphs.glyph(stateRoles[t.state])
+  if (isStopped(t)) return isDone(t) ? Glyphs.done : Glyphs.paused
+  if (isActive(t)) return Glyphs.download
+  if (t.state === "error" || t.state === "missingFiles") return Glyphs.error
+  return Glyphs.upload
 }
 
 // One-line meta under the torrent name.
@@ -133,4 +139,24 @@ function apiStatus(store, online) {
     up:summary.ul_bps === undefined ? store.transfer.ul_bps : summary.ul_bps}
   if (store.info.state === "parked" || (summary.network && summary.network.state !== "ready")) result.connection = "vpn_waiting"
   return result
+}
+
+function barRate(n, compact) {
+  if (n===undefined || n===null) return compact ? "" : "—"
+  var value=Math.max(0,Number(n)), units=compact ? ["B","K","M","G","T"] : ["B/s","KB/s","MB/s","GB/s","TB/s"], index=0
+  while (value>=1000 && index<units.length-1) {value/=1000;index++}
+  return value.toFixed(index>0 && value<10 ? 1 : 0) + (compact ? "" : " ") + units[index]
+}
+function plainTip(text) {
+  text=String(text).replace(/</g,"‹").replace(/>/g,"›")
+  return text.length>512 ? text.slice(0,511)+"…" : text
+}
+function sourceName(source) {
+  var value=source.magnet || source.url || source.path || "Torrent"
+  if (source.magnet) {
+    var match=/[?&]dn=([^&#]*)/i.exec(value)
+    if (match) {try {return decodeURIComponent(match[1].replace(/\+/g," "))} catch(error) {return match[1]}}
+    return "Magnet link"
+  }
+  return value.split(/[?#]/)[0].split("/").pop() || "Torrent"
 }

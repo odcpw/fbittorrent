@@ -20,6 +20,9 @@ function create(options) {
     changes: [], hasTorrents: false, membershipChanged: false, proto: undefined, compatible: false, instance: "",
     generation: 0, membershipVersion: 0, sortVersions: {added:0,name:0,progress:0,rate:0,size:0,state:0,eta:0}, sortNames: dictionary(), sortValues: dictionary(), keys: [], keysDirty: true, sortCache: dictionary(), lastError: null }
   STATES.forEach(function(state) { s.counts[state] = 0 })
+  var errors=dictionary(), unacknowledged=dictionary()
+  s.firstError=function() {for (var hash in errors) return s.torrents[hash]; return null}
+  s.firstReady=function() {for (var hash in unacknowledged) return s.torrents[hash]; return null}
   function recount(row, sign) {
     if (!row) return
     s.counts.total += sign
@@ -60,6 +63,8 @@ function create(options) {
       if (oldStaged !== !!next.staged) s.counts.staged += next.staged ? 1 : -1
     }
     if (added || fields.indexOf("name") >= 0) s.sortNames[hash] = String(next.name || "").toLocaleLowerCase()
+    if (next.state==="error") errors[hash]=true; else delete errors[hash]
+    if (next.playable && next.playable.ready && next.playable.acked===false) unacknowledged[hash]=true; else delete unacknowledged[hash]
     var rank = STATES.indexOf(next.state)
     var values = s.sortValues[hash] || {hash:hash}
     values.added_at = next.added_at; values.name = s.sortNames[hash]; values.progress = next.progress
@@ -70,7 +75,7 @@ function create(options) {
   function remove(hash) {
     var row = s.torrents[hash]
     if (!row) return
-    recount(row, -1); delete s.torrents[hash]; delete s.sortNames[hash]; delete s.sortValues[hash]; s.keysDirty = true; touched(hash, null, true)
+    recount(row, -1); delete errors[hash]; delete unacknowledged[hash]; delete s.torrents[hash]; delete s.sortNames[hash]; delete s.sortValues[hash]; s.keysDirty = true; touched(hash, null, true)
   }
   function replaceTorrents(rows) {
     s.hasTorrents = true

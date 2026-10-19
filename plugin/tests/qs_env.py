@@ -15,6 +15,8 @@ def prepare(sandbox, recipe, source=None, wayland=False):
     shutil.copytree(source, config / 'Plugin')
     fixtures = ROOT / 'contracts/ipc/v1'
     shutil.copytree(fixtures, config / 'Fixtures')
+    states=ROOT/'contracts/ui/states.json'
+    if states.exists(): shutil.copy2(states,config/'States.json')
     for name in ('Commons', 'Ui'):
         (config / name).symlink_to('/usr/share/omarchy/shell/' + name, target_is_directory=True)
     env = dict(sandbox.env, FBT_FIXTURE_NAMES=json.dumps(sorted(p.name for p in fixtures.glob('*.ndjson'))), QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', FBT_TEST_HOOKS='1')

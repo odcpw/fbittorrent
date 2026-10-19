@@ -6,6 +6,7 @@ import qs.Commons as Commons
 import qs.Ui
 import qs.Ui as Ui
 import "../Model.js" as Model
+import "../Glyphs.js" as Glyphs
 
 CursorSurface {
   property var host
@@ -115,7 +116,7 @@ CursorSurface {
         visible: !(row.torrent && (row.torrent.intent !== undefined
                    ? row.torrent.state === "done" && !row.torrent.seed
                    : Number(row.torrent.completion_on || 0) > 0 && Number(row.torrent.ratio_limit) === 0))
-        iconText: row.stopped ? "󰐊" : "󰏤"
+        iconText: row.stopped ? Glyphs.play : Glyphs.paused
         tooltipText: row.stopped ? "Start (p)" : "Stop (p)"
         foreground: host.foreground
         fontFamily: host.fontFamily
@@ -124,7 +125,7 @@ CursorSurface {
         onClicked: svc.toggleTorrent(row.torrent)
       }
       PanelActionButton {
-        iconText: "󰝰"
+        iconText: Glyphs.folder
         tooltipText: "Open the file, or the folder (o)"
         foreground: host.foreground
         fontFamily: host.fontFamily
@@ -134,7 +135,7 @@ CursorSurface {
       }
       PanelActionButton {
         objectName: "trash-" + (row.torrent ? row.torrent.hash : "")
-        iconText: "󰆴"
+        iconText: Glyphs.trash
         tooltipText: "Remove torrent, keep files (d)"
         foreground: host.foreground
         hoverColor: host.urgent

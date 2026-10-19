@@ -93,8 +93,22 @@ def real_fallback(binary):
                     log=sandbox.root/'shims/fbittorrent.log'
                     case.check(not log.exists(), 'no CLI process is spawned for automatic status', str(log))
                     q.ipc('start')
+                    q.ipc('start')
                     q.wait(lambda: log.exists())
                     case.check(log.read_text().splitlines()==['["up"]'], 'explicit Start runs exactly one fbittorrent up',log.read_text())
+                    q.ipc('middle')
+                    case.check(q.ipc('summon')=='oliver.torrents:{"view":"torrents"}',
+                               'default middle click summons the dashboard through the shell',q.ipc('summon'))
+                    fixtures.path_shim('wl-paste', "printf '%s' 'magnet:?xt=urn:btih:"+'d'*40+"&dn=Clipboard%20preview'", sandbox.root)
+                    q.ipc('clipboard')
+                    offer=q.wait(lambda: json.loads(q.ipc('offer')))
+                    case.check(offer['name']=='Clipboard preview',
+                               'clipboard read creates a named offer before a mutation is sent',json.dumps(offer))
+                    case.check(not json.loads(q.ipc('state'))['pending'], 'offer itself has no mutation ref',q.ipc('state'))
+                    listed=client.call('torrents.list',{})['result']['torrents']
+                    case.check(listed==[], 'real daemon list remains empty until the offer is accepted',json.dumps(listed))
+                    q.ipc('cancel')
+                    case.check(q.ipc('offer')=='null','Cancel clears the clipboard offer',q.ipc('offer'))
                     q.ipc('pause','f'*40)
                     q.wait(lambda: bool(q.ipc('error')))
                     case.check(q.ipc('error')=='not found', 'real typed API error reaches the service without optimistic row changes',q.ipc('error'))

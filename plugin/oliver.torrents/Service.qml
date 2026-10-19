@@ -20,6 +20,9 @@ Item {
   readonly property bool online: status.ok === true && status.running !== false
   property bool reconnecting: false
   property bool stoppedRecently: false
+  property string byeReason: ""
+  property bool startupRequested: false
+  property var clipboardOffer: null
   property string instance: ""
   property string backendState: "stopped"
   property string lastError: ""
@@ -66,6 +69,7 @@ Item {
       status = connectionStatus
     }
     reconnecting = c.reconnecting; instance = c.instance
+    if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     pending = c.state().pending
     lastError = c.lastError ? c.lastError.message : ""
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
@@ -78,7 +82,7 @@ Item {
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
-    if (frame.ev === "bye") { stoppedRecently = true; stoppedTimer.restart() }
+    if (frame.ev === "bye") { byeReason=frame.reason; stoppedRecently = true; stoppedTimer.restart() }
   }
   function mutate(op, args, cap, callback) {
     if (!client) return false
@@ -110,7 +114,18 @@ Item {
   function recheck(hash) { return mutate("torrents.recheck", {hashes:[hash]}, "recheck") }
   function quit() { return mutate("app.shutdown", {reason:"user"}) }
   function dismissClipboard() { return mutate("app.clipboard.dismiss", {}, "clipboard") }
-  function startDaemon() { Commons.Util.execArgv([bin, "up"]) }
+  function startDaemon() {
+    if (startupRequested) return
+    startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
+    Commons.Util.execArgv([bin,"up"])
+  }
+  function openDashboard(view) {
+    if (!shell || !shell.summon("oliver.torrents",JSON.stringify({view:view || "torrents"}))) {
+      actionStatus="Dashboard is not available; update the plugin"; noticeTimer.restart()
+    }
+  }
+  function acceptOffer() { var offer=clipboardOffer; clipboardOffer=null; if (offer) add(offer.source,false) }
+  function cancelOffer() { clipboardOffer=null }
   function useRuntimeDir(path) {
     if (Quickshell.env("FBT_TEST_HOOKS") !== "1") return "refused: FBT_TEST_HOOKS=1 required"
     socket.connected = false
@@ -138,8 +153,8 @@ Item {
       source = {magnet:value}
     } else if (/^https?:\/\//i.test(value)) source = {url:value}
     else if (/^\//.test(value) && /\.torrent$/i.test(value)) source = {path:value}
-    if (hash && store.torrents[hash]) { actionStatus = "Already in your list: " + store.torrents[hash].name; return null }
-    if (!source) actionStatus = "Clipboard has no torrent"
+    if (hash && store.torrents[hash]) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
+    if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
   onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics)
@@ -167,6 +182,8 @@ Item {
     }
   }
   Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.client.tick(); root.syncRows() } }
+  Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
+  Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
   Timer { id: stoppedTimer; interval: 10000; onTriggered: root.stoppedRecently = false }
   Process {
@@ -182,7 +199,7 @@ Item {
       onStreamFinished: {
         if (root.clipboardTooLarge) return
         var source = root.clipboardSource(text)
-        if (source) root.add(source, false)
+        if (source) root.clipboardOffer={source:source,name:Model.sourceName(source)}
       }
     }
     onExited: function(code) { if (code !== 0) root.lastError = "Could not read clipboard" }

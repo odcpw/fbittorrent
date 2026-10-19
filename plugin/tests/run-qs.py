@@ -17,6 +17,9 @@ with fixtures.Sandbox() as sandbox:
     os.environ['QT_QUICK_BACKEND'] = 'software'
     from qs_env import prepare
     config, env = prepare(sandbox, Path(sys.argv[2]).resolve())
+    if sys.argv[1]=='icons':
+        from icon_fixtures import write
+        write(config)
     os.environ.clear()
     os.environ.update(env)
     command = ['timeout', '60s', 'qs', '--no-color', '-p', str(config)]
