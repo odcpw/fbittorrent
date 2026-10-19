@@ -62,8 +62,8 @@ pub(super) fn execute(
                 record.only_files = Some(files.clone());
             }
             if let Some(seed) = seed {
+                record.upload = (*seed).then_some(true);
                 record.ratio_limit = if *seed { -2.0 } else { 0.0 };
-                record.upload_limit = if *seed { 0 } else { NO_UPLOAD_LIMIT };
             }
             if let Some(folder) = save_path {
                 record.output_folder = folder.to_string_lossy().into();

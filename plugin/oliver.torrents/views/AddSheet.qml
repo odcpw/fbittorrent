@@ -68,7 +68,7 @@ FocusScope {
         visible:!root.model.duplicate && root.model.phase!=="input";Layout.fillWidth:true;spacing:Commons.Style.spacing.lg
         Text {textFormat:Text.PlainText;text:"Seeding";color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
         Ui.ToggleSwitch {id:seedToggle;activeFocusOnTab:true;hasCursor:activeFocus;Keys.onSpacePressed:root.flow.seed(!root.model.seed);checked:root.model.seed;busy:root.model.busy;onToggled:root.flow.seed(!root.model.seed)}
-        Text {Layout.fillWidth:true;textFormat:Text.PlainText;text:root.model.seed ? "Continues seeding when complete" : "Upload capped at 32 KiB/s, stops when complete";wrapMode:Text.Wrap;color:Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall}
+        Text {Layout.fillWidth:true;textFormat:Text.PlainText;text:root.model.seed ? "Continues seeding when complete" : "Upload: off";wrapMode:Text.Wrap;color:Model.dim(Commons.Color.foreground,Commons.Color.popups.background);font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.bodySmall}
       }
       RowLayout {
         visible:!root.model.duplicate && root.model.phase!=="input";Layout.fillWidth:true

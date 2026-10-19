@@ -199,7 +199,7 @@ fn settings_destination_seed_and_idle_are_validated_cancelable_minimal_drafts() 
         .unwrap()
         .list
         .borrow_mut()
-        .select(Some(settings_fields::SEED_ROW));
+        .select(Some(settings_fields::UPLOAD_ROW));
     app.on_key(KeyEvent::new(KeyCode::Right));
     app.settings
         .as_ref()
@@ -211,11 +211,11 @@ fn settings_destination_seed_and_idle_are_validated_cancelable_minimal_drafts() 
     let draft = &app.settings.as_ref().unwrap().cfg;
     assert_eq!(draft.save_path.as_deref(), Some("/private/new downloads"));
     assert_eq!(draft.idle_exit_secs, 0);
-    assert!(draft.seed_by_default);
+    assert_eq!(draft.upload,"on");
     let original = &app.settings.as_ref().unwrap().original;
     assert_eq!(
         settings_fields::settings_patch(original, draft),
-        serde_json::json!({"save_path":"/private/new downloads","idle_exit_secs":0,"seed_by_default":true,"clipboard_watch":true})
+        serde_json::json!({"save_path":"/private/new downloads","idle_exit_secs":0,"upload":"on","clipboard_watch":true})
     );
     for bad in ["", "-1", "29", "18446744073709551616"] {
         app.apply_idle_input(bad);
@@ -230,7 +230,7 @@ fn settings_destination_seed_and_idle_are_validated_cancelable_minimal_drafts() 
         let text = super::golden::render(&app, w, h);
         for field in [
             "Destination",
-            "Seed new torrents",
+            "Upload: on",
             "Idle exit",
             "Clipboard offers",
         ] {
@@ -238,7 +238,7 @@ fn settings_destination_seed_and_idle_are_validated_cancelable_minimal_drafts() 
         }
     }
     app.on_key(KeyEvent::new(KeyCode::Escape));
-    assert!(!app.cfg.seed_by_default);
+    assert_eq!(app.cfg.upload,"off");
     assert_eq!(app.cfg.idle_exit_secs, 300);
 }
 #[test]
@@ -396,7 +396,7 @@ fn settings_destination_seed_idle_and_clipboard_are_cancelable_drafts() {
     app.on_key(KeyEvent::new(KeyCode::Enter));
     assert_eq!(app.settings.as_ref().unwrap().cfg.save_path.as_deref(),Some("/tmp/fbt-settings-draft"));
     app.apply_destination_input("relative");assert!(!app.settings.as_ref().unwrap().error.is_empty());
-    app.settings.as_ref().unwrap().list.borrow_mut().select(Some(settings_fields::SEED_ROW));
+    app.settings.as_ref().unwrap().list.borrow_mut().select(Some(settings_fields::UPLOAD_ROW));
     app.on_key(KeyEvent::new(KeyCode::Right));
     app.apply_idle_input("0");assert_eq!(app.settings.as_ref().unwrap().cfg.idle_exit_secs,0);
     app.apply_idle_input("-1");assert_eq!(app.settings.as_ref().unwrap().cfg.idle_exit_secs,0);
@@ -404,7 +404,7 @@ fn settings_destination_seed_idle_and_clipboard_are_cancelable_drafts() {
     app.settings.as_ref().unwrap().list.borrow_mut().select(Some(settings_fields::CLIPBOARD_ROW));
     app.on_key(KeyEvent::new(KeyCode::Right));
     let draft=&app.settings.as_ref().unwrap().cfg;
-    assert_eq!(settings_fields::settings_patch(&original,draft),serde_json::json!({"save_path":"/tmp/fbt-settings-draft","seed_by_default":!original.seed_by_default,"idle_exit_secs":0,"clipboard_watch":!original.clipboard_watch}));
+    assert_eq!(settings_fields::settings_patch(&original,draft),serde_json::json!({"save_path":"/tmp/fbt-settings-draft","upload":"on","idle_exit_secs":0,"clipboard_watch":!original.clipboard_watch}));
     app.edit_idle_exit();app.prompt.as_mut().unwrap().input.set_value("900");
     app.on_key(KeyEvent::new(KeyCode::Escape));assert_eq!(app.settings.as_ref().unwrap().cfg.idle_exit_secs,0);
     app.on_key(KeyEvent::new(KeyCode::Escape));assert!(app.settings.is_none());

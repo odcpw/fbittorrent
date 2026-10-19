@@ -89,7 +89,7 @@ function create(service,changed,debug) {
     var generation=epoch
     function apply(value){
       if(generation!==epoch || !s.visible)return
-      if(!seedDirty)s.seed=options.seed===undefined ? value.seed_by_default===true : options.seed===true
+      if(!seedDirty)s.seed=options.seed===undefined ? false : options.seed===true
       if(!pathDirty){var path=options.save_path || value.save_path || "";if(path!==s.savePath || !s.space.supported){s.savePath=path;scheduleSpace(true)}}
       publish()
     }

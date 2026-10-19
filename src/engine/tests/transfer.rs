@@ -1,3 +1,4 @@
+const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the product default.
     fn resumed_transfer_observation(
         seed: &AppEngine,
         client: &ManagedTorrent,
@@ -236,7 +237,7 @@
             assert!(handle.stats().finished);
             record.hash
         });
-        let cap = NO_UPLOAD_LIMIT.to_string();
+        let cap = TEST_UPLOAD_CAP.to_string();
         seed.dispatcher
             .dispatch(&request(
                 "torrents/setUploadLimit",
@@ -321,13 +322,13 @@
             });
         let observed = serde_json::json!({
             "partial": partial, "payload_len": payload.len(),
-            "configured_upload_limit_bps": NO_UPLOAD_LIMIT,
+            "configured_upload_limit_bps": TEST_UPLOAD_CAP,
             "effective_upload_limit_bps": effective_upload_limit,
             "sample_before_s": sample_before, "sample_after_s": elapsed,
             "observer_timestamps": observations,
         });
         let is_partial = partial < payload.len() as u64;
-        let within_cap = partial as f64 <= NO_UPLOAD_LIMIT as f64 * (elapsed + 1.5);
+        let within_cap = partial as f64 <= TEST_UPLOAD_CAP as f64 * (elapsed + 1.5);
         engine_test_diagnostic(
             "observe partial loopback payload",
             "The first observation is smaller than the full payload.",
@@ -362,7 +363,7 @@
         let saved: Ledger =
             serde_json::from_slice(&std::fs::read(seed_store.join("torrents.json")).unwrap())
                 .unwrap();
-        assert_eq!(saved.records[0].upload_limit, NO_UPLOAD_LIMIT);
+        assert_eq!(saved.records[0].upload_limit, TEST_UPLOAD_CAP);
         assert!(
             !saved.records[0].paused,
             "app shutdown must preserve the intent to resume"

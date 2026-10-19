@@ -72,7 +72,7 @@ fn assert_render(surface: &str, width: u16, height: u16) {
         "rss"=>&["RSS","Blender releases","Unread","Read","Sintel","Big.Buck.Bunny","Elephants.Dream"],
         "files"=>&["Files","FILE","SIZE","DONE","PRIO","Subtitles/English.srt","42%","include","skip"],
         "providers"=>&["Search providers","EZTV","YTS","The Pirate Bay","nova"],
-        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Destination","Seed new torrents","Idle exit","Clipboard offers","Enter save","Esc cancel"],
+        "settings"=>&["Download settings","Simultaneous downloads","Peer encryption","VPN connection","Reduce motion","Peer port","Destination","Upload: off","Idle exit","Clipboard offers","Enter save","Esc cancel"],
         "prompt"=>&["Add magnet link or URL","streaming automatic","seed:off","magnet:?xt=urn:btih:"],
         "help"=>&["GLOBAL","Torrents","Search","Shows","RSS","Settings","Log"],
         "confirm"=>&["DELETE","AND ITS FILES? y/N"],
@@ -169,7 +169,7 @@ fn footer_overflow_80x24() {
 fn watch_ready_and_may_stall_goldens() {
     for (name,stall,buffer,finish) in [("watch-ready",true,240,42),("watch-may-stall",false,30,1080)] {
         let mut app=fixture::app("torrents");
-        let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"default_cap","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
+        let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
         let legacy=super::format::torrent(&row);
         app.torrents[0]=legacy.clone();app.store.torrents.insert(row.hash.to_string(),row);
         let _=app.open_details(&legacy);
@@ -185,7 +185,7 @@ fn watch_ready_and_may_stall_goldens() {
 fn private_overview_explains_networking_only_for_known_private_metainfo() {
     for (private,known) in [(true,true),(false,true),(true,false)] {
         let mut app=fixture::app("details");
-        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"default_cap","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
+        let mut value=serde_json::json!({"hash":app.torrents[0].hash,"name":"Private fixture","state":"paused","intent":"pause","staged":false,"checked":false,"seed":false,"upload_policy":"off","save_path":"/fixture/downloads","added_at":1792281600,"force":false,"private":private});
         if known {value["size"]=serde_json::json!(1024);}
         let detail:crate::api::TorrentDetail=serde_json::from_value(value).unwrap();
         let hash=detail.torrent.hash.clone();

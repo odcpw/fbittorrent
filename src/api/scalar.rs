@@ -94,7 +94,7 @@ closed_enum!(TorrentState {
 });
 closed_enum!(Intent { Run, Pause });
 closed_enum!(UploadPolicy {
-    DefaultCap,
+    Off,
     Unlimited,
     Custom
 });

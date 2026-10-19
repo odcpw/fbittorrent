@@ -84,7 +84,7 @@ pub(crate) fn run(cfg:&Config,sub:&RssCmd,json_mode:bool,no_start:bool)->Result<
             let items=source.items(&feed.id,false)?;
             let item=items.iter().find(|item|item.id==*article_id).ok_or_else(||AppError::new(Code::NotFound,format!("no item with id '{article_id}' in feed '{}'",feed.name)).hint(format!("fbittorrent rss items \"{}\" --json",feed.name)))?;
             let owner=catalogue::write_owner(cfg,no_start,json_mode)?;
-            let call=api::Call::RssGrab{args:api::FeedGrabArgs{feed:feed.id.clone(),item:item.id.clone(),seed:Some(cfg.seed_by_default),stopped:Some(false),save_path:cfg.save_path.clone(),files:None,category:cfg.category.clone()}};
+            let call=api::Call::RssGrab{args:api::FeedGrabArgs{feed:feed.id.clone(),item:item.id.clone(),seed:Some(false),stopped:Some(false),save_path:cfg.save_path.clone(),files:None,category:cfg.category.clone()}};
             let added:api::AddResult=catalogue::typed(catalogue::success(&owner,&call,cfg.timeout_secs)?)?;
             let hash=added.hash.context("grab confirmation omitted hash")?;
             let mut value=json!({"ok":true,"action":"rss-grab","hash":hash,"name":item.title,"feed":feed.name});

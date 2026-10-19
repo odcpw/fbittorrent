@@ -144,8 +144,8 @@ fn run(cli: Cli) -> Result<Code> {
         Cmd::Limit{..}=>return Err(AppError::new(Code::Usage,"per-torrent download limits require the daemon API").into()),
         Cmd::Limits { down, up, alt, alt_down, alt_up } => return cli::limits::run(&cfg, json, down, up, alt, alt_down, alt_up),
         Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
-        Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
-            return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
+        Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port, upload } => {
+            return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port, upload);
         }
         _ => {}
     }

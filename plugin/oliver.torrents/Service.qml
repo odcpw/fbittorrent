@@ -229,7 +229,7 @@ Item {
   function resume(hash) { return mutate("torrents.start", {hashes:[hash]}) }
   function toggleSeed(hash) {
     var row = store.torrents[hash]
-    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.seed}) : false
+    return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
   function add(source, stage) { var args={source:source}; if(stage)args.stage=true; return mutate("torrents.add", args, stage ? "staging" : "") }

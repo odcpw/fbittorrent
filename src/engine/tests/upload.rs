@@ -1,0 +1,198 @@
+use librqbit::{create_torrent, spawn_utils::BlockingSpawner, CreateTorrentOptions};
+use std::time::Instant;
+// Real wire requests deliberately ignore the choke: permission must hold even
+// against a peer that requests pieces without waiting for our unchoke.
+fn requested_payload(addr: std::net::SocketAddr, hash: &str) -> usize {
+    use std::io::{Read, Write};
+    let mut peer = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    peer.set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    peer.set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut handshake = vec![19];
+    handshake.extend_from_slice(b"BitTorrent protocol");
+    handshake.extend_from_slice(&[0; 8]);
+    handshake.extend(
+        (0..40)
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hash[i..i + 2], 16).unwrap()),
+    );
+    handshake.extend_from_slice(b"-FB0001-wire-probe01");
+    assert_eq!(handshake.len(), 68);
+    peer.write_all(&handshake).unwrap();
+    let mut response = [0; 68];
+    if peer.read_exact(&mut response).is_err() {
+        return 0;
+    }
+    peer.write_all(&[0, 0, 0, 1, 2]).unwrap(); // interested
+    let mut request = vec![0, 0, 0, 13, 6];
+    request.extend_from_slice(&0u32.to_be_bytes());
+    request.extend_from_slice(&0u32.to_be_bytes());
+    request.extend_from_slice(&16384u32.to_be_bytes());
+    if peer.write_all(&request).is_err() {
+        return 0;
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut payload = 0;
+    while Instant::now() < deadline {
+        let mut prefix = [0; 4];
+        if peer.read_exact(&mut prefix).is_err() {
+            break;
+        }
+        let len = u32::from_be_bytes(prefix) as usize;
+        assert!(len <= 65536, "bounded peer frame");
+        if len == 0 {
+            continue;
+        }
+        let mut frame = vec![0; len];
+        if peer.read_exact(&mut frame).is_err() {
+            break;
+        }
+        if frame[0] == 7 {
+            assert!(len >= 9);
+            payload += len - 9;
+            break;
+        }
+    }
+    payload
+}
+
+#[test]
+fn upload_permission_blocks_payload_in_both_phases_and_allows_explicit_opt_in() {
+    for complete in [false, true] {
+        let directory = review_directory(if complete {
+            "upload-complete"
+        } else {
+            "upload-downloading"
+        });
+        let source = directory.join("source");
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&source).unwrap();
+        let payload: Vec<u8> = (0..32768).map(|i| (i % 251) as u8).collect();
+        std::fs::write(source.join("payload.bin"), &payload).unwrap();
+        let app = test_app(&directory, &downloads, Ledger::default(), Some(0));
+        let dispatcher = app.dispatcher();
+        let bytes = dispatcher
+            .runtime
+            .block_on(create_torrent(
+                dispatcher.runtime.cx(),
+                &source.join("payload.bin"),
+                CreateTorrentOptions {
+                    piece_length: Some(16384),
+                    ..Default::default()
+                },
+                &BlockingSpawner::new(1),
+            ))
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+        std::fs::write(
+            downloads.join("payload.bin"),
+            if complete {
+                &payload[..]
+            } else {
+                &payload[..16384]
+            },
+        )
+        .unwrap();
+        let handle = dispatcher.runtime.block_on(async {
+            let h = dispatcher
+                .inner
+                .session
+                .add_torrent(
+                    dispatcher.runtime.cx(),
+                    AddTorrent::from_bytes(bytes.clone()),
+                    Some(AddTorrentOptions {
+                        overwrite: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .unwrap()
+                .into_handle()
+                .unwrap();
+            time::timeout(
+                dispatcher.runtime.cx(),
+                Duration::from_secs(5),
+                h.wait_until_initialized(dispatcher.runtime.cx()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            h
+        });
+        assert_eq!(handle.stats().finished, complete);
+        assert_eq!(
+            handle.stats().progress_bytes,
+            if complete { 32768 } else { 16384 }
+        );
+        let addr = dispatcher.inner.session.listen_addr().unwrap();
+        let hash = handle.info_hash().as_string();
+        let off = requested_payload(addr, &hash);
+        assert_eq!(off, 0, "default must refuse piece payload");
+        let mut cfg = Config {
+            upload: "on".into(),
+            ..Default::default()
+        };
+        dispatcher.apply_settings(&cfg).unwrap();
+        let on = requested_payload(addr, &hash);
+        assert_eq!(on, 16384, "on must serve verified data");
+        handle.set_upload_enabled(Some(false));
+        assert_eq!(
+            requested_payload(addr, &hash),
+            0,
+            "per-torrent off overrides global on"
+        );
+        cfg.upload = "off".into();
+        dispatcher.apply_settings(&cfg).unwrap();
+        handle.set_upload_enabled(Some(true));
+        assert_eq!(
+            requested_payload(addr, &hash),
+            16384,
+            "explicit per-torrent on overrides global off"
+        );
+        handle.set_upload_enabled(None);
+        assert_eq!(
+            requested_payload(addr, &hash),
+            0,
+            "removing override restores default off"
+        );
+        println!("upload phase={} default_payload_bytes={off} enabled_payload_bytes={on}; override off=0 on=16384",if complete {"completed"}else{"downloading"});
+        drop(handle);
+        drop(dispatcher);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
+fn old_default_cap_is_upload_off_without_losing_current_data() {
+    let directory = review_directory("upload-migration");
+    std::fs::create_dir_all(&directory).unwrap();
+    let mut record = review_record(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        &directory.join("downloads"),
+    );
+    record.upload_limit = 32768;
+    record.only_files = Some(vec![0, 2]);
+    let path = directory.join("torrents.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&Ledger {
+            records: vec![record],
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let ledger = read_ledger(&path).unwrap();
+    assert_eq!(ledger.records[0].upload, Some(false));
+    assert_eq!(ledger.records[0].only_files, Some(vec![0, 2]));
+    assert_eq!(
+        ledger.records[0].options(false).unwrap().upload_enabled,
+        Some(false)
+    );
+    std::fs::write(&path, serde_json::to_vec(&ledger).unwrap()).unwrap();
+    assert_eq!(read_ledger(&path).unwrap().records[0].upload, Some(false));
+    std::fs::remove_dir_all(directory).unwrap();
+}

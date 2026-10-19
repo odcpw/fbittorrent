@@ -23,7 +23,7 @@ ShellRoot {
     check("source","exactly one source and one dropped file",Source.drop(["file:///tmp/a.torrent"],""),!!Source.drop(["file:///tmp/a.torrent"],"") && !Source.drop(["a","b"],"") && !Source.normalize({path:"/tmp/a.torrent",url:"https://x/a"}))
     var s=service(["torrents","files"]),f=Flow.create(s,function(){},true)
     f.open(source)
-    check("preview","no staging cap means no write before Download; settings defaults retained",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && f.snapshot().seed && f.snapshot().savePath==="/downloads")
+    check("preview","no staging cap means no write before Download; settings defaults retained",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && !f.snapshot().seed && f.snapshot().savePath==="/downloads")
     f.commit();check("preview","Download sends existing add shape without stage",s.calls[0],s.calls[0].op==="torrents.add" && s.calls[0].args.stage===undefined && s.calls[0].args.origin==="manual")
     s.reply("torrents.add",{hash:hash});check("preview","confirmed reply closes and selects hash",f.snapshot(),!f.snapshot().visible && s.selected===hash)
     f.open(source);var count=s.calls.length;f.cancel();check("preview","Escape from preview never sends add/discard",s.calls.length,s.calls.length===count && !f.snapshot().visible)
@@ -73,7 +73,7 @@ ShellRoot {
     s=service(["torrents","search"]);f=Flow.create(s,function(){},true)
     var result={key:hash,name:"Search selection",providers:["alpha"],magnet:source.magnet}
     f.search(result,7);check("search_review","legacy search opens review without a write",f.snapshot(),s.calls.length===0 && f.snapshot().phase==="preview" && f.snapshot().search)
-    f.commit();check("search_review","Download invokes real search.grab from a stable result with review defaults",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.result.key===hash && s.calls[0].args.seed===true && !s.calls[0].args.stage)
+    f.commit();check("search_review","Download invokes real search.grab from a stable result with review defaults",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.result.key===hash && s.calls[0].args.seed===false && !s.calls[0].args.stage)
     s.reply("search.grab",{hash:hash});check("search_review","confirmed grab selects the downloaded torrent",f.snapshot(),!f.snapshot().visible && s.selected===hash)
     s=service(["torrents","search","staging"]);f=Flow.create(s,function(){},true);f.search(result,7)
     check("search_review","negotiated staging uses the session/key and stage true",s.calls[0],s.calls[0].op==="search.grab" && s.calls[0].args.stage===true && s.calls[0].args.search_id===7 && s.calls[0].args.key===hash)

@@ -23,5 +23,7 @@
   "state": "done",
   "tracker_count": 1,
   "undo_until": 1792310490,
-  "upload_policy": "default_cap"
+  "upload_policy": "off",
+  "upload_enabled": false,
+  "upload_limit_bps": 65536
 }

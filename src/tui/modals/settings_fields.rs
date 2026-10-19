@@ -9,7 +9,7 @@ const LIMIT_NAMES: [&str; 4] = [
 pub(super) const SETTINGS_ROWS: usize = 13;
 pub(super) const PORT_ROW: usize = 8;
 pub(super) const DESTINATION_ROW: usize = 9;
-pub(super) const SEED_ROW: usize = 10;
+pub(super) const UPLOAD_ROW: usize = 10;
 pub(super) const IDLE_ROW: usize = 11;
 pub(super) const CLIPBOARD_ROW: usize = 12;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
@@ -32,7 +32,7 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     for key in [
         "clipboard_watch",
         "save_path",
-        "seed_by_default",
+        "upload",
         "idle_exit_secs",
         "peer_port",
         "max_active_downloads",
@@ -53,7 +53,7 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
 pub(super) fn native_settings(cfg: &mut Config, settings: &crate::api::Settings) -> Result<()> {
     cfg.clipboard_watch = settings.clipboard_watch;
     cfg.save_path = Some(settings.save_path.clone());
-    cfg.seed_by_default = settings.seed_by_default;
+    cfg.upload = settings.upload.clone();
     cfg.idle_exit_secs = settings.idle_exit_secs;
     cfg.show_quality = settings.show_quality.clone();
     cfg.peer_port = u16::try_from(settings.peer_port)?;

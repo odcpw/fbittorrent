@@ -41,7 +41,7 @@ pub fn view(cfg: &Config) -> Settings {
                 .to_string_lossy()
                 .into_owned()
         }),
-        seed_by_default: cfg.seed_by_default,
+        upload: cfg.upload.clone(),
         autostart: cfg.autostart,
         idle_exit_secs: cfg.idle_exit_secs,
         notify: cfg.notify,

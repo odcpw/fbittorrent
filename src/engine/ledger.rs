@@ -13,6 +13,8 @@ pub(super) struct Record {
     pub(super) output_folder: String,
     pub(super) only_files: Option<Vec<usize>>,
     pub(super) upload_limit: i64,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub(super) upload: Option<bool>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
     pub(super) trackers: Vec<String>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
@@ -69,7 +71,7 @@ impl Record {
 
     fn deferred_intent(options: &ops::AddRequest, folder: &Path, hash: String, name: String, source: String, files: Option<Vec<usize>>) -> Result<Self> {
         let record = Self {
-            display_name:None, hash, name, source, only_files: files,
+            upload: None, display_name:None, hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
             category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||origin_from_tags(&options.tags)),
@@ -105,6 +107,7 @@ impl Record {
             Ok::<_,anyhow::Error>(NonZeroU32::new(u32::try_from(bps).context("download cap exceeds the native engine maximum")?).unwrap())
         }).transpose()?;
         Ok(AddTorrentOptions {
+            upload_enabled: self.upload.or_else(|| (!self.stop_on_complete()).then_some(true)),
             paused,
             overwrite: true,
             output_folder: Some(self.output_folder.clone()),
@@ -177,6 +180,13 @@ pub(super) fn read_ledger(path: &Path) -> Result<Ledger> {
         let fields:OriginFields=serde_json::from_slice(&bytes)?;
         for (record, field) in ledger.records.iter_mut().zip(fields.records) {
             if field.origin.is_none() {record.origin=origin_from_tags(&record.tags);}
+        }
+    }
+    // The former default was a payload cap, never an explicit upload opt-in.
+    for record in &mut ledger.records {
+        if record.upload.is_none() && record.upload_limit == 32768 && record.stop_on_complete() {
+            record.upload = Some(false);
+            record.upload_limit = 0;
         }
     }
     let mut hashes = HashSet::new();

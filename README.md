@@ -15,12 +15,11 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   duration supplies the buffer estimate; unknown duration stays unknown. The
   notification's Open action plays the file. Agents can use
   `fbittorrent wait <hash> --until playable --json` or `--until stall-free`.
-- **Seeding off by default.** New torrents get a 32 KiB/s upload cap while
-  downloading and stop when complete. This limits uploaded payload; it does not
-  guarantee zero upload. Allow seeding per torrent with `u` in the TUI or widget,
-  or `fbittorrent seed <hash>`; that removes the cap and allows completed torrents
-  to keep running.
-  Flip the default with `seed_by_default = true` in the config.
+- **Upload off by default.** Peers receive no piece payload while downloading or
+  after completion. `fbittorrent settings --upload on` allows upload while downloading,
+  subject to the configured speed limits. Completed torrents stop unless you explicitly
+  enable their Upload toggle in Details or run `fbittorrent seed <hash>`. That per-torrent
+  permission also works with global upload off; turning it off denies upload for that torrent.
 - **App lifetime.** CLI writes start the daemon on demand without opening a
   terminal. `up` starts only the engine; `up --ui` and `dashboard` also open the
   dashboard or TUI. Reads and status queries never start it. Nothing runs at
@@ -365,7 +364,7 @@ peer_port = 6882
 max_active_downloads = 3
 peer_encryption = "prefer"           # off, prefer, require
 # network_interface = "proton"       # required ProtonVPN, or an exact interface
-seed_by_default = false
+upload = "off"
 show_quality = "1080p"
 notify = true
 timeout_secs = 10
@@ -521,7 +520,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 - The native engine uses the rqbit protocol code ported to Asupersync, with
   app-owned tasks, network activity, and storage work. The app's normal
   dependency graph has no Tokio runtime. Existing files are hash checked on opening. Changing
-  an upload cap rebuilds that torrent under the new limit and can cause another
+  an upload cap updates the existing live limiter without another
   check. Native MSE/peer encryption is supported; high/max file priorities,
   uTP and pure BitTorrent v2 remain unavailable.
   See [the engine evaluation](docs/engine-evaluation.md) for the implementation

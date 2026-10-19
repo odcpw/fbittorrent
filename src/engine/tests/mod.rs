@@ -63,6 +63,7 @@ use fixture::*;
                 runtime.cx(),
                 downloads.to_path_buf(),
                 SessionOptions {
+                    upload_enabled: false,
                     dht: None,
                     disable_trackers: true,
                     disable_local_service_discovery: true,
@@ -187,3 +188,4 @@ mod typed_seed {
 }
 include!("legacy_wire.rs");
 include!("wire_probe.rs");
+include!("upload.rs");

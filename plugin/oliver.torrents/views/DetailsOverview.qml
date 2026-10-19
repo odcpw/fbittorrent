@@ -44,8 +44,8 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;label:"Completed";visible:root.torrent.completed_at!==undefined;value:Model.when(root.torrent.completed_at)}
     Components.DetailField {Layout.fillWidth:true;label:"Undo until";visible:root.torrent.undo_until!==undefined;value:Model.when(root.torrent.undo_until)}
     RowLayout {
-      Text {Layout.fillWidth:true;text:"Allow seeding (u)";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-      Ui.ToggleSwitch {checked:root.torrent.seed===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
+      Text {Layout.fillWidth:true;text:"Upload";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
+      Ui.ToggleSwitch {checked:root.torrent.upload_enabled===true;busy:root.service.rowPending(root.torrent.hash);onToggled:root.service.toggleSeed(root.torrent.hash)}
     }
     Components.DetailField {Layout.fillWidth:true;value:DetailText.policy(root.torrent)}
     Components.DetailField {Layout.fillWidth:true;label:"Queue position";visible:root.torrent.queue_pos!==undefined;value:String(root.torrent.queue_pos)}

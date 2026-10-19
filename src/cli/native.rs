@@ -238,7 +238,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             value["action"] = json!("add");
             value["sequential"] = json!(true);
             value["first_last"] = json!(true);
-            value["seed"] = json!(*seed || cfg.seed_by_default);
+            value["seed"] = json!(*seed);
             value["stopped"] = json!(stopped);
             if value["source"].is_null() {
                 value["source"] = json!(if source.starts_with("magnet:") {
@@ -573,7 +573,7 @@ pub(super) fn add(
     if let Some(path) = &save { crate::free_space::require_writable(path)?; }
     let input=super::handler::source(source)?;
     let mut args =
-        json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed||cfg.seed_by_default});
+        json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed});
     if let Some(save) = save.or(cfg.save_path.clone()) {
         args["save_path"] = json!(save);
     }

@@ -572,18 +572,17 @@ def seed_toggle_no_check(binary, systemd):
             return
         policies = []
         with cap_observations(case, dict(seed=engine), fixture.info_hash) as sample:
-            for verb, expected in [(None, "default_cap"), ("seed", "unlimited"), ("noseed", "default_cap")]:
+            for verb, expected in [(None, "off"), ("seed", "unlimited"), ("noseed", "off")]:
                 if verb:
                     harness.cli(verb, fixture.info_hash)
                 row = engine_row(engine, fixture.info_hash)
-                policy = "unlimited" if row.get("upload_limit_bps") is None and row["seed"] else \
-                    "default_cap" if row.get("upload_limit_bps") == 32768 and not row["seed"] else "custom"
+                policy = row["upload_policy"]
                 policies.append(policy)
                 sample()
                 case.step(f"observe upload policy after {verb or 'initial completion'}", expected).close(
                     policy == expected and row["state"] in ("done", "seeding"),
                     f"Policy={policy}; torrent={row}; transfer.info={engine_value(engine, 'transfer.info')}.")
-        case.check(policies == ["default_cap", "unlimited", "default_cap"],
+        case.check(policies == ["off", "unlimited", "off"],
                    "seed then noseed restores the default policy", str(policies))
 
 
@@ -3942,6 +3941,7 @@ from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, sho
 from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
+from daemon_upload import zero_upload
 
 def handler_confirm_stages(binary, systemd=False):
     # Reuse the private native shell fixture; the daemon case retains its own JSONL.
@@ -4927,7 +4927,7 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (tui_trackers, tracker_add_remove, download_cap_holds, tui_peers_tab, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, stats_persist, history_points, shows_quality_prefers, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (zero_upload, tui_trackers, tracker_add_remove, download_cap_holds, tui_peers_tab, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, stats_persist, history_points, shows_quality_prefers, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,

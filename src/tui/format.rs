@@ -47,7 +47,7 @@ pub(super) fn torrent(row: &api::Torrent) -> Torrent {
         up_limit: row
             .upload_limit_bps
             .map(signed)
-            .unwrap_or(if row.seed { 0 } else { 32768 }),
+            .unwrap_or(0),
         ratio_limit: if row.seed { -1.0 } else { 0.0 },
         tags: if row.seed {
             "seed".into()
@@ -170,23 +170,8 @@ impl Metrics<'_> {
         )
     }
     pub fn upload(&self) -> String {
-        if let Some(row) = self.api {
-            if row.seed {
-                return "seeding allowed  (u to turn off)".into();
-            }
-            return format!(
-                "{} · stops when complete  (u to seed)",
-                row.upload_limit_bps.map_or_else(
-                    || "default upload cap".into(),
-                    |limit| format!("{} cap", rate(Some(limit)))
-                )
-            );
-        }
-        if self.legacy.seed_allowed() {
-            "seeding allowed  (u to turn off)".into()
-        } else {
-            "32 KiB/s cap · stops when complete  (u to seed)".into()
-        }
+        let enabled = self.api.map_or_else(|| self.legacy.seed_allowed(), |row| row.upload_enabled);
+        format!("Upload: {}  (u to change)", if enabled {"on"} else {"off"})
     }
 }
 pub(super) fn rate(value: Option<u64>) -> String {

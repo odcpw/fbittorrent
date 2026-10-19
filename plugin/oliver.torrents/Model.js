@@ -73,7 +73,7 @@ function meta(t) {
   if(t.dl_bps!==undefined && t.dl_bps!==null)values.push(rate(t.dl_bps))
   if(t.eta_s!==undefined && t.eta_s!==null)values.push(Formats.eta(t.eta_s,false))
   if(!values.length && t.size!==undefined && t.size!==null)values.push(Formats.size(t.size,false))
-  values.push(t.seed ? "seeding allowed" : "seed off")
+  values.push(t.upload_enabled===true ? "Upload: on" : "Upload: off")
   return values.join(" · ")
 }
 

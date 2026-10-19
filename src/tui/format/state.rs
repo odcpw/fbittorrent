@@ -101,7 +101,7 @@ mod watch_tests {
     use super::*;
     #[test]
     fn ready_and_may_stall_words_are_truthful() {
-        let mut row:api::Torrent=serde_json::from_value(serde_json::json!({"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"Video.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"default_cap","save_path":"/tmp/fixture","added_at":1,"force":false,"playable":{"file":0,"prefix_bytes":33554432,"ready":true,"acked":false,"buffered_s":32,"stall_free":false}})).unwrap();
+        let mut row:api::Torrent=serde_json::from_value(serde_json::json!({"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"Video.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fixture","added_at":1,"force":false,"playable":{"file":0,"prefix_bytes":33554432,"ready":true,"acked":false,"buffered_s":32,"stall_free":false}})).unwrap();
         let legacy=Torrent::default();
         assert_eq!(state_cell(&legacy,Some(&row)).trim_end(),"▶ Ready");
         assert_eq!(state_word(&legacy,Some(&row)),"Playable · may stall");

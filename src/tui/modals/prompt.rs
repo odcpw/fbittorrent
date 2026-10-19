@@ -43,7 +43,7 @@ impl TuiApp {
         if matches!(kind,PromptKind::AddTracker{..}) {input=input.with_max_length(4096).with_mask('•');}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
-        let add_flags = (true, true, self.cfg.seed_by_default);
+        let add_flags = (true, true, false);
         self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags });
     }
 

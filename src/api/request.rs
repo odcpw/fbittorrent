@@ -525,9 +525,9 @@ impl Call {
 
 pub const SETTINGS_KEYS: &[&str] = &[
     "max_active_downloads", "peer_encryption", "network_interface", "save_path",
-    "seed_by_default", "autostart", "idle_exit_secs", "notify", "timeout_secs",
+    "autostart", "idle_exit_secs", "notify", "timeout_secs",
     "handler", "open_command", "clipboard_watch", "reduce_motion", "peer_port",
-    "show_quality", "download_limit_bps", "upload_limit_bps", "alt_download_limit_bps",
+    "upload", "show_quality", "download_limit_bps", "upload_limit_bps", "alt_download_limit_bps",
     "alt_upload_limit_bps", "alt_limits_on",
 ];
 
