@@ -465,7 +465,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","torznab"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -830,9 +830,9 @@ unchanged. Example from `contracts/ipc/v1/search.ndjson`:
 |---|---|---|---|---|
 | `search.start` | `query`, `providers?`, `limit?` | `{search_id}` | yes | P3-01 |
 | `search.stop` | `search_id` | `{state: "done"}` | yes | P3-01 |
-| `search.providers` | none | `{providers: [Provider]}` | no | P3-01 |
+| `search.providers` | none | `{providers: [Provider]}`; kind nova or torznab (P7-01) | no | P3-01 |
 | `search.set_provider` | `name`, `enabled` | `{state: "done"}` | yes | P3-01 |
-| `search.install` | `curated?` or `sources?` | pending ref, then `{installed, failed}` | yes | P3-01 |
+| `search.install` | `curated?` or `sources?` (HTTPS Nova .py or Torznab endpoint; P7-01) | pending ref, then `{installed, failed}` | yes | P3-01 |
 | `search.browse_sources` | none | `{sources: [BrowseSource]}` | no | P3-01 |
 | `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
 | `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |
@@ -928,7 +928,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.25**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.26**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -963,6 +963,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.23` | `app.client.dashboard_visible` |
 | `1.2.24` | `search.results[].providers` |
 | `1.2.25` | `playable` |
+| `1.2.26` | `search.torznab` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1082,3 +1083,52 @@ presence. Popup `glance` remains independent and freezes the idle countdown.
 The plugin declares visibility after hello and reconnect, including when the
 window was already visible before connecting. It omits the new marker for
 servers without the capability, preserving their strict request parsing.
+
+
+## Native Torznab providers (P7-01, CLI contract 1.2.26)
+
+Capability `torznab` enables the reserved `Provider.kind:"torznab"` alongside
+`nova`. `search.providers` lists both, and `search.start` runs selected enabled
+indexers through the same normalization/dedupe and keyed snapshots as Nova.
+`search.install {sources:["https://indexer.example/api"]}` registers native
+endpoints; a URL ending in `.py` installs a Nova script. Existing configured
+endpoints retain their kind. `torznab.ndjson` characterizes the mixed list.
+
+`fbittorrent search --install-torznab URL --key-file PATH` registers a native
+endpoint without placing the key on argv. The config is
+`$XDG_CONFIG_HOME/fbittorrent/indexers.toml`:
+
+```toml
+[[torznab]]
+name = "private_indexer"
+url = "https://indexer.example/api"
+api_key_file = "/absolute/path/to/indexer.key"
+```
+
+Both files must be regular, owned by the user, exactly 0600 and opened with
+`O_NOFOLLOW`; an unsafe mode or symlink is refused, never repaired. Up to 16
+indexers and 256 KiB of config are accepted; each key is bounded to 4096 bytes.
+Inline URL credentials and inline `apikey` parameters are refused. Keyed remote
+endpoints require HTTPS; keyed loopback HTTP is allowed. Configuration refusals
+are `invalid_args`; upstream/download failures are `upstream` with
+`details.source:"torznab"`.
+
+Queries send `t=search`, `q`, and `apikey` only inside a native child worker.
+Requests have a 30-second deadline, a 4 MiB response limit, bounded XML nesting,
+and a 5000-result limit. Redirects stay on the original scheme/host/port, with
+at most six hops; cross-origin redirects are refused before a second request.
+`search.stop` and owner teardown kill and reap those workers, including blocked
+TLS requests. Empty measurements remain absent. The TUI and dashboard show
+provider kind; native-only search does not invoke Python.
+
+Responses that echo the credential are redacted before leaving the worker,
+including literal/URL-encoded keys and credential-bearing URL query members.
+A `__FBT_TORZNAB_KEY__` marker in a result is redeemed only by the native worker
+against its configured origin, so `search.grab` can retrieve metainfo without
+exposing the key in API frames, results, config output, logs or process argv.
+When an interface is selected, both queries and metainfo downloads use the
+existing interface-bound DNS/TCP primitives, with readiness checks around I/O
+and ordinary TLS verification. Bound `localhost` resolves directly to IPv4/IPv6
+loopback; remote names use bound DNS. Missing/down interfaces fail without retrying
+on an ordinary socket. The HTTP worker owns its small runtime only for the
+request; it never creates an engine session or acquires the daemon lock.

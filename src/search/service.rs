@@ -41,7 +41,7 @@ pub(crate) fn upstream(e: anyhow::Error) -> Error {
     let mut failure = error(ErrorCode::Upstream, &format!("{e:#}"), None);
     failure.details = Some(serde_json::Map::from_iter([(
         "source".into(),
-        "search".into(),
+        if e.to_string().starts_with("Torznab ") {"torznab".into()}else{"search".into()},
     )]));
     failure
 }
