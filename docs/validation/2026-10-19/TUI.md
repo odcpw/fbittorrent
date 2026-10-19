@@ -42,3 +42,8 @@ Continuation: P4-01 awaits P1-15; P4-02–11 and P5-02 depend transitively on th
 split/API work or other tracks. P6-10 awaits P1-13 (`src/daemon/notify.rs`) and
 P3-03 (`src/api/ops/shows.rs`), both absent here. No further Track D bead is
 unblocked on this branch. No branch switch or merge performed.
+
+Implementation commit: `c2269c1c49deddb42a5fd67cab9773b3a876e453` (16 files).
+Metadata deviation: its message body contains literal `\n` separators, so the
+co-author text is not a parsed trailer. History is preserved under the owner's
+no-rewrite rule; this receipt commit has the correctly formatted trailer.
