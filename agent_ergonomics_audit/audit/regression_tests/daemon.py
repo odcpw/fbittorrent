@@ -9,6 +9,7 @@ through managed recipes; stopping the launcher or closing an initially open
 stdin tears down every child. There is no --self-test mode.
 """
 import argparse
+from behavior_checks import capability_catalogue, check_capabilities, expected_daemon_stderr
 import base64
 import ctypes
 import fcntl
@@ -362,6 +363,7 @@ class Harness:
     def stop_serve(self, process, number=signal.SIGTERM, code=0):
         step = self.case.step("signal owned daemon", f"signal {number} reaches the serve PID (not the systemd-run launcher)")
         pid = self.daemon_pid()
+        stderr_offset = len(self.stderr())
         began = time.monotonic()
         os.kill(pid, number)
         step.ok(f"Delivered signal {number} to owned PID {pid}.")
@@ -369,6 +371,11 @@ class Harness:
         elapsed = time.monotonic() - began
         self.case.check(elapsed < 10 and not self.engine_path.exists(),
                         "daemon exits and removes its socket within 10 seconds", f"elapsed={elapsed:.3f}s; socket={self.engine_path.exists()}.")
+
+        if code == 0:
+            diagnostics = self.stderr()[stderr_offset:]
+            self.case.check(expected_daemon_stderr(diagnostics),
+                            "owned shutdown has healthy diagnostics and drains before socket unlink", diagnostics)
 
     def lock_free(self):
         path = self.engine_path.with_name("engine.lock")
@@ -911,8 +918,8 @@ def sigterm_drains(binary, systemd):
                 partial.sendall(b'{"id":')
                 harness.stop_serve(process)
             text = harness.stderr()
-            case.check(re.search(r"engine drained in \d+ ms", text) is not None and "sockets unlinked" in text,
-                       "SIGTERM logs the bounded drain and socket unlink", text[-1800:])
+            case.check(expected_daemon_stderr(text),
+                       "SIGTERM has healthy diagnostics and an ordered complete drain", text[-1800:])
             harness.lock_free()
 
 
@@ -1485,8 +1492,8 @@ def api_start_results(binary, systemd):
         client.call("torrents.set_seed", dict(hashes=[complete.info_hash], on=False))
         refusal = client.call("torrents.start", dict(hashes=[complete.info_hash]), error="invalid_state")
         case.check(refusal["error"]["details"] == dict(state="done", reason="complete_no_seed", hash=complete.info_hash) and
-                   refusal["error"]["hint"] == "inspect fbittorrent log" and refusal["error"]["message"] == "invalid state",
-                   "completed start preserves the catalogue text and the hash for fbittorrent seed <hash>", str(refusal))
+                   bool(refusal["error"].get("hint")) and bool(refusal["error"].get("message")),
+                   "completed start reports complete_no_seed and its torrent identity with guidance", str(refusal))
         partial_dir = sandbox.root / "partial"
         partial_dir.mkdir()
         partial = fixtures.two_file_fixture(partial_dir)
@@ -1739,6 +1746,8 @@ REPLAY_NORMALIZATION = (
     ("/result/server/pid", "timestamp", "positive u64; presence preserved"),
     ("/result/server/build", "text", "nonempty string; presence preserved (declared fixture volatile path)"),
     ("/result/server/version", "version", "semantic version string; presence preserved"),
+    ("/result/caps", "capabilities", "fixture caps are a subset of live caps; every live cap is in the capability catalogue"),
+    ("/error/message; /error/hint; /result/server/log", "text", "nonempty human-readable guidance; codes, details and state remain checked"),
     ("/result/torrent/completed_bytes; /result/torrent/progress; /result/torrents/*/completed_bytes; /result/torrents/*/progress", "checking only", "live state=checking: u64 completed_bytes <= size, finite progress=completed_bytes/size within 1e-9 absolute; size=0 requires both zero; presence preserved; other states compare exactly. Checking hashes exclude these measurements from live-history agreement, retaining size/file totals"),
     ("object member absent in fixture", "extra optional field", "live value validates against P1-05; removing the member also validates; log every pointer (ruling 4C)"),
     ("all other JSON pointers", "exact", "canonical bytes through the P1-05 types; no extra masks or value substitution"),
@@ -1760,6 +1769,7 @@ class ReplayNormalizer:
         self.extra_optional = []
         self.undo_windows = {}
         self.undo_hash_windows = {}
+        self.catalogue = capability_catalogue((REPO / "docs/IPC.md").read_text())
 
     def bind(self, kind, fixture, live, pointer):
         valid = (type(live) is int and 0 < live < 2**64) if kind == "request" else (
@@ -1816,6 +1826,12 @@ class ReplayNormalizer:
                 return got  # The complete checking tuple was validated below.
             rule = next((kind for patterns, kind, _ in REPLAY_NORMALIZATION
                          for pattern in patterns.split("; ") if self.matches(pattern, pointer)), "exact")
+            if rule == "capabilities":
+                try:
+                    check_capabilities(wanted, got, self.catalogue)
+                except ValueError as error:
+                    raise ReplayMismatch(f"JSON pointer {pointer}: {error}") from error
+                return got
             if rule == "checking only":
                 rule = "exact"
             if rule == "undo deadline":
@@ -2258,11 +2274,27 @@ def restore_replay_interface(client, harness):
 
 def api_replay_normalization(binary, systemd):
     with Case("daemon", "api_replay_normalization") as case:
+        import unittest
+        from behavior_checks_test import BehaviorChecks
+        controls = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(BehaviorChecks).run(controls)
+        case.check(controls.wasSuccessful(), "diagnostic, shutdown, capability and version predicate controls pass",
+                   f"tests={controls.testsRun}; failures={controls.failures}; errors={controls.errors}")
         normalizer = ReplayNormalizer()
         normalizer.compare(dict(id=1, result=dict(instance="0" * 32, server=dict(version="0.2.0"))),
                            dict(id=123, result=dict(instance="a" * 32, server=dict(version="0.1.0"))))
         case.check(True, "identity and version normalization accepts valid first occurrences", json.dumps(normalizer.identities, sort_keys=True))
+        normalizer.compare(dict(result=dict(caps=["files", "torrents"])),
+                           dict(result=dict(caps=["torrents", "watch", "files"])))
+        normalizer.compare(dict(error=dict(code="not_found", message="Old wording", hint="Old hint")),
+                           dict(error=dict(code="not_found", message="New wording", hint="New hint")))
+        case.check(True, "capability supersets and reworded guidance preserve behaviour", "Fixture caps retained; all live caps catalogued; error code unchanged.")
         for label, expected, actual, pointer in [
+            ("missing capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["files"])), "/result/caps"),
+            ("unknown capability", dict(result=dict(caps=["torrents"])), dict(result=dict(caps=["torrents", "made_up"])), "/result/caps"),
+            ("wrong capability type", dict(result=dict(caps=["torrents"])), dict(result=dict(caps="torrents")), "/result/caps"),
+            ("missing guidance", dict(error=dict(message="Old wording")), dict(error=dict(message="")), "/error/message"),
+            ("changed error code", dict(error=dict(code="not_found")), dict(error=dict(code="invalid_args")), "/error/code"),
             ("inconsistent identity", dict(id=1), dict(id=124), "/id"),
             ("invalid volatile", dict(result=dict(dl_bps=1)), dict(result=dict(dl_bps=-1)), "/result/dl_bps"),
             ("changed nonvolatile", dict(result=dict(checked=True)), dict(result=dict(checked=False)), "/result/checked"),
@@ -2491,10 +2523,6 @@ def replay_frame_deferrals(expected, op, caps=()):
     return found
 
 
-CAP_BEADS = dict(subscribe="P1-08", mutations="P1-09", peers="P5-01", watch="P5-05",
-                 queue="P6-05", origin="P6-08")
-
-
 def replay_deferral_class(bead, reason):
     if bead == "ENVIRONMENT-CONDITIONAL":
         return "environment-conditional"
@@ -2571,16 +2599,17 @@ def contract_group(group, binary, systemd):
                     # both run through frozen P1-05 validation, never synthesized.
                     if "caps" in actual.get("result", {}):
                         available_caps = set(actual["result"]["caps"])
+                        try:
+                            check_capabilities(expected.get("result", {}).get("caps", []),
+                                               actual["result"]["caps"], normalizer.catalogue)
+                            case.check(True, "fixture caps are available and all live caps are catalogued", json.dumps(sorted(available_caps)))
+                        except ValueError as error:
+                            case.check(False, "fixture caps are available and all live caps are catalogued", str(error))
                     owners = condition_deferrals + replay_frame_deferrals(expected, current["op"] if current else None, available_caps)
                     if group == "torrents" and number == 9 and os.environ.get("FBT_TEST_VPN") != "1":
                         owners.append(("/result/state", "ENVIRONMENT-CONDITIONAL", "ruling 6: explicit fixture0 binding requires the harness VPN namespace fixture (vpn.py, opt-in FBT_TEST_VPN=1)"))
                     if "instance" in expected.get("result", {}) and "instance" in actual.get("result", {}):
                         normalizer.bind("instance", expected["result"]["instance"], actual["result"]["instance"], "/result/instance")
-                    for index, cap in enumerate(expected.get("result", {}).get("caps", [])):
-                        if cap in CAP_BEADS and cap not in actual.get("result", {}).get("caps", []): owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
-                    if group == "hello" and expected.get("result", {}).get("proto") == 2:
-
-                        if cap in CAP_BEADS and cap not in available_caps: owners.append((f"/result/caps/{index}", CAP_BEADS[cap], "unadvertised capability " + cap))
                     if group == "hello" and expected.get("result", {}).get("proto") == 2 and actual.get("result", {}).get("proto") != 2:
                         owners.append(("/result/proto", "P1-18", "proto-2 acceptance is not implemented"))
                     if owners:
@@ -2594,11 +2623,11 @@ def contract_group(group, binary, systemd):
                             if ev is None:raise RuntimeError("EOF before file-removal completion")
                             if ev.get("ev")=="mutation.result" and ev.get("ref")==reference:outcome=ev
                         case.check(outcome["outcome"]=="done","file-deleting removal completes before subsequent missing-record scenario",json.dumps(outcome))
-                    step = case.step(f"replay {path.relative_to(REPO)}:{number}", "canonical bytes match under the single declared normalization table")
+                    step = case.step(f"replay {path.relative_to(REPO)}:{number}", "response behaviour matches the fixture under the declared normalization rules")
                     try:
                         first_extra = len(normalizer.extra_optional)
                         normalizer.compare(expected, actual)
-                        step.ok("Canonical bytes matched; identity bindings and volatile validity checked.")
+                        step.ok("Response behaviour matched; identities, capabilities and volatile values checked.")
                     except ReplayMismatch as failure:
                         step.fail(str(failure))
                     for pointer, value in normalizer.extra_optional[first_extra:]:

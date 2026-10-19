@@ -179,6 +179,8 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
             ui.contains('Q','Stop fbittorrent?')
             ui.press('y','confirmed Q stops the daemon and exits the client cleanly',
                      lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()==0 and not d.DaemonContract.socket_path(sandbox).exists())
+            case.check(d.expected_daemon_stderr(h.stderr()),
+                       'confirmed Q emits healthy diagnostics and drains before unlinking sockets',h.stderr())
         except Exception as error:
             ui.observe('finish UI actions','all actions complete without an exception',lambda pane:False,timeout=0)
             setup.check(False,'UI actions complete without exception',f'{type(error).__name__}: {error}')

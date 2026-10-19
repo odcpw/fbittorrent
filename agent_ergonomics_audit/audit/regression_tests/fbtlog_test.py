@@ -18,6 +18,16 @@ from fbtlog import Case, REPO, suite_status
 from native import NativeHarness
 
 
+def process_cleanup_controls():
+    import unittest
+    from native_cleanup_test import NativeCleanup
+    with Case("fbtlog_test", "process_cleanup") as test:
+        result = unittest.TestResult()
+        unittest.defaultTestLoader.loadTestsFromTestCase(NativeCleanup).run(result)
+        test.check(result.wasSuccessful(), "private-process cleanup, failure paths and suite audit controls pass",
+                   f"tests={result.testsRun}; failures={result.failures}; errors={result.errors}")
+
+
 def settings_reopen():
     with Case("fbtlog_test", "settings_reopen") as test:
         fixtures = test.suite.directory / "fixtures/reopen"
@@ -328,6 +338,7 @@ def main():
     polling_cli_exits()
     settings_reopen()
     tmux_relaunch()
+    process_cleanup_controls()
     early_abort_summary()
     return suite_status("fbtlog_test")
 
