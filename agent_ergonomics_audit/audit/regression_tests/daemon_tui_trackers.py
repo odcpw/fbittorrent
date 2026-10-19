@@ -21,6 +21,8 @@ def tui_trackers(binary,systemd):
             ui.keys(target,']]]');ui.assert_pane(target,'[Trackers]')
             ui.assert_pane(target,'! Error');ui.assert_pane(target,'fixture: not yet')
             ui.assert_pane(target,'(e) Reannounce')
+            topic='torrent:'+fixture.info_hash+'.trackers'
+            h.wait_for(lambda:((counts:=client.call('app.info')['result']['subscriptions']['by_topic']).get(topic)==1,json.dumps(counts)),'only the visible Trackers tab owns its live topic')
             for width,height in [(120,30),(80,24),(160,45)]:
                 resized=ui.tmux('resize-window','-t',target,'-x',str(width),'-y',str(height))
                 case.check(resized.returncode==0,'resize tracker panel to '+str((width,height)),resized.stderr)
@@ -43,7 +45,7 @@ def tui_trackers(binary,systemd):
             case.check(after[0]['status']=='ok' and after[0]['peers']==1 and '1' in ui.capture(target),
                        'the panel reflects the successful real response and one returned peer',client.diagnostic(after)+'\n'+ui.capture(target))
             ui.assert_pane(target,'(e) Reannounce')
-            ui.keys(target,'e');ui.assert_pane(target,'Reannouncing…');ui.assert_pane(target,'Reannounce requested')
+            ui.keys(target,'e');ui.assert_pane(target,'Reannounce requested')
             time.sleep(.35)
             case.check(len(tracker.snapshot())==2,'second keyboard force within sixty seconds adds no announce',json.dumps(tracker.snapshot()))
             client.call('torrents.stop',dict(hashes=[fixture.info_hash]))
@@ -51,7 +53,9 @@ def tui_trackers(binary,systemd):
             case.check(d.tracker_rows(client,fixture.info_hash)==after,'paused torrent retains its final recorded tracker status',client.diagnostic(d.tracker_rows(client,fixture.info_hash)))
             ui.keys(target,'e');ui.assert_pane(target,'not_live')
             case.check(len(tracker.snapshot())==2,'paused keyboard force cannot announce',json.dumps(tracker.snapshot()))
-            ui.keys(target,'Escape',literal=False);ui.keys(target,'L')
+            ui.keys(target,'Escape',literal=False)
+            h.wait_for(lambda:((counts:=client.call('app.info')['result']['subscriptions']['by_topic']).get(topic,0)==0,json.dumps(counts)),'closing details releases the tracker topic')
+            ui.keys(target,'L')
             pane=ui.capture(target)
             case.check('tui-private-token' not in pane and 'passkey=' not in pane,'retained TUI log/history contains no query or echoed passkey',pane)
             ui.keys(target,'Escape',literal=False);ui.keys(target,'q')

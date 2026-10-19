@@ -1,6 +1,6 @@
 //! API v1 wire contract. This module does not start a server or own engine state.
 //! `docs/IPC.md` is the maintained contract; shared client/server examples live in
-//! `contracts/ipc/v1`. The legacy IPC transport remains independent.
+//! `contracts/ipc/v1`. One current native protocol serves every client.
 #![allow(dead_code, unused_imports)] // Contract types/reexports precede their consumers.
 
 pub mod client;
@@ -14,6 +14,7 @@ pub mod objects;
 pub mod rss;
 pub mod shows;
 pub mod peers;
+pub mod trackers;
 pub mod ops;
 pub mod request;
 pub mod search;

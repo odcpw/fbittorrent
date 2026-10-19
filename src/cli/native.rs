@@ -306,7 +306,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                         let detail=c.call("torrents.get",json!({"hash":hashes[0]}))?;
                         if let Some(count)=detail["torrent"].get("tracker_count") {value["tracker_count"]=count.clone();}
                         value["trackers"]=if c.hello.caps.iter().any(|cap|cap=="trackers") {
-                            c.call("torrents.trackers",json!({"hash":hashes[0]}))?["trackers"].clone()
+                            serde_json::to_value(serde_json::from_value::<api::TrackersResult>(c.call("torrents.trackers",json!({"hash":hashes[0]}))?)?.trackers.into_iter().map(api::trackers::public_tracker).collect::<Vec<_>>())?
                         } else {json!([])};
                     } else { value["trackers"]=json!([]); }
                     emit(json_mode, value);

@@ -523,7 +523,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:clipboard` | Add | `y` | — | — |  |
 | `modal:clipboard` | Dismiss | `Esc` | — | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
-| `modal:details` | Reannounce | `e` | — | — |  |
+| `modal:details` | Reannounce | `e` | `e` | — |  |
 | `modal:details` | Refresh | `r` | — | — |  |
 | `modal:details` | Next tracker | `↓`, `j` | — | — |  |
 | `modal:details` | Previous tracker | `↑`, `k` | — | — |  |

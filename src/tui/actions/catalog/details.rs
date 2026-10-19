@@ -25,7 +25,7 @@ macro_rules! detail {
 }
 pub(super) const ACTIONS: &[Action] = &[
     action!("trackers.reannounce",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('e'))],"Reannounce",20,
-        |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Trackers&&!d.trackers.busy)&&a.online,Some(|a|a.load_trackers(true)),T,None,None,None),
+        |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Trackers&&!d.trackers.busy)&&a.online,Some(|a|a.load_trackers(true)),TD,None,None,None),
     action!("trackers.refresh",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('r'))],"Refresh",40,
         |a|a.details.as_ref().is_some_and(|d|d.tab==DetailsTab::Trackers&&!d.trackers.busy)&&a.online,Some(|a|a.load_trackers(false)),T,None,None,None),
     action!("trackers.down",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Down),KeyChord::plain(KeyCode::Char('j'))],"Next tracker",90,

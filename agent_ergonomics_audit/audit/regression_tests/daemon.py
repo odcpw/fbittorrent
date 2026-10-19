@@ -1070,6 +1070,7 @@ class ApiConn:
     def diagnostic(self, frame):
         text = json.dumps(frame, sort_keys=True)
         if self.redact_urls:
+            text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://)[^/?\s"<>]*@', r'\1', text)
             text = re.sub(r'([a-zA-Z][a-zA-Z0-9+.-]*://[^?\s"<>]+)\?[^\s"<>]*', r'\1?…', text)
         return text
 

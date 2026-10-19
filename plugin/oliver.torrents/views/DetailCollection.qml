@@ -22,7 +22,7 @@ ListView {
     Text {
       id:generic
       width:parent.width;visible:root.flow.tab!=="peers";textFormat:Text.PlainText;wrapMode:Text.Wrap
-      text:root.flow.tab==="trackers" ? row.modelData.url+"\n"+row.modelData.status+(row.modelData.last_error ? " · "+row.modelData.last_error : "") : "Piece "+row.modelData.index+" · "+(row.modelData.state || "")
+      text:"Piece "+row.modelData.index+" · "+(row.modelData.state || "")
       color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body
     }
   }

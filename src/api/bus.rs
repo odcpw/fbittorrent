@@ -131,6 +131,7 @@ struct Sample {
     searches: BTreeMap<u64, Value>,
     files: BTreeMap<String, Value>,
     peers: BTreeMap<String, Value>,
+    trackers: BTreeMap<String, Value>,
     network: Value,
     settings: Value,
     disk: Disk,
@@ -147,6 +148,7 @@ impl Sample {
             Topic::RssFeeds=>self.rss_feeds.clone(),
             Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
             Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
+            Topic::Trackers(h) => self.trackers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
             Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
             Topic::Network => self.network.clone(),
@@ -253,7 +255,7 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
             if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
-            if let Topic::Files(hash) | Topic::Peers(hash) = topic {
+            if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Trackers(hash) = topic {
                 if !sample.rows.iter().any(|r| &r.hash == hash) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
@@ -458,8 +460,12 @@ impl Bus {
         for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
             if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
         }
+        let mut trackers=BTreeMap::new();
+        for hash in topics.iter().filter_map(|t|if let Topic::Trackers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
+            if rows.iter().any(|r|&r.hash==hash) {trackers.insert(hash.to_string(),serde_json::to_value(ops::trackers::read(&self.daemon,hash)?).unwrap());}
+        }
         Ok(Sample {
-            peers,
+            peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
             show_releases,
 
@@ -720,7 +726,7 @@ impl Subscription {
         order.sort_by_key(|i| {
             matches!(
                 self.topics[*i].topic,
-                Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
+                Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
             )
         });
         for index in order {
@@ -733,9 +739,9 @@ impl Subscription {
             } else {
                 sample.value(&t.topic)
             };
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
+            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
             let reset =
-                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Files(_));
+                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_));
             if t.sent.is_none() || reset {
                 if keyed {
                     let resync = t.topic == Topic::Events
@@ -825,7 +831,7 @@ impl Subscription {
         // sampling is then released while the owning connection remains open.
         if restart {
             self.topics.retain(
-                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
+                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) | Topic::Trackers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
             );
         }
         self.epoch = Some(engine);

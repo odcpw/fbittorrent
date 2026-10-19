@@ -54,7 +54,7 @@ impl TuiApp {
         let tab = tabs[index];
         if tab == current {return Cmd::none();}
         self.details.as_mut().unwrap().tab = tab;
-        if tab!=DetailsTab::Trackers {let panel=&mut self.details.as_mut().unwrap().trackers;panel.busy=false;panel.request=0;}
+        if tab!=DetailsTab::Trackers {self.store.trackers.clear();let panel=&mut self.details.as_mut().unwrap().trackers;panel.busy=false;panel.request=0;}
         self.files = None;
         if tab != DetailsTab::Peers {self.store.peers.clear();}
         if tab == DetailsTab::Trackers {return self.load_trackers(false);}
@@ -89,7 +89,7 @@ impl TuiApp {
     }
     pub(super) fn close_details(&mut self) -> Cmd<Msg> {
         self.details = None;
-        self.store.peers.clear();
+        self.store.peers.clear();self.store.trackers.clear();
         self.files = None;
         Cmd::none()
     }

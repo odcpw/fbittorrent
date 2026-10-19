@@ -93,6 +93,15 @@ ShellRoot {
       var view=dashboard.item ? dashboard.item.search : null,query=view ? view.queryTarget : null
       return JSON.stringify({search:!!view,active:view ? view.activeFocus : null,visible:view ? view.visible : null,query:query ? {active:query.activeFocus,focus:query.focus,text:query.text,visible:query.visible} : null,state:service.dashboardState})
     }
+    function trackerRows():string {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return "[]"
+      var view=root.find(dashboard.item.torrents,"tracker-view");return JSON.stringify(view ? view.renderedRows() : [])
+    }
+    function trackerReannounce():bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
+      var button=root.find(dashboard.item.torrents,"trackers-reannounce");if(!button || !button.enabled)return false
+      preferencesInput.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
     function clickDetailTab(tab:string):bool {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !dashboard.item)return false
       var button=root.find(dashboard.item.torrents,"details-tab-"+tab);if(!button)return false

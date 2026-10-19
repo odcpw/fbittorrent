@@ -27,7 +27,7 @@ fn rev_monotonic() {
         logs: json!([]),
         searches: BTreeMap::new(),
         files: BTreeMap::new(),
-        peers: BTreeMap::new(),
+        peers: BTreeMap::new(),trackers:BTreeMap::new(),
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},

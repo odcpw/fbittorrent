@@ -1,17 +1,19 @@
-//! On-demand tracker reads; explicit reannounce has a bounded follow-up read.
+//! Visible-only tracker snapshots/deltas, with explicit read/reannounce actions.
 use super::*;
 use crate::api;
-use std::{sync::atomic::{AtomicU64,Ordering}, time::Instant};
+use std::sync::atomic::{AtomicU64,Ordering};
 
 static NEXT_READ: AtomicU64=AtomicU64::new(1);
 #[derive(Default)]
 pub(super) struct TrackerPanel {
     pub rows: Vec<api::Tracker>,
+    pub urls:Vec<String>,
     pub busy: bool,
     pub error: String,
     pub request: u64,
     pub offset: usize,
     revision: u64,
+    request_revision:u64,
     cache: RefCell<TrackerTable>,
 }
 #[derive(Default)]
@@ -20,28 +22,12 @@ struct TrackerTable {
     rows: Vec<(String,bool)>,
     header: String,
 }
-/// The mirror never retains the private query. Also remove echoed passkeys.
-pub(super) fn public_tracker(mut row: api::Tracker) -> api::Tracker {
-    if let Some(message)=&mut row.message {
-        if let Ok(url)=url::Url::parse(&row.url) {
-            for (_,value) in url.query_pairs() {
-                if !value.is_empty() {*message=message.replace(value.as_ref(),"…");}
-            }
-        }
-        *message=public_message(message);
-    }
-    row.url=row.url.split(['?','#']).next().unwrap_or_default().to_owned();
-    row
-}
-pub(super) fn public_message(message: &str) -> String {
-    message.split_whitespace().map(|word| {
-        if word.contains("://") {word.split(['?','#']).next().unwrap_or_default()} else {word}
-    }).collect::<Vec<_>>().join(" ").chars().take(200).collect()
-}
+pub(super) fn public_tracker(row:api::Tracker)->api::Tracker {api::trackers::public_tracker(row)}
+pub(super) fn public_message(message:&str)->String {api::trackers::public_message(message)}
 fn read(connection: &attach::Presence,hash: &str)->Result<Vec<api::Tracker>> {
     let result:api::TrackersResult=serde_json::from_value(connection.request("torrents.trackers",serde_json::json!({"hash":hash}))?)?;
     anyhow::ensure!(result.trackers.len()<=4096,"tracker list exceeds UI row budget");
-    Ok(result.trackers.into_iter().map(public_tracker).collect())
+    Ok(result.trackers)
 }
 impl TuiApp {
     pub(super) fn load_trackers(&mut self, forced: bool) -> Cmd<Msg> {
@@ -49,6 +35,7 @@ impl TuiApp {
         if details.trackers.busy {return Cmd::none();}
         let request=NEXT_READ.fetch_add(1,Ordering::Relaxed);
         details.trackers.request=request;
+        details.trackers.request_revision=details.trackers.revision;
         details.trackers.busy=true;
         details.trackers.error.clear();
         let hash=details.hash.clone();
@@ -61,12 +48,8 @@ impl TuiApp {
                 if !forced {return read(&connection,&hash);}
                 let before=read(&connection,&hash)?;
                 connection.request_confirmed("torrents.reannounce",serde_json::json!({"hashes":[hash]}))?;
-                let deadline=Instant::now()+Duration::from_secs(2);
-                loop {
-                    let rows=read(&connection,&hash)?;
-                    if (rows!=before && rows.iter().all(|r|r.status!=api::TrackerStatus::Updating)) || Instant::now()>=deadline {return Ok(rows);}
-                    std::thread::sleep(Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())));
-                }
+                // Subsequent status/counters arrive only through the visible topic.
+                Ok(before)
             })().map_err(|e|public_message(&e.to_string()));
             Msg::Trackers {connection:identity,hash,request,forced,result}
         })
@@ -77,15 +60,34 @@ impl TuiApp {
         panel.busy=false;
         match result {
             Ok(rows)=>{
+                if panel.revision==panel.request_revision {
+                let mut rows=rows;rows.sort_by(|a,b|a.url.cmp(&b.url));
+                panel.urls=rows.iter().map(|row|row.url.clone()).collect();
                 panel.rows=rows.into_iter().map(public_tracker).collect();
-                panel.rows.sort_by(|a,b|a.url.cmp(&b.url));
                 panel.revision=panel.revision.wrapping_add(1);
+                }
                 if forced {self.set_success("Reannounce requested");}
                 else {self.set_status("Trackers refreshed",false);}
             },
             Err(error)=>{panel.error=public_message(&error);self.set_status(public_message(&error),true);},
         }
         Cmd::none()
+    }
+    pub(super) fn tracker_topic(&self)->Option<api::Topic> {
+        self.details.as_ref().filter(|d|d.tab==DetailsTab::Trackers && self.has_cap("trackers"))
+            .and_then(|d|api::Hash::new(&d.hash).ok()).map(api::Topic::Trackers)
+    }
+    pub(super) fn sync_tracker_panel(&mut self) {
+        let Some(details)=self.details.as_mut().filter(|d|d.tab==DetailsTab::Trackers)else{return;};
+        let Some(rows)=self.store.trackers.iter().find(|(h,_)|h.as_str()==details.hash).map(|(_,rows)|rows)else{return;};
+        let urls=rows.keys().cloned().collect::<Vec<_>>();
+        let rows=rows.values().cloned().map(public_tracker).collect::<Vec<_>>();
+        if details.trackers.rows!=rows || details.trackers.urls!=urls {
+            details.trackers.rows=rows;details.trackers.urls=urls;
+            details.trackers.revision=details.trackers.revision.wrapping_add(1);
+            details.trackers.offset=details.trackers.offset.min(details.trackers.rows.len().saturating_sub(1));
+        }
+        details.trackers.error.clear();
     }
     pub(super) fn scroll_trackers(&mut self, down: bool)->Cmd<Msg> {
         if let Some(d)=self.details.as_mut() {
@@ -96,7 +98,7 @@ impl TuiApp {
     pub(super) fn view_trackers(&self, area: Rect, frame: &mut Frame) {
         let Some(details)=&self.details else {return;};
         let panel=&details.trackers;
-        if !panel.error.is_empty() {
+        if !panel.error.is_empty() && panel.rows.is_empty() {
             Paragraph::new(panel.error.as_str()).style(self.theme.err()).wrap(WrapMode::Word).render(area,frame);return;
         }
         if panel.rows.is_empty() {

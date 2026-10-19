@@ -309,7 +309,9 @@
     {
       "id": "trackers.reannounce",
       "keys": {
-        "dashboard": null,
+        "dashboard": [
+          "e"
+        ],
         "popup": null,
         "tui": [
           "e"

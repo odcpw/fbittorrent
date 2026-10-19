@@ -8,6 +8,7 @@ pub(super) struct Snapshot {
     pub files: BTreeMap<String, api::File>,
     pub searches: BTreeMap<String, api::SearchItem>,
     pub peers: BTreeMap<String, api::Peer>,
+    pub trackers:BTreeMap<String,api::Tracker>,
     pub events: Vec<api::Event>,
     pub logs: BTreeMap<u64, api::LogEntry>,
     pub feeds:BTreeMap<String,api::Feed>,
@@ -22,7 +23,7 @@ impl Snapshot {
             torrents: BTreeMap::new(),
             files: BTreeMap::new(),
             searches: BTreeMap::new(),
-            peers: BTreeMap::new(),
+            peers: BTreeMap::new(),trackers:BTreeMap::new(),
             events: Vec::new(),
             logs: BTreeMap::new(),
             feeds:BTreeMap::new(),feed_items:BTreeMap::new(),
@@ -30,7 +31,7 @@ impl Snapshot {
         }
     }
     pub fn len(&self) -> usize {
-        self.peers.len() + self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.searches.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
+        self.trackers.len() + self.peers.len() + self.torrents.len() + self.files.len() + self.events.len() + self.logs.len() + self.searches.len() + self.feeds.len() + self.feed_items.len() + self.shows.len() + self.releases.len()
     }
     pub fn append(
         &mut self,
@@ -55,6 +56,7 @@ impl Snapshot {
                     keys.insert(row.hash.to_string())
                         && !self.torrents.contains_key(row.hash.as_str())
                 }
+                (api::Topic::Trackers(_),api::Item::Tracker(row))=>keys.insert(row.url.clone())&&!self.trackers.contains_key(&row.url),
                 (api::Topic::Peers(_),api::Item::Peer(p))=>keys.insert(p.addr.clone())&&!self.peers.contains_key(&p.addr),
                 (api::Topic::Files(_), api::Item::File(row)) => {
                     keys.insert(row.index.to_string())
@@ -84,6 +86,7 @@ impl Snapshot {
                 api::Item::Torrent(row) => {
                     self.torrents.insert(row.hash.to_string(), row.clone());
                 }
+                api::Item::Tracker(row)=>{self.trackers.insert(row.url.clone(),row.clone());},
                 api::Item::Peer(p)=>{self.peers.insert(p.addr.clone(),p.clone());},
                 api::Item::File(row) => {
                     self.files.insert(row.index.to_string(), row.clone());

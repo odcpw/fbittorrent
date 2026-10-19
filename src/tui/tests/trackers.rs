@@ -74,3 +74,24 @@ fn tracker_error_elision_keeps_the_failure_reason_before_the_url() {
     assert!(text.contains("fixture: not yet"),"{text}");
     assert!(text.ends_with('…'));
 }
+
+#[test]
+fn live_tracker_snapshot_is_atomic_and_a_late_read_cannot_replace_a_push() {
+    let mut app=fixture::app("torrents");prepare(&mut app);
+    let hash=api::Hash::new(app.details.as_ref().unwrap().hash.clone()).unwrap();
+    let topic=api::Topic::Trackers(hash.clone());assert_eq!(app.tracker_topic(),Some(topic.clone()));
+    app.load_trackers(false);let request=app.details.as_ref().unwrap().trackers.request;
+    let stale=app.details.as_ref().unwrap().trackers.rows.clone();
+    let row=api::Tracker{url:"https://credential-user:credential-pass@tracker.invalid/announce?passkey=private-token".into(),tier:None,status:api::TrackerStatus::Ok,last_announce_at:Some(10),next_announce_at:None,peers:Some(1),message:None};
+    app.store.event(&api::Event::SnapshotBegin{sub:123,topic:topic.clone(),rev:1,count:1,reason:api::SnapshotReason::Subscribe,oldest_seq:None}).unwrap();
+    app.store.event(&api::Event::SnapshotChunk{sub:123,topic:topic.clone(),rev:2,items:vec![api::Item::Tracker(row.clone())]}).unwrap();
+    app.sync_tracker_panel();assert_eq!(app.details.as_ref().unwrap().trackers.rows,stale,"partial snapshots cannot replace confirmed status");
+    app.store.event(&api::Event::SnapshotEnd{sub:123,topic:topic.clone(),rev:3}).unwrap();app.sync_tracker_panel();
+    app.trackers_loaded(None,hash.to_string(),request,false,Ok(stale));
+    let panel=&app.details.as_ref().unwrap().trackers;
+    assert_eq!(panel.rows.len(),1);assert_eq!(panel.rows[0].status,api::TrackerStatus::Ok);
+    assert_eq!(panel.urls,[row.url.clone()],"private identity stays available only for explicit socket operations");
+    let pane=golden::render(&app,80,24);
+    for secret in ["credential-user","credential-pass","private-token","passkey="] {assert!(!pane.contains(secret));}
+    app.details_tab(true);assert!(app.tracker_topic().is_none());assert!(app.store.trackers.is_empty());
+}

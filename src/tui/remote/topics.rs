@@ -33,6 +33,7 @@ impl TuiApp {
                 desired.push(api::Topic::Files(hash));
             }
         }
+        if let Some(topic)=self.tracker_topic(){desired.push(topic);}
         if let Some(topic)=self.peer_topic() {desired.push(topic);}
         self.topic_selection.desired = desired;
         if self.topic_selection.inflight
