@@ -97,6 +97,7 @@ fn run(cli: Cli) -> Result<Code> {
     if let Some(Cmd::RobotDocs { section, surface }) = &cli.cmd {
         return cli::robot_docs(section, surface, cli.json);
     }
+    if matches!(&cli.cmd,Some(Cmd::Api { list:true,.. })) { return cli::raw::catalog(cli.json); }
     let _search_cleanup = SearchCleanup;
     search::begin_session()?;
     let cfg = Config::load()?;
@@ -177,6 +178,8 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
+        Cmd::Events { follow, since_seq, kinds } => return cli::stream::events(&cfg, follow, since_seq, kinds),
+        Cmd::Api { op, list, args, json_args, reference } => return cli::raw::run(&cfg, json, no_start, op, list, args, json_args, reference),
         Cmd::Log { follow, level, source } => return cli::logs::run(&cfg, json, follow, level, source),
         Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
             return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
@@ -535,7 +538,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 

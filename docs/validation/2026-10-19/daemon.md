@@ -204,3 +204,43 @@ passes 365 locked Rust tests, zero failures, two intentional ignores. Python com
 source-size checks pass. No all.sh between track beads per owner instruction.
 Unmet criteria: none. Follow-up: actual desktop banners/installation remain the
 integrated milestone's qualification, outside these isolated unit/process checks.
+
+## P1-18 — events and raw API (`fbt-p1-18-s18`)
+
+Added bounded event replay/follow with instance/seq, filters, explicit resync,
+EOF/SIGINT detachment; raw response/error envelopes, typed arguments, stable raw
+client identity for cross-process refs, per-op startup/retry policy; a compiled
+args/result catalogue shared by api --list, robot-docs api and capabilities. A
+unit checks every IPC operation row/argument/result/mutating column. No existing
+fixture bytes changed. Neighbouring client plumbing retains transport envelopes
+and names across reconnect; the old unit initializer only adds name=None. The
+live shape bridge applies actual cli::shapes::rows, rather than duplicating it in
+Python. Documentation corrects stale restart/exit-75 wording.
+
+Private-XDG evidence: `target/test-logs/fbt-p1-18-s18/`; `run.py check`
+(`initial-check/`) passed; `api` (`module-tests-fixed/`) passed 88/one bridge
+ignore; `policy` (`raw-units-fixed/`) passed the argument unit. `agent
+ events_follow_completion events_since_seq_replay events_resync_when_older
+ events_down_exit_4 api_list_matches api_list_matches_ipc_md api_unknown_op_hint
+ api_mutating_starts_daemon_read_does_not` passed eight real cases in each mode
+(`foreground/agent_contract/`, `FBT_BUS_SYSTEMD=1` in `systemd/agent_contract/`).
+Completion arrived in 0.855/0.804 s with exact real loopback bytes; killing the
+reader then resuming prints exactly the two later additions; 1,002 real parked
+ledger additions force actual 1,000-entry ring eviction and explicit oldest_seq;
+raw A.9 objects equal the actual Rust shape conversion; raw typed failures retain
+field details; explicit refs replay identical mutation results across processes;
+raw read never starts, write starts the verified private static unit. The final
+catalogue also works with an invalid private config (`catalog-final/` and
+`catalog-systemd-final/`). `build` (`final-build/`) and single full `cargo test
+--locked -- --nocapture` (`full-final/`) pass: 368 tests, zero failures, three
+intentional process-bridge ignores (the new shape bridge ran in both live cases).
+Python, whitespace, unchanged-fixture and <=900 source-line checks pass.
+
+Literal bead deviations: planned contract 1.2.1 was already superseded by
+integrated features; the required monotonic patch is 1.2.5, with separate events
+and api changes entries. No catalogue operation is within Levenshtein distance 2
+of literal `nope`; it exits 2/unknown_op with nearest=[] and api --list hint,
+while the actual distance-two typo torrents.lsit suggests torrents.list. Neither
+an old version nor a false neighbour is fabricated. Other criteria met. No
+all.sh between track beads per owner policy. Follow-up: app.log queries with many
+maximum-length messages need a byte budget beneath the 1 MiB response cap.

@@ -2,6 +2,8 @@
 use super::*;
 pub mod shapes;
 pub(super) mod logs;
+pub(super) mod stream;
+pub(super) mod raw;
 pub(super) mod restart;
 mod native;
 mod offline;
@@ -32,6 +34,20 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Cmd {
+    /// Replay retained daemon events; --follow streams until EOF or Ctrl+C
+    Events {
+        #[arg(long)] follow: bool,
+        #[arg(long)] since_seq: Option<u64>,
+        #[arg(long, value_delimiter=',')] kinds: Vec<String>,
+    },
+    /// Send a raw API operation or list its compiled catalogue
+    Api {
+        #[arg(required_unless_present="list")] op: Option<String>,
+        #[arg(long, conflicts_with="op")] list: bool,
+        #[arg(long="arg", requires="op")] args: Vec<String>,
+        #[arg(long, requires="op")] json_args: Option<String>,
+        #[arg(long="ref", requires="op")] reference: Option<String>,
+    },
     /// Read daemon history without starting it; --follow streams NDJSON
     Log {
         #[arg(long)]
@@ -343,13 +359,17 @@ mod tests {
 /// Documentation is available even when configuration is invalid or absent.
 pub(super) fn robot_docs(section: &str, surface: &str, json: bool) -> Result<Code> {
     match section {
+        "api" => {
+            if json { println!("{}", serde_json::json!({"ok":true,"operations":crate::api::ops::TABLE})); }
+            else { print!("{}",crate::api::ops::markdown()); }
+        }
         "keys" => {
             if json { println!("{}", tui::actions::keymap(surface)); }
             else { print!("{}", tui::actions::markdown(surface)); }
         }
         "guide" => if json { println!("{}", agent::with_warnings(serde_json::json!({"ok":true,"section":"guide","text":agent::ROBOT_GUIDE.to_string()}))); } else { print!("{}", agent::ROBOT_GUIDE); },
         _ => return Err(AppError::new(Code::Usage, format!("unknown docs section '{section}'"))
-            .hint("fbittorrent robot-docs guide   # or: robot-docs keys --surface all").into()),
+            .hint("fbittorrent robot-docs guide   # or: robot-docs api / robot-docs keys --surface all").into()),
     }
     Ok(Code::Ok)
 }

@@ -567,3 +567,11 @@ active, summary/app.info expose `upgrade_pending`; `restart` switches immediatel
 Foreground `serve` exits 75 too, but requires its supervisor to launch a new owner;
 CLI restart waits 30 seconds and exits 8 if no replacement hello arrives. Reads
 and restart never start a closed daemon. Hello reports the compiled git build id.
+
+Agents can use `fbittorrent events --follow --kinds torrent.completed --json`
+instead of polling. Save `(instance, seq)` and pass `--since-seq` to replay; an
+expired cursor emits an explicit resync marker. Ctrl+C detaches only the reader.
+`fbittorrent api torrents.list --json` prints the unchanged API envelope. Raw
+arguments accept repeated `--arg key=value` or one `--json-args` object; `--ref`
+keeps an explicit mutation identity across invocations. `api --list --json` and
+`robot-docs api` expose the operation catalogue. Reads never start a daemon.

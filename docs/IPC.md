@@ -616,3 +616,30 @@ hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
 keeps the process and API connections. No capability or frozen fixture changes;
 P1-17 implements the existing fields and operation. CLI contract 1.2.4 adds the
 replacement instance/server to restart output.
+
+### P1-18: agent event stream and raw operation catalogue
+
+`fbittorrent events [--follow] [--since-seq N] [--kinds a,b] --json` prints only
+retained/live event items, each with the daemon's `instance` and original `seq`.
+Store the pair; sequences reset per instance. Without follow, snapshot.end ends
+the replay. EOF or SIGINT exits 0 and never stops the daemon. A cursor older than
+the ring prints an explicit `{ev:"resync", reason:"resync", oldest_seq, seq,
+instance}` control line before replay; its seq is oldest_seq-1. Kind filters do
+not hide this data-loss marker. Unknown kinds exit 2; a closed read exits 4.
+
+`fbittorrent api <op> [--arg key=value] [--json-args '{...}'] [--ref r]` prints
+the response envelope verbatim, including id/ok/result or the full typed error.
+JSON values in --arg stay typed; other strings remain strings. Duplicate keys
+are rejected. Hello sends the supplied initial hello (or the standard agent
+hello); other operations use the shared API client, with stable raw-api client
+identity so explicit refs survive separate CLI invocations. Startup and retry
+policy use the compiled operation table. Reads and unknown operations never
+start an owner; writes respect autostart and --no-start. The envelope's A.3 code
+determines the CLI exit. Unknown names suggest at most three table entries with
+Levenshtein distance <=2; unrelated names have an empty nearest list and the
+api --list hint. api --list and robot-docs api show the same args/results,
+mutating/idempotent/since metadata; a unit test compares every documented row.
+
+Changelog P1-18: CLI contract 1.2.5 adds events/api and capabilities.api_operations.
+The original planned 1.2.1 number predates already-integrated additive changes;
+all earlier fields and frozen fixture bytes remain intact. No new API operation.
