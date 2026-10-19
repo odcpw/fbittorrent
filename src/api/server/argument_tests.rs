@@ -471,6 +471,18 @@ fn live_subscription_validation_retains_revision_history_and_rejects_gaps() {
 }
 
 #[test]
+fn tracker_url_failures_name_the_key_without_echoing_values() {
+    for op in ["torrents.add_tracker","torrents.remove_tracker"] {
+        let bytes=serde_json::to_vec(&json!({"id":1,"op":op,"args":{"hash":"5656565656565656565656565656565656565656","url":"ftp://127.0.0.1/a?passkey=private"}})).unwrap();
+        let invalid=super::framing::decode(&bytes).err().expect("invalid scheme");
+        assert_eq!(invalid.error.code,ErrorCode::InvalidArgs);
+        assert_eq!(invalid.error.details.unwrap()["key"],"url");
+        assert!(!invalid.error.message.contains("private"));
+        println!("{op}: invalid URL names url, query value absent");
+    }
+}
+
+#[test]
 fn live_readded_completion_starts_after_confirmed_removal() {
     let hash = "ab".repeat(20);
     let initial = checking_capture();

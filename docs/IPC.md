@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `tracker_edit` | `torrents.add_tracker/remove_tracker` | P7-04 |
 | `download_limit` | `torrents.set_download_limit`, configured/effective torrent fields | P7-06 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
 | `mutations` | `ref` replay, `mutation.result`, pending states | P1-09 |
@@ -201,6 +202,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
+| `torrents.add_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
+| `torrents.remove_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
 | `torrents.set_upload_limit` | `hashes: [hash]`, `bps: bps?` (≥ 16384, or `null` for unlimited) | `{state: enum(done\|pending)}` (pending until P6-07) | yes | P1-06 |
 | `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder)}` | no | P1-06 |
@@ -468,7 +471,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","recheck","queue","origin","log","search","trackers","limits","free_space","clipboard","rss","shows","move","staging","dashboard_presence","watch","peers","download_limit","torznab","tracker_edit"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -910,7 +913,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.29**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.30**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -949,6 +952,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.27` | `download_limit_bps` |
 | `1.2.28` | `search.install_torznab` |
 | `1.2.29` | `search.torznab` |
+| `1.2.30` | `trackers.edit` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1117,6 +1121,19 @@ CLI `limit <sel> --down N[K|M]` or `--down none` starts on demand, expands all
 client-side in batches of 256 and emits `{ok,action:"limit",hashes,download_limit_bps}`
 (the last field is null when explicitly cleared). Below-floor/overflow syntax
 is exit 2. Dashboard rendering is deferred to track C/D; no new TUI control.
+
+### P7-04: tracker editing (contract 1.2.30)
+
+`tracker_edit` enables idempotent `torrents.add_tracker {hash,url}` and
+`torrents.remove_tracker {hash,url}`, both returning `{state:"done"}`. URLs must
+use HTTP, HTTPS or UDP, contain a host, and fit within 4096 bytes; UDP requires an
+explicit port. Invalid input names `url` and never echoes it (queries may carry
+passkeys). An admitted handle is required, including when paused. The ordered
+set changes without restarting the handle or rechecking data. Each torrent has
+at most 256 edited trackers. Added URLs merge with metainfo on restore; durable
+removal tombstones prevent removed metainfo URLs from returning. Private torrents
+retain the first-tracker-only policy and never inherit session/public trackers.
+Both operations are available through the existing raw CLI `api` command.
 
 ### P7-01: native Torznab catalogue surface (contract 1.2.28)
 

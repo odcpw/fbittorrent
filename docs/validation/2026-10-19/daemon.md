@@ -677,6 +677,79 @@ finite primary. Current code preserves that selection and reports min of the
 per-torrent cap and the selected global/turtle bucket; no frozen P5-04 test was
 changed. Owner clarification requested; independent suite-budget work continues.
 
+
+### Owner rate-limit ruling (2026-10-19)
+
+The active global rate is the alternative/turtle value while turtle is on and
+otherwise the primary value. Effective per-torrent download/upload rate is the
+minimum of the configured per-torrent rate and that active global rate; an
+unlimited/unset value drops out. The default per-torrent upload cap remains
+32 KiB/s. P7-06 already implements this rule; no rate code change was needed.
+This supersedes the earlier pending primary-versus-alt question. The isolated
+5 s warmup/20 s byte-window and turtle-minimum tests in the P7-06 evidence above
+remain the observed proof. Suite wall-budget work is deferred until integration
+brings main's complete harness into this branch; the interrupted pre-integration
+baseline is retained as interrupted evidence, not a suite result.
+
+
+### P7-04 — tracker add/remove, daemon/API/CLI half (fbt-p7-04-aq7)
+
+Landed an ordered, watch-driven mutable tracker set in the fork, bounded live
+monitor admission/removal (including an empty set), handle-preserving edits,
+and durable `Record.trackers` additions plus removal tombstones merged with
+metainfo on restore. The ledger is saved before publishing an edit; a forced
+atomic-save failure proves the old live set and saved record remain intact.
+Private torrents keep the first-metainfo-tracker policy and exclude public
+session trackers. Tracker counts reflect edits for live and ledger-only reads.
+Added strict/idempotent `torrents.add_tracker` and `torrents.remove_tracker`
+(`http(s)`/`udp`, host required, UDP port required, 4096-byte URL bound), raw CLI
+coverage, and query-redacted diagnostics. Contract 1.2.15 adds `tracker_edit`,
+its changes[] entry, TABLE rows, documentation and tracker-edit.ndjson. Per the
+owner's exact-cap ruling, existing hello/error capability arrays and the hello
+doc example were updated to the live list; no comparison mask was introduced.
+Neighbour edits are the one-line server error-key recovery for `url` plus its
+regression, live/saved detail counts, mechanical Record initializers (including
+the existing importer), and fork persistence readers of the changed set type.
+No compatibility mode or adapter was added.
+
+Evidence root: `target/test-logs/fbt-p7-04-aq7/` (mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p7-04-aq7/`). Commands below were executed through
+`/tmp/fbt-track-a-run.py` with `FBT_BEAD=fbt-p7-04-aq7`, distinct FBT_RUN_NAME,
+CARGO_BUILD_JOBS=4, the rch shim, and validated private HOME/TMPDIR/XDG/download
+paths before any product process. All end-to-end steps retained E.1 JSONL.
+
+- `cargo check --locked --tests`: exit 0; `check/development_check/check.jsonl`.
+- `cargo test --locked -p librqbit-tracker-comms tracker_set_mutation -- --nocapture`:
+  1 passed; `fork-set/development_trackerset/trackerset.jsonl` and stdout log.
+- `cargo test --locked -p librqbit-core -p librqbit --features librqbit/rust-tls --lib private_ -- --nocapture`:
+  4 fork + 2 core regressions passed; `fork-private/development_fork/fork.jsonl`.
+- `cargo build --locked`: exit 0; `build-final/development_build/build.jsonl`.
+- `daemon.py target/debug/fbittorrent --no-systemd --case tracker_add_remove --case contract_hello --case contract_errors`
+  and the identical `--systemd` selection: 3/3 cases each, exit 0;
+  `{foreground-final,systemd-final}/processes/daemon/*.jsonl`. Both modes:
+  A stayed at 2 announces while newly added B advanced 2 -> 4 over two actual
+  further cycles; the same removal survived a real daemon restart. Empty-set
+  re-add, paused edits, idempotence, unknown hash, invalid URLs, raw CLI and
+  failed-save rollback also passed. Actual received HTTP request inventories:
+  `processes/workers/tracker_add_remove/daemon/tracker_add_remove.tracker-requests.json`.
+- `cargo test --locked -- --nocapture` (one full invocation): **389 passed,
+  0 failed, 3 existing opt-in tests ignored**;
+  `full-final/development_full/full.jsonl`, stdout and daemon stderr logs.
+  Includes the new typed URL, exact error-key and durable-record/count tests.
+- `python3 -m py_compile .../daemon.py .../daemon_trackers.py`, `git diff --check`:
+  exit 0. Every changed/new src file remains <=900 lines. No unexpected panic,
+  obligation leak or drain failure in the final runs. No all.sh between track
+  beads, per the owner's track policy.
+
+The initial foreground/systemd evidence is retained: only the invalid-URL
+`details.key` assertions failed (server returned `args`); the decoder was fixed
+and assertions kept unchanged before the final green runs. UI +/x and confirmation
+criteria are deferred to tracks C/D. P6-01 is absent on this branch, so the
+`torrent:<h>.trackers` not_contacted/removed delta hook remains an explicit
+integration follow-up, not claimed proven here. Both named announce acceptance
+criteria pass. Main f086ed9 arrived after these edits were underway; this tested
+commit must be included by the integrator before the branch can fast-forward
+and the complete-harness wall-budget work can run.
 ### Integration of P5-01 and P7-06 (2026-10-19)
 
 Merged track A through e31703d onto 50188d2. The already-applied M1a presence
@@ -695,3 +768,36 @@ Evidence: target/test-logs/integration/batch12-track-a/checks.jsonl. Cargo check
 lint pass. Focused Rust tests: 73 passed, zero failed; one existing live-capture
 harness entry point ignored. Isolated QML: 17 client and 35 store cases pass
 under batch12-track-a/qs/. No full suite, release build or native case re-run.
+
+
+### P7-04 / P6-01 semantic merge of main c1a13e0
+
+Reconciled all 15 conflicts, retaining main's features and P7-04 edits. The live
+ordered tracker set now owns the same observation store used by the monitors;
+remove retires its row immediately, cancelled/stale requests cannot recreate it
+or overwrite a re-added row, and saved reads merge edits without admitting a
+handle. Reannounce keeps its original sixty-second throttle owner across edits
+and handle replacement. Mutation edits respect main's operation/move exclusion.
+Main's complete contract history was retained; P7-04 uses the next unique slot
+1.2.29 above main's 1.2.28, as required by the unchanged history-uniqueness test;
+the integrator can renumber this additive entry. Exact 25-cap hello/error
+fixtures and docs agree. No existing assertion was weakened.
+
+Evidence under `target/test-logs/fbt-p7-04-aq7/` (private-XDG wrapper as above):
+`cargo check --locked --tests` green (`merge-check-final/`);
+`cargo test --locked --bin fbittorrent api:: -- --nocapture` 104 passed, one
+existing opt-in ignored (`merge-api/`);
+`cargo test --locked -p librqbit-tracker-comms -- --nocapture` ten passed,
+including stale-response/removal and throttle ownership (`merge-tracker-units/`);
+`daemon.py --case tracker_saved_views --case tracker_status --case reannounce
+--case reannounce_rate_limited --case reannounce_not_live_invalid_state --case
+tracker_url_redacted --case tracker_add_remove` seven passed with each of
+`--no-systemd` and `--systemd` (`merge-{foreground,systemd}/processes/daemon/*.jsonl`);
+`cargo test --locked -- --nocapture` 547 passed, zero failed, three existing
+opt-in tests ignored (`merge-full/`). Python compilation and diff checks passed.
+Initial merge check exposed one missing origin field in a test initializer;
+fixed before the final check. No unexpected panic/leak/drain failure in final
+runs. The integrated default foreground selection is now 203 cases, versus the
+older reported 186; wall-budget work will measure every currently selected case.
+The previously recorded tracker-topic/UI follow-ups remain; this merge proves
+current-set RPC observations and announce control.

@@ -80,6 +80,10 @@ impl EngineDispatcher {
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             return self.staged_operation(cx, op).await;
         }
+        if let EngineOp::EditTracker {hash,url,add} = &op {
+            self.edit_tracker(cx,hash,url,*add).await?;
+            return Ok(EngineResult::Acknowledged);
+        }
         match &op {
             EngineOp::Trackers {hash} => return self.trackers(cx,hash).await,
             EngineOp::Reannounce {hashes} => return self.reannounce(cx,hashes).await,
@@ -173,7 +177,10 @@ impl EngineDispatcher {
                         Err(error) => return Err(error),
                     }
                 };
-                return Ok(EngineResult::Detail(TorrentDetails::from_bytes(torrent, bytes.as_deref())?));
+                let mut detail=TorrentDetails::from_bytes(torrent, bytes.as_deref())?;
+                if let Ok(handle)=self.inner.handle(hash){detail.tracker_count=Some(handle.tracker_urls().len() as u64);}
+                else if let Some(bytes)=bytes.as_deref(){detail.tracker_count=Some(record.tracker_count(bytes)?);}
+                return Ok(EngineResult::Detail(detail));
             }
             EngineOp::Files { hash } => {
                 let handle = match self.inner.handle(hash) {
@@ -247,7 +254,7 @@ impl EngineDispatcher {
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
-                    only_files, download_limit: None, upload_limit: options.upload_limit,
+                    only_files, trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit,
                     ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
@@ -546,7 +553,7 @@ impl EngineDispatcher {
                 .clone()
                 .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
             only_files: files,
-            download_limit: None,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             upload_limit: options.upload_limit,
             ratio_limit: options.ratio_limit,
             category: options.category.clone(),
@@ -753,8 +760,11 @@ pub(crate) fn parked_get(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    Ok(EngineResult::Detail(TorrentDetails::from_bytes(
-        torrent,
-        bytes.as_deref(),
-    )?))
+    let mut detail=TorrentDetails::from_bytes(torrent,bytes.as_deref())?;
+    if let Some(bytes)=bytes.as_deref() {
+        let ledger=read_ledger(&directory.join("torrents.json"))?;
+        let record=ledger.records.iter().find(|r|r.hash==hash).context("torrent record not found")?;
+        detail.tracker_count=Some(record.tracker_count(bytes)?);
+    }
+    Ok(EngineResult::Detail(detail))
 }

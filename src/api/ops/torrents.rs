@@ -16,6 +16,7 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::EditTracker { hash, .. }
         | EngineOp::Commit {hash, ..}
         | EngineOp::Discard {hash}
         | EngineOp::Files { hash }
@@ -223,6 +224,11 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
+            execute(daemon,EngineOp::EditTracker{hash:args.hash.to_string(),url:args.url.clone(),add:matches!(call,Call::TorrentsAddTracker{..})})?;
+            if matches!(call,Call::TorrentsAddTracker{..}) {Reply::TorrentsAddTracker(DoneResult{state:DoneState::Done})}
+            else {Reply::TorrentsRemoveTracker(DoneResult{state:DoneState::Done})}
+        },
         Call::TorrentsPeers { args } => Reply::TorrentsPeers(PeersResult { peers: daemon.peers.read(daemon, &args.hash)? }),
         Call::TorrentsFiles { args } => Reply::TorrentsFiles(FilesResult {
             files: files(daemon, &args.hash)?,

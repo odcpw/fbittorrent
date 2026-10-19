@@ -20,6 +20,8 @@ pub(super) fn saved(record: &Record, directory: &Path) -> Result<Vec<librqbit::T
             })
             .unwrap_or_default()
     };
+    urls.extend(record.trackers.iter().filter_map(|v|v.parse().ok()));
+    urls.retain(|url|!record.removed_trackers.iter().any(|v|v==url.as_str()));
     urls.sort();
     urls.dedup();
     Ok(urls
@@ -122,4 +124,23 @@ mod tests {
         assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
         std::fs::remove_dir(directory).unwrap();
     }
+}
+
+#[cfg(test)]
+#[test]
+fn saved_tracker_edits_merge_without_restoring_or_contacting() {
+    let directory=crate::engine::tests::review_directory("saved-tracker-edits");
+    std::fs::create_dir_all(&directory).unwrap();
+    let record:Record=serde_json::from_value(serde_json::json!({
+        "hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"metadata",
+        "source":"magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&tr=http%3A%2F%2F127.0.0.1%3A1%2Foriginal",
+        "output_folder":directory,"only_files":null,"upload_limit":32768,"ratio_limit":0.0,
+        "category":"","tags":"","added_on":1,"completion_on":0,"paused":true,
+        "trackers":["http://127.0.0.1:2/added"],"removed_trackers":["http://127.0.0.1:1/original"]
+    })).unwrap();
+    let rows=saved(&record,&directory).unwrap();
+    assert_eq!(rows.len(),1);assert_eq!(rows[0].url.as_str(),"http://127.0.0.1:2/added");
+    assert_eq!(rows[0].status,librqbit::TrackerStatus::NotContacted);
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(),0);
+    std::fs::remove_dir(directory).unwrap();
 }

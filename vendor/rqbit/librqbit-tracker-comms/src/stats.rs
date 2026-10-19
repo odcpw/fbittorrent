@@ -67,16 +67,23 @@ impl TrackerStats {
                 .or_insert_with(|| TrackerStat::not_contacted(url));
         }
     }
+    /// Configuration changes retire observations immediately. An old request's
+    /// revision guard cannot restore a removed row or overwrite a re-added row.
+    pub fn remove(&self, url: &Url) {
+        self.rows.lock().remove(url);
+    }
+    pub fn retain(&self, urls: &[Url]) {
+        self.rows.lock().retain(|url, _| urls.contains(url));
+    }
     pub fn snapshot(&self) -> Vec<TrackerStat> {
         self.rows.lock().values().cloned().collect()
     }
     pub fn not_contacted(&self, url: &Url, message: &str) {
         let mut rows = self.rows.lock();
-        let row = rows
-            .entry(url.clone())
-            .or_insert_with(|| TrackerStat::not_contacted(url.clone()));
-        row.status = TrackerStatus::NotContacted;
-        row.message = Some(sanitize(url, message));
+        if let Some(row) = rows.get_mut(url) {
+            row.status = TrackerStatus::NotContacted;
+            row.message = Some(sanitize(url, message));
+        }
     }
     pub fn announce_now(&self) -> bool {
         let mut last = self.last_forced.lock();
@@ -100,15 +107,17 @@ impl TrackerStats {
     }
     pub fn updating(self: &Arc<Self>, url: &Url) -> AnnounceGuard {
         let mut rows = self.rows.lock();
-        let row = rows
-            .entry(url.clone())
-            .or_insert_with(|| TrackerStat::not_contacted(url.clone()));
-        let previous = row.clone();
+        let previous = rows
+            .get(url)
+            .cloned()
+            .unwrap_or_else(|| TrackerStat::not_contacted(url.clone()));
         let revision = self.revision.fetch_add(1, Ordering::Relaxed) + 1;
-        row.revision = revision;
-        row.status = TrackerStatus::Updating;
-        row.message = None;
-        row.next_announce_at = None;
+        if let Some(row) = rows.get_mut(url) {
+            row.revision = revision;
+            row.status = TrackerStatus::Updating;
+            row.message = None;
+            row.next_announce_at = None;
+        }
         AnnounceGuard {
             owner: self.clone(),
             url: url.clone(),
@@ -253,4 +262,24 @@ mod tests {
         assert!(message.len() <= 200);
         assert_eq!(redact_url(&url), "https://tracker.invalid/announce?…");
     }
+}
+
+#[cfg(test)]
+#[test]
+fn removed_announce_cannot_resurrect_or_overwrite_readded_observation() {
+    let url=Url::parse("http://127.0.0.1:1234/announce").unwrap();
+    let state=Arc::new(TrackerStats::default());
+    let set=crate::TrackerSet::with_stats(vec![url.clone()],state.clone());
+    let old=state.updating(&url);
+    assert!(set.remove(&url));assert!(state.snapshot().is_empty());
+    old.ok(99,Duration::from_secs(600));assert!(state.snapshot().is_empty());
+    let late=state.updating(&url);assert!(state.snapshot().is_empty());
+    assert!(set.add(url.clone()).unwrap());
+    late.error("old request",Duration::from_secs(10));
+    let rows=state.snapshot();assert_eq!(rows.len(),1);
+    assert_eq!(rows[0].status,TrackerStatus::NotContacted);assert!(rows[0].message.is_none());
+    assert!(state.announce_now());assert!(!state.announce_now());
+    assert!(set.remove(&url));assert!(set.add(url).unwrap());
+    assert!(!state.announce_now(),"set mutation preserves the same throttle owner");
+    println!("removed/readded tracker: stale results cannot resurrect rows; throttle owner survives edits");
 }

@@ -231,7 +231,7 @@
             output_folder: downloads.to_string_lossy().into_owned(),
             only_files: None,
             upload_limit: NO_UPLOAD_LIMIT,
-            download_limit: None,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             ratio_limit: 0.0,
             category: String::new(),
             tags: String::new(), origin: "manual".into(),

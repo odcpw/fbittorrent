@@ -138,6 +138,12 @@ impl Validate for Request {
                 Ok(())
             },
             Call::Subscribe { args } => args.validate(),
+            Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
+                let url=url::Url::parse(&args.url).ok();
+                require(args.url.len()<=4096 && url.is_some_and(|u|u.host_str().is_some()
+                    && matches!(u.scheme(),"http"|"https"|"udp")
+                    && (u.scheme()!="udp" || u.port().is_some())),"url","http(s) or udp tracker URL with a host (UDP requires a port)")
+            },
             Call::TorrentsSetDownloadLimit{args}=>{
                 args.validate()?;
                 if let Update::Set(bps)=args.bps {require(bps<=u32::MAX as u64,"bps","at most 4294967295 bytes/s")?;}
