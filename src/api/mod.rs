@@ -9,6 +9,7 @@ pub mod errors;
 pub mod events;
 pub mod mutations;
 pub mod objects;
+pub mod rss;
 pub mod ops;
 pub mod request;
 pub mod response;
@@ -18,6 +19,7 @@ pub mod validation;
 
 pub use events::*;
 pub use objects::*;
+pub use rss::*;
 pub use request::*;
 pub use response::*;
 pub use scalar::*;

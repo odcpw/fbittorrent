@@ -29,6 +29,7 @@ fn rev_monotonic() {
         network: json!({"ready":true,"message":"ready"}),
         settings: json!({}),
         disk: Disk {needed_bytes:0,low:false,free_bytes:None},
+        rss_feeds:json!([]),rss_items:BTreeMap::new(),
         daemon: json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),
     };
     subscription.update(&sample, &[], 1).unwrap();

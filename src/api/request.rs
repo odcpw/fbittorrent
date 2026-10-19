@@ -1,6 +1,7 @@
 //! Strict client input. Runtime policies (in-flight IDs, hello deadlines,
 //! capabilities, path opening and mutation refs) belong to the server.
 use super::scalar::*;
+use super::rss::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -292,6 +293,15 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename="rss.feeds")]
+    RssFeeds { #[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs> },
+    #[serde(rename="rss.add")] RssAdd { args:FeedAddArgs },
+    #[serde(rename="rss.remove")] RssRemove { args:FeedArgs },
+    #[serde(rename="rss.refresh")] RssRefresh { #[serde(skip_serializing_if="Option::is_none")] args:Option<FeedRefreshArgs> },
+    #[serde(rename="rss.items")] RssItems { args:FeedItemsArgs },
+    #[serde(rename="rss.set_read")] RssSetRead { args:FeedReadArgs },
+    #[serde(rename="rss.mark_feed_read")] RssMarkFeedRead { args:FeedArgs },
+    #[serde(rename="rss.grab")] RssGrab { args:FeedGrabArgs },
     #[serde(rename = "app.clipboard.dismiss")]
     AppClipboardDismiss { args: HashArgs },
     #[serde(rename = "app.log")]
@@ -367,6 +377,8 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
+            Self::RssItems { .. }=>"rss.items", Self::RssSetRead { .. }=>"rss.set_read", Self::RssMarkFeedRead { .. }=>"rss.mark_feed_read", Self::RssGrab { .. }=>"rss.grab",
             Self::AppClipboardDismiss { .. } => "app.clipboard.dismiss",
             Self::AppLog { .. } => "app.log",
             Self::AppStats { .. } => "app.stats",

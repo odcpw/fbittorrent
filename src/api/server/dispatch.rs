@@ -41,6 +41,16 @@ impl Shared {
             .map(|ticket| ticket.reference.to_string())
             .unwrap_or_default();
         if !self.daemon.is_stopping() {
+            if let Call::RssRefresh { args } = &job.request.call {
+                if let Some(id)=args.as_ref().and_then(|a|a.feed.as_ref()) {
+                    if let Err(failure)=ops::rss::feed(&self.daemon,id) {self.answer(&job,Err(failure));return;}
+                }
+                let pending=Reply::RssRefresh(MutationResult::Pending {reference:MutationRef::new(&reference).unwrap()});
+                if self.begin_confirmation(&job,pending,Confirmation::Worker,false) {
+                    self.confirm((job.connection.number,job.generation),ops::rss::dispatch(&self.daemon,&job.request.call));
+                }
+                return;
+            }
             if let Call::TorrentsAdd { args } = &job.request.call {
                 if matches!(args.source, AddSource::Url(_)) {
                     if let Err(failure) = ops::torrents::validate_url_add(args) {
@@ -90,6 +100,7 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
+                Call::RssFeeds {..}|Call::RssAdd {..}|Call::RssRemove {..}|Call::RssItems {..}|Call::RssSetRead {..}|Call::RssMarkFeedRead {..}|Call::RssGrab {..}|Call::RssRefresh {..}=>ops::rss::dispatch(&self.daemon,&job.request.call),
                 Call::AppClipboardDismiss { .. }
                 | Call::AppLog { .. }
                 | Call::AppStats { .. }

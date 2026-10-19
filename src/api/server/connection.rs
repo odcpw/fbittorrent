@@ -172,6 +172,7 @@ impl Shared {
         let glance = client.glance;
         drop(client);
         self.daemon.policy.lock().unwrap().client(connection.number, interactive, glance, Instant::now());
+        self.daemon.rss.presence(connection.number,interactive);
         self.bus.refresh();
     }
 }
@@ -180,6 +181,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
     impl Drop for Presence<'_> {
         fn drop(&mut self) {
             self.0.daemon.policy.lock().unwrap().disconnect(self.1, Instant::now());
+            self.0.daemon.rss.presence(self.1,false);
             self.0.bus.remove_connection(self.1);
             self.0.bus.refresh();
         }

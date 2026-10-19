@@ -492,3 +492,43 @@ is under `target/test-logs/fbt-p6-13-dxe/`, mirrored in
 Wayland clipboard/day-long owner evaluation remain deferred to tracks C/D/owner.
 No all.sh between track beads. Follow-up: hash-only notification adds rely on
 ordinary peer discovery rather than retaining clipboard tracker parameters.
+
+## P3-02 — RSS daemon/API (fbt-p3-02-n95)
+
+Added eight typed RSS operations, feed/item objects, keyed on-change topics,
+an owned coalescing stale-on-interactive scheduler, cached views invalidated by
+inode/size/mtime, 4 MiB feed reads, persistent grabbed history and rss-origin adds.
+Checks never add torrents. A grab marks read/grabbed only after an accepted real
+engine add. Feed-id removal is exact, preserving nested display names. The
+in-process CLI still uses the shared locked/atomic store. Contract 1.2.10 adds
+rss cap/changes and rss.ndjson; hello/error arrays compare exactly with live caps.
+Neighbours: API types/catalogue/dispatch/framing, bus/diff, presence/drain hooks,
+add-origin validation, and the TUI API mirror's typed RSS collections (rendering
+is deferred; no UI completion claimed). Snapshot row/byte bounds are retained,
+and only the selected feed's item table remains in that mirror.
+
+`FBT_BEAD=fbt-p3-02-n95 python3 /tmp/fbt-track-a-run.py api`, `units rss::`,
+`build` pass: 89 API tests and 13 RSS/store tests. All four
+`cases rss_refresh_on_interactive rss_cli_edit_visible rss_oversized_refused
+rss_grab_marks_read_only_on_success` pass both modes (`final-{foreground,systemd}/`):
+counted local feed hits follow stale interactive edges only; CLI add pushes in
+**103 ms** both modes; >4 MiB refresh returns pending then upstream/rss failure
+while both cached items survive; failed grab leaves read/grabbed false, successful
+local metainfo add persists rss origin and read/grabbed; nested-name removal and
+CLI read-history interoperability pass. One full `cargo test --locked -- --nocapture`
+ran (`full-final/`): **381 passed, 1 failed, 3 ignored**. The sole failure was the
+new RSS snapshot encountering the TUI mirror's unsupported item type. It was
+implemented without changing that test; final `units tui::store::` passes all
+**12** tests including every transcript (`tui-mirror-final/`). No second full run
+is claimed, following the one-full-run track cadence.
+
+Exact hello replay passes both modes (`caps-{foreground,systemd}/`). Error replay
+exposed a pre-existing pressure-fixture race: auxiliary URL replies crossed into
+the next line-cap scenario. The harness now drains every admitted reply and
+pending outcome after releasing its actual HTTP fixture; canonical expectations
+are unchanged. Final `cases contract_errors` passes both modes
+(`replay-fixed-{foreground,systemd}/`), with empty outstanding sets recorded.
+Logs are under `target/test-logs/fbt-p3-02-n95/`, mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p3-02-n95/`. No all.sh between track beads.
+Follow-up: the existing legacy error replay still records its older capability/
+operation deferrals; this bead adds no new comparison mask or deferral.

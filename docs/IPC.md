@@ -157,6 +157,14 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `rss.feeds` | none | `{feeds: [Feed]}` | no | P3-02 |
+| `rss.add` | `url: str`, `name?: str` | `{feed: Feed}` | yes | P3-02 |
+| `rss.remove` | `feed: str` | `{}` | yes | P3-02 |
+| `rss.refresh` | `feed?: str` | `{state: enum(pending\|done), ref?: str}` | yes | P3-02 |
+| `rss.items` | `feed: str`, `unread_only?: bool` | `{items: [FeedItem]}` | no | P3-02 |
+| `rss.set_read` | `feed: str`, `item: str`, `read: bool` | `{}` | yes | P3-02 |
+| `rss.mark_feed_read` | `feed: str` | `{count: u64}` | yes | P3-02 |
+| `rss.grab` | `feed: str`, `item: str`, optional add options | `{state: enum(pending\|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}` | yes | P3-02 |
 | `app.clipboard.dismiss` | `hash: hash` | `{}` | yes | P6-13 |
 | `app.settings.get` | none | `Settings` | no | P3-05 |
 | `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
@@ -434,7 +442,7 @@ validation failures are recorded without a new mask or deferral.
 
 ```ndjson
 {"dir":"c2s","frame":{"args":{"client":{"kind":"test","name":"fixture-test","version":"0.2.0"},"interactive":false,"proto":1},"id":1,"op":"hello"}}
-{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"caps":["torrents","files","subscribe","mutations","deferred_add","imdb","settings","log","limits","clipboard","rss"],"engine":"librqbit 9.0.1","engine_epoch":1,"instance":"0123456789abcdef0123456789abcdef","limits":{"hashes":256,"inflight":8,"line_in":65536,"line_out":1048576,"subs":16},"policy":{"idle_exit_secs":300},"proto":1,"server":{"build":"fixture","launcher":"foreground","log":"the terminal running fbittorrent serve","pid":1234,"version":"0.2.0"},"state":"running"}}}
 {"dir":"s2c","frame":{"ev":"bye","reason":"invalid_message"}}
 ```
 
@@ -722,3 +730,26 @@ A notice `Magnet on clipboard: <name>` offers Add and Dismiss; its actions call
 discovery. No transfer starts before an explicit Add action. Hello/error fixtures
 now advertise the exact live caps including clipboard; changes[].cap records it.
 The new clipboard.ndjson transcript covers offers, dismiss and clipboard adds.
+
+### P3-02: daemon RSS (contract 1.2.10)
+
+Capability `rss` adds the rss.* operations above and keyed on-change topics
+`rss.feeds` (id) and `rss.items:<feed-id>` (item id). Feed ids are the existing
+stable URL ids; feeds sort by id, items by published time descending then id.
+`Feed` contains id, name, url, title?, unread, last_refresh_at?, loading, error?.
+`FeedItem` contains id, title, description?, published_at?, size?, link?, magnet?,
+torrent_url?, read, grabbed. Unknown dates/sizes are omitted. Topic removals use
+string ids. The store is reloaded on inode/size/mtime changes before reads; the
+bus checks that stamp while RSS topics are subscribed so local CLI edits push.
+
+A new interactive presence schedules one stale check (older than 30 minutes)
+per feed; bar/glance/idle presence does not fetch. A single owned worker
+coalesces opens and rechecks staleness under its refresh lock. Explicit
+rss.refresh returns pending with a ref; mutation.result carries done or the
+upstream failure (details.source=rss). Bodies are capped at 4 MiB and each fetch
+at ten seconds or the shorter configured timeout; errors retain cached items.
+Drain stops scheduling and waits for the current bounded fetch. RSS refresh
+never adds a torrent. rss.grab uses the item's magnet/torrent URL with origin
+rss, and marks read/grabbed only after a successful ledger add. Existing
+in-process CLI paths and atomic store merge/rename behaviour remain available.
+Hello/error fixture caps now exactly include rss; rss.ndjson covers every op.

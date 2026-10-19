@@ -2395,7 +2395,23 @@ def replay_error(expected, fixture_request, client, normalizer, harness, number,
             client.case.check(frame.get("error", {}).get("code") == code,
                               "drive bounded dispatch/in-flight pressure rather than inject a server error",
                               f"elapsed={time.monotonic()-began:.3f}s; frame={frame!r}")
-            return frame, deferred
+            expected_frame = frame
+        # Releasing the HTTP source completes the auxiliary requests. Drain
+        # their actual replies and mutation outcomes before the next fixture
+        # input; response(identifier) may already have consumed some of them.
+        identifiers = {job["id"] for job in jobs}
+        def remaining():
+            replies = [line["frame"] for line in frames if line["dir"] == "s2c" and line["frame"].get("id") in identifiers]
+            pending = {reply["result"]["ref"] for reply in replies if reply.get("result", {}).get("state") == "pending"}
+            completed = {line["frame"].get("ref") for line in frames if line["dir"] == "s2c" and line["frame"].get("ev") == "mutation.result"}
+            return identifiers - {reply["id"] for reply in replies}, pending - completed
+        deadline = time.monotonic() + 20
+        while any(remaining()) and time.monotonic() < deadline:
+            if client.receive() is None: break
+        outstanding = remaining()
+        client.case.check(not any(outstanding), "drain every real pressure-fixture reply/outcome before protocol validation",
+                          json.dumps(dict(unanswered=sorted(outstanding[0]), pending=sorted(outstanding[1]))))
+        return expected_frame, deferred
     # These complete expected error frames have no P1-06 RPC producer. Do not
     # mistake the old catalogue's app.info requests for a way to trigger them.
     owners = {"ambiguous": "P1-11", "safety": "P1-11", "unsupported": "P1-18",
@@ -3785,11 +3801,12 @@ def tui_single_connection(binary, systemd):
 
 from daemon_disk import disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk
 from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
+from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
 from daemon_limits import alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart
 
 CASES = {function.__name__: function for function in
-         (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
+         (rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,

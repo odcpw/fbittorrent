@@ -9,6 +9,14 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation { name:"rss.feeds",mutating:false,idempotent:false,since:"P3-02",args:"none",result:"`{feeds: [Feed]}`" },
+    Operation { name:"rss.add",mutating:true,idempotent:false,since:"P3-02",args:"`url: str`, `name?: str`",result:"`{feed: Feed}`" },
+    Operation { name:"rss.remove",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`",result:"`{}`" },
+    Operation { name:"rss.refresh",mutating:true,idempotent:false,since:"P3-02",args:"`feed?: str`",result:"`{state: enum(pending|done), ref?: str}`" },
+    Operation { name:"rss.items",mutating:false,idempotent:false,since:"P3-02",args:"`feed: str`, `unread_only?: bool`",result:"`{items: [FeedItem]}`" },
+    Operation { name:"rss.set_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`, `item: str`, `read: bool`",result:"`{}`" },
+    Operation { name:"rss.mark_feed_read",mutating:true,idempotent:true,since:"P3-02",args:"`feed: str`",result:"`{count: u64}`" },
+    Operation { name:"rss.grab",mutating:true,idempotent:false,since:"P3-02",args:"`feed: str`, `item: str`, optional add options",result:"`{state: enum(pending|done), hash?: hash, name?: str, duplicate?: bool, deferred?: bool, disk?: DiskSpace}`" },
     Operation { name: "app.clipboard.dismiss", mutating: true, idempotent: true, since: "P6-13",
         args: "`hash: hash`", result: "`{}`" },
     Operation { name: "app.log", mutating: false, idempotent: false, since: "P1-14",
@@ -68,6 +76,7 @@ pub const TABLE: &[Operation] = &[
 ];
 
 pub mod app;
+pub mod rss;
 pub mod imdb;
 pub mod settings;
 pub mod torrents;

@@ -1,6 +1,7 @@
 //! Subscription frames and unsolicited events. Whole items are typed; only a
 //! partial delta uses arbitrary JSON values (including null for field deletion).
 use super::{objects::*, response::Error, scalar::*};
+use super::rss::{Feed,FeedItem};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -8,6 +9,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Item {
+    Feed(Feed), FeedItem(FeedItem),
     Log(LogEntry),
     Torrent(Torrent),
     File(File),

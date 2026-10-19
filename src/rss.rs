@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::qbt::{parse_rfc2822, RssArticle, RssFeed};
 
-const MAX_BODY: u64 = 8 * 1024 * 1024;
+const MAX_BODY: u64 = 4 * 1024 * 1024;
 const MAX_CACHED_ARTICLES: usize = 500;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -37,13 +37,15 @@ struct StoredFeed {
     last_checked: i64,
     etag: String,
     last_modified: String,
+    error: String,
+    grabbed_ids: BTreeSet<String>,
 }
 
 impl Default for StoredFeed {
     fn default() -> Self {
         Self {
             feed: RssFeed::default(), read_ids: BTreeSet::new(), last_checked: 0,
-            etag: String::new(), last_modified: String::new(),
+            etag: String::new(), last_modified: String::new(), error: String::new(), grabbed_ids: BTreeSet::new(),
         }
     }
 }
@@ -60,6 +62,12 @@ impl Drop for FileLock {
 #[derive(Clone)]
 pub struct Store {
     path: PathBuf,
+}
+pub(crate) struct Snapshot {
+    pub feed: RssFeed,
+    pub last_checked: i64,
+    pub error: String,
+    pub grabbed: BTreeSet<String>,
 }
 
 impl Default for Store {
@@ -156,6 +164,18 @@ impl Store {
         // An atomic rename makes unlocked reads safe, including during refresh.
         Ok(self.load()?.feeds.into_iter().map(|stored| stored.feed).collect())
     }
+    pub(crate) fn snapshot(&self) -> Result<Vec<Snapshot>> {
+        Ok(self.load()?.feeds.into_iter().map(|s|Snapshot { feed:s.feed, last_checked:s.last_checked, error:s.error, grabbed:s.grabbed_ids }).collect())
+    }
+    pub(crate) fn mark_grabbed(&self, path: &str, item: &str) -> Result<()> {
+        self.mutate(|data| {
+            let stored = data.feeds.iter_mut().find(|s|s.feed.name==path).context("RSS feed not found")?;
+            let article = stored.feed.articles.iter_mut().find(|a|a.id==item).context("RSS item not found")?;
+            article.is_read = true;
+            stored.read_ids.insert(item.into()); stored.grabbed_ids.insert(item.into());
+            Ok(())
+        })
+    }
 
     pub fn add(&self, url: &str, name: Option<&str>, timeout_secs: u64) -> Result<()> {
         validate_url(url)?;
@@ -190,6 +210,13 @@ impl Store {
             data.feeds.retain(|stored| !matches_path(&stored.feed.name, path));
             if data.feeds.len() == before { bail!("RSS feed not found: {path}"); }
             Ok(())
+        })
+    }
+    pub(crate) fn remove_id(&self, id:&str)->Result<()> {
+        self.mutate(|data| {
+            let before=data.feeds.len();
+            data.feeds.retain(|s| if s.feed.uid.is_empty(){stable_id(&s.feed.url)!=id}else{s.feed.uid!=id});
+            if before==data.feeds.len(){bail!("RSS feed not found");} Ok(())
         })
     }
 
@@ -239,6 +266,7 @@ impl Store {
                 else { return Ok(()); }; // subscription removed during fetch
                 stored.last_checked = now();
                 stored.feed.is_loading = false;
+                stored.error = fetched.as_ref().err().map(|e|format!("{e:#}")).unwrap_or_default();
                 match &fetched {
                     Ok(Some(result)) => {
                         if !result.title.is_empty() { stored.feed.title = result.title.clone(); }
@@ -328,7 +356,7 @@ fn host_name(url: &str) -> String {
         .unwrap_or_default()
 }
 
-fn stable_id(value: &str) -> String {
+pub(crate) fn stable_id(value: &str) -> String {
     // Stable cache key; it is not used as a cryptographic digest.
     let hash = value.bytes().fold(0xcbf29ce484222325u64, |hash, byte|
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
@@ -598,6 +626,21 @@ mod tests {
         assert!(reopened[0].articles.iter().find(|a| a.id == "episode-2").unwrap().is_read);
         store.set_read("Example", Some("episode-1"), true).unwrap();
         assert!(store.list().unwrap()[0].articles.iter().all(|a| a.is_read));
+    }
+    #[test]
+    fn grabbed_history_is_atomic_and_independent_of_read_toggle() {
+        let (_scratch,store)=Scratch::store();
+        let parsed=parse_feed(RSS.as_bytes(),"https://example.org/rss").unwrap();
+        store.import(&[RssFeed {name:"Example".into(),url:"https://example.org/rss".into(),articles:parsed.articles,..Default::default()}]).unwrap();
+        let before=std::fs::read(&store.path).unwrap();
+        assert!(store.mark_grabbed("Example","absent").is_err());
+        assert_eq!(std::fs::read(&store.path).unwrap(),before);
+        store.mark_grabbed("Example","episode-1").unwrap();
+        store.set_read("Example",Some("episode-1"),false).unwrap();
+        let snapshot=store.snapshot().unwrap().remove(0);
+        assert!(snapshot.grabbed.contains("episode-1"));
+        assert!(!snapshot.feed.articles.iter().find(|a|a.id=="episode-1").unwrap().is_read);
+        assert_eq!(MAX_BODY,4*1024*1024);
     }
 
     #[test]

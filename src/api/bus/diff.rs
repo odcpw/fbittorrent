@@ -9,13 +9,17 @@ pub(super) fn state_event(sub: u64, topic: &Topic, rev: u64, value: Value) -> Ap
         data,
     })
 }
-fn key(topic: &Topic, value: &Value) -> String {
-    let v = &value[match topic {
+fn key_field(topic:&Topic)->&'static str {
+    match topic {
+        Topic::RssFeeds | Topic::RssItems(_)=>"id",
         Topic::Torrents => "hash",
         Topic::Files(_) => "index",
         Topic::Events | Topic::Log => "seq",
         _ => unreachable!(),
-    }];
+    }
+}
+fn key(topic: &Topic, value: &Value) -> String {
+    let v = &value[key_field(topic)];
     v.as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| v.to_string())
@@ -68,11 +72,7 @@ pub(super) fn diff(topic: &Topic, old: &Value, new: &Value) -> (Changed, Vec<Val
         for (k, v) in before {
             if !after.contains_key(&k) {
                 removed.push(
-                    v[if *topic == Topic::Torrents {
-                        "hash"
-                    } else {
-                        "index"
-                    }]
+                    v[key_field(topic)]
                     .clone(),
                 );
             }

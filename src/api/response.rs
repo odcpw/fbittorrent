@@ -1,6 +1,7 @@
 //! Typed response envelopes and operation results. Decode a successful result
 //! using its request's operation (`Reply::decode`); there is no op on a reply.
 use super::{objects::*, scalar::*};
+use super::rss::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -209,6 +210,8 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
+    RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
     AppLog(LogResult),
     AppStats(StatsResult),
@@ -241,6 +244,10 @@ pub enum Reply {
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
         let reply = match op {
+            "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),
+            "rss.remove"=>serde_json::from_value(result).map(Self::RssRemove), "rss.refresh"=>serde_json::from_value(result).map(Self::RssRefresh),
+            "rss.items"=>serde_json::from_value(result).map(Self::RssItems), "rss.set_read"=>serde_json::from_value(result).map(Self::RssSetRead),
+            "rss.mark_feed_read"=>serde_json::from_value(result).map(Self::RssMarkFeedRead), "rss.grab"=>serde_json::from_value(result).map(Self::RssGrab),
             "app.clipboard.dismiss" => serde_json::from_value(result).map(Self::AppClipboardDismiss),
             "app.log" => serde_json::from_value(result).map(Self::AppLog),
             "app.stats" => serde_json::from_value(result).map(Self::AppStats),
