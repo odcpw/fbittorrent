@@ -29,7 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
-CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history','turtle_limits')
+CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history','turtle_limits','peer_port')
 
 
 class PaneUi(native.AttachedTui):
@@ -289,6 +289,39 @@ def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
         ui.case=setup
 
 
+def peer_port(binary,setup,sandbox,h,ui,process,torrent):
+    with d.ApiConn(h)as client, socket.socket()as reservation:
+        client.hello();client.call('subscribe',dict(topics=['events']))
+        reservation.bind(('127.0.0.1',0));port=reservation.getsockname()[1]
+        ui.start_owned();ui.tmux('resize-window','-t',ui.target,'-x','80','-y','24')
+        before=client.call('app.info')['result'];client.pushed.clear()
+        with Case('tui_smoke','peer_port')as case:
+            ui.case=case
+            ui.contains('F6','Download settings',literal=False)
+            ui.press('Up','select the peer port field',lambda pane:'Peer port'in pane,literal=False)
+            ui.contains('Right','Peer port · 0 automatic',literal=False)
+            ui.press('C-a','select the current port text',lambda pane:'Peer port · 0 automatic'in pane,literal=False)
+            ui.press(str(port),'type a free private peer port',lambda pane:str(port)in pane)
+            ui.contains('Enter',str(port),literal=False)
+            reservation.close()
+            ui.contains('Enter','[Torrents]',literal=False)
+            def restarted():
+                info=client.call('app.info')['result']
+                changed=[frame for frame in client.pushed if frame.get('ev')=='engine.changed']
+                return info['state']=='running'and info['engine_epoch']==before['engine_epoch']+1 and len(changed)>=2,json.dumps(dict(info=info,changed=changed))
+            h.wait_for(restarted,'one port-setting engine restart completes without reconnecting clients')
+            after=client.call('app.info')['result'];changed=[frame for frame in client.pushed if frame.get('ev')=='engine.changed']
+            settings=client.call('app.settings.get')['result'];active=client.call('app.stats')['result']['active_clients']
+            case.check(settings['peer_port']==port and after['instance']==before['instance']and after['clients']['tui']==before['clients']['tui']and active['tui']==1 and not ui.done.exists(),
+                       'the edited port is applied; owner, observer socket and one TUI connection survive',json.dumps(dict(before=before,after=after,settings=settings,active=active)))
+            case.check([frame['state']for frame in changed]==['starting','running'],
+                       'the setting produces exactly the two engine.changed phases, without a second client-requested restart',json.dumps(changed))
+            with socket.create_connection(('127.0.0.1',port),timeout=1):
+                case.check(True,'the real engine peer listener accepts TCP on the chosen port',f'127.0.0.1:{port}')
+            ui.press('q','q detaches after the engine restart while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
+        ui.case=setup
+
+
 def log_history(binary):
     """A real injected engine error and a failed open survive in the pushed log."""
     import shutil
@@ -341,7 +374,7 @@ def main():
         log_history(args.binary.resolve());return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
-            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers','turtle_limits')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
+            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers','turtle_limits','peer_port')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
                 if index:
                     h.notify.close()
                     process=h.start_serve()
@@ -356,6 +389,8 @@ def main():
                     h.notify.close();process=h.start_serve()
                     if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('poster fixture owner did not restart')
                 poster_overlay_cleanup(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'peer_port'):
+                peer_port(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
             if args.case in(None,'turtle_limits'):
                 turtle_limits(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
             if args.case in(None,'low_chroma_theme_markers'):

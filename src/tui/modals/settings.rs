@@ -39,8 +39,8 @@ impl TuiApp {
             return Cmd::task(move|| {
                 let result=(||->Result<Config> {
                     let connection=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?;
-                    let reply:crate::api::SettingsSetResult=serde_json::from_value(connection.request("app.settings.set",patch)?)?;
-                    if reply.restart{connection.request("app.restart",serde_json::json!({"scope":"engine"}))?;}
+                    let _:crate::api::SettingsSetResult=serde_json::from_value(connection.request("app.settings.set",patch)?)?;
+                    // app.settings.set owns the restart; sending app.restart here can restart twice.
                     let settings:crate::api::Settings=serde_json::from_value(connection.request("app.settings.get",serde_json::json!({}))?)?;
                     let mut cfg=values;settings_fields::native_settings(&mut cfg,&settings)?;Ok(cfg)
                 })();
@@ -49,6 +49,7 @@ impl TuiApp {
         }
         if matches!(intent,actions::Intent::Left|actions::Intent::Right){
             let selected=self.settings.as_ref().unwrap().list.borrow().selected().unwrap_or(0);
+            if selected==settings_fields::PORT_ROW{return self.edit_peer_port();}
             if selected>=4{return self.edit_limit(selected-4);}
         }
 
@@ -92,16 +93,17 @@ impl TuiApp {
         block.render(area, frame);
         let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(settings_fields::SETTINGS_ROWS as u16));
         self.view_rows(MouseList::Settings,rows,settings_fields::SETTINGS_ROWS,
-            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion,settings_fields::limit(&modal.cfg,i.saturating_sub(4)))),
+            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion,settings_fields::limit(&modal.cfg,i.saturating_sub(4)),modal.cfg.peer_port)),
             |i|Line::raw(match i {
                 0=>format!("Simultaneous downloads   {}",modal.cfg.max_active_downloads),
                 1=>format!("Peer encryption          {}",match modal.cfg.peer_encryption.as_str(){"require"=>"Require encryption","off"=>"Off",_=>"Prefer encryption"}),
                 2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
                 3=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
+                settings_fields::PORT_ROW=>format!("Peer port                {}",if modal.cfg.peer_port==0{"Automatic (0)".into()}else{modal.cfg.peer_port.to_string()}),
                 _=>settings_fields::limit_label(&modal.cfg,i-4),
             }),frame);
         let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
-            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nChanging encryption or VPN reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
+            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
         };
         let remaining = inner.height.saturating_sub(settings_fields::SETTINGS_ROWS as u16);
         Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(settings_fields::SETTINGS_ROWS as u16), inner.width, remaining), frame);

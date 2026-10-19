@@ -15,6 +15,7 @@ pub(super) struct Prompt {
 pub(super) enum PromptKind {
     AddMagnet,
     SettingLimit(usize),
+    SettingPeerPort,
     AddFeed,
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
@@ -29,6 +30,7 @@ impl TuiApp {
             .with_style(self.theme.text())
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
         if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
+        if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
@@ -89,6 +91,7 @@ impl TuiApp {
                 let (seq, fl, seed) = p.add_flags;
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
+                if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {
