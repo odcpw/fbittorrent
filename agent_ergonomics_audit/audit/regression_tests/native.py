@@ -824,6 +824,8 @@ def expected_daemon_stderr(stderr, complete=True):
                 r'INFO engine state changed state=(?:starting|running|parked|stopping) engine_epoch=[0-9]+',
                 r'DEBUG api legacy dispatch path="[A-Za-z0-9/]+"',
                 r'INFO daemon restarting engine reason=(?:Explicit|Settings)', r'INFO network Waiting for fbmissing0',
+                r'INFO resume trusted hash=[0-9a-f]{40}', r'INFO resume check_required hash=[0-9a-f]{40} clean=(?:true|false)',
+                r'INFO imdb index loaded refresh=(?:true|false)',
                 r'INFO daemon draining', r'INFO engine drained in [0-9]+ ms',
                 r'INFO daemon slot released elapsed_ms=[0-9]+', r'INFO daemon sockets unlinked',
                 r'INFO daemon stopped reason=(?:Quit|Signal\(15\)) code=0']
@@ -1100,6 +1102,11 @@ def stop_during_hashing(binary):
             stderr_offset = len(stderr_bytes)
             # Restart with the same saved-paused intent, then explicitly Stop
             # its fresh startup check before exercising the actual Resume key.
+            # A clean stop lets fast resume (P6-06) trust the saved state and
+            # skip the check, so consume the CLEAN marker as a crash would.
+            marker = store / "resume/CLEAN"
+            case.check(marker.is_file(), "A clean down leaves the fast-resume CLEAN marker.", str(marker))
+            marker.unlink(missing_ok=True)
             harness.start_tmux(tmux, session, launch)
             harness.wait_for(lambda: socket_path.exists(), "saved-paused hashing fixture reopens")
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
