@@ -1003,3 +1003,28 @@ retained foreground/systemd debug JSONL for recheck_staged_invalid_state,
 api_torrent_operations and move_verb was inspected: all six cases passed. Those
 are owner-run evidence, not new live runs by the integrator. No full suite, release
 build or all.sh was run for integration.
+
+
+### P7-01 — native Torznab indexers (fbt-p7-01-cje)
+
+Native Torznab now shares provider preferences, sessions, normalized dedupe and results with Nova, including CLI installation and API search.install; TUI provider labels show kind (the dashboard already does). Private indexers/key files enforce owned regular 0600 files and O_NOFOLLOW, with refusal rather than repair. Queries have 30 s / 4 MiB bounds, 16 configured indexers and bounded XML/results; owned native workers are killed/reaped by cancellation. Credentials stay out of argv, public frames, config output and diagnostics, including rejected-install URLs/messages and echoed/encoded credentials in XML. Redacted download references are redeemed only inside the worker at the configured origin; selected-interface queries and metainfo downloads use existing bound DNS/TCP with ordinary TLS verification, exact interface guards and an observed runtime close before success. Bound localhost resolves directly to loopback. Capability torznab, CLI patch 1.2.26, command flags, the operation catalogue, exact capability arrays/examples and new typed torznab.ndjson are reconciled. Existing wire field meanings are unchanged; no compatibility mode or migration shim was added.
+
+All four criteria pass via `python3 target/test-logs/fbt-p7-01-cje/run-daemon.py {foreground,systemd}-qualified target/debug/fbittorrent torznab_results torznab_http_key_refused torznab_redirect_refused torznab_key_not_logged torznab_boundaries torznab_tui_kind torznab_localhost`: 7/7 each, JSONL under `target/test-logs/fbt-p7-01-cje/{foreground,systemd}-qualified/daemon/`. Results dedupe a real Nova response and Torznab RSS by hash; remote keyed HTTP and unsafe/symlinked files refuse before network; a cross-origin redirect reaches no target and yields upstream/torznab; a held actual worker's argv, real secret-bearing XML, metainfo redemption and a deliberately rejected inline-credential install remain secret-free. Same-origin redirects, 4 MiB HTTP refusal, cancellation within two seconds, missing-interface no-fallback and keyed localhost are controls. Real private tmux modal captures are `torznab_tui_kind.pane.txt` in those roots; q leaves the owner alive. Native-only query/grab succeeds with Python shimmed to fail. Eight focused Torznab unit/typed-fixture tests passed (`native-unit.*`); three reviewed provider goldens passed (`provider-goldens.*`). Final `cargo test --locked`: **540 passed, 0 failed, 3 ignored**, 15.37 s runtime (`bound-full.*`); latest debug build (`bound-final-debug.*`), check (`bound-check-final.*`) and size gate pass. Earlier failed traces retain the fixture-only credential echo and the corrected catalogue-table mismatch; the qualified traces contain no fixture credential. One terminal setup attempt used Tab (which moves screens); Escape correctly leaves the query before P, retaining the original modal/kind assertions. No criteria remain unmet; no release/all.sh between track beads, per owner policy. Follow-up: the previously pending P3-07 RSS/Shows client wiring is now dependency-ready on this branch.
+
+### Integration of qualified P7-01 (2026-10-19)
+
+Merged 12fd97c onto dcc7db5. Retained the integrated peers/download-limit caps,
+watch and P7-06 documentation, earlier checkpoint history and D's harness
+registration. Torznab's implemented API capability/search.install extension is
+patch 1.2.29, following the CLI/provider checkpoint at 1.2.28. All 25 exact caps
+and the unique ordered patch history agree across code, hello/error fixtures,
+docs and Python assertions; the README link names the integrated patch.
+
+Evidence: target/test-logs/integration/batch15-track-b/checks.jsonl. Locked
+check --tests, Python compilation, daemon case registration and size lint pass.
+Focused tests: Torznab/typed fixture 8, agent 6, API fixtures 30, provider goldens 3;
+47 passed, no failures. Inspected all seven owner-retained qualified cases in
+both foreground and systemd modes: 14 passed, indexed by owner-evidence.jsonl.
+Those are owner-run native results, not new integrator reruns. No full suite,
+release build or all.sh was run. P7-01's previously pending qualification is now
+supplied by the owner's retained evidence; no bead state was changed.

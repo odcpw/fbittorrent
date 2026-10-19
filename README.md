@@ -699,3 +699,12 @@ opening their payloads for hashing. `seed` and nonempty file-selection actions
 verify them before use; `open` only stats the saved target and stays dormant.
 Missing data becomes `error` with `reason:missing_files` when acted on. Explicit
 `delete --files --yes` can remove a dormant record without creating a live handle.
+
+
+Private Jackett/Prowlarr indexers use native Torznab, alongside Nova providers:
+`fbittorrent search --install-torznab https://indexer.example/api --key-file /path/to/indexer.key`.
+Keep the key in its own user-owned 0600 regular file; indexers.toml has the same
+requirement, and unsafe modes/symlinks are refused. Keyed HTTP is allowed only
+on loopback. Queries are bounded to 30 seconds/4 MiB and refuse cross-origin
+redirects; credentials are redacted from results and diagnostics. The providers
+sheet/modal displays `nova` or `torznab`. See [IPC.md](docs/IPC.md#native-torznab-providers-p7-01-cli-contract-1229).

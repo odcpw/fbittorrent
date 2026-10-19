@@ -425,7 +425,7 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
     let mut failures = Vec::new();
     for source in sources {
         let result = (|| -> Result<()> {
-            if url::Url::parse(source).is_ok_and(|u|!u.path().ends_with(".py")) {
+            if torznab::indexers()?.iter().any(|i|i.url==*source) || url::Url::parse(source).is_ok_and(|u|!u.path().ends_with(".py")) {
                 torznab::install(source,None)?;return Ok(());
             }
             if !source.starts_with("https://") {
@@ -472,7 +472,7 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
             Ok(())
         })();
         if let Err(error) = result {
-            failures.push(format!("{source}: {error:#}"));
+            failures.push(format!("{}: {error:#}",torznab::public_source(source)));
         }
     }
     if !failures.is_empty() {

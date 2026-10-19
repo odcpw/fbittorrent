@@ -68,7 +68,7 @@ def contract(binary,systemd):
             value,r1=cli(case,sandbox,binary,'capabilities','--json')
             _,r2=cli(case,sandbox,binary,'capabilities','--json')
             case.check(r1.stdout==r2.stdout,'R-008 capabilities is byte-identical',hashlib.sha256(r1.stdout.encode()).hexdigest())
-            case.check(value.get('contract_version')=='1.2.28' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.28 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
+            case.check(value.get('contract_version')=='1.2.29' and any(v.get('field')=='status.ok' and v.get('breaking') for v in value['changes']),'R-001 capabilities documents the 1.2.29 patch and retains the declared 1.2.0 break',json.dumps(value.get('changes')))
             cli(case,sandbox,binary,'triage','--json') # R-002
             added,_=cli(case,sandbox,binary,'add',fixture.torrent,'--stopped','--origin','agent','--json') # R-003
             digest=added['hash']
