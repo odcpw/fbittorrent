@@ -17,6 +17,9 @@ pub(super) enum PromptKind {
     RenameTorrent {hash:String},
     SettingLimit(usize),
     SettingPeerPort,
+    SettingDestination,
+    SettingIdleExit,
+    ShowQuality {imdb:String},
     AddFeed,
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
@@ -33,6 +36,9 @@ impl TuiApp {
         if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
         if matches!(kind,PromptKind::RenameTorrent {..}) {input=input.with_max_length(512);}
+        if kind==PromptKind::SettingIdleExit {input=input.with_max_length(20);}
+        if kind==PromptKind::SettingDestination {input=input.with_max_length(4096);}
+        if matches!(kind,PromptKind::ShowQuality {..}) {input=input.with_max_length(16);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
@@ -67,6 +73,8 @@ impl TuiApp {
                     self.close_prompt();
                     return match kind {
                         PromptKind::Shutdown => self.shutdown_daemon(),
+                        PromptKind::ConfirmDeleteTorrent { hash, files } if self.cfg.native() =>
+                            self.service_action("torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":files}),if files {"deleted with files"}else{"removed · U undo (10 s)"}),
                         PromptKind::ConfirmDeleteTorrent { hash, files } =>
                             self.action(if files { "deleted with files" } else { "removed" }, move |c| c.delete(&[hash], files)),
                         PromptKind::ConfirmRemoveFeed { name } => {
@@ -106,6 +114,9 @@ impl TuiApp {
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
+                if kind==PromptKind::SettingDestination {return self.apply_destination_input(&value);}
+                if kind==PromptKind::SettingIdleExit {return self.apply_idle_input(&value);}
+                if let PromptKind::ShowQuality {imdb}=kind {return self.apply_show_quality(imdb,&value);}
                 if let PromptKind::RenameTorrent {hash}=kind {
                     if !crate::engine::rename::valid_name(&raw){self.set_status("Name must contain no controls and at most 512 characters",true);return Cmd::none();}
                     return self.service_action("torrents.rename",serde_json::json!({"hash":hash,"name":raw}),"renamed torrent");

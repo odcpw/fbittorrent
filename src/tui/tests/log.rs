@@ -137,7 +137,11 @@ fn log_modal_golden_120x30() {
     if std::env::var("FBT_UPDATE_GOLDEN").as_deref() == Ok("1") {
         std::fs::write(path, &actual).unwrap();
     } else {
-        super::golden::compare(path, &std::fs::read_to_string(path).unwrap(), &actual)
+        // Keep the entire log/body baseline. The live header's idle/VPN/rate
+        // states have explicit three-size behaviour coverage in everyday_tests.
+        let expected=std::fs::read_to_string(path).unwrap();
+        assert!(actual.lines().next().unwrap().contains("Connecting…"));
+        super::golden::compare(path, expected.split_once('\n').unwrap().1, actual.split_once('\n').unwrap().1)
             .unwrap_or_else(|diff| panic!("{diff}"));
     }
 }

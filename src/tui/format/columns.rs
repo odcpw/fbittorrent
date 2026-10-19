@@ -33,7 +33,7 @@ impl Columns {
         );
         let down = row.map_or_else(
             || (t.is_active() && t.progress_known).then_some(t.dlspeed.max(0) as u64),
-            |r| r.dl_bps,
+            |r| (r.state==api::TorrentState::Downloading).then_some(r.dl_bps).flatten(),
         );
         let eta = row.map_or_else(
             || (t.is_active() && t.eta > 0 && t.eta < 8_640_000).then_some(t.eta as u64),
@@ -93,5 +93,10 @@ mod tests {
         assert_eq!(cells.eta, "");
         assert_eq!(compact_rate(3_100_000), "3.1M");
         assert_eq!(compact_eta(720), "12m");
+        for state in [api::TorrentState::Paused,api::TorrentState::Done,api::TorrentState::Seeding,api::TorrentState::Queued] {
+            let mut row=row.clone();row.state=state;row.dl_bps=Some(0);row.eta_s=Some(0);
+            let cells=Columns::of(&torrent(&row),Some(&row));
+            assert!(cells.down.is_empty()&&cells.eta.is_empty(),"inactive rate and ETA stay blank: {state:?}");
+        }
     }
 }

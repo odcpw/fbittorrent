@@ -23,6 +23,8 @@ impl TuiApp {
         self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
+        self.removal_undo_available().hash(&mut hash);
+        self.service_busy.hash(&mut hash);
         self.status_is_error.hash(&mut hash);
         self.status_success.hash(&mut hash);
         self.poster_open.hash(&mut hash);
@@ -33,6 +35,7 @@ impl TuiApp {
         if let Some(torrent) = self.selected_torrent() {
             self.store.pending_for_key(&torrent.hash).hash(&mut hash);
             torrent.name.hash(&mut hash);
+            self.can_follow_title(&torrent.name).hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
@@ -40,6 +43,7 @@ impl TuiApp {
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);
+            self.can_follow_title(&result.file_name).hash(&mut hash);
         }
         if let Some(feed) = self.selected_feed() {
             feed.name.hash(&mut hash);

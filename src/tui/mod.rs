@@ -62,6 +62,14 @@ mod palette;
 mod feedback;
 mod limits;
 mod statistics;
+mod everyday;
+#[path="screens/release_sort.rs"]
+mod release_sort;
+#[path="screens/rss_sort.rs"]
+mod rss_sort;
+#[cfg(test)]
+#[path="tests/everyday.rs"]
+mod everyday_tests;
 #[cfg(test)]
 #[path="tests/statistics.rs"]
 mod statistics_tests;
@@ -181,7 +189,10 @@ impl Model for TuiApp {
                 match r { Ok(idx) => self.ratings = Some(idx), Err(e) => self.set_status(format!("ratings index: {e}"), true) }
                 Cmd::none()
             }
-            Msg::Api {connection,update,ack} => {let command=self.api_update(connection,update);let _=ack.try_send(());command},
+            Msg::Api {connection,updates,ack} => {
+                let commands=updates.into_iter().map(|update|self.api_update(connection,update)).collect();
+                let _=ack.try_send(());Cmd::batch(commands)
+            },
             Msg::ApiRead {connection,result} => {
                 if self.presence.as_ref().map(|active|active.id)!=connection || self.presence.as_ref().is_some_and(|active|!active.alive()) {return Cmd::none();}
                 self.apply_api_read(result)

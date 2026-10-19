@@ -57,7 +57,9 @@ impl TuiApp {
         if matches!(intent,actions::Intent::Left|actions::Intent::Right){
             let selected=self.settings.as_ref().unwrap().list.borrow().selected().unwrap_or(0);
             if selected==settings_fields::PORT_ROW{return self.edit_peer_port();}
-            if selected>=4{return self.edit_limit(selected-4);}
+            if selected==settings_fields::DESTINATION_ROW{return self.edit_destination();}
+            if selected==settings_fields::IDLE_ROW{return self.edit_idle_exit();}
+            if (4..8).contains(&selected){return self.edit_limit(selected-4);}
         }
 
         let modal = self.settings.as_mut().unwrap();
@@ -79,6 +81,8 @@ impl TuiApp {
                         let count = modal.connections.len();
                         modal.cfg.network_interface = modal.connections[(index + if forward { 1 } else { count - 1 }) % count].clone();
                     }
+                    settings_fields::CLIPBOARD_ROW=>modal.cfg.clipboard_watch=!modal.cfg.clipboard_watch,
+                    settings_fields::SEED_ROW=>modal.cfg.seed_by_default=!modal.cfg.seed_by_default,
                     _ => modal.cfg.reduce_motion = !modal.cfg.reduce_motion,
                 }
                 modal.error.clear();
@@ -100,17 +104,21 @@ impl TuiApp {
         block.render(area, frame);
         let rows=Rect::new(inner.x,inner.y,inner.width,inner.height.min(settings_fields::SETTINGS_ROWS as u16));
         self.view_rows(MouseList::Settings,rows,settings_fields::SETTINGS_ROWS,
-            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion,settings_fields::limit(&modal.cfg,i.saturating_sub(4)),modal.cfg.peer_port)),
+            |i|layout::fingerprint(&(i,modal.cfg.max_active_downloads,&modal.cfg.peer_encryption,&modal.cfg.network_interface,modal.cfg.reduce_motion,settings_fields::limit(&modal.cfg,i.saturating_sub(4)),modal.cfg.peer_port,&modal.cfg.save_path,modal.cfg.seed_by_default,modal.cfg.idle_exit_secs,modal.cfg.clipboard_watch)),
             |i|Line::raw(match i {
                 0=>format!("Simultaneous downloads   {}",modal.cfg.max_active_downloads),
                 1=>format!("Peer encryption          {}",match modal.cfg.peer_encryption.as_str(){"require"=>"Require encryption","off"=>"Off",_=>"Prefer encryption"}),
                 2=>format!("VPN connection           {}",match modal.cfg.network_interface.as_deref(){None=>"Off · ordinary connection".into(),Some("proton")=>"ProtonVPN · required".into(),Some(name)=>format!("{name} · required")}),
                 3=>format!("Reduce motion            {}",if modal.cfg.reduce_motion{"On"}else{"Off"}),
                 settings_fields::PORT_ROW=>format!("Peer port                {}",if modal.cfg.peer_port==0{"Automatic (0)".into()}else{modal.cfg.peer_port.to_string()}),
+                settings_fields::DESTINATION_ROW=>format!("Destination              {}",modal.cfg.save_path.as_deref().unwrap_or("Default downloads folder")),
+                settings_fields::CLIPBOARD_ROW=>format!("Clipboard offers         {}",if modal.cfg.clipboard_watch{"On"}else{"Off"}),
+                settings_fields::SEED_ROW=>format!("Seed new torrents        {}",if modal.cfg.seed_by_default{"On"}else{"Off"}),
+                settings_fields::IDLE_ROW=>format!("Idle exit                {}",if modal.cfg.idle_exit_secs==0{"Disabled".into()}else{format!("{} seconds",modal.cfg.idle_exit_secs)}),
                 _=>settings_fields::limit_label(&modal.cfg,i-4),
             }),frame);
         let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
-            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
+            format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nNew destination/seed defaults apply to future adds.\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
         };
         let remaining = inner.height.saturating_sub(settings_fields::SETTINGS_ROWS as u16);
         Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { th.err().bg(th.selection) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(settings_fields::SETTINGS_ROWS as u16), inner.width, remaining), frame);

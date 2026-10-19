@@ -424,6 +424,16 @@ that hook. Provider scripts
 execute locally, so install scripts you trust. Private trackers usually need Jackett or Prowlarr; the
 official `jackett.py` plugin works once you have one of those running.
 
+In the TUI, `s` cycles the list sort and `S` reverses it while keeping the
+selected torrent or release. `y` copies a torrent or search result's magnet
+when one is available. After removing a torrent with files kept, `U` restores
+it within ten seconds; deleting files has no undo. In Shows, `=` changes the
+selected show's quality, with `default` restoring the global preference.
+`,` or F6 opens draft Settings, including destination, seed default and idle
+exit (300 seconds by default; 0 disables it). Enter saves; Esc discards the
+draft. These defaults apply to future adds. `q` closes the terminal while
+transfers continue; `Q` still stops the daemon.
+
 ## Provider browsing
 
 YTS loads in the app through its JSON API; if a host is unavailable, the app
@@ -570,6 +580,10 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Sort torrents | `s` | — | — |  |
+| `screen:torrents` | Reverse torrent sort | `S` | — | — |  |
+| `screen:torrents` | Copy magnet | `y` | — | — |  |
+| `global` | Undo removal | `U` | — | — |  |
 | `screen:torrents` | Rename | `N` | `N` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
 | `screen:torrents` | Next details tab | — | `]` | — |  |
@@ -593,9 +607,9 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:search` | Browse grid/rows | — | `v` | — | Browse lists only. |
-| `screen:search` | Sort results | — | `s` | — |  |
-| `screen:search` | Reverse results sort | — | `S` | — |  |
-| `pane:search.results` | Copy magnet | — | `y` | — |  |
+| `screen:search` | Sort results | `s` | `s` | — |  |
+| `screen:search` | Reverse results sort | `S` | `S` | — |  |
+| `pane:search.results` | Copy magnet | `y` | `y` | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -613,6 +627,8 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `pane:search.results` | Follow show | `f`, `F` | `f`, `F` | — |  |
 | `pane:search.query` | Search | `Enter` | `Enter` | — |  |
 | `pane:search.query` | Leave query | `Esc`, `↓` | `Esc`, `↓` | — |  |
+| `pane:rss.items` | Sort items | `s` | — | — |  |
+| `pane:rss.items` | Reverse item sort | `S` | — | — |  |
 | `screen:rss` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:rss` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:rss` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -630,6 +646,10 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:rss` | All read | `M` | `M` | — |  |
 | `screen:rss` | IMDb | `i` | `i` | — |  |
 | `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `pane:shows.releases` | Copy magnet | `y` | — | — |  |
+| `pane:shows.releases` | Sort releases | `s` | — | — |  |
+| `pane:shows.releases` | Reverse release sort | `S` | — | — |  |
+| `screen:shows` | Show quality | `=` | — | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |

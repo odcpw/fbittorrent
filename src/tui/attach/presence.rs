@@ -149,12 +149,13 @@ impl Presence {
         .map_err(anyhow::Error::msg)?;
         self.confirmations.wait(&reference, deadline, &self.closed)
     }
-    pub(in crate::tui) fn next_update(&self) -> Result<Option<Update>> {
-        let result = self
-            .updates
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .recv_timeout(Duration::from_millis(100));
+    pub(in crate::tui) fn next_updates(&self) -> Result<Option<Vec<Update>>> {
+        let result = update_batch(
+            &self
+                .updates
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
         match result {
             Ok(update) => Ok(Some(update)),
             Err(mpsc::RecvTimeoutError::Timeout) if self.alive() => Ok(None),
@@ -181,5 +182,57 @@ impl Drop for Presence {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+/// One bounded delivery per UI loop, preserving event order and the ACK barrier.
+fn update_batch(
+    receiver: &mpsc::Receiver<Update>,
+) -> std::result::Result<Vec<Update>, mpsc::RecvTimeoutError> {
+    let first = receiver.recv_timeout(Duration::from_millis(100))?;
+    let mut batch = Vec::with_capacity(32);
+    batch.push(first);
+    while batch.len() < 32 {
+        match receiver.try_recv() {
+            Ok(update) => batch.push(update),
+            Err(_) => break,
+        }
+    }
+    Ok(batch)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn burst_updates_keep_order_and_stay_bounded_before_the_next_ack() {
+        let (sender, receiver) = mpsc::sync_channel(128);
+        for i in 0..80 {
+            sender
+                .send(Update::Acknowledged {
+                    reference: crate::api::MutationRef::new(format!("burst-{i}")).unwrap(),
+                    pending: false,
+                })
+                .unwrap();
+        }
+        let mut seen = Vec::new();
+        for length in [32, 32, 16] {
+            let batch = update_batch(&receiver).unwrap();
+            assert_eq!(batch.len(), length);
+            for update in batch {
+                let Update::Acknowledged { reference, .. } = update else {
+                    panic!("wrong update")
+                };
+                seen.push(reference.to_string());
+            }
+        }
+        assert_eq!(
+            seen,
+            (0..80).map(|i| format!("burst-{i}")).collect::<Vec<_>>()
+        );
+        drop(sender);
+        assert!(matches!(
+            update_batch(&receiver),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
     }
 }

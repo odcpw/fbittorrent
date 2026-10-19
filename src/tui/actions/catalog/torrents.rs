@@ -1,5 +1,13 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("torrents.sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('s'))],"Sort torrents",90,
+        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(false)),T,None,None,None),
+    action!("torrents.reverse_sort",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse torrent sort",90,
+        |a|a.cfg.native(),Some(|a|a.keyboard_torrent_sort(true)),T,None,None,None),
+    action!("torrents.copy_magnet",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
+        |a|a.selected_torrent().is_some(),Some(TuiApp::copy_torrent_magnet),T,None,None,None),
+    action!("torrents.undo_remove",Scope::Global,&[KeyChord::plain(KeyCode::Char('U'))],"Undo removal",30,
+        |a|a.cfg.native()&&a.removal_undo.is_some()&&!a.service_busy,Some(TuiApp::undo_removal),T,None,None,None),
     action!("torrents.rename",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
         |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
     action!("torrents.details_previous",Scope::Screen(Screen::Torrents),&[],"Previous details tab",90,
@@ -214,7 +222,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::Char('f')), KeyChord::plain(KeyCode::Char('F'))],
         "Follow show",
         90,
-        |a| a.cfg.native() && a.selected_torrent().is_some(),
+        |a| a.cfg.native() && a.selected_torrent().is_some_and(|t|a.can_follow_title(&t.name)),
         Some(|a| a.on_torrents_action(Intent::Follow)),
         TD,
         Some(&[KeyChord::plain(KeyCode::Char('f'))]),

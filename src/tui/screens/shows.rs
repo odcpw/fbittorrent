@@ -45,9 +45,9 @@ impl TuiApp {
         let mut releases: Vec<_> = self.shows.shows.iter().flat_map(|show| show.episodes.iter()
             .filter(move |episode| show.is_new(&episode.key))
             .map(move |episode| (show, episode))).collect();
-        releases.sort_by(|(a_show, a), (b_show, b)| b.released.cmp(&a.released)
-            .then_with(|| a_show.title.cmp(&b_show.title)).then_with(|| b.key.cmp(&a.key)).then_with(|| a_show.imdb.cmp(&b_show.imdb)));
-        self.inbox_rows = releases.into_iter().map(|(show, episode)| ShowReleaseTarget { imdb: show.imdb.clone(), key: episode.key.clone() }).collect();
+        releases.sort_by(|(a_show,a),(b_show,b)|self.release_sort.compare(a,b,self.release_descending)
+            .then_with(||a_show.title.cmp(&b_show.title)).then_with(||a_show.imdb.cmp(&b_show.imdb)));
+        self.inbox_rows=releases.into_iter().map(|(show,episode)|ShowReleaseTarget {imdb:show.imdb.clone(),key:episode.key.clone()}).collect();
         self.ep_list.borrow_mut().hovered = None;
         self.last_click = None;
         if self.shows_inbox() {
@@ -157,7 +157,7 @@ impl TuiApp {
                 if !self.shows_focus_eps {
                     self.set_status("Enter opens releases · Shift+M marks one selected show's releases read", false);
                 } else if self.cfg.native(){
-                    if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (U)ndo"}else{"release marked unread"});}
+                    if let Some(target)=self.selected_release_target(){let read=self.shows_inbox()||!self.shows.get(&target.imdb).is_some_and(|s|s.seen.contains(&target.key));return self.service_action("shows.set_read",serde_json::json!({"imdb":target.imdb,"key":target.key,"read":read}),if read{"release marked read · (u)ndo"}else{"release marked unread"});}
                 } else if let Some(label) = self.mark_selected_release() {
                     if self.save_shows() { self.set_success(label); }
                 }
@@ -222,7 +222,7 @@ impl TuiApp {
         let inbox = self.shows_inbox();
         let show = self.shows.get_mut(&target.imdb)?;
         let read = if inbox { show.seen.insert(target.key.clone()); true } else { show.toggle_seen(&target.key) };
-        let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (U)ndo" } else { "" });
+        let label = format!("{} {} marked {}{}", show.title, target.key, if read { "read" } else { "unread" }, if inbox { " · (u)ndo" } else { "" });
         if inbox { self.inbox_last_read = Some(target); }
         self.rebuild_inbox();
         Some(label)
@@ -274,7 +274,7 @@ impl TuiApp {
         let left = Flex::vertical()
             .constraints([Constraint::Fill, Constraint::Fixed(card_h)])
             .split(cols[0]);
-        let unread = self.inbox_rows.len();
+        let unread = self.shows_unread();
         let title = format!(" Shows › Followed ({}) ", self.shows.shows.len());
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -384,11 +384,11 @@ impl TuiApp {
         }
         let inbox = self.shows_inbox();
         let title = if inbox {
-            format!(" Shows › All unread · {unread} releases · newest first ")
+            format!(" Shows › All unread · {unread} releases · {} {} ",self.release_sort.label(),if self.release_descending{"↓"}else{"↑"})
         } else if let Some(show) = self.selected_show() {
             format!(
                 " Shows › {} · {} releases ",
-                show.label(),
+                format!("{} · {}",show.label(),show.quality.as_deref().unwrap_or("default quality")),
                 show.episodes.len()
             )
         } else {
@@ -615,7 +615,7 @@ pub(super) fn episode_metadata_width(width: usize) -> usize {
 
 pub(super) fn episode_metadata(episode: Option<&Episode>, width: usize) -> String {
     let (quality, size, seeds, date) = match episode {
-        Some(e) => (e.quality.clone(), human_bytes(e.size), e.seeds.to_string(), if e.released > 0 { ymd(e.released) } else { String::new() }),
+        Some(e) => (if e.quality.is_empty(){"—".into()}else{e.quality.clone()}, if e.size<0{"—".into()}else{human_bytes(e.size)}, if e.seeds<0{"—".into()}else{e.seeds.to_string()}, if e.released > 0 { ymd(e.released) } else { "—".into() }),
         None => ("QUAL".into(), "SIZE".into(), "SEEDS".into(), "DATE".into()),
     };
     if width >= 80 { format!(" {quality:>5}  {size:>9}  {seeds:>5}  {date:>10}") }

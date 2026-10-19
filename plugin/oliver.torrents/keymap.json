@@ -574,6 +574,54 @@
       "scope": "modal:log"
     },
     {
+      "id": "torrents.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort torrents",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse torrent sort",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.copy_magnet",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Copy magnet",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.undo_remove",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "U"
+        ]
+      },
+      "label": "Undo removal",
+      "scope": "global"
+    },
+    {
       "id": "torrents.rename",
       "keys": {
         "dashboard": [
@@ -930,7 +978,9 @@
           "s"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "s"
+        ]
       },
       "label": "Sort results",
       "scope": "screen:search"
@@ -942,7 +992,9 @@
           "S"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "S"
+        ]
       },
       "label": "Reverse results sort",
       "scope": "screen:search"
@@ -954,7 +1006,9 @@
           "y"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "y"
+        ]
       },
       "label": "Copy magnet",
       "scope": "pane:search.results"
@@ -1212,6 +1266,30 @@
       "scope": "pane:search.query"
     },
     {
+      "id": "rss.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort items",
+      "scope": "pane:rss.items"
+    },
+    {
+      "id": "rss.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse item sort",
+      "scope": "pane:rss.items"
+    },
+    {
       "id": "rss.next",
       "keys": {
         "dashboard": [
@@ -1464,6 +1542,54 @@
       },
       "label": "Follow show",
       "scope": "pane:rss.items"
+    },
+    {
+      "id": "shows.copy_magnet",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "y"
+        ]
+      },
+      "label": "Copy magnet",
+      "scope": "pane:shows.releases"
+    },
+    {
+      "id": "shows.sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "s"
+        ]
+      },
+      "label": "Sort releases",
+      "scope": "pane:shows.releases"
+    },
+    {
+      "id": "shows.reverse_sort",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "S"
+        ]
+      },
+      "label": "Reverse release sort",
+      "scope": "pane:shows.releases"
+    },
+    {
+      "id": "shows.quality",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "="
+        ]
+      },
+      "label": "Show quality",
+      "scope": "screen:shows"
     },
     {
       "id": "shows.next",

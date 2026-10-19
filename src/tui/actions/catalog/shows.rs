@@ -1,5 +1,13 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("shows.copy_magnet",Scope::Pane(Screen::Shows,Pane::Releases),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
+        |a|a.selected_episode().is_some(),Some(TuiApp::copy_episode_magnet),T,None,None,None),
+    action!("shows.sort",Scope::Pane(Screen::Shows,Pane::Releases),&[KeyChord::plain(KeyCode::Char('s'))],"Sort releases",90,
+        |_|true,Some(|a|a.sort_releases(false)),T,None,None,None),
+    action!("shows.reverse_sort",Scope::Pane(Screen::Shows,Pane::Releases),&[KeyChord::plain(KeyCode::Char('S'))],"Reverse release sort",90,
+        |_|true,Some(|a|a.sort_releases(true)),T,None,None,None),
+    action!("shows.quality",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('='))],"Show quality",40,
+        |a|a.release_show().is_some(),Some(TuiApp::show_quality_prompt),T,None,None,None),
     action!(
         "shows.next",
         Scope::Screen(Screen::Shows),

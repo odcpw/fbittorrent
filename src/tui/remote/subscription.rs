@@ -4,22 +4,24 @@ pub(in crate::tui) struct ApiSub {
     pub connection: Arc<attach::Presence>,
 }
 impl Subscription<Msg> for ApiSub {
+    // Presence generations must never collide with local timer/search IDs.
     fn id(&self) -> SubId {
-        self.connection.id
+        (1 << 63) | self.connection.id
     }
     fn run(&self, sender: Sender<Msg>, stop: StopSignal) {
         while !stop.is_stopped() {
-            let (update, terminal) = match self.connection.next_update() {
-                Ok(Some(update)) => (update, false),
+            let (updates, terminal) = match self.connection.next_updates() {
+                Ok(Some(updates)) => (updates, false),
                 Ok(None) => continue,
-                Err(error) => (attach::ApiUpdate::Closed(error.to_string()), true),
+                Err(error) => (vec![attach::ApiUpdate::Closed(error.to_string())], true),
             };
-            // One message may be awaiting the model. Backpressure never grows ftui's queue.
+            // One batch (at most 32 frames) may await the model. This keeps
+            // backpressure without delaying each individual frame by a UI poll.
             let (ack, consumed) = std::sync::mpsc::sync_channel(1);
             if sender
                 .send(Msg::Api {
                     connection: self.connection.id,
-                    update,
+                    updates,
                     ack,
                 })
                 .is_err()
@@ -52,7 +54,11 @@ impl TuiApp {
             }
             let result=(||->Result<()> {
                 // Each topic has its own sub/revision so a gap can replace only that topic.
-                for topic in topics {connection.request("subscribe",json!({"topics":[topic]}))?;}
+                for topic in topics {
+                    let mut args=json!({"topics":[topic]});
+                    if topic=="summary" {args["interval_ms"]=json!(500);}
+                    connection.request("subscribe",args)?;
+                }
                 Ok(())
             })().map_err(|e|e.to_string());
             Msg::UiSubscribed{connection:connection.id,result}

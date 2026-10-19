@@ -31,7 +31,7 @@ impl TuiApp {
         self.set_status(
             format!(
                 "Sorted by {} {}",
-                column.label().to_lowercase(),
+                if field==TorrentSort::Added {"added".into()}else{column.label().to_lowercase()},
                 if self.torrent_descending {
                     "↓"
                 } else {

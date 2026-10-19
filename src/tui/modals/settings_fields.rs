@@ -6,8 +6,12 @@ const LIMIT_NAMES: [&str; 4] = [
     "Turtle download limit",
     "Turtle upload limit",
 ];
-pub(super) const SETTINGS_ROWS: usize = 9;
+pub(super) const SETTINGS_ROWS: usize = 13;
 pub(super) const PORT_ROW: usize = 8;
+pub(super) const DESTINATION_ROW: usize = 9;
+pub(super) const SEED_ROW: usize = 10;
+pub(super) const IDLE_ROW: usize = 11;
+pub(super) const CLIPBOARD_ROW: usize = 12;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
     match index {
         0 => cfg.download_limit_bps,
@@ -26,6 +30,10 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     let draft = serde_json::to_value(draft).unwrap();
     let mut patch = serde_json::Map::new();
     for key in [
+        "clipboard_watch",
+        "save_path",
+        "seed_by_default",
+        "idle_exit_secs",
         "peer_port",
         "max_active_downloads",
         "peer_encryption",
@@ -43,6 +51,11 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     patch.into()
 }
 pub(super) fn native_settings(cfg: &mut Config, settings: &crate::api::Settings) -> Result<()> {
+    cfg.clipboard_watch = settings.clipboard_watch;
+    cfg.save_path = Some(settings.save_path.clone());
+    cfg.seed_by_default = settings.seed_by_default;
+    cfg.idle_exit_secs = settings.idle_exit_secs;
+    cfg.show_quality = settings.show_quality.clone();
     cfg.peer_port = u16::try_from(settings.peer_port)?;
     cfg.max_active_downloads = usize::try_from(settings.max_active_downloads)?;
     cfg.peer_encryption = match settings.peer_encryption {
@@ -165,4 +178,35 @@ pub(super) fn limit_label(cfg: &Config, index: usize) -> String {
         LIMIT_NAMES[index],
         rate_text(limit(cfg, index))
     )
+}
+
+impl TuiApp {
+    pub(super) fn edit_destination(&mut self)->Cmd<Msg> {
+        let path=self.settings.as_ref().unwrap().cfg.save_path.clone().unwrap_or_default();
+        self.open_prompt(PromptKind::SettingDestination,"Destination · absolute folder path",false);
+        self.prompt.as_mut().unwrap().input.set_value(path);
+        Cmd::none()
+    }
+    pub(super) fn apply_destination_input(&mut self,value:&str)->Cmd<Msg> {
+        if let Some(modal)=self.settings.as_mut() {
+            if !std::path::Path::new(value).is_absolute() || value.chars().any(char::is_control) {
+                modal.error="Destination must be an absolute folder path".into();
+            } else {modal.cfg.save_path=Some(value.into());modal.error.clear();}
+        }
+        Cmd::none()
+    }
+    pub(super) fn edit_idle_exit(&mut self)->Cmd<Msg> {
+        let seconds=self.settings.as_ref().unwrap().cfg.idle_exit_secs;
+        self.open_prompt(PromptKind::SettingIdleExit,"Idle exit · seconds (at least 30) · 0 disables",false);
+        self.prompt.as_mut().unwrap().input.set_value(seconds.to_string());
+        Cmd::none()
+    }
+    pub(super) fn apply_idle_input(&mut self,value:&str)->Cmd<Msg> {
+        if let Some(modal)=self.settings.as_mut() {
+            if let Some(seconds)=value.parse::<u64>().ok().filter(|n|*n==0 || *n>=30) {
+                modal.cfg.idle_exit_secs=seconds;modal.error.clear();
+            } else {modal.error="Idle exit must be 0 (disabled) or at least 30 seconds".into();}
+        }
+        Cmd::none()
+    }
 }

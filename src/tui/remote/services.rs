@@ -64,6 +64,12 @@ impl TuiApp {
         self.show_grabbing.clear();
         match result {
             Ok(value) => {
+                if op == "torrents.remove" && args["delete_files"] == false {
+                    self.removal_undo = args["hashes"][0].as_str().zip(value["undo_until"].as_u64()).map(|(h,t)|(h.into(),t));
+                }
+                if op == "torrents.add" && args["source"]["restore"].is_string() {
+                    self.removal_undo = None;
+                }
                 if op == "shows.set_read" && args["read"] == true {
                     if let (Some(imdb), Some(key)) = (args["imdb"].as_str(), args["key"].as_str()) {
                         self.inbox_last_read = Some(ShowReleaseTarget {
@@ -158,8 +164,7 @@ impl TuiApp {
             .collect();
         self.feeds.sort_by(|a, b| a.name.cmp(&b.name));
         for feed in &mut self.feeds {
-            feed.articles
-                .sort_by(|a, b| b.ts.cmp(&a.ts).then(a.id.cmp(&b.id)));
+            feed.articles.sort_by(|a,b|self.rss_sort.compare(a,b,self.rss_descending));
         }
         self.feed_list.borrow_mut().select(
             selected
@@ -327,9 +332,11 @@ impl TuiApp {
             self.follow_target = None;
             self.shows_focus_eps = false;
         }
-        self.rebuild_inbox();
+        self.reorder_releases();
         if let Some(target) = selected {
-            if !self.shows_inbox() {
+            if self.shows_inbox() {
+                self.ep_list.borrow_mut().select(self.inbox_rows.iter().position(|r|*r==target));
+            } else {
                 let pos = self
                     .selected_show()
                     .filter(|s| s.imdb == target.imdb)
