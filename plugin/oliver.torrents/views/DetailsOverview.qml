@@ -12,6 +12,9 @@ ScrollView {
   required property var service
   required property var torrent
   property var card:null
+  readonly property bool editing:titleEditor.editing
+  function renameTitle(){titleEditor.begin()}
+  function key(event){return titleEditor.key(event)}
   readonly property bool posterLoaded:poster.loaded
   signal recheckRequested(string hash)
   clip:true
@@ -19,7 +22,8 @@ ScrollView {
   ColumnLayout {
     width:root.availableWidth;spacing:Commons.Style.spacing.sm
     Components.PosterCard {id:poster;Layout.fillWidth:true;card:root.card}
-    Components.DetailField {Layout.fillWidth:true;value:root.torrent.name;font.bold:true}
+    Components.DisplayNameEditor {id:titleEditor;Layout.fillWidth:true;service:root.service;torrent:root.torrent}
+    Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.original_name && root.torrent.original_name!==root.torrent.name;label:"Original name";value:root.torrent.original_name || ""}
     Components.DetailField {Layout.fillWidth:true;value:Model.stateLabel(root.torrent)+(DetailText.reason(root.torrent,root.service.store.network) ? " · "+DetailText.reason(root.torrent,root.service.store.network) : "")}
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.playable;value:DetailText.playable(root.torrent.playable)}
     Components.DetailField {Layout.fillWidth:true;label:"Size";value:Model.size(root.torrent.size,false)+" · "+Model.percent(root.torrent.progress,root.torrent.state==="done" || root.torrent.state==="seeding")}

@@ -81,6 +81,9 @@ mod disk_tests;
 #[path="tests/port.rs"]
 mod port_tests;
 #[cfg(test)]
+#[path="tests/rename.rs"]
+mod rename_tests;
+#[cfg(test)]
 #[path="tests/log.rs"]
 mod log_tests;
 #[path="modals/log.rs"]

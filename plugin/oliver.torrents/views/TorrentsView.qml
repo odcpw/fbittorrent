@@ -93,6 +93,7 @@ FocusScope {
     if(text==="s"){service.cycleSort();return true}
     if(text==="S"){service.sortReverse=!service.sortReverse;return true}
     if(event.key===Qt.Key_Return || event.key===Qt.Key_Enter){if(current)activate(cursorHash);return true}
+    if(text==="N"){if(current){activate(cursorHash);service.detailFlow.begin(cursorHash);Qt.callLater(function(){if(pane)pane.renameTitle()})}return true}
     if(text==="o"){if(current)service.openTarget(cursorHash);return true}
     if(text==="p" || event.key===Qt.Key_Space){if(current)service.toggleTorrent(current);return true}
     if(text==="u"){if(current)service.toggleSeed(cursorHash);return true}
@@ -181,7 +182,7 @@ FocusScope {
         }
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   p pause   u seed   d remove   D delete files   o open   s sort   / filter   q close"}
+    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u seed   d remove   D delete files   o open   s sort   / filter   q close"}
     RowLayout {
       Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding
       Text {

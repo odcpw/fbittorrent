@@ -15,7 +15,7 @@ function create(service, changed) {
     service.client.request("torrents.get",{hash:hash},{callback:function(result){
       if(!result)return
       var extra={},row=result.torrent
-      ;["file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
+      ;["original_name","file_count","piece_count","piece_size","tracker_count","private","undo_until","comment","created_by"].forEach(function(k){if(row[k]!==undefined)extra[k]=row[k]})
       keep(extras,hash,extra);changed()
     }})
   }

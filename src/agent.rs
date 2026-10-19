@@ -610,7 +610,7 @@ fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
         for child in command.get_subcommands().filter(|c|c.get_name()!="help"){
             let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
             let old=metadata.iter().find(|m|m.name==name);
-            let starts=matches!(name.as_str(),"limit"|"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
+            let starts=matches!(name.as_str(),"rename"|"limit"|"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
             out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts,"since":if name=="limit" {"1.2.27"} else if name=="limits" {"1.2.14"} else {"1.2.0"}}));
             walk(child,&name,metadata,out);
         }

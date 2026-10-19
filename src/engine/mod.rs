@@ -33,6 +33,7 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+pub(crate) mod rename;
 pub(crate) mod staging;
 mod bus;
 mod watch;

@@ -40,9 +40,9 @@ regular file at most 16 MiB whose first byte is d (bencoded).
   `app.clipboard.dismiss`, `torrents.commit`, `torrents.discard`, `torrents.force_start`, `app.settings.set`,
   `transfer.set_limits`, `transfer.set_alt`, `search.set_provider`, `rss.set_read`,
   `rss.mark_feed_read`, `shows.set_quality`, `shows.set_read`, `shows.mark_show_read`,
-  `torrents.reannounce`, `torrents.set_download_limit`, `torrents.add_tracker`,
+  `torrents.reannounce`, `torrents.set_download_limit`, `torrents.rename`, `torrents.add_tracker`,
   `torrents.remove_tracker`. Every other
-  mutating operation (`torrents.remove`, `torrents.recheck`, `torrents.move`, `torrents.rename`,
+  mutating operation (`torrents.remove`, `torrents.recheck`, `torrents.move`,
   `torrents.queue_move`, `rss.add`, `rss.remove`, `shows.follow`, `shows.unfollow`,
   `shows.undo_read`, `search.install`, the `*.grab` family, `app.shutdown`, `app.restart`) is not,
   and a client never resends it on its own. `api::ops::TABLE` carries this flag and `api --list`
@@ -76,6 +76,7 @@ when a required cap is missing.
 | `torrents` | `torrents.list/get/add/start/stop/remove/open_target`, topic `torrents`, `summary` | P1-06 |
 | `files` | `torrents.files/set_files`, topic `torrent:<h>.files` | P1-06 |
 | `subscribe` | `subscribe/unsubscribe`, snapshots and deltas | P1-08 |
+| `rename` | `torrents.rename`; display only, original_name in torrent details | P7-03 |
 | `tracker_edit` | `torrents.add_tracker/remove_tracker` | P7-04 |
 | `download_limit` | `torrents.set_download_limit`, configured/effective torrent fields | P7-06 |
 | `dashboard_presence` | `app.client.dashboard_visible` on the shared bar/dashboard socket | M1a |
@@ -203,6 +204,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.files` | `hash: hash` | `{files: [File]}` | no | P1-06 |
 | `torrents.set_files` | `hash: hash`, `include: [u64]?`, `skip: [u64]?` | `{state: "done"}` | yes | P1-06 |
 | `torrents.set_seed` | `hashes: [hash]`, `on: bool` | `{state: "done"}` | yes | P1-06 |
+| `torrents.rename` | `hash: hash`, `name: str` (0..512, empty clears) | `{state: "done"}` | yes | P7-03 |
 | `torrents.add_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.remove_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
@@ -1220,3 +1222,10 @@ and ordinary TLS verification. Bound `localhost` resolves directly to IPv4/IPv6
 loopback; remote names use bound DNS. Missing/down interfaces fail without retrying
 on an ordinary socket. The HTTP worker owns its small runtime only for the
 request; it never creates an engine session or acquires the daemon lock.
+
+### Display names (P7-03)
+
+`torrents.rename {hash,name}` stores a trimmed display override. Empty input clears it.
+Names contain at most 512 Unicode characters and no control characters. `name` in
+torrent rows, selectors, filters and sorting uses this override; `original_name` in
+`torrents.get` remains metadata-derived. Payload paths and hashes never change.

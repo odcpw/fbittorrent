@@ -525,6 +525,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `global` | Open TUI | — | — | `t` |  |
 | `global` | Add from clipboard | — | `Ctrl+V` | — |  |
 | `modal:stopped` | Start fbittorrent | `Enter` | — | — |  |
+| `modal:details` | Rename | `N` | — | — |  |
 | `modal:details` | Back | `Esc`, `h` | — | — |  |
 | `modal:details` | Next tab | `]` | — | — |  |
 | `modal:details` | Previous tab | `[` | — | — |  |
@@ -548,6 +549,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
+| `screen:torrents` | Rename | `N` | `N` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
 | `screen:torrents` | Next details tab | — | `]` | — |  |
 | `global` | Add | `a` | `a` | `a` |  |

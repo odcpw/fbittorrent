@@ -467,10 +467,18 @@ fn operation_event_error_and_document_coverage() {
             }
         }
     }
+    // P7-03 uses behavioural request/reply coverage instead of a new frozen transcript.
+    for name in ["Friendly title", ""] {
+        let request:Request=serde_json::from_value(serde_json::json!({"id":81,"op":"torrents.rename","args":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":name}})).unwrap();
+        request.validate().unwrap();
+        assert!(matches!(Reply::decode("torrents.rename",serde_json::json!({"state":"done"})).unwrap(),Reply::TorrentsRename(_)));
+        operations.insert(request.call.op());
+    }
     let ipc = include_str!("../../docs/IPC.md");
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "torrents.rename",
         "torrents.commit",
         "torrents.discard",
         "torrents.move",
@@ -762,5 +770,18 @@ fn tracker_edits_validate_url_without_echoing_passkeys() {
         assert_eq!(request.call.op(),op);
         assert!(Reply::decode(op,json!({"state":"done"})).is_ok());
         println!("{op}: strict URL validation and done result round-trip passed; query redacted");
+    }
+}
+
+#[test]
+fn rename_validation_preserves_empty_and_rejects_controls() {
+    for name in ["", "  Personal title ✨  ", &"é".repeat(512)] {
+        let request:Request=serde_json::from_value(json!({"id":1,"op":"torrents.rename","args":{"hash":"5656565656565656565656565656565656565656","name":name}})).unwrap();
+        request.validate().unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap()["args"]["name"],name);
+    }
+    for name in ["bad\nname", "bad\0name", &"é".repeat(513)] {
+        let request=serde_json::from_value::<Request>(json!({"id":1,"op":"torrents.rename","args":{"hash":"5656565656565656565656565656565656565656","name":name}}));
+        assert!(request.is_err(),"request decoding validates name: {name:?}");
     }
 }

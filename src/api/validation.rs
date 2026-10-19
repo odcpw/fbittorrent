@@ -126,6 +126,7 @@ impl Validate for UploadLimitArgs {
 impl Validate for Request {
     fn validate(&self) -> Checked {
         match &self.call {
+            Call::TorrentsRename {args}=>require(crate::engine::rename::valid_name(&args.name),"name","at most 512 characters, no control characters; empty restores original"),
             Call::ShowsSetQuality {args} => require(crate::imdb::service::valid_id(&args.imdb),"imdb","an IMDb id (tt followed by digits)"),
             Call::AppLog { args: Some(args) } => {
                 require(args.limit.is_none_or(|v| v <= 1000), "limit", "at most 1000")?;

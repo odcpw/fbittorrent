@@ -164,6 +164,8 @@ pub struct TorrentView {
 }
 
 impl TorrentView {
+    pub(crate) fn original_name(&self)->&str {&self.legacy.name}
+
     fn rechecking(&mut self) {
         self.state = TorrentState::Checking;
         self.checked = false;
@@ -193,7 +195,7 @@ impl TorrentView {
         let (state, reason) = derive_state(facts);
         Self {
             hash: record.hash.clone(),
-            name: record.name.chars().take(1024).collect(),
+            name: record.display_name.as_deref().unwrap_or(&record.name).chars().take(1024).collect(),
             state,
             reason: reason.map(str::to_owned),
             error: None,

@@ -9,6 +9,7 @@ pub struct Operation {
     pub result: &'static str,
 }
 pub const TABLE: &[Operation] = &[
+    Operation{name:"torrents.rename",mutating:true,idempotent:true,since:"P7-03",args:"`hash: hash`, `name: str` (0..512, empty clears)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.add_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
     Operation{name:"torrents.remove_tracker",mutating:true,idempotent:true,since:"P7-04",args:"`hash: hash`, `url: str` (http(s) or udp)",result:"`{state: \"done\"}`"},
 

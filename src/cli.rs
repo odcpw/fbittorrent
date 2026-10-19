@@ -105,6 +105,8 @@ pub(super) enum Cmd {
         #[arg(long)] alt_down: Option<String>,
         #[arg(long)] alt_up: Option<String>,
     },
+    /// Set the displayed name only; an empty name restores the original
+    Rename {selector:String,name:String},
     /// Set a torrent download cap in bytes/s (K/M suffix); none clears
     Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement

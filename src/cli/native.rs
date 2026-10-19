@@ -27,6 +27,7 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Noseed { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
+            | Cmd::Rename {..}
             | Cmd::Limit { .. }
             | Cmd::Restart
     )
@@ -388,6 +389,13 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 json!({"ok":true,"action":if stop{"stop"}else{"delete"},"count":hashes.len(),"hashes":hashes,"running":running}),
             );
         }
+        Cmd::Rename{selector,name}=>{
+            let c=connect(cfg,true,no_start,json_mode)?;
+            let hashes=selected(&list(&c)?,&[selector.clone()])?;
+            anyhow::ensure!(hashes.len()==1,AppError::new(Code::Usage,"rename requires one torrent"));
+            c.call("torrents.rename",json!({"hash":hashes[0],"name":name}))?;
+            emit(json_mode,json!({"ok":true,"action":"rename","count":1,"hashes":hashes}));
+        },
         Cmd::Limit{selector,down}=>{
             let bps=super::download_limit::parse(down)?;
             let c=connect(cfg,true,no_start,json_mode)?;

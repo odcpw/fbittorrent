@@ -80,6 +80,7 @@ impl EngineDispatcher {
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             return self.staged_operation(cx, op).await;
         }
+        if let EngineOp::Rename {hash,name}=&op {self.rename(cx,hash,name).await?;return Ok(EngineResult::Acknowledged);}
         if let EngineOp::EditTracker {hash,url,add} = &op {
             self.edit_tracker(cx,hash,url,*add).await?;
             return Ok(EngineResult::Acknowledged);
@@ -167,7 +168,7 @@ impl EngineDispatcher {
                 let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
                 let record = ledger.records.iter().find(|record| &record.hash == hash)
                     .context("torrent record not found")?;
-                torrent.name = record.name.clone();
+                torrent.name = record.display_name.as_ref().unwrap_or(&record.name).clone();
                 let bytes = if let Some(metadata) = self.inner.handle(hash).ok().and_then(|handle|handle.metadata.load_full()) {
                     Some(metadata.torrent_bytes.to_vec())
                 } else {
@@ -251,6 +252,7 @@ impl EngineDispatcher {
                 }
                 let only_files = magnet.get_select_only();
                 let record = Record {
+                    display_name:None,
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
@@ -541,6 +543,7 @@ impl EngineDispatcher {
         }
         let paused = options.stopped;
         let mut record = Record {
+            display_name:None,
             hash: String::new(),
             name: options
                 .torrent

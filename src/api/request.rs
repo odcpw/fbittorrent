@@ -432,6 +432,8 @@ pub enum Call {
     TorrentsRemove { args: RemoveArgs },
     #[serde(rename = "torrents.files")]
     TorrentsFiles { args: HashArgs },
+    #[serde(rename="torrents.rename")]
+    TorrentsRename {args:RenameArgs},
     #[serde(rename = "torrents.add_tracker")]
     TorrentsAddTracker { args: TrackerEditArgs },
     #[serde(rename = "torrents.remove_tracker")]
@@ -501,6 +503,7 @@ impl Call {
             Self::TorrentsRemove { .. } => "torrents.remove",
             Self::TorrentsFiles { .. } => "torrents.files",
             Self::TorrentsPeers { .. } => "torrents.peers",
+            Self::TorrentsRename {..}=>"torrents.rename",
             Self::TorrentsAddTracker { .. } => "torrents.add_tracker",
             Self::TorrentsRemoveTracker { .. } => "torrents.remove_tracker",
             Self::TorrentsSetFiles { .. } => "torrents.set_files",
@@ -554,3 +557,7 @@ pub struct CommitArgs {
     #[serde(skip_serializing_if="Option::is_none")]
     pub save_path: Option<String>,
 }
+
+#[derive(Debug,Clone,PartialEq,Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameArgs {pub hash:Hash,pub name:String}
