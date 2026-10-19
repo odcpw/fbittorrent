@@ -167,8 +167,8 @@ jobs:
             base=$(git rev-parse --verify HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)
           fi
           python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_commits -- git diff --check "$base" HEAD
-      - name: Check engine file sizes and the size-lint boundary cases
-        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test src/engine
+      - name: Check source file sizes (900-line ceiling; legacy files may only shrink) and the size-lint boundary cases
+        run: python3 agent_ergonomics_audit/audit/regression_tests/ci.py --suite ci_lint_sizes -- scripts/lint-sizes.sh --self-test --baseline scripts/size-baseline.txt src
       # Token and plugin-structure lints arrive in their named P2/P4 beads.
       - name: Summarize cases
         if: always()

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforce the engine/TUI plan's physical-line ceiling on explicit directories.
+# Enforce the 900-line ceiling on explicit directories; --baseline ratchets legacy oversize files (they may only shrink).
 set -euo pipefail
 exec python3 - "$@" <<'PY'
 import argparse
@@ -10,7 +10,22 @@ import unittest
 LIMIT = 900
 
 
-def check_sizes(directories, emit=print):
+def load_baseline(path):
+    """Legacy oversize files and the line counts they may not exceed (ratchet): `<lines> <path>` per line."""
+    baseline = {}
+    if path is None:
+        return baseline
+    for raw in Path(path).read_text().splitlines():
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        count, _, name = raw.partition(" ")
+        baseline[name.strip()] = int(count)
+    return baseline
+
+
+def check_sizes(directories, emit=print, baseline=None):
+    baseline = baseline or {}
     failed = False
     files = set()
     for directory in directories:
@@ -27,9 +42,11 @@ def check_sizes(directories, emit=print):
             emit(f"lint-sizes: ERROR {path}: {error}")
             failed = True
             continue
-        verdict = "ERROR" if count > LIMIT else "ok"
-        emit(f"lint-sizes: {verdict} {path}: {count} lines (limit {LIMIT})")
-        failed |= count > LIMIT
+        allowed = max(LIMIT, baseline.get(str(path), 0))
+        verdict = "ERROR" if count > allowed else "ok"
+        note = f" (legacy baseline {baseline[str(path)]}, may only shrink)" if str(path) in baseline and allowed > LIMIT else ""
+        emit(f"lint-sizes: {verdict} {path}: {count} lines (limit {allowed}){note}")
+        failed |= count > allowed
     emit(f"lint-sizes: {len(files)} files checked; {'FAIL' if failed else 'PASS'}")
     return int(failed)
 
@@ -65,6 +82,17 @@ class SizeTests(unittest.TestCase):
         (self.root / "unterminated.rs").write_bytes(b"line\n" * 900 + b"last")
         self.assertEqual(self.check(), 1)
 
+    def test_baseline_allows_legacy_size_but_not_growth(self):
+        legacy = self.root / "legacy.rs"
+        legacy.write_bytes(b"line\n" * 1000)
+        base = {str(legacy): 1000}
+        self.assertEqual(check_sizes([self.root], self.output.append, base), 0)
+        legacy.write_bytes(b"line\n" * 1001)
+        self.assertEqual(check_sizes([self.root], self.output.append, base), 1)
+        (self.root / "new.rs").write_bytes(b"line\n" * 901)
+        legacy.write_bytes(b"line\n" * 1000)
+        self.assertEqual(check_sizes([self.root], self.output.append, base), 1)
+
     def test_missing_directory_and_file_argument_fail(self):
         self.assertEqual(self.check(self.root / "missing"), 1)
         file = self.root / "file.rs"
@@ -74,6 +102,7 @@ class SizeTests(unittest.TestCase):
 
 parser = argparse.ArgumentParser(description="Fail when a file exceeds 900 physical lines.")
 parser.add_argument("--self-test", action="store_true", help="test the ceiling and error handling before checking directories")
+parser.add_argument("--baseline", type=Path, help="ratchet file: `<lines> <path>` per line; listed files may not grow past that count, all others obey the limit")
 parser.add_argument("directories", nargs="*", type=Path)
 args = parser.parse_args()
 if not args.directories and not args.self_test:
@@ -82,5 +111,5 @@ if args.self_test:
     tests = unittest.defaultTestLoader.loadTestsFromTestCase(SizeTests)
     if not unittest.TextTestRunner(verbosity=2).run(tests).wasSuccessful():
         raise SystemExit(1)
-raise SystemExit(check_sizes(args.directories) if args.directories else 0)
+raise SystemExit(check_sizes(args.directories, baseline=load_baseline(args.baseline)) if args.directories else 0)
 PY
