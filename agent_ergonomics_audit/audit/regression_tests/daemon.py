@@ -3213,6 +3213,7 @@ from daemon_notify import (notify_completed, notify_action_open, notify_action_d
     notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once)
 
 from daemon_log import log_injected_error, log_follow, hello_counters, log_down_never_starts
+from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
 from daemon_policy import (idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
@@ -3805,7 +3806,8 @@ def tui_single_connection(binary, systemd):
 
 
 CASES = {function.__name__: function for function in
-         (log_injected_error, log_follow, hello_counters, log_down_never_starts,
+         (upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
+          log_injected_error, log_follow, hello_counters, log_down_never_starts,
           settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients,
           settings_offline_no_start, tui_single_connection, offline_stop_ledger,
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,

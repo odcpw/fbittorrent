@@ -41,7 +41,7 @@ pub fn dispatch(
         Call::AppInfo { .. } => {
             let mut value = serde_json::to_value(hello(daemon)).unwrap();
             value["uptime_s"] = json!(uptime);
-            value["upgrade_pending"] = json!(false);
+            value["upgrade_pending"] = json!(daemon.upgrade_pending.load(std::sync::atomic::Ordering::Acquire));
             value["clients"] = counts;
             value["subscriptions"] = serde_json::to_value(subscriptions).unwrap();
             Reply::AppInfo(serde_json::from_value(value).unwrap())

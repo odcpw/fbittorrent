@@ -172,3 +172,35 @@ compilation, diff whitespace and changed-source 900-line checks pass. No all.sh
 between track beads per owner instruction. Unmet criteria: none. Follow-up:
 notification Open-log still needs a visible terminal/log pane; these checks prove
 CLI history/stream delivery, not desktop presentation.
+
+## P1-17 — upgrade detection and restart (`fbt-p1-17-2ds`)
+
+Added build-time git/dirty identity with the fixture override, owner executable
+identity checks every 30 seconds, busy-table deferral and live upgrade_pending,
+exit-75 replacement, and a restart CLI that requests daemon scope and waits up to
+30 seconds for a different hello instance. A foreground owner exits 75; without
+a supervisor the CLI times out with exit 8 and never launches an owner itself.
+Existing P1-11 skew warnings remain verified. Neighbouring edits publish pending
+state in app.info/summary and route the split CLI to the bounded restart helper.
+No existing contract fixture changed; contract patch 1.2.4 records new restart
+instance/server output.
+
+Evidence: `target/test-logs/fbt-p1-17-2ds/`; commands use private-XDG `run.py`.
+`policy` (`upgrade-units/`) passes two upgrade unit tests. `cases
+upgrade_idle_exit_75 upgrade_pending_while_busy restart_now
+restart_closed_never_starts` passes all four cases in `foreground/daemon/` and
+`FBT_BUS_SYSTEMD=1` in `systemd-fixed/daemon/`: two actual locked builds differ by
+compiled p1-17-old/new ids; private copy/rename changes the inode; idle replacement
+records systemd SubState=auto-restart and ExecMainStatus=75 then a new build/instance;
+a real 8 MiB capped loopback transfer retains the old instance with pending=true
+until stopped; explicit restart overrides an interactive busy owner, while the
+foreground wait expires cleanly after 30 seconds. Replacement unit environment
+and working directory are verified before launch and again in the actual child.
+The original systemd fixture checked lock freedom before stopping its replacement
+owner; that failure is retained in `systemd/` and corrected by checking after
+verified unit/cgroup teardown. `skew.py` (`skew/agent_contract/`) passes the
+existing human/JSON version-skew test. Single `full` (`full-final/development_full/`)
+passes 365 locked Rust tests, zero failures, two intentional ignores. Python compilation, diff whitespace and changed
+source-size checks pass. No all.sh between track beads per owner instruction.
+Unmet criteria: none. Follow-up: actual desktop banners/installation remain the
+integrated milestone's qualification, outside these isolated unit/process checks.

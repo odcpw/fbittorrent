@@ -601,3 +601,18 @@ never starts a daemon and exits 4 when closed, with up/journalctl hints.
 
 Changelog: P1-14 adds the log cap/topic, `app.log`, `app.stats`, and `log.ndjson`;
 existing fixture files remain byte-for-byte unchanged.
+
+### P1-17: executable upgrades
+
+`hello.server.build` is the short git id (with -dirty for modified sources), or
+unknown when git metadata is unavailable. Build-time FBT_BUILD_ID_OVERRIDE is a
+fixture override. The owner records executable device/inode/mtime at startup and
+checks every 30 seconds. A replacement sets app.info/summary.daemon.upgrade_pending
+while the existing busy table is nonempty, then drains with bye reason upgrade
+and unit exit 75. The systemd unit starts the replacement binary. Explicit
+app.restart with scope daemon drains immediately, including while busy. CLI
+restart never starts an absent owner, and waits at most 30 seconds for a different
+hello instance (exit 8 on timeout, exit 4 when already stopped). Engine scope
+keeps the process and API connections. No capability or frozen fixture changes;
+P1-17 implements the existing fields and operation. CLI contract 1.2.4 adds the
+replacement instance/server to restart output.

@@ -2,6 +2,7 @@
 use super::*;
 pub mod shapes;
 pub(super) mod logs;
+pub(super) mod restart;
 mod native;
 mod offline;
 pub(super) mod settings;
@@ -74,7 +75,7 @@ pub(super) enum Cmd {
     Up { #[arg(long)] ui: bool },
     /// Open the dashboard, falling back to the TUI when the panel is absent
     Dashboard { #[arg(long)] view: Option<String>, #[arg(long)] query: Option<String> },
-    /// Restart the running engine; daemon upgrade handling follows in P1-17
+    /// Restart the running daemon and wait up to 30 seconds for its replacement
     Restart,
     /// Close the app and stop its engine (legacy mode stops the service)
     Down,

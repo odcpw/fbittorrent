@@ -412,7 +412,7 @@ impl Bus {
             serde_json::to_value(policy.snapshot(now)).unwrap()
         };
         daemon["state"] = json!(state);
-        daemon["upgrade_pending"] = json!(false);
+        daemon["upgrade_pending"] = json!(self.daemon.upgrade_pending.load(Ordering::Acquire));
         self.daemon.notifier.enabled(cfg.notify && !self.daemon.no_notify);
         let network = serde_json::to_value(self.daemon.network()).unwrap();
         let mut effective = cfg;

@@ -110,15 +110,16 @@ Menu entries live in `~/.config/omarchy/extensions/omarchy-menu.jsonc` under
 ## Lifecycle
 
 `fbittorrent serve` owns the native engine in a headless daemon. `up` starts it,
-`down` drains it, and `restart` replaces the engine slot while its sockets stay
+`down` drains it, and `restart` replaces the daemon and waits for a new hello.
+The API can also replace just the engine slot while its sockets stay
 available. `dashboard` summons the desktop view. The static user unit starts on
 writes; nothing is enabled at login. Reads (`status`, `list`, `show`, `triage`)
 never start an owner. When it is down, saved reads report `running:false`; `stop`
 and keep-files `delete` update the saved ledger under the same instance lock.
 `--no-start` and `autostart=false` prevent automatic startup. Without a user
-manager, run `serve` in a terminal or tmux. Automatic idle exit and binary upgrade
-replacement are delivered by their lifecycle work; this checkout reports the
-available daemon state without inventing missing idle counters.
+manager, run `serve` in a terminal or tmux. Automatic idle exit uses the busy
+table; binary replacement requests exit 75 when idle, and systemd starts the
+installed replacement.
 
 The CLI speaks newline-delimited API v1 on `api.sock`; `docs/IPC.md` defines the
 wire contract. Contract 1.2.0 keeps torrent JSON fields and adds normalized state,
@@ -179,7 +180,7 @@ fbittorrent search --install | --install-url <url> | --plugins
 fbittorrent imdb <release name>      rating, blurb, poster path
 fbittorrent up [--ui] | down          start daemon / drain and stop owner
 fbittorrent dashboard [--view v] [--query q]   summon panel, or fall back to TUI
-fbittorrent restart                  restart engine slot (upgrade handling follows)
+fbittorrent restart                  restart daemon now; wait up to 30 s for new hello
 fbittorrent serve                   run the native engine headlessly in the foreground
 fbittorrent status                   rates and counts; never opens the app
 fbittorrent settings --max-downloads 3 --encryption prefer --vpn proton
@@ -558,3 +559,11 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
 <!-- keys:end -->
+
+The daemon checks its executable inode and modification time every 30 seconds.
+An atomically installed replacement switches automatically when the busy table
+is empty, through exit 75 and the systemd unit's forced restart. While work is
+active, summary/app.info expose `upgrade_pending`; `restart` switches immediately.
+Foreground `serve` exits 75 too, but requires its supervisor to launch a new owner;
+CLI restart waits 30 seconds and exits 8 if no replacement hello arrives. Reads
+and restart never start a closed daemon. Hello reports the compiled git build id.

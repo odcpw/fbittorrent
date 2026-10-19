@@ -234,8 +234,9 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Restart => {
             if cfg.native() {
-                api::client::ensure_daemon(&cfg, true)?;
-                ipc::request(&cfg, "POST", "app/restart", &[], None)?;
+                let result = cli::restart::daemon(&cfg,json)?;
+                emit(json,result,|| println!("daemon restarted"));
+                return Ok(Code::Ok);
             } else {
                 backend::stop(&cfg)?;
                 let mut explicit = cfg.clone(); explicit.autostart = !no_start;
