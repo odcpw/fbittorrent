@@ -255,3 +255,16 @@ fn reconnecting_to_the_same_instance_resets_connection_scoped_revisions() {
     assert!(store.stale);
     assert_eq!(store.torrents, before);
 }
+
+#[test]
+fn search_fixture_mirrors_deduplicated_results_and_ledger_annotations() {
+    let (store,_) = replay(&fixture("search.ndjson")).unwrap();
+    let rows = &store.searches[&1];
+    assert_eq!(rows.len(),1);
+    let row = &rows[&"a".repeat(40)];
+    assert_eq!(row.name,"辛特尔");
+    assert_eq!(row.providers,vec!["alpha","beta"]);
+    assert_eq!(row.added.as_ref().unwrap().as_str(),"a".repeat(40));
+    assert!(row.leechers.is_none() && row.uploaded_at.is_none());
+    assert_eq!(store.subscriptions[&1].rev,4);
+}

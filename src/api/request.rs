@@ -1,6 +1,6 @@
 //! Strict client input. Runtime policies (in-flight IDs, hello deadlines,
 //! capabilities, path opening and mutation refs) belong to the server.
-use super::scalar::*;
+use super::{scalar::*, search::*};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -262,6 +262,41 @@ pub struct ImdbLookupArgs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Call {
+    #[serde(rename = "search.start")]
+    SearchStart {
+        args: SearchStartArgs,
+    },
+    #[serde(rename = "search.stop")]
+    SearchStop {
+        args: SearchIdArgs,
+    },
+    #[serde(rename = "search.providers")]
+    SearchProviders {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.set_provider")]
+    SearchSetProvider {
+        args: SetProviderArgs,
+    },
+    #[serde(rename = "search.install")]
+    SearchInstall {
+        args: SearchInstallArgs,
+    },
+    #[serde(rename = "search.browse_sources")]
+    SearchBrowseSources {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        args: Option<EmptyArgs>,
+    },
+    #[serde(rename = "search.browse")]
+    SearchBrowse {
+        args: SearchBrowseArgs,
+    },
+    #[serde(rename = "search.grab")]
+    SearchGrab {
+        args: SearchGrabArgs,
+    },
+
     #[serde(rename = "torrents.recheck")]
     TorrentsRecheck { args: HashesArgs },
     #[serde(rename = "app.settings.get")]
@@ -329,6 +364,15 @@ pub enum Call {
 impl Call {
     pub fn op(&self) -> &'static str {
         match self {
+            Self::SearchStart { .. } => "search.start",
+            Self::SearchStop { .. } => "search.stop",
+            Self::SearchProviders { .. } => "search.providers",
+            Self::SearchSetProvider { .. } => "search.set_provider",
+            Self::SearchInstall { .. } => "search.install",
+            Self::SearchBrowseSources { .. } => "search.browse_sources",
+            Self::SearchBrowse { .. } => "search.browse",
+            Self::SearchGrab { .. } => "search.grab",
+
             Self::TorrentsRecheck { .. } => "torrents.recheck",
             Self::AppSettingsGet { .. } => "app.settings.get",
             Self::AppSettingsSet { .. } => "app.settings.set",

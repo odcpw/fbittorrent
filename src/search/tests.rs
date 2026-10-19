@@ -399,3 +399,56 @@ os._exit(0)
             "provider subprocesses survived Nova parent death: {live:?}"
         );
     }
+
+    #[test]
+    fn dedupe_key_btih() {
+        let first = SearchResult { file_url: "magnet:?xt=urn:btih:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&dn=first".into(), ..Default::default() };
+        let second = SearchResult { file_url: "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&tr=elsewhere".into(), ..Default::default() };
+        assert_eq!(normalize::dedupe_key(&first), normalize::dedupe_key(&second));
+        assert_eq!(normalize::dedupe_key(&first), "a".repeat(40));
+        let (_scratch, store) = scratch();
+        std::fs::create_dir_all(&store.data).unwrap();
+        let path = store.data.join("metadata.torrent");
+        let bytes = b"d4:infod6:lengthi1e4:name1:x12:piece lengthi4e6:pieces20:aaaaaaaaaaaaaaaaaaaaee";
+        std::fs::write(&path,bytes).unwrap();
+        assert_eq!(normalize::torrent_hash(path.to_str().unwrap()).unwrap(), librqbit::torrent_from_bytes(bytes).unwrap().info_hash.as_string());
+    }
+
+    #[test]
+    fn dedupe_key_title_size() {
+        let first = SearchResult { file_name: "  Sintel   2010 ".into(), file_size: 1234, file_url: "https://alpha.invalid/one".into(), engine: "alpha".into(), seeders: 1, ..Default::default() };
+        let second = SearchResult { file_name: "sintel 2010".into(), file_url: "https://beta.invalid/two".into(), engine: "beta".into(), seeders: 9, ..first.clone() };
+        assert_eq!(normalize::dedupe_key(&first),normalize::dedupe_key(&second));
+        let items = normalize::aggregate(&[first.clone(),second.clone()],5000);
+        assert_eq!(items.len(),1); assert_eq!(items[0].providers, vec!["alpha","beta"]); assert_eq!(items[0].seeds,Some(9));
+        assert_eq!(items[0].url.as_deref(),Some(second.file_url.as_str()));
+        let different = SearchResult { file_size: 1235, ..first };
+        assert_ne!(normalize::dedupe_key(&different),normalize::dedupe_key(&second));
+    }
+
+    #[test]
+    fn mojibake_roundtrip() {
+        for (raw,expected) in [("è¾›ç‰¹å°”","辛特尔"),("Amélie","Amélie"),("Straße","Straße"),("Sintel","Sintel")] {
+            assert_eq!(normalize::repair_name(raw),expected); println!("{raw:?} -> {expected:?}");
+        }
+    }
+
+    #[test]
+    fn raw_provider_bytes_survive_normalization_and_capture_is_bounded() {
+        let _session = session(); let (_scratch,store) = scratch(); store.ensure_runtime().unwrap();
+        std::fs::write(store.runtime().join("engines/raw.py"),r#"class raw:
+ name='Raw'
+ url='https://raw.invalid'
+ def search(self,query):
+  print('magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|è¾›ç‰¹å°”|123|9|-1|https://raw.invalid',flush=True)
+  print('x'*(3*1024*1024),flush=True)
+"#).unwrap();
+        let id = start_in(&store,"fixture").unwrap(); let deadline = Instant::now()+Duration::from_secs(8);
+        while !job(id).unwrap().done.load(Ordering::Acquire) { assert!(Instant::now()<deadline); thread::sleep(Duration::from_millis(20)); }
+        let selected=job(id).unwrap(); let state=selected.state.lock().unwrap();
+        assert!(std::str::from_utf8(&state.raw).unwrap().contains("è¾›ç‰¹å°”"));
+        assert!(state.raw.len() <= MAX_CAPTURE_BYTES); assert!(state.error.contains("exceeded 2 MiB"));
+        let items=normalize::aggregate(&state.results,5000); assert_eq!(items[0].name,"辛特尔"); assert_eq!(items[0].leechers,None);
+        println!("retained raw={} bytes, normalized={:?}, error={}",state.raw.len(),items,state.error);
+        drop(state); delete(id).unwrap();
+    }

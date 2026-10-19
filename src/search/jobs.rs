@@ -1,15 +1,17 @@
 //! Search job registration, streaming results, cancellation and drain.
 use super::*;
 
-struct JobState {
-    results: Vec<SearchResult>,
-    error: String,
+pub(super) struct JobState {
+    pub(super) results: Vec<SearchResult>,
+    pub(super) raw: Vec<u8>,
+    pub(super) hashes: BTreeMap<String,String>,
+    pub(super) error: String,
 }
 pub(super) struct SearchJob {
     pub(super) pid: AtomicI32,
-    done: AtomicBool,
+    pub(super) done: AtomicBool,
     cancelled: AtomicBool,
-    state: Mutex<JobState>,
+    pub(super) state: Mutex<JobState>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 #[derive(Default)]
@@ -38,6 +40,10 @@ pub fn start(query: &str) -> Result<i64> {
 }
 
 pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
+    start_selected(store, query, None)
+}
+
+pub(super) fn start_selected(store: &ProviderStore, query: &str, selected: Option<&[String]>) -> Result<i64> {
     if query.trim().is_empty() {
         bail!("no search query given");
     }
@@ -50,7 +56,7 @@ pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
     }
     let providers: Vec<_> = plugins_in(store)?
         .into_iter()
-        .filter(|plugin| plugin.enabled)
+        .filter(|plugin| plugin.enabled && selected.is_none_or(|names| names.contains(&plugin.name)))
         .collect();
     if providers.is_empty() {
         bail!("no enabled search providers; install providers with fbittorrent search --install");
@@ -71,6 +77,8 @@ pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
         cancelled: AtomicBool::new(false),
         state: Mutex::new(JobState {
             results: vec![],
+            raw: vec![],
+            hashes: BTreeMap::new(),
             error: String::new(),
         }),
         worker: Mutex::new(None),
@@ -80,30 +88,32 @@ pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
         .name("torrent-search".into())
         .spawn(move || {
             let errors = thread::spawn(move || {
-                // Drain stderr completely so a noisy failing provider cannot block
-                // the search, while retaining a bounded diagnostic for the user.
-                let mut reader = BufReader::new(stderr);
-                let mut retained = String::new();
-                let mut line = String::new();
-                while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                    if retained.len() < 16 * 1024 {
-                        retained.push_str(&line);
-                    }
-                    line.clear();
-                }
-                retained
+                drain_bounded(&mut BufReader::new(stderr), 16 * 1024)
+                    .map(|(bytes,_)| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default()
             });
             let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                if let Some(result) = parse_result(&line, &providers) {
-                    if let Ok(mut state) = worker_job.state.lock() {
-                        if state.results.len() < MAX_RESULTS {
-                            state.results.push(result);
-                        }
+            let mut retained = 0usize;
+            let mut inspected = BTreeMap::<String, Option<String>>::new();
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                let budget = MAX_CAPTURE_BYTES.saturating_sub(retained);
+                let count = reader.by_ref().take(budget as u64 + 1).read_until(b'\n', &mut line).unwrap_or(0);
+                if count == 0 { break; }
+                if count > budget {
+                    if let Ok(mut state) = worker_job.state.lock() { state.error = "search provider output exceeded 2 MiB".into(); }
+                    process.kill(); break;
+                }
+                retained += count;
+                let result = std::str::from_utf8(&line).ok().and_then(|text| parse_result(text, &providers));
+                let hash = result.as_ref().and_then(|r| inspected.entry(r.file_url.clone()).or_insert_with(|| normalize::torrent_hash(&r.file_url)).clone());
+                if let Ok(mut state) = worker_job.state.lock() {
+                    state.raw.extend_from_slice(&line);
+                    if let Some(result) = result {
+                        if let Some(hash) = hash { state.hashes.insert(result.file_url.clone(), hash); }
+                        if state.results.len() < MAX_RESULTS { state.results.push(result); }
                     }
                 }
-                line.clear();
             }
             let status = process.child.wait();
             process.kill();
@@ -113,11 +123,11 @@ pub(super) fn start_in(store: &ProviderStore, query: &str) -> Result<i64> {
                 && !status.as_ref().is_ok_and(|status| status.success())
             {
                 if let Ok(mut state) = worker_job.state.lock() {
-                    state.error = if errors.trim().is_empty() {
+                    if state.error.is_empty() { state.error = if errors.trim().is_empty() {
                         "search providers failed to finish".into()
                     } else {
                         errors.trim().into()
-                    };
+                    }; }
                 }
             }
             worker_job.done.store(true, Ordering::Release);

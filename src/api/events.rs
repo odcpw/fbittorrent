@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 pub enum Item {
     Torrent(Torrent),
     File(File),
+    Search(super::SearchItem),
     Event(Box<Event>),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

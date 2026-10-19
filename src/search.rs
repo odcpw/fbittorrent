@@ -471,6 +471,8 @@ pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
 
 
 mod download;
+pub(crate) mod normalize;
+pub(crate) mod service;
 mod jobs;
 mod process;
 #[cfg(test)]

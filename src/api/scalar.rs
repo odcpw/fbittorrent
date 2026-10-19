@@ -147,6 +147,7 @@ pub enum Topic {
     Summary,
     Torrents,
     Files(Hash),
+    Search(u64),
     Network,
     Settings,
     Events,
@@ -160,6 +161,7 @@ impl Topic {
             Self::Settings => "settings".into(),
             Self::Events => "events".into(),
             Self::Files(h) => format!("torrent:{h}.files"),
+            Self::Search(id) => format!("search:{id}"),
         }
     }
 }
@@ -177,6 +179,9 @@ impl<'de> Deserialize<'de> for Topic {
             "network" => Ok(Self::Network),
             "settings" => Ok(Self::Settings),
             "events" => Ok(Self::Events),
+            _ if s.starts_with("search:") => s[7..].parse::<u64>()
+                .ok().filter(|id| *id > 0).map(Self::Search)
+                .ok_or_else(|| serde::de::Error::custom("invalid search topic")),
             _ => s
                 .strip_prefix("torrent:")
                 .and_then(|s| s.strip_suffix(".files"))

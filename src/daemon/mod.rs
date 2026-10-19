@@ -33,6 +33,7 @@ pub struct Daemon {
     pub no_notify: bool,
     pub(crate) notifier: notify::Notifier,
     pub(crate) imdb: crate::imdb::service::Service,
+    pub(crate) search: crate::search::service::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -328,6 +329,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         directory.clone(),
         Duration::from_secs(5),
     )?);
+    crate::search::begin_session()?;
+    struct SearchDrain;
+    impl Drop for SearchDrain { fn drop(&mut self) { crate::search::shutdown_all(); } }
+    let _search_drain = SearchDrain;
     let lifecycle = Lifecycle::default();
     let _signals = signals::Signals::install(lifecycle.clone())?;
     let panicked = Arc::new(AtomicBool::new(false));
@@ -349,6 +354,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         no_notify,
         notifier: notify::Notifier::new(cfg.notify)?,
         imdb: Default::default(),
+        search: Default::default(),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
@@ -385,6 +391,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     // Already-read requests complete; new handlers see stopping immediately.
     server.stop_accepting();
     api.stop_accepting();
+    daemon.search.shutdown();
     let began = Instant::now();
     if daemon
         .slot

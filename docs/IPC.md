@@ -596,3 +596,56 @@ before shutdown bye. The independent `recheck.ndjson` transcript and contract
 patch 1.2.3 document the new operation without modifying earlier transcripts.
 Dashboard/TUI/CLI surfaces are integrated by their owner tracks; completion
 notifications and the pending busy reason consume P1-08/P1-12/P1-13's channels.
+
+### P3-01: daemon search sessions
+
+The `search` capability implements `search.start`, `search.stop`, `search.providers`,
+`search.set_provider`, `search.install`, `search.browse_sources`, `search.browse` and
+`search.grab`. `search.start` takes `query` (1..256 characters), optional provider
+names and `limit` (1..5000), returning `{search_id}`. Four sessions may coexist;
+a fifth returns retryable `busy` with `details.limit: "sessions"`. Sessions belong
+to the starting connection. Disconnect retains results and provider processes for
+30 seconds; subscribing to `search:<id>` within that lease reclaims it. Expiry,
+`search.stop` and daemon drain kill the entire provider process group. A session
+(including its grace) is the `search` idle-policy busy reason.
+
+`search:<id>` is keyed by `key`, defaults to 500 ms, and uses the usual snapshot
+and delta framing. Results carry `key`, `name`, `providers` and optional `size`,
+`seeds`, `leechers`, `uploaded_at`, `magnet`, `url`, `page_url`, `imdb_id`, `rating`,
+`provider_url` and `added` (the daemon ledger's hash). Unknown measurements are
+omitted. Keys use a v1 info hash from a magnet or bounded metainfo inspection,
+otherwise normalized title and size. The best-seeded copy retains all providers;
+ordering is seeds descending, name, first provider. Valid UTF-8 inverse Latin-1
+(or Windows-1252 punctuation) repairs mojibake; raw provider bytes remain in the
+session. Provider stdout is capped at 2 MiB and results at 5000.
+
+`search.done` carries `search_id`, `total` and `warnings: [{provider,message}]`.
+`search.providers` returns `{providers:[{name,kind,enabled,full_name?,url?,version?}]}`
+with kind `nova` or `torznab`. `search.set_provider {name,enabled}` persists the
+preference. `search.install` accepts exactly one of `curated:true` or `sources`
+(HTTPS URLs); its pending ref is confirmed by `mutation.result` containing
+`{installed,failed:[{source,message}]}`. `search.browse_sources` returns
+`{sources:[{id,label,provider,in_app,url?}]}`; `search.browse {source}` returns
+`{items:[SearchResult]}` using the existing 16 MiB JSON limit. `search.grab` takes
+either `{search_id,key}` or `{result}`, plus the usual add options, and uses
+`torrents.add` semantics with origin `search`. Parked grabs fail with
+`engine_unavailable` and a VPN hint; provider download hooks remain forbidden
+with VPN binding enabled.
+
+Contract 1.2.4 adds this namespace and keyed topic; existing transcripts stay
+unchanged. Example from `contracts/ipc/v1/search.ndjson`:
+
+```json
+{"dir":"c2s","frame":{"id":4,"op":"search.start","args":{"query":"Sintel","providers":["alpha","beta"],"limit":5000}}}
+```
+
+| Operation | Arguments | Result | Mutating | Since |
+|---|---|---|---|---|
+| `search.start` | `query`, `providers?`, `limit?` | `{search_id}` | yes | P3-01 |
+| `search.stop` | `search_id` | `{state: "done"}` | yes | P3-01 |
+| `search.providers` | none | `{providers: [Provider]}` | no | P3-01 |
+| `search.set_provider` | `name`, `enabled` | `{state: "done"}` | yes | P3-01 |
+| `search.install` | `curated?` or `sources?` | pending ref, then `{installed, failed}` | yes | P3-01 |
+| `search.browse_sources` | none | `{sources: [BrowseSource]}` | no | P3-01 |
+| `search.browse` | `source` | `{items: [SearchResult]}` | no | P3-01 |
+| `search.grab` | `search_id` and `key`, or `result`; add options | as `torrents.add` | yes | P3-01 |

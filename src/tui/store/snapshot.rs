@@ -6,6 +6,7 @@ pub(super) struct Snapshot {
     pub bytes: usize,
     pub torrents: BTreeMap<String, api::Torrent>,
     pub files: BTreeMap<String, api::File>,
+    pub searches: BTreeMap<String, api::SearchItem>,
     pub events: Vec<api::Event>,
 }
 impl Snapshot {
@@ -15,11 +16,12 @@ impl Snapshot {
             bytes: 0,
             torrents: BTreeMap::new(),
             files: BTreeMap::new(),
+            searches: BTreeMap::new(),
             events: Vec::new(),
         }
     }
     pub fn len(&self) -> usize {
-        self.torrents.len() + self.files.len() + self.events.len()
+        self.torrents.len() + self.files.len() + self.searches.len() + self.events.len()
     }
     pub fn append(
         &mut self,
@@ -44,6 +46,9 @@ impl Snapshot {
                     keys.insert(row.index.to_string())
                         && !self.files.contains_key(&row.index.to_string())
                 }
+                (api::Topic::Search(_), api::Item::Search(row)) => {
+                    keys.insert(row.key.clone()) && !self.searches.contains_key(&row.key)
+                }
                 (api::Topic::Events, api::Item::Event(_)) => {
                     self.events.len() + items.len() <= MAX_EVENTS
                 }
@@ -63,6 +68,7 @@ impl Snapshot {
                     self.files.insert(row.index.to_string(), row.clone());
                 }
                 api::Item::Event(event) => self.events.push(*event.clone()),
+                api::Item::Search(row) => { self.searches.insert(row.key.clone(),row.clone()); },
             }
         }
         self.bytes += bytes;

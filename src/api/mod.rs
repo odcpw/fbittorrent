@@ -11,6 +11,7 @@ pub mod mutations;
 pub mod objects;
 pub mod ops;
 pub mod request;
+pub mod search;
 pub mod response;
 pub mod scalar;
 pub mod server;
@@ -19,6 +20,7 @@ pub mod validation;
 pub use events::*;
 pub use objects::*;
 pub use request::*;
+pub use search::*;
 pub use response::*;
 pub use scalar::*;
 
