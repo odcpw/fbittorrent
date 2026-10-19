@@ -3632,8 +3632,124 @@ def imdb_poster_atomic(binary, systemd):
                    f"every observed size={observations}; final bytes={len(final)}; card={card!r}", [artifact])
 
 
+def settings_invalid_named(binary, systemd):
+    with api_owned("settings_invalid_named", binary, systemd) as (case, sandbox, h, process), ApiConn(h) as client:
+        client.hello()
+        before = client.call("app.settings.get")["result"]
+        config = Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
+        saved = config.read_bytes()
+        for key, value in dict(max_active_downloads=0, peer_encryption="invalid", network_interface="../bad",
+                               save_path="", seed_by_default=1, autostart=None, idle_exit_secs=-1, notify="yes",
+                               timeout_secs=0, handler="exec", open_command="", clipboard_watch=0,
+                               reduce_motion=None, peer_port=65536, show_quality="", download_limit_bps=1,
+                               upload_limit_bps=1, alt_download_limit_bps=1, alt_upload_limit_bps=1,
+                               alt_limits_on=1, restart_class=[], password="not-a-setting").items():
+            reply = client.call("app.settings.set", {key:value}, error="invalid_args")
+            case.check(reply["error"].get("details", {}).get("key") == key,
+                       "invalid settings value names its exact key", json.dumps(reply))
+        client.call("app.settings.set", dict(notify=False, max_active_downloads=0), error="invalid_args")
+        after = client.call("app.settings.get")["result"]
+        case.check(after == before and config.read_bytes() == saved,
+                   "invalid multi-key patch changes neither durable bytes nor effective settings", json.dumps(after))
+
+
+def settings_live_queue(binary, systemd):
+    with api_owned("settings_live_queue", binary, systemd) as (case, sandbox, h, process), ApiConn(h) as client:
+        client.hello()
+        epoch = client.call("app.info")["result"]["engine_epoch"]
+        fixtures_created = []
+        for index in range(2):
+            root = sandbox.root / f"queue-payload-{index}"
+            root.mkdir()
+            payload = root / f"queue-{index}.bin"
+            payload.write_bytes(bytes([index+1]) * (128 * 1024))
+            fixture = fixtures.torrent_fixture(root, [payload], name=f"queue-{index}")
+            destination = sandbox.root / f"empty-{index}"
+            destination.mkdir()
+            client.call("torrents.add", dict(source=dict(path=str(fixture.torrent)), stopped=True, save_path=str(destination)))
+            fixtures_created.append(fixture)
+        h.wait_for(lambda: (all(t["checked"] for t in client.call("torrents.list", {})["result"]["torrents"]), "both real initial checks completed"), "hash fixture torrents")
+        client.call("app.settings.set", dict(max_active_downloads=1))
+        client.call("torrents.start", dict(hashes=[f.info_hash for f in fixtures_created]))
+        def queue_count(active, queued):
+            q = json.loads(h.engine_call("app/queue")["value"])
+            return q["active_downloads"] == active and q["queued_downloads"] == queued, json.dumps(q)
+        h.wait_for(lambda: queue_count(1,1), "queue admits one torrent at limit one")
+        applied = client.call("app.settings.set", dict(max_active_downloads=2, idle_exit_secs=0, handler="add",
+                              clipboard_watch=True, open_command="mpv --keep-open=yes", seed_by_default=True,
+                              upload_limit_bps=65536))["result"]
+        h.wait_for(lambda: queue_count(2,0), "live increase admits queued torrent before acknowledgement")
+        settings = client.call("app.settings.get")["result"]
+        after = client.call("app.info")["result"]
+        case.check(not applied["restart"] and after["engine_epoch"] == epoch and settings["max_active_downloads"] == 2
+                   and after["policy"]["idle_exit_secs"] == 0 and settings["handler"] == "add",
+                   "live settings apply without an engine epoch change", json.dumps(dict(ack=applied, settings=settings, info=after)))
+        saved = tomllib.loads((Path(sandbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml").read_text())
+        case.check(saved["max_active_downloads"] == 2 and saved["upload_limit_bps"] == 65536,
+                   "live settings acknowledgement follows durable save", json.dumps(saved))
+        cli = h.cli("settings", "--max-downloads", "1")
+        case.check(cli["running"] is True and cli["applied"] == ["max_active_downloads"] and not cli["restart"],
+                   "running CLI settings use durable API acknowledgement", json.dumps(cli))
+        h.wait_for(lambda: queue_count(1,1), "CLI queue decrease takes effect on the same engine")
+        default_path = sandbox.root / "changed-downloads"
+        client.call("app.settings.set", dict(save_path=str(default_path)))
+        source = fixtures_created[0]
+        unique = sandbox.root / "defaults.torrent"
+        info = dict(source.info, name="new-defaults.bin")
+        unique.write_bytes(fixtures.bencode(dict(info=info)))
+        added = client.call("torrents.add", dict(source=dict(path=str(unique)), stopped=True))["result"]
+        detail = client.call("torrents.get", dict(hash=added["hash"]))["result"]["torrent"]
+        case.check(detail["seed"] and detail["save_path"] == str(default_path),
+                   "new adds immediately use changed seed and save path defaults", json.dumps(detail))
+
+
+def settings_restart_class_keeps_clients(binary, systemd):
+    with api_owned("settings_restart_class_keeps_clients", binary, systemd) as (case, sandbox, h, process), ApiConn(h) as client:
+        hello = client.hello()["result"]
+        before = client.call("app.info")["result"]
+        current = client.call("app.settings.get")["result"]
+        encryption = "require" if current["peer_encryption"] != "require" else "prefer"
+        reply = client.call("app.settings.set", dict(peer_encryption=encryption), ref="settings-restart")["result"]
+        case.check(reply == dict(applied=["peer_encryption"], restart=True),
+                   "restart-class settings return durable applied/restart, never pending", json.dumps(reply))
+        def restarted():
+            info = client.call("app.info")["result"]
+            return info["state"] == "running" and info["engine_epoch"] > before["engine_epoch"], json.dumps(info)
+        h.wait_for(restarted, "same API connection survives in-place engine restart", timeout=15)
+        after = client.call("app.info")["result"]
+        settings = client.call("app.settings.get")["result"]
+        case.check(after["instance"] == hello["instance"] and after["server"]["pid"] == before["server"]["pid"]
+                   and after["engine_epoch"] == before["engine_epoch"] + 1 and settings["peer_encryption"] == encryption,
+                   "daemon identity and connection remain, only the engine epoch advances", json.dumps(dict(info=after, settings=settings)))
+        duplicate = client.call("app.settings.set", dict(peer_encryption=encryption))["result"]
+        case.check(duplicate == dict(applied=[],restart=False), "unchanged settings do not restart again", json.dumps(duplicate))
+        case.check(not any(ev.get("ev") == "mutation.result" for ev in client.pushed),
+                   "settings acknowledgement produces no pending mutation completion event", json.dumps(client.pushed))
+        transition_lines = [line for line in h.stderr().splitlines() if "INFO engine state changed" in line]
+        case.check(any("state=starting" in line for line in transition_lines)
+                   and sum("state=running" in line for line in transition_lines) >= 2,
+                   "supervisor passes Running to Starting to Running", "\n".join(transition_lines))
+        case.step("record event-bus dependency", "P1-08 supplies pushed settings and engine.changed frames").ok(
+            "P1-08 is absent on this branch; connected restart and durable settings verified; pushed topic/event acceptance remains pending integration.")
+
+
+def settings_offline_no_start(binary, systemd):
+    with Case("daemon", "settings_offline_no_start") as case, Sandbox() as sandbox, Harness(case, binary, sandbox, systemd) as h:
+        fixtures.path_shim("systemctl", "exit 99", sandbox.root)
+        result = h.cli("settings", "--max-downloads", "5", "--idle-secs", "0", "--handler", "add", "--clipboard-watch", "false", "--port", "6885")
+        value = result
+        case.check(value["running"] is False and value["max_active_downloads"] == 5 and value["idle_exit_secs"] == 0
+                   and value["handler"] == "add" and value["clipboard_watch"] is False and value["peer_port"] == 6885,
+                   "offline CLI settings persist the canonical values without starting the daemon", json.dumps(value))
+        read = h.cli("settings")
+        bad = h.cli("settings", "--max-downloads", "0", code=2)
+        case.check(read["max_active_downloads"] == 5 and not h.engine_path.exists()
+                   and not (sandbox.root / "shims/systemctl.log").exists(),
+                   "settings reads and writes never invoke a manager or create a live engine", json.dumps(bad))
+
+
 CASES = {function.__name__: function for function in
-         (imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
+         (settings_invalid_named, settings_live_queue, settings_restart_class_keeps_clients, settings_offline_no_start, imdb_index_loaded_once, imdb_poster_cap, imdb_poster_atomic, fixture_payloads, fixture_servers, path_shims, notify_and_process, launcher_exit_cleanup,
           systemd_without_bus_address, interim_engine_socket, ready_notify, parked_start, sigterm_drains,
           panic_exits_70, second_serve_refused, engine_restart_retains_owner, shutdown_inflight_add,
           unit_is_static, add_starts_unit_no_launcher, status_never_starts, down_stops, kill9_restarts,

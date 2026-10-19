@@ -3,6 +3,7 @@ use super::*;
 pub mod shapes;
 mod native;
 mod offline;
+pub(super) mod settings;
 pub(super) use native::{handles as native_handles, run as run_native};
 
 #[derive(Parser)]
@@ -32,8 +33,8 @@ pub(super) enum Cmd {
     /// Run the torrent engine daemon (other commands start it on demand)
     Serve {
         /// Idle shutdown delay; 0 disables the idle safety net
-        #[arg(long, default_value_t = 300)]
-        idle_exit_secs: u64,
+        #[arg(long)]
+        idle_exit_secs: Option<u64>,
         /// Disable desktop notifications (systemd readiness is still sent)
         #[arg(long)]
         no_notify: bool,
@@ -230,6 +231,14 @@ pub(super) enum Cmd {
         /// List available network interface names
         #[arg(long)]
         interfaces: bool,
+        #[arg(long)]
+        idle_secs: Option<u64>,
+        #[arg(long)]
+        handler: Option<String>,
+        #[arg(long, num_args=0..=1, default_missing_value="true")]
+        clipboard_watch: Option<bool>,
+        #[arg(long)]
+        port: Option<u16>,
     },
     /// Look a release name up on IMDb (title, rating, blurb, poster)
     Imdb {

@@ -155,6 +155,8 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.client` | `interactive: bool?`, `glance: bool?` (either or both; a connection drop resets both) | `{}` | no | P1-06 |
 | `app.shutdown` | `reason: str?` | `{state: "pending"}`, then `bye` | yes | P1-06 |
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
+| `app.settings.get` | none | `Settings` | no | P3-05 |
+| `app.settings.set` | any subset of writable `Settings` keys | `{applied: [str], restart: bool}` | yes | P3-05 |
 | `app.network` | none | `{state: NetworkState, interfaces: [str]}` | no | P1-06 |
 | `transfer.info` | none | `{dl_bps: bps?, ul_bps: bps?, session_downloaded: bytes, session_uploaded: bytes}` | no | P1-06 |
 | `torrents.list` | `states: [state]?`, `origin: [str]?` | `{torrents: [Torrent]}` | no | P1-06 |
@@ -550,3 +552,27 @@ and records the additive `add.deferred` field. `add --json` preserves the atomic
 API reply's `deferred:true`; human output says “waiting for VPN”. The desktop
 handler passes `--origin handler`. The API/engine implementation and new fixture
 remain unchanged; the CLI uses the returned hash without list differencing.
+
+### P3-05: durable settings operations
+
+`app.settings.get` returns `Settings`. `app.settings.set` accepts any subset of
+its writable keys, validates the whole patch with `Config::validate`, and names
+an invalid key in `error.details.key` before making changes. `restart_class` is
+read-only and equals `peer_encryption`, `network_interface`, `peer_port`.
+An explicit null clears `network_interface` or an optional speed limit; other
+keys require their declared type. Speed limits range from 16384 through
+4294967295 bytes/second; absence means unlimited.
+
+Settings changes are not pending mutations: no `mutation.result` follows them.
+A restart-class change answers `{applied: [keys], restart: true}` after the durable
+save, the supervisor restarts the engine slot, and clients observe completion
+through `engine.changed` (and the `network` state when the binding changed).
+Live changes answer `restart:false` after save and apply. Repeating an unchanged
+patch returns an empty `applied` list and does not restart. The `settings` state
+is published on change by P1-08; this branch exposes the settings generation and
+snapshot for that integration. The CLI uses these operations when running and
+saves the private config without starting the daemon when stopped.
+
+Adds capability `settings`, the two operation-table rows, and the independent
+`settings.ndjson` transcript. CLI contract 1.2.2 adds canonical settings values,
+`applied`, `restart` and `running`; existing CLI settings keys remain available.

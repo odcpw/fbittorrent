@@ -62,7 +62,7 @@ fn main() {
         // No search session, TUI signal owner or background thread may start
         // before serve has blocked its shutdown signals.
         let result = std::panic::catch_unwind(|| Config::load()
-            .and_then(|cfg| daemon::run_serve(cfg, *idle_exit_secs, *no_notify)));
+            .and_then(|cfg| { let idle = idle_exit_secs.unwrap_or(cfg.idle_exit_secs); daemon::run_serve(cfg, idle, *no_notify) }));
         std::process::exit(match result {
             Ok(result) => result.unwrap_or_else(|error| {
                 let (_, message, hint) = agent::classify(&error);
@@ -179,31 +179,8 @@ fn run(cli: Cli) -> Result<Code> {
             });
             return Ok(Code::Ok);
         }
-        Cmd::Settings { max_downloads, encryption, vpn, interfaces } => {
-            anyhow::ensure!(cfg.native(), "these settings require the native engine");
-            let mut changed = cfg.clone();
-            if let Some(limit) = max_downloads { changed.max_active_downloads = limit; }
-            if let Some(policy) = encryption { changed.peer_encryption = policy; }
-            if let Some(selection) = vpn { changed.network_interface = if selection == "off" { None } else { Some(selection) }; }
-            changed.validate()?;
-            let altered = changed.max_active_downloads != cfg.max_active_downloads || changed.peer_encryption != cfg.peer_encryption || changed.network_interface != cfg.network_interface;
-            if altered {
-                let client = Client::from_config(&cfg);
-                if ipc::is_running(&cfg) && changed.peer_encryption == cfg.peer_encryption && changed.network_interface == cfg.network_interface {
-                    client.set_queue_limit(changed.max_active_downloads)?;
-                } else {
-                    changed.save()?;
-                    if ipc::is_running(&cfg) { client.restart_app()?; }
-                }
-            }
-            let available = if interfaces { Some(network_app::interfaces()?) } else { None };
-            emit(json, serde_json::json!({"ok": true, "max_active_downloads": changed.max_active_downloads, "peer_encryption": changed.peer_encryption, "network_interface": changed.network_interface, "network": network_app::state(&changed), "interfaces": available}), || {
-                println!("Simultaneous downloads: {}", changed.max_active_downloads);
-                println!("Peer encryption: {}", changed.peer_encryption);
-                println!("VPN: {}", network_app::state(&changed).message);
-                if let Some(names) = &available { println!("Connections: {}", names.join(", ")); }
-            });
-            return Ok(Code::Ok);
+        Cmd::Settings { max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port } => {
+            return cli::settings::run(&cfg, json, max_downloads, encryption, vpn, interfaces, idle_secs, handler, clipboard_watch, port);
         }
         _ => {}
     }
@@ -481,7 +458,7 @@ fn run(cli: Cli) -> Result<Code> {
             let h = resolve_in(&ts, &[selector])?;
             let t = ts.iter().find(|t| t.hash == h[0]).unwrap();
             let target = qbt::open_target(t);
-            Command::new("xdg-open").arg(&target).spawn()?;
+            cfg.open_target(&target)?;
             emit(json, serde_json::json!({"ok": true, "action": "open", "hash": t.hash, "target": target}), || println!("opened {target}"));
             Ok(Code::Ok)
         }

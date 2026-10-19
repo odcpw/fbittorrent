@@ -381,13 +381,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 } => return wait_for(cfg, c, hashes, *timeout, *interval, json_mode),
                 Cmd::Open { .. } => {
                     let target = c.call("torrents.open_target", json!({"hash":hashes[0]}))?;
-                    std::process::Command::new("xdg-open")
-                        .arg(
-                            target["path"]
-                                .as_str()
-                                .context("open target omitted path")?,
-                        )
-                        .spawn()?;
+                    cfg.open_target(target["path"].as_str().context("open target omitted path")?)?;
                     emit(
                         json_mode,
                         json!({"ok":true,"action":"open","hash":hashes[0],"target":target["path"]}),
