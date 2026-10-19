@@ -375,8 +375,8 @@ Ruling 7 treats checking measurements as state-conditioned volatile values:
 when the live torrent is checking, completed_bytes must be a u64 no greater than
 size, and finite progress must equal completed_bytes/size within 1e-9 absolute
 (zero size requires both zero). Presence is preserved. Checked and size remain
-exact; other states still compare completed_bytes/progress exactly. P1-05d owns
-the fixture correction to checked=false for an active check.
+exact; other states still compare completed_bytes/progress exactly. P1-05d's
+fixture correction to checked=false for an active check is integrated.
 Live validation checks every original frame against the frozen types, bounds,
 capabilities and canonical round trips, and retains revision checks. Its
 cross-reply agreement still checks static sizes and file totals. For any hash
@@ -388,8 +388,9 @@ file:line, pointer, class, target bead and reason. Capability/protocol deferrals
 apply only while that feature is unavailable; advertised features stay under
 active comparison. The receipt distinguishes undrivable catalogue frames from
 error codes that can be produced with a different shape and retains the bounded
-starting-window retry evidence. Remaining nonvolatile validation failures are
-recorded without a new mask or deferral.
+starting-window retry evidence. A retained missing-files restore error keeps its
+missing_files reason through Stop and retry until the error clears. Nonvolatile
+validation failures are recorded without a new mask or deferral.
 
 | JSON pointer(s) | Comparison | Validity |
 |---|---|---|
