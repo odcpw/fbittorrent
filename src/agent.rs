@@ -153,6 +153,7 @@ fn upload_cap_text() -> String {
 
 pub fn capabilities_json() -> serde_json::Value {
     let changes = vec![
+        serde_json::json!({"since":"1.2.32","version":"1.2.32","breaking":false,"field":"status.session","cap":"history","note":"P6-04 status includes current daemon-session downloaded/uploaded network bytes and session start; plain status shows session and all-time totals"}),
         serde_json::json!({"since":"1.2.32","version":"1.2.32","breaking":false,"field":"torrents.rename","cap":"rename","note":"display-name overrides preserve metadata names, payload paths and torrent identity"}),
         serde_json::json!({"since":"1.2.32","version":"1.2.32","breaking":false,"field":"status.all_time","cap":"history","note":"P6-04 real session network counters and atomic all-time statistics surviving daemon restarts"}),
         serde_json::json!({"since":"1.2.31","version":"1.2.31","breaking":false,"field":"status.history","cap":"history","note":"P6-03 one bounded 600-sample global speed ring, 60-point summary/status and five-second stats topic"}),

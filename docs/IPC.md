@@ -951,7 +951,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.31` | `status.history` |
 | `1.2.31` | `pieces` |
 | `1.2.31` | `cli.catalogue` |
-| `1.2.32` | `status.all_time` |
+| `1.2.32` | `status.session`, `status.all_time` |
 | `1.2.32` | `torrents.rename` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)

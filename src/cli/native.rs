@@ -110,6 +110,13 @@ fn emit(json_mode: bool, value: Value) {
                     value["total"]
                 );
             }
+            for (key, label) in [("session", "Session"), ("all_time", "All time")] {
+                if let (Some(downloaded), Some(uploaded)) =
+                    (value[key]["downloaded"].as_u64(), value[key]["uploaded"].as_u64())
+                {
+                    println!("{label}: downloaded {downloaded} B; uploaded {uploaded} B");
+                }
+            }
         } else if let Some(rows) = value["torrents"].as_array() {
             for row in rows {
                 let hash = row["hash"].as_str().unwrap_or("");
@@ -611,6 +618,7 @@ fn status(
     let mut value = counts(rows);
     value["ok"] = json!(true);
     value["running"] = json!(true);
+    value["session"] = stats["session"].clone();
     value["all_time"] = stats["all_time"].clone();
     value["connection"] = json!("api");
     value["backend"] = json!("native");
