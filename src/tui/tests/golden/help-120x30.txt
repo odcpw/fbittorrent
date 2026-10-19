@@ -1,10 +1,10 @@
 [ 1 Torrents ]  2 ╭ Keys ────────────────────────────────────────────────────────────────────────────╮0 KiB/s  default
 ╭ Torrents (3) ───│                                                                                  │─────────────────╮
-│                 │ GLOBAL                                                                           │                 │
-│   STATE     NAME│   (1) Torrents                                                                   │  ↓    ETA PEERS │
-│ ▌ ↓ Down    The │   (2) Search                                                                     │.1M     4m     3 │
-│   ✓ Done    Sint│   (3) Shows                                                                      │                 │
-│   ◌ Meta    Othe│   (4) RSS                                                                        │               3 │
+│  STATE     NAME │ GLOBAL                                                                           │   ↓    ETA PEERS│
+│▌ ↓ Down    The D│   (1) Torrents                                                                   │2.1M     4m     3│
+│  ✓ Done    Sinte│   (2) Search                                                                     │                 │
+│  ◌ Meta    Other│   (3) Shows                                                                      │                3│
+│                 │   (4) RSS                                                                        │                 │
 │                 │   (Tab) Next screen                                                              │                 │
 │                 │   (Shift+Tab) Previous screen                                                    │                 │
 │                 │   (?) Help                                                                       │                 │

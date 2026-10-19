@@ -52,6 +52,9 @@ mod palette;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 #[cfg(test)]
+#[path = "tests/responsive.rs"]
+mod responsive_tests;
+#[cfg(test)]
 #[path = "tests/golden.rs"]
 mod golden;
 
@@ -146,7 +149,8 @@ impl Model for TuiApp {
             Msg::Torrents(r) => {
                 self.poll_inflight = false;
                 match r {
-                    Ok((ts, ti)) => {
+                    Ok((mut ts, ti)) => {
+                        if !self.cfg.native(){ts.sort_by(|left,right|store::legacy_order(left,right,self.torrent_sort,self.torrent_descending));}
                         self.online = true;
                         self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
@@ -392,6 +396,7 @@ impl Model for TuiApp {
     fn view(&self, frame: &mut Frame) {
         let th = &self.theme;
         self.last_bounds.set(frame.bounds());
+        self.rects.borrow_mut().begin();
         self.poster_drawn.set(false);
         let root = Flex::vertical()
             .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(2)])
@@ -414,6 +419,7 @@ impl Model for TuiApp {
                 p.input.render(inner, frame);
             }
         }
+        self.rects.borrow_mut().footer=root[3];
         self.view_status(root[3], frame);
         if self.files.is_some() { self.view_files(frame); }
         if self.providers.is_some() { self.view_providers(frame); }

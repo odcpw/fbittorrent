@@ -101,7 +101,7 @@ impl TuiApp {
                 if rows_changed {
                     let rows = self
                         .store
-                        .sorted_torrents(store::TorrentSort::Added, true)
+                        .sorted_torrents(self.torrent_sort,self.torrent_descending)
                         .into_iter()
                         .map(format::torrent)
                         .collect();
