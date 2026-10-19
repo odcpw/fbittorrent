@@ -14,7 +14,7 @@ mod tests;
 
 const MAX_ITEMS: usize = 100_000;
 const MAX_SNAPSHOT_BYTES: usize = 32 * api::LINE_OUT;
-const MAX_EVENTS: usize = 512;
+const MAX_EVENTS: usize = 1000; // Match the daemon event ring, including reconnect snapshots.
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct Subscription {

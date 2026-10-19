@@ -1,4 +1,4 @@
-//! Screen interface while Track B's search/RSS services are still local.
+//! Screen interface while Track B's RSS/Shows services are still local.
 //! Native torrent commands use the API connection; legacy and pending service paths stay isolated here.
 use super::*;
 use serde_json::Value;
@@ -176,12 +176,19 @@ impl ScreenClient {
         self.local.rss_set_read(name, id, read)
     }
     pub fn search_plugins(&self) -> Result<Vec<SearchPlugin>> {
+        if self.cfg.native() {
+            let connection=self.connection.as_ref().ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?;
+            let result:api::ProvidersResult=request(connection,"search.providers",json!({}))?;
+            return Ok(result.providers.into_iter().map(|p|SearchPlugin {name:p.name,full_name:p.full_name.unwrap_or_default(),url:p.url.unwrap_or_default(),version:p.version.unwrap_or_default(),enabled:p.enabled}).collect());
+        }
         self.local.search_plugins()
     }
     pub fn search_set_plugin(&self, name: &str, on: bool) -> Result<()> {
+        if self.cfg.native(){self.mutate("search.set_provider",json!({"name":name,"enabled":on}))?;return Ok(());}
         self.local.search_set_plugin(name, on)
     }
     pub fn search_start(&self, query: &str) -> Result<i64> {
+        anyhow::ensure!(!self.cfg.native(),"native search uses pushed API sessions");
         self.local.search_start(query)
     }
     pub fn search_results(
@@ -190,12 +197,15 @@ impl ScreenClient {
         limit: i64,
         offset: i64,
     ) -> Result<crate::qbt::SearchResponse> {
+        anyhow::ensure!(!self.cfg.native(),"native search uses pushed API sessions");
         self.local.search_results(id, limit, offset)
     }
     pub fn search_stop(&self, id: i64) -> Result<()> {
+        anyhow::ensure!(!self.cfg.native(),"native search uses pushed API sessions");
         self.local.search_stop(id)
     }
     pub fn search_delete(&self, id: i64) -> Result<()> {
+        anyhow::ensure!(!self.cfg.native(),"native search uses pushed API sessions");
         self.local.search_delete(id)
     }
     pub fn torrents(&self) -> Result<Vec<Torrent>> {

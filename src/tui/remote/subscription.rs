@@ -94,6 +94,10 @@ impl TuiApp {
                     }
                     _ => {}
                 }
+                if matches!(&event,api::Event::SnapshotEnd {topic:api::Topic::Search(_)|api::Topic::Events,..}
+                    |api::Event::Delta {topic:api::Topic::Search(_)|api::Topic::Events,..}|api::Event::SearchDone {..}) {
+                    self.sync_native_search();
+                }
                 if rows_changed {
                     let rows = self
                         .store
@@ -138,7 +142,10 @@ impl TuiApp {
 }
 pub(in crate::tui) fn verb(op: &str) -> &'static str {
     match op {
-        "torrents.add" => "Adding",
+        "torrents.add" | "search.grab" => "Adding",
+        "search.start" => "Searching",
+        "search.stop" => "Stopping search",
+        "search.set_provider" => "Updating provider",
         "torrents.start" => "Starting",
         "torrents.stop" => "Stopping",
         "torrents.remove" => "Removing",
