@@ -27,8 +27,8 @@ function create(service,changed){
   }
   f.current=function(){return f.rows[f.cursor] || null}
   f.mount=function(){active=true;service.showsTopics=[topic()];sync()}
-  f.hide=function(){active=false;service.showsTopics=[]}
-  f.select=function(id,child){f.selected=id;f.cursor=0;if(child)f.focus="releases";if(active)service.showsTopics=[topic()];sync()}
+  f.hide=function(){active=false;service.showsTopics=[];delete service.store.topics[topic()];f.rows=[]}
+  f.select=function(id,child){var previous=topic();f.selected=id;if(previous!==topic())delete service.store.topics[previous];f.cursor=0;if(child)f.focus="releases";if(active)service.showsTopics=[topic()];sync()}
   f.move=function(delta,edge){
     if(f.focus==="shows"){
       var ids=["inbox"].concat(f.shows.map(function(s){return s.imdb})),index=ids.indexOf(f.selected)

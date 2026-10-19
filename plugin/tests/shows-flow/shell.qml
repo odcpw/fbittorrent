@@ -26,7 +26,9 @@ ShellRoot {
   calls[2].done({},null);flow.undo();assertThat(calls[3].op==="shows.undo_read","undo requests the daemon-owned undo")
   calls[3].done({},null);flow.followOpen();flow.follow("tt1234567");assertThat(calls[4].args.imdb==="tt1234567" && calls[4].op==="shows.follow","follow uses an explicit IMDb id")
   calls[4].done({state:"pending",ref:"ref-5"},null);service.store.mutations["ref-5"]={status:"done",result:{show:{imdb:"tt1234567"}}};flow.frame({ev:"mutation.result"});assertThat(!flow.busy && !flow.panel,"pending actions complete through the daemon outcome")
-  flow.hide();assertThat(!service.showsTopics.length,"hidden inbox releases observation")
+  flow.select("tt1",false);assertThat(!service.store.topics["shows.releases:inbox"],"switching shows releases the previous release table")
+  service.store.topics["shows.releases:tt1"]={episode:{key:"S01E01"}}
+  flow.hide();assertThat(!service.showsTopics.length && !service.store.topics["shows.releases:tt1"] && !flow.rows.length,"hidden inbox releases observation and cached release rows")
   console.log("Shows controller: staged review, safe discard, read/undo, follow and observation passed")
   console.log("FBTQS-PASS shows_journey")
   Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})

@@ -23,7 +23,7 @@ function utf8Bytes(s) {
 
 function create(io, options) {
   var o = options || {}, now = o.now || Date.now
-  var subscriptionGeneration=0
+  var subscriptionGeneration=0, subscriptionRun=null, subscriptionWanted=false, subscriptionRetryAt=0, subscriptionFailure=null
   var c = { online: false, instance: "", caps: [], hello: null, pending: Object.create(null), actions: Object.create(null),
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
@@ -98,7 +98,7 @@ function create(io, options) {
   }
   c.disconnected = function() {
     var wasOnline = c.online
-    subscriptionGeneration++; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
+    subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     if (!c.graceful && wasOnline) c.reconnecting = true
     c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
     // Unsent actions have no unknown outcome and are never replayed.
@@ -152,23 +152,48 @@ function create(io, options) {
     if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")
     return wanted
   }
+  // Coalesce visibility changes and release each old subscription before
+  // installing its replacement. Overlapping base groups can exceed the
+  // daemon's 16-topic budget before their late cleanup replies arrive.
+  function renewSubscriptions() {
+    if(subscriptionRun || !subscriptionWanted || !c.online || now()<subscriptionRetryAt)return
+    subscriptionWanted=false
+    var base=topics(),details=c.details.filter(function(t,i,all){return base.indexOf(t)<0 && all.indexOf(t)===i}).slice(0,16-base.length)
+    var run={generation:subscriptionGeneration,remove:Object.keys(c.subs).map(Number),groups:[base].concat(details.map(function(t){return [t]})),index:0}
+    subscriptionRun=run;c.subs=Object.create(null);c.topicRevs=Object.create(null)
+    function advance(){
+      if(subscriptionRun!==run || !c.online)return
+      if(run.remove.length){
+        c.request("unsubscribe",{sub:run.remove.shift()},{callback:function(result,failure){
+          if(subscriptionRun!==run)return
+          if(failure){c.reset("could not release old subscriptions");return}
+          advance()
+        }})
+      }else if(run.generation!==subscriptionGeneration || run.index===run.groups.length){
+        if(run.generation===subscriptionGeneration && c.lastError===subscriptionFailure){c.lastError=null;subscriptionFailure=null}
+        subscriptionRun=null;renewSubscriptions()
+      }else{
+        c.request("subscribe",{topics:run.groups[run.index++],interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000},{callback:function(result,failure){
+          if(subscriptionRun!==run)return
+          if(failure){
+            if(failure.code==="unknown_op"){subscriptionRun=null;c.mode="poll";subscriptionWanted=false;c.pollAt=0;c.poll()}
+            else if(failure.retryable){subscriptionFailure=failure;subscriptionRun=null;subscriptionWanted=true;subscriptionRetryAt=now()+1000}
+            else advance()
+          }else if(result){
+            if(run.generation!==subscriptionGeneration)run.remove.push(result.sub)
+            else c.subs[result.sub]={topics:result.topics,rev:0,resync:false}
+            advance()
+          }
+          changed()
+        }})
+      }
+    }
+    advance()
+  }
   c.subscribeAll = function() {
     subscriptionGeneration++
-    Object.keys(c.subs).forEach(function(sub) { c.request("unsubscribe", { sub: Number(sub) }) })
-    c.subs = Object.create(null); c.topicRevs = Object.create(null)
-    if (c.caps.indexOf("subscribe") < 0 || c.mode === "poll") { c.mode = "poll"; c.pollAt = 0; c.poll(); return }
-    var generation=++subscriptionGeneration
-    var groups=[topics()].concat(c.details.slice(0,12).map(function(topic){return [topic]}))
-    groups.forEach(function(group){
-      c.request("subscribe", {topics:group,interval_ms:c.popupOpen || c.dashboardVisible ? 1000 : 5000}, {
-        callback:function(result,failure){
-          if(result && generation!==subscriptionGeneration){c.request("unsubscribe",{sub:result.sub});return}
-          if(failure && failure.code==="unknown_op"){c.mode="poll";c.pollAt=0;c.poll()}
-          else if(result)c.subs[result.sub]={topics:result.topics,rev:0,resync:false}
-          changed()
-        }
-      })
-    })
+    if(c.caps.indexOf("subscribe")<0 || c.mode==="poll"){c.mode="poll";c.pollAt=0;c.poll();return}
+    subscriptionWanted=true;renewSubscriptions()
   }
 
   c.resubscribe = function(topic) {
@@ -198,7 +223,7 @@ function create(io, options) {
       var e = c.awaiting[ref]
       if (now() >= e.deadline) { delete c.awaiting[ref]; fail(e, { code: "timeout", message: "no answer", retryable: true }, "no answer") }
     })
-    pump(); c.poll(); changed()
+    pump(); renewSubscriptions(); c.poll(); changed()
   }
   c.receive = function(line) {
     if (utf8Bytes(line) + 1 > 1048576) { c.reset("server line exceeds 1048576 bytes"); return }
