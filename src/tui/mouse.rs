@@ -128,13 +128,13 @@ impl TuiApp {
         if self.settings.is_some() {
             let area = settings_area(self.last_bounds.get());
             let inner = Block::bordered().padding(Sides::horizontal(1)).inner(area);
-            let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(3));
+            let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(4));
             if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
                 if rows.contains(m.x, m.y) {
                     self.settings.as_ref().unwrap().list.borrow_mut().select(Some(usize::from(m.y - rows.y)));
                     return self.on_settings_key(KeyEvent::new(KeyCode::Right));
                 }
-                if inner.contains(m.x, m.y) && m.y == inner.y.saturating_add(3) {
+                if inner.contains(m.x, m.y) && m.y == inner.y.saturating_add(4) {
                     return self.on_settings_key(KeyEvent::new(KeyCode::Enter));
                 }
             }
@@ -218,11 +218,6 @@ impl TuiApp {
     }
 }
 
-
-pub(super) fn readable_index(state: &RefCell<ListState>) -> Option<usize> {
-    let state = state.borrow();
-    state.hovered.or(state.selected())
-}
 
 pub(super) fn mouse_row_index(area: Rect, x: u16, y: u16, offset: usize, len: usize) -> Option<usize> {
     area.contains(x, y).then(|| offset + usize::from(y - area.y)).filter(|&i| i < len)

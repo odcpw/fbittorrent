@@ -133,10 +133,9 @@ impl TuiApp {
             let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill]).split(inner);
             let hdr = Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), 1);
             Paragraph::new(Text::from_line(result_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
-            let selected = readable_index(&self.search_list);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.search_results.iter().enumerate().map(|(i, r)|
-                li(result_line(r, self.rating_for(r), inner.width.saturating_sub(2), th, (selected == Some(i)).then_some(elapsed)))).collect();
+                li(result_line(r, self.rating_for(r), inner.width.saturating_sub(2), th, hovered_for(&self.search_list,i,elapsed)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.search_list.borrow_mut());
         }
@@ -174,7 +173,6 @@ impl TuiApp {
         block.render(left, frame);
         let w = inner.width.saturating_sub(2) as usize;
         let mut last = "";
-        let selected = readable_index(&self.browse_list);
         let elapsed = self.marquee_elapsed();
         let items: Vec<ListItem> = self.browse_entries.iter().enumerate().map(|(i, e)| {
             let prov = if e.provider == last { String::new() } else { e.provider.to_string() };
@@ -184,7 +182,7 @@ impl TuiApp {
             let label = format!("{glyph}{}", e.label);
             li(Line::from_spans([
                 Span::styled(cell(&prov, 16), th.accented()),
-                Span::styled(readable_cell(&label, w.saturating_sub(16), (selected == Some(i)).then_some(elapsed)), if is_site { th.dimmed() } else { th.text() }),
+                Span::styled(readable_cell(&label, w.saturating_sub(16), hovered_for(&self.browse_list,i,elapsed)), if is_site { th.dimmed() } else { th.text() }),
             ]))
         }).collect();
         let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");

@@ -98,7 +98,6 @@ impl TuiApp {
         let name_w = iw.saturating_sub(4 + tail_w);
         let header = Line::from_spans([Span::styled(format!("      {}", cell("FILE", name_w)), bg.fg(th.dim).bold()), Span::styled(format!(" {:>9} {:>6} {:>7}", "SIZE", "DONE", "PRIO"), bg.fg(th.dim).bold())]);
         Paragraph::new(Text::from_line(header)).wrap(WrapMode::None).render(rows[0], frame);
-        let selected_row = readable_index(&m.list);
         let elapsed = self.marquee_elapsed();
         let items: Vec<ListItem> = m.files.iter().enumerate().map(|(i, f)| {
             let (mark, prio, pst) = match f.priority {
@@ -110,7 +109,7 @@ impl TuiApp {
             let name_style = if f.priority == 0 { bg.fg(th.dim) } else { bg.fg(th.fg) };
             li(Line::from_spans([
                 Span::styled(format!("{mark} "), name_style),
-                Span::styled(readable_cell(&f.name, name_w, (selected_row == Some(i)).then_some(elapsed)), name_style),
+                Span::styled(readable_cell(&f.name, name_w, hovered_for(&m.list,i,elapsed)), name_style),
                 Span::styled(format!(" {:>9} {:>6}", human_bytes(f.size), if f.progress_known { format!("{:.0}%", f.progress * 100.0) } else { "—".into() }), bg.fg(th.dim)),
                 Span::styled(format!(" {prio:>7}"), pst),
             ]))

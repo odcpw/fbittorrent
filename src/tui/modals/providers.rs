@@ -83,7 +83,6 @@ impl TuiApp {
         }
         let rows = Flex::vertical().constraints([Constraint::Fill, Constraint::Fixed(1)]).split(inner);
         let iw = inner.width.saturating_sub(2) as usize;
-        let selected = readable_index(&m.list);
         let elapsed = self.marquee_elapsed();
         let items: Vec<ListItem> = m.plugins.iter().enumerate().map(|(i, p)| {
             let mark = if p.enabled { "[x] " } else { "[ ] " };
@@ -91,7 +90,7 @@ impl TuiApp {
             let site = p.url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string();
             li(Line::from_spans([
                 Span::styled(mark, st),
-                Span::styled(readable_cell(&p.full_name, 22, (selected == Some(i)).then_some(elapsed)), st),
+                Span::styled(readable_cell(&p.full_name, 22, hovered_for(&m.list,i,elapsed)), st),
                 Span::styled(cell(&site, iw.saturating_sub(4 + 22 + 1)), bg.fg(th.dim)),
             ]))
         }).collect();

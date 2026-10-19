@@ -1,6 +1,10 @@
 //! Existing motion behavior.
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MarqueeTarget { list: MouseList, index: usize, revision: u64 }
+
+
 impl TuiApp {
     /// Title under the cursor on the current screen: (lookup key, IMDb id if known).
     pub(super) fn hovered_title(&self) -> Option<(String, Option<String>)> {
@@ -42,41 +46,26 @@ impl TuiApp {
         self.lookup_imdb(key, id)
     }
 
-    pub(super) fn marquee_target(&self) -> Option<String> {
-        if self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
-        if let Some((list, index)) = self.pointer_row() {
-            let text = match list {
-                MouseList::Torrents => self.torrents.get(index).map(|t| t.name.clone()),
-                MouseList::Results => self.search_results.get(index).map(|r| r.file_name.clone()),
-                MouseList::Browse => self.browse_entries.get(index).map(|e| e.label.to_owned()),
-                MouseList::Feeds => self.feeds.get(index).map(|f| f.name.clone()),
-                MouseList::Items => self.selected_feed().and_then(|f| f.articles.get(index)).map(|a| a.title.clone()),
-                MouseList::Shows => if index == 0 { Some("All unread".into()) } else { self.show_at(index).map(Show::label) },
-                MouseList::Episodes => self.episode_at(index).map(|(s, e)| if self.shows_inbox() { format!("{} · {} · {}", s.label(), e.key, e.title) } else { e.title.clone() }),
-                MouseList::Files => self.files.as_ref().and_then(|m| m.files.get(index)).map(|f| f.name.clone()),
-                MouseList::Providers => self.providers.as_ref().and_then(|m| m.plugins.get(index)).map(|p| p.full_name.clone()),
-            };
-            if let Some(text) = text { return Some(format!("hover:{list:?}:{index}:{text}")); }
+    pub(super) fn marquee_target(&self) -> Option<MarqueeTarget> {
+        use std::hash::{Hash, Hasher};
+        if self.cfg.reduce_motion || self.show_help || self.prompt.is_some() || self.settings.is_some() { return None; }
+        let (list,index)=self.pointer_row()?;
+        if self.mouse_list_state(list).borrow().selected()==Some(index) { return None; }
+        // Borrow stable identifiers instead of allocating a formatted target on
+        // every frame. Metadata replacement under a stationary pointer resets it.
+        let mut hash=std::collections::hash_map::DefaultHasher::new();
+        match list {
+            MouseList::Torrents=>{ let row=self.torrents.get(index)?; (&row.hash,&row.name).hash(&mut hash); }
+            MouseList::Results=>{ let row=self.search_results.get(index)?; (&row.file_url,&row.file_name).hash(&mut hash); }
+            MouseList::Browse=>{ let row=self.browse_entries.get(index)?; (row.provider,row.label).hash(&mut hash); }
+            MouseList::Feeds=>{ self.feeds.get(index)?.name.hash(&mut hash); }
+            MouseList::Items=>{ let row=self.selected_feed()?.articles.get(index)?; (&row.id,&row.title).hash(&mut hash); }
+            MouseList::Shows=>{ if index>0 { let row=self.show_at(index)?; (&row.imdb,&row.title).hash(&mut hash); } }
+            MouseList::Episodes=>{ let (show,row)=self.episode_at(index)?; (&show.imdb,&row.key,&row.title).hash(&mut hash); }
+            MouseList::Files=>{ let modal=self.files.as_ref()?; let row=modal.files.get(index)?; (&modal.hash,row.index,&row.name).hash(&mut hash); }
+            MouseList::Providers=>{ let row=self.providers.as_ref()?.plugins.get(index)?; (&row.name,&row.full_name).hash(&mut hash); }
         }
-        if let Some(m) = &self.providers {
-            return m.list.borrow().selected().and_then(|i| m.plugins.get(i))
-                .map(|p| format!("provider:{}:{}", p.name, p.full_name));
-        }
-        if let Some(m) = &self.files {
-            return m.list.borrow().selected().and_then(|i| m.files.get(i))
-                .map(|f| format!("file:{}:{}:{}", m.hash, f.index, f.name));
-        }
-        match self.screen {
-            Screen::Torrents => self.selected_torrent().map(|t| format!("torrent:{}:{}", t.hash, t.name)),
-            Screen::Search if self.search_browse => self.browse_list.borrow().selected()
-                .and_then(|i| self.browse_entries.get(i)).map(|e| format!("browse:{}:{}", e.provider, e.label)),
-            Screen::Search => self.selected_result().map(|r| format!("result:{}:{}", r.file_url, r.file_name)),
-            Screen::Rss if self.rss_focus_items => self.item_list.borrow().selected()
-                .and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i).map(|a| format!("item:{}:{}", f.name, a.id)))),
-            Screen::Rss => self.selected_feed().map(|f| format!("feed:{}", f.name)),
-            Screen::Shows if self.shows_focus_eps => self.selected_episode().map(|(s, e)| format!("show:{}:{}", s.imdb, e.key)),
-            Screen::Shows => self.selected_show().map(|s| format!("show:{}", s.imdb)),
-        }
+        Some(MarqueeTarget { list,index,revision:hash.finish() })
     }
 
     pub(super) fn sync_marquee(&mut self) {
@@ -87,8 +76,8 @@ impl TuiApp {
         }
     }
 
-    pub(super) fn marquee_elapsed(&self) -> Duration {
-        let target = self.marquee_target();
-        if target.is_some() && target == self.marquee_key { self.marquee_since.elapsed() } else { Duration::ZERO }
+    pub(super) fn marquee_elapsed(&self) -> Option<Duration> {
+        let target=self.marquee_target();
+        (target.is_some() && target==self.marquee_key).then(||self.marquee_since.elapsed())
     }
 }

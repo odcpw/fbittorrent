@@ -51,7 +51,7 @@ pub struct TuiApp {
     pub(super) hover_since: std::time::Instant,
     pub(super) pointer_motion_on_start: bool,
     pub(super) termination_signal: Option<i32>,
-    pub(super) marquee_key: Option<String>,
+    pub(super) marquee_key: Option<super::motion::MarqueeTarget>,
     pub(super) marquee_since: std::time::Instant,
     pub(super) last_bounds: Cell<Rect>,
     pub(super) tab_rects: Cell<[Rect; 4]>,

@@ -308,15 +308,74 @@
     }
 
     #[test]
-    fn selected_name_reveals_hidden_middle_and_tail() {
-        let name = "abcdefghij";
-        assert_eq!(readable_cell(name, 5, None), "ab…ij");
-        assert_eq!(readable_cell(name, 5, Some(Duration::from_millis(800))), "ab…ij");
-        assert_eq!(readable_cell(name, 5, Some(Duration::from_millis(900 + 3 * 160))), "defgh");
-        assert_eq!(readable_cell(name, 5, Some(Duration::from_millis(900 + 7 * 160))), "hij  ");
-        for step in 0..16 {
-            assert_eq!(dw(&readable_cell("字幕ファイル.mkv", 8, Some(Duration::from_millis(900 + step * 160)))), 8);
+    fn marquee_once_then_stops() {
+        let name="abcdefghij";
+        assert_eq!(readable_cell(name,5,None),"ab…ij");
+        let mut offsets=Vec::new();
+        let mut cells=Vec::new();
+        for tick in 0..24 {
+            let elapsed=Duration::from_millis(tick*300);
+            let offset=marquee_offset(dw(name),5,elapsed).unwrap_or(0);
+            let cell=readable_cell(name,5,Some(elapsed));
+            println!("fake_ms={} offset={offset} rendered={cell:?}",elapsed.as_millis());
+            assert_eq!(dw(&cell),5);
+            offsets.push(offset);cells.push(cell);
         }
+        assert!(cells.iter().any(|cell|cell=="cdefg"),"8 cells/s must reach offset 2 at 1200 ms");
+        assert!(cells.iter().any(|cell|cell=="fghij"),"must show the final complete window");
+        assert!(cells[7..].iter().all(|cell|cell=="ab…ij"),"one pass must stay at its elided start: {cells:?}");
+        assert!(offsets[7..].iter().all(|offset|*offset==0));
+        for tick in 0..30 {
+            let cell=readable_cell("字幕ファイル.mkv",8,Some(Duration::from_millis(tick*300)));
+            assert_eq!(dw(&cell),8,"wide names must keep their row width: {cell:?}");
+        }
+    }
+
+    #[test]
+    fn reduce_motion_no_scroll() {
+        let mut app=app();
+        app.torrents=vec![Torrent { name:"Selected".into(),..Default::default() },Torrent { name:"Long hovered name, including the entire tail".into(),..Default::default() }];
+        app.tor_list.borrow_mut().select(Some(0));
+        app.tor_list.borrow_mut().hovered=Some(1);
+        app.cfg.reduce_motion=true;
+        app.sync_marquee();
+        let expected=cell(&app.torrents[1].name,12);
+        for tick in 0..24 {
+            app.marquee_since=std::time::Instant::now()-Duration::from_millis(tick*300);
+            let shown=readable_cell(&app.torrents[1].name,12,hovered_for(&app.tor_list,1,app.marquee_elapsed()));
+            println!("reduce_motion fake_ms={} rendered={shown:?}",tick*300);
+            assert_eq!(shown,expected);
+            assert!(app.marquee_key.is_none());
+        }
+    }
+
+    #[test]
+    fn selected_long_name_is_static_even_under_pointer() {
+        let mut app=app();
+        app.torrents=vec![Torrent { hash:"static".into(),name:"A selected long name whose complete tail remains in the footer".into(),state:"stoppedDL".into(),..Default::default() }];
+        app.tor_list.borrow_mut().select(Some(0));
+        app.tor_list.borrow_mut().hovered=Some(0);
+        app.sync_marquee();
+        let before=render(&app,120,30);
+        for ms in [0,900,1200,2100,5000,600_000] {
+            app.marquee_since=std::time::Instant::now()-Duration::from_millis(ms);
+            assert!(app.marquee_elapsed().is_none());
+            assert_eq!(render(&app,120,30),before,"selected row moved at {ms} ms");
+        }
+        assert!(before.lines().last().unwrap().contains(&app.torrents[0].name));
+    }
+
+    #[test]
+    fn hover_identity_change_rearms_the_one_pass_clock() {
+        let mut app=app();
+        app.torrents=vec![Torrent { name:"Selected".into(),..Default::default() },Torrent { hash:"hovered".into(),name:"Another long name".into(),..Default::default() }];
+        app.tor_list.borrow_mut().select(Some(0));app.tor_list.borrow_mut().hovered=Some(1);
+        app.sync_marquee();let previous=app.marquee_key;
+        app.marquee_since=std::time::Instant::now()-Duration::from_secs(20);
+        app.torrents[1].name.push_str(" changed");app.sync_marquee();
+        assert_ne!(app.marquee_key,previous);
+        assert!(app.marquee_elapsed().unwrap()<Duration::from_millis(300));
+        app.clear_pointer_hover();assert!(app.marquee_elapsed().is_none());
     }
 
     #[test]
@@ -488,6 +547,11 @@
         assert!(text.contains("Download settings"));
         assert!(text.contains("ProtonVPN · required"));
         assert!(text.contains("Require encryption"));
+        app.on_key(KeyEvent::new(KeyCode::Down));
+        app.on_key(KeyEvent::new(KeyCode::Right));
+        assert!(app.settings.as_ref().unwrap().cfg.reduce_motion);
+        assert!(!app.cfg.reduce_motion,"the modal stages its change until Save");
+        assert!(render(&app,80,24).contains("Reduce motion"));
         render(&app, 24, 8);
         render(&app, 8, 3);
         app.on_key(KeyEvent::new(KeyCode::Escape));

@@ -65,22 +65,37 @@ pub(super) fn cell(s: &str, w: usize) -> String {
     format!("{t}{}", " ".repeat(w.saturating_sub(dw(&t))))
 }
 
-/// After a pause, slide a fixed-width window across the entire selected name.
-pub(super) fn readable_cell(s: &str, w: usize, selected_for: Option<Duration>) -> String {
-    let Some(elapsed) = selected_for else { return cell(s, w) };
-    let name = clean(s);
-    if w < 2 || dw(&name) <= w || elapsed < Duration::from_millis(900) { return cell(&name, w); }
-    let offset = ((elapsed - Duration::from_millis(900)).as_millis() / 160) as usize % (dw(&name) + 3);
-    let looped = format!("{name}   {name}");
-    let mut out = String::new();
-    let mut pos = 0;
-    let mut used = 0;
-    for c in looped.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if pos + cw <= offset { pos += cw; continue; }
-        if pos < offset { out.push(' '); used += 1; pos += cw; continue; }
-        if used + cw > w { break; }
-        out.push(c); used += cw; pos += cw;
+/// Only an unselected hovered row receives a clock. Keyboard selection is static.
+pub(super) fn hovered_for(state: &RefCell<ListState>, index: usize, elapsed: Option<Duration>) -> Option<Duration> {
+    let state=state.borrow();
+    if state.hovered==Some(index) && state.selected()!=Some(index) { elapsed } else { None }
+}
+
+/// The existing 300 ms clock advances at eight terminal cells per second.
+/// One final-window tick is guaranteed before returning to the elided start.
+pub(super) fn marquee_offset(name_width: usize, width: usize, elapsed: Duration) -> Option<usize> {
+    let travel=name_width.checked_sub(width)?;
+    if width<2 || travel==0 || elapsed<Duration::from_millis(900) { return None; }
+    let moving=elapsed-Duration::from_millis(900);
+    let end_ms=(travel as u128*1000).div_ceil(8);
+    if moving.as_millis()>=end_ms+300 { return None; }
+    Some((moving.as_millis()*8/1000).min(travel as u128) as usize)
+}
+
+/// A hovered name travels to the end once, resets, and stays still. Never wraps.
+pub(super) fn readable_cell(s: &str, w: usize, hovered_for: Option<Duration>) -> String {
+    let Some(elapsed)=hovered_for else { return cell(s,w) };
+    let name=clean(s);
+    let Some(offset)=marquee_offset(dw(&name),w,elapsed) else { return cell(&name,w) };
+    let mut out=String::with_capacity(w);
+    let mut pos=0;
+    let mut used=0;
+    for c in name.chars() {
+        let cw=unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if pos+cw<=offset { pos+=cw;continue; }
+        if pos<offset { out.push(' ');used+=1;pos+=cw;continue; }
+        if used+cw>w { break; }
+        out.push(c);used+=cw;pos+=cw;
     }
     out.push_str(&" ".repeat(w.saturating_sub(used)));
     out

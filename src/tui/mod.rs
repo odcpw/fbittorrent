@@ -95,8 +95,8 @@ impl Model for TuiApp {
 
     fn update(&mut self, msg: Msg) -> Cmd<Msg> {
         match msg {
-            Msg::Raw(Event::Key(k)) => self.on_key(k),
-            Msg::Raw(Event::Mouse(m)) => self.on_mouse(m),
+            Msg::Raw(Event::Key(k)) => { let cmd=self.on_key(k); self.sync_marquee(); cmd },
+            Msg::Raw(Event::Mouse(m)) => { let cmd=self.on_mouse(m); self.sync_marquee(); cmd },
             Msg::Raw(Event::Resize { .. }) => {
                 if let Some(k) = &self.kitty { k.borrow_mut().clear(); }
                 Cmd::none()

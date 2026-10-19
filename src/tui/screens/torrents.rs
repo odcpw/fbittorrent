@@ -90,10 +90,9 @@ impl TuiApp {
             let rows = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill]).split(inner);
             let hdr = Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), 1);
             Paragraph::new(Text::from_line(torrent_header(inner.width.saturating_sub(2), th))).wrap(WrapMode::None).render(hdr, frame);
-            let selected = readable_index(&self.tor_list);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.torrents.iter().enumerate().map(|(i, t)|
-                li(torrent_line(t, inner.width.saturating_sub(2), th, (selected == Some(i)).then_some(elapsed)))).collect();
+                li(torrent_line(t, inner.width.saturating_sub(2), th, hovered_for(&self.tor_list,i,elapsed)))).collect();
             let list = List::new(items).highlight_style(th.selected()).highlight_symbol("▌");
             StatefulWidget::render(&list, rows[1], frame, &mut self.tor_list.borrow_mut());
         }

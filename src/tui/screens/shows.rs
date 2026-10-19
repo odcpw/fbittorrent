@@ -240,7 +240,6 @@ impl TuiApp {
         let inner = block.inner(left[0]);
         block.render(left[0], frame);
         let w = inner.width.saturating_sub(2) as usize;
-        let selected = readable_index(&self.show_list);
         let elapsed = self.marquee_elapsed();
         let mut parents = vec![li(Line::from_spans([
             Span::styled(cell("All unread", w.saturating_sub(dw(&unread.to_string()) + 1)), th.text().bold()),
@@ -251,7 +250,7 @@ impl TuiApp {
             let busy = self.shows_refreshing.contains(&show.imdb);
             let warning = show.error.is_some() || (show.last_checked > 0 && !show.catalogue_complete);
             let tail = if busy { format!(" {}", SPINNER[self.tick % 4]) } else if warning { " !".into() } else if n > 0 { format!(" {n}") } else { String::new() };
-            let name = readable_cell(&show.label(), w.saturating_sub(dw(&tail)), (selected == Some(i + 1) && (!self.shows_focus_eps || self.show_list.borrow().hovered.is_some())).then_some(elapsed));
+            let name = readable_cell(&show.label(), w.saturating_sub(dw(&tail)), hovered_for(&self.show_list,i+1,elapsed));
             li(Line::from_spans([
                 Span::styled(name, if n > 0 { th.text().bold() } else { th.text() }),
                 Span::styled(tail, if warning && !busy { th.err() } else { th.accented() }),
@@ -319,7 +318,6 @@ impl TuiApp {
         let name_w = w.saturating_sub(11 + metadata);
         let header = format!("   {:<7} {}{}", "RELEASE", cell(if inbox { "SHOW" } else { "TITLE" }, name_w), if metadata > 0 { episode_metadata(None, w) } else { String::new() });
         Paragraph::new(header).style(th.dimmed()).wrap(WrapMode::None).render(Rect::new(rows[0].x + 2, rows[0].y, rows[0].width.saturating_sub(2), rows[0].height), frame);
-        let selected = readable_index(&self.ep_list);
         let have: HashMap<(String, String), &Torrent> = self.torrents.iter().filter_map(|torrent| {
             let parsed = crate::release::parse(&torrent.name);
             Some(((parsed.title.to_ascii_lowercase(), parsed.episode?), torrent))
@@ -348,7 +346,7 @@ impl TuiApp {
                 Span::styled(if unread { "●" } else { " " }, th.accented()),
                 Span::styled(format!("{mark} "), style),
                 Span::styled(format!("{:<7} ", episode.key), text_style),
-                Span::styled(readable_cell(&name, name_w, (selected == Some(index) && (self.shows_focus_eps || self.ep_list.borrow().hovered.is_some())).then_some(elapsed)), text_style),
+                Span::styled(readable_cell(&name, name_w, hovered_for(&self.ep_list,index,elapsed)), text_style),
                 Span::styled(if metadata > 0 { episode_metadata(Some(episode), w) } else { String::new() }, th.dimmed()),
             ]))
         }).collect();

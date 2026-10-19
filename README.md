@@ -30,7 +30,9 @@ the daemon running. `down` stops it. Torrent records and feed history stay on di
   rating, blurb, poster; `i` opens IMDb, `w` opens the Wikipedia article. Hover
   a row to preview its full name; click selects it, double-click activates it,
   and the wheel moves the list under the pointer. Hover leaves the keyboard
-  target unchanged. Long hovered or selected names scroll after a short pause.
+  target unchanged. Selected names stay still. Hovered, unselected names scroll once after a
+  short pause, return to the start and stop. `reduce_motion = true` in the
+  config, or Reduce motion in Settings, disables hover scrolling.
   The bottom rows show contextual commands such as `(o) Open`; uppercase keys
   use Shift, and separate action feedback.
   Press `?` for scrollable help; `1`–`4` or Tab switch screens.

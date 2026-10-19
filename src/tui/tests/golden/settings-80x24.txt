@@ -5,6 +5,7 @@
 ││ ▌ Simultaneous downloads   3                                               ││
 ││   Peer encryption          Prefer encryption                               ││
 ││   VPN connection           Off · ordinary connection                       ││
+││   Reduce motion            Off                                             ││
 ││ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          ││
 ││                                                                            ││
 ││ Extra downloads wait their turn. Encryption protects peer traffic; your IP ││
@@ -15,7 +16,6 @@
 ││                                                                            ││
 ││ VPN binding off                                                            ││
 ││ Changing encryption or VPN reopens the app's engine.                       ││
-││                                                                            ││
 ││                                                                            ││
 ││                                                                            ││
 │╰────────────────────────────────────────────────────────────────────────────╯│

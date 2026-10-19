@@ -137,14 +137,13 @@ impl TuiApp {
         if self.feeds.is_empty() {
             Paragraph::new("No feeds yet.\n\n(N)ew feed: add an RSS URL").style(th.dimmed()).render(pad(inner), frame);
         } else {
-            let selected = readable_index(&self.feed_list);
             let elapsed = self.marquee_elapsed();
             let items: Vec<ListItem> = self.feeds.iter().enumerate().map(|(i, f)| {
                 let unread = f.articles.iter().filter(|a| !a.is_read).count();
                 let w = inner.width.saturating_sub(2) as usize;
                 let count = format!(" {unread}/{}", f.articles.len());
                 let name = readable_cell(&f.name, w.saturating_sub(count.len() + 1),
-                    (selected == Some(i) && (!self.rss_focus_items || self.feed_list.borrow().hovered.is_some())).then_some(elapsed));
+                    hovered_for(&self.feed_list,i,elapsed));
                 let padn = 1;
                 let mut spans = vec![Span::styled(name, if unread > 0 { th.text().bold() } else { th.text() }), Span::raw(" ".repeat(padn)), Span::styled(count, th.dimmed())];
                 if f.has_error { spans.push(Span::styled(" !", th.err())); }
@@ -166,14 +165,13 @@ impl TuiApp {
             return;
         }
         let w = inner.width.saturating_sub(2) as usize;
-        let selected = readable_index(&self.item_list);
         let elapsed = self.marquee_elapsed();
         let items: Vec<ListItem> = f.articles.iter().enumerate().map(|(i, a)| {
             let date = if a.ts > 0 { ymd(a.ts) } else { a.date.chars().take(11).collect() };
             let size = a.size.map(human_bytes).unwrap_or_default();
             let tail = format!(" {size:>9}  {date}");
             let title = readable_cell(&a.title, w.saturating_sub(tail.len() + 2),
-                (selected == Some(i) && (self.rss_focus_items || self.item_list.borrow().hovered.is_some())).then_some(elapsed));
+                hovered_for(&self.item_list,i,elapsed));
             let padn = 0;
             li(Line::from_spans([
                 Span::styled(if a.is_read { "  " } else { "● " }, th.accented()),

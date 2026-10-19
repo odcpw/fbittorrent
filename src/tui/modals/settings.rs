@@ -32,16 +32,19 @@ impl TuiApp {
             let values = self.settings.as_ref().unwrap().cfg.clone();
             let result = (|| -> Result<Config> {
                 let mut latest = Config::load()?;
+                let queue_changed = latest.max_active_downloads != values.max_active_downloads;
                 let reopen = latest.peer_encryption != values.peer_encryption || latest.network_interface != values.network_interface;
                 latest.max_active_downloads = values.max_active_downloads;
                 latest.peer_encryption = values.peer_encryption;
                 latest.network_interface = values.network_interface;
+                latest.reduce_motion = values.reduce_motion;
                 latest.validate()?;
                 if reopen {
                     latest.save()?;
                     self.lifecycle.request_restart(RestartReason::Settings);
                 } else {
-                    Client::from_config(&self.cfg).set_queue_limit(latest.max_active_downloads)?;
+                    if queue_changed { Client::from_config(&self.cfg).set_queue_limit(latest.max_active_downloads)?; }
+                    latest.save()?;
                 }
                 Ok(latest)
             })();
@@ -58,8 +61,8 @@ impl TuiApp {
         let modal = self.settings.as_mut().unwrap();
         let selected = modal.list.borrow().selected().unwrap_or(0);
         match intent {
-            actions::Intent::Down => modal.list.borrow_mut().select(Some((selected + 1) % 3)),
-            actions::Intent::Up => modal.list.borrow_mut().select(Some((selected + 2) % 3)),
+            actions::Intent::Down => modal.list.borrow_mut().select(Some((selected + 1) % 4)),
+            actions::Intent::Up => modal.list.borrow_mut().select(Some((selected + 3) % 4)),
             actions::Intent::Left | actions::Intent::Right => {
                 let forward = !matches!(intent, actions::Intent::Left);
                 match selected {
@@ -69,11 +72,12 @@ impl TuiApp {
                         let index = policies.iter().position(|p| *p == modal.cfg.peer_encryption).unwrap_or(0);
                         modal.cfg.peer_encryption = policies[(index + if forward { 1 } else { 2 }) % 3].into();
                     }
-                    _ => {
+                    2 => {
                         let index = modal.connections.iter().position(|v| *v == modal.cfg.network_interface).unwrap_or(0);
                         let count = modal.connections.len();
                         modal.cfg.network_interface = modal.connections[(index + if forward { 1 } else { count - 1 }) % count].clone();
                     }
+                    _ => modal.cfg.reduce_motion = !modal.cfg.reduce_motion,
                 }
                 modal.error.clear();
             }
@@ -93,13 +97,13 @@ impl TuiApp {
         block.render(area, frame);
         let encryption = match modal.cfg.peer_encryption.as_str() { "require" => "Require encryption", "off" => "Off", _ => "Prefer encryption" };
         let vpn = match modal.cfg.network_interface.as_deref() { None => "Off · ordinary connection".into(), Some("proton") => "ProtonVPN · required".into(), Some(name) => format!("{name} · required") };
-        let items = vec![li(Line::raw(format!("Simultaneous downloads   {}", modal.cfg.max_active_downloads))), li(Line::raw(format!("Peer encryption          {encryption}"))), li(Line::raw(format!("VPN connection           {vpn}")))];
-        let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(3));
+        let items = vec![li(Line::raw(format!("Simultaneous downloads   {}", modal.cfg.max_active_downloads))), li(Line::raw(format!("Peer encryption          {encryption}"))), li(Line::raw(format!("VPN connection           {vpn}"))), li(Line::raw(format!("Reduce motion            {}",if modal.cfg.reduce_motion { "On" } else { "Off" })))];
+        let rows = Rect::new(inner.x, inner.y, inner.width, inner.height.min(4));
         StatefulWidget::render(&List::new(items).style(bg).highlight_style(th.selected()).highlight_symbol("▌"), rows, frame, &mut modal.list.borrow_mut());
         let description = if !modal.error.is_empty() { modal.error.clone() } else {
             format!("↑/↓ choose · ←/→ change · Enter save · Esc cancel\n\nExtra downloads wait their turn. Encryption protects peer traffic; your IP remains visible.\n\nA required VPN blocks torrent transfers when disconnected. Feed and search websites use your usual connection.\n\n{}\nChanging encryption or VPN reopens the app's engine.", crate::network_app::state(&modal.cfg).message)
         };
-        let remaining = inner.height.saturating_sub(3);
-        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { bg.fg(th.red) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(3), inner.width, remaining), frame);
+        let remaining = inner.height.saturating_sub(4);
+        Paragraph::new(description).style(if modal.error.is_empty() { bg.fg(th.dim) } else { bg.fg(th.red) }).wrap(WrapMode::Word).render(Rect::new(inner.x, inner.y.saturating_add(4), inner.width, remaining), frame);
     }
 }
