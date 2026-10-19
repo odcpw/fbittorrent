@@ -465,7 +465,9 @@ impl Bus {
         let mut effective = cfg;
         effective.idle_exit_secs = self.daemon.idle_exit_secs();
         effective.notify &= !self.daemon.no_notify;
-        let settings = serde_json::to_value(ops::settings::view(&effective)).unwrap();
+        let settings = if topics.contains(&Topic::Settings) || topics.contains(&Topic::Summary) {
+            serde_json::to_value(ops::settings::view(&effective)).unwrap()
+        } else { Value::Null };
         let mut show_releases=BTreeMap::new();
         for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
             show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
@@ -496,7 +498,9 @@ impl Bus {
             state,
             rows,
             completions,
-            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            logs: if topics.contains(&Topic::Log) {
+                serde_json::to_value(self.daemon.logs.all()).unwrap()
+            } else { Value::Null },
             searches,
             files,
             pieces,
