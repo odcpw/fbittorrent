@@ -518,9 +518,10 @@ class NativeHarness:
                 status = status if isinstance(status, dict) else {}
                 present = socket_path.exists()
                 observed = (f"socket={present}; status exit {status_exit}, ok={status.get('ok')}, "
-                            f"app_open={status.get('app_open')}, connection={status.get('connection')}")
-                if (status_exit == 0 and status.get("ok") is True and status.get("app_open") is True
-                        and status.get("connection") == "connected" and present and time.monotonic() < end):
+                            f"running={status.get('running')}, daemon={status.get('daemon')}, connection={status.get('connection')}")
+                if (status_exit == 0 and status.get("ok") is True and status.get("running") is True
+                        and status.get("daemon", {}).get("state") == "running"
+                        and status.get("connection") == "api" and present and time.monotonic() < end):
                     show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
@@ -535,7 +536,7 @@ class NativeHarness:
                 break
             time.sleep(max(0, min(.1, end-time.monotonic())))
         self.record("wait for settings safely reopen engine",
-                    f"Socket present, status ok/app_open/connected and show {hash_} exit 0 within {seconds} seconds",
+                    f"Socket present, status ok/running with daemon running over API and show {hash_} exit 0 within {seconds} seconds",
                     f"{'Ready' if ready else 'Timed out'} after {time.monotonic()-started:.3f} seconds; {observed}",
                     ready, started)
         return restored
@@ -1677,7 +1678,7 @@ def main():
                     cli("delete", hash_)
                 cli("settings", "--max-downloads", "3")
                 cli("settings", "--vpn", "fbmissing0")
-                wait_for(lambda: cli("status").get("connection") == "vpn_waiting", "required VPN blocks networking")
+                wait_for(lambda: cli("status").get("daemon", {}).get("state") == "parked", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
                 case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)

@@ -564,7 +564,7 @@ fn add(
     await_mutation(c, result)
 }
 fn counts(rows: &[api::Torrent]) -> Value {
-    json!({"total":rows.len(),"active":rows.iter().filter(|r|r.state==api::TorrentState::Downloading).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
+    json!({"total":rows.len(),"active":rows.iter().filter(|r|matches!(r.state, api::TorrentState::Downloading | api::TorrentState::Metadata | api::TorrentState::Checking | api::TorrentState::Stalled)).count(),"queued":rows.iter().filter(|r|r.state==api::TorrentState::Queued).count(),"seeding":rows.iter().filter(|r|r.state==api::TorrentState::Seeding).count(),"stopped":rows.iter().filter(|r|r.state==api::TorrentState::Paused).count(),"ready":rows.iter().filter(|r|r.playable.as_ref().is_some_and(|p|p.ready)).count()})
 }
 fn status(
     c: Option<&ApiClient>,
