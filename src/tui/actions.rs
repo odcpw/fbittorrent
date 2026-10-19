@@ -83,6 +83,7 @@ pub enum ModalKind {
     Providers,
     Settings,
     Help,
+    Stopped,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {

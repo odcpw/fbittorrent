@@ -96,7 +96,7 @@ impl TuiApp {
         let context_width = dw(&context).min(available);
         let labels_width = available.saturating_sub(context_width + 1);
         let legend = pack_labels(&self.footer_labels(), labels_width);
-        let feedback = if self.status.is_empty() {
+        let feedback = if self.daemon_stopped || self.status.is_empty() {
             self.footer_selection().unwrap_or_default()
         } else {
             self.status.clone()

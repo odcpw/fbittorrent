@@ -143,3 +143,54 @@ P4-04/P3-01/P3-18; P4-10 and P4-11 await P4-04; P4-08 awaits P1-14/P4-03;
 P4-03 awaits the authorized P1-15 integration and P3-07; P4-05 lacks P2-08's
 `contracts/ui/themes/expected.json`; P4-09 awaits P4-03. No next item is
 unblocked on this branch. M3 is not reached. No branch switch or merge performed.
+
+## P1-15 — fbt-p1-15-h0l
+
+The TUI now attaches in its own terminal to the daemon, retaining the legacy
+2 s data poll and one bounded API presence connection (`tui-<pid>`, interactive
+hello and `app.client` heartbeat). It owns no lifecycle object, engine or lock.
+`q`/Ctrl+C/SIGHUP detach; `Q` asks while work is active and only lowercase `y`
+sends `app.shutdown`. The first `q` prints the canonical notice after terminal
+restoration and atomically saves the private, once-only preference. Two failed
+polls show the stopped banner; Enter starts/reconnects. Settings restart the
+owner's engine slot without closing the UI. RSS/Shows on-open refresh remains
+local. Neighbour edits move legacy migration into daemon startup and decrement
+API client counts on disconnect (the two-client regression exposed cumulative
+counts); daemon supervision/teardown and all frozen wire fixtures stay unchanged.
+
+Evidence root: `target/test-logs/fbt-p1-15-h0l/`. Run the retained
+`native-cases.py verified` wrapper for `native.py` with private five-XDG fixtures,
+disposable runtime-only static units and actual capped loopback seed/leech engines.
+Every new case logs keys, panes and CLI status; `Q_confirms` uses logger-compatible
+slug `q_confirms`.
+
+| Criterion | Command/case | JSONL evidence | Observed |
+| --- | --- | --- | --- |
+| No daemon → TUI starts it | `native.py --case tui_starts_daemon` | `verified/native/tui_starts_daemon.jsonl` | same owner remains after heartbeat and Ctrl+C |
+| q keeps download running | `native.py --case q_detaches` | `verified/native/q_detaches.jsonl` | real payload increases after q; same daemon PID |
+| Q confirms/stops | `native.py --case q_confirms` | `verified/native/q_confirms.jsonl` | Y/n/Enter cancel; y stops owner within 6 s |
+| First-q notice once | `native.py --case first_q_notice_once` | `verified/native/first_q_notice_once.jsonl` | first prints; second omits; saved marker true |
+| Daemon-gone banner <5 s | `native.py --case daemon_gone_banner` | `verified/native/daemon_gone_banner.jsonl` | stopped + Enter in 4.026 s; Enter starts new PID |
+| Two terminals attach | `native.py --case second_tui_attaches` | `verified/native/second_tui_attaches.jsonl` | both show same torrent; clients 2→1 on detach; no focus helper |
+
+`cargo test --locked tui:: -- --nocapture`: **86 pass** (`focused_final.*`),
+including prompts and all **34 unchanged goldens**. The bead's one full
+`cargo test --locked -- --nocapture`: **303 pass, 2 ignored** (`full.*`);
+subsequent attach-path refinement is covered by the focused run and six real
+cases. Agent documentation checks: 4 pass (`agent_docs.*`). Size self-tests and
+all 116 API/TUI/daemon files pass (`sizes_final.*`); generated key docs match
+(`generated.*`). SIGHUP detaches in **121 ms**, leaves the unfinished torrent,
+socket and held lock (`verified/native/terminal_close_is_graceful.jsonl`).
+
+Additional native replay: 24/26 pass in `verified/native/summary.json`.
+`quit_restart_down`'s log checker was extended for the exact successful daemon
+restart/parked phases, retaining negative controls, and its existing Shows-badge
+assertion now waits for the initial asynchronous read model. Its focused replay
+is recorded in `restart_final/`. `startup_survives_bad_record` remains red:
+CLI `show` intermittently returns exit 4 through the legacy readiness probe
+(which has a 200 ms budget), while the daemon remains running (also reproduced separately in
+`restore_verified/`); no assertion or timeout was weakened. Follow-up: replace
+that false-closed CLI probe through P1-11's API client. The six bead criteria are
+met; automatic idle exit is still P1-12, as disclosed in README/robot-docs.
+No release build or all.sh between track beads. Continue with P4-03's available
+API screens; Track B namespaces and the bus integration still need merging.

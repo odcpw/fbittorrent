@@ -227,6 +227,18 @@
       "scope": "global"
     },
     {
+      "id": "daemon.start",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Enter"
+        ]
+      },
+      "label": "Start fbittorrent",
+      "scope": "modal:stopped"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [

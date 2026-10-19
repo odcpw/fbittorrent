@@ -12,7 +12,10 @@ impl Screen {
 
 pub struct TuiApp {
     pub(super) cfg: Config,
-    pub(super) lifecycle: Lifecycle,
+    pub(super) presence: Option<Arc<super::attach::Presence>>,
+    pub(super) failed_polls: u8,
+    pub(super) daemon_stopped: bool,
+    pub(super) quit_notice: bool,
     pub(super) theme: Theme,
     pub(super) footer_cache: RefCell<Option<super::footer::FooterCache>>,
     pub(super) screen: Screen,
@@ -95,6 +98,9 @@ pub(super) struct ShowReleaseTarget { pub(super) imdb: String, pub(super) key: S
 pub enum Msg {
     Raw(Event),
     Poll,
+    Attached(Result<Arc<super::attach::Presence>,String>),
+    OwnerShutdown(Result<(),String>),
+    SettingsSaved(Result<Config,String>),
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
     Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
@@ -129,10 +135,6 @@ pub enum Screen { Torrents, Search, Shows, Rss }
 
 impl TuiApp {
     pub(super) fn new(cfg: Config, screen: Screen, shows: Shows) -> Self {
-        Self::with_lifecycle(cfg, screen, shows, Lifecycle::default())
-    }
-
-    pub(super) fn with_lifecycle(cfg: Config, screen: Screen, shows: Shows, lifecycle: Lifecycle) -> Self {
         let theme = Theme::load();
         let mut search_input = TextInput::new()
             .with_placeholder("search torrents, Enter to run")
@@ -141,7 +143,7 @@ impl TuiApp {
         search_input.set_focused(screen == Screen::Search);
         let mut app = TuiApp {
             cfg,
-            lifecycle,
+            presence:None,failed_polls:0,daemon_stopped:false,quit_notice:false,
             theme,
             footer_cache: RefCell::new(None),
             screen,

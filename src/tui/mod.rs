@@ -9,6 +9,7 @@ mod app;
 pub use app::{TuiApp, Screen, Msg, ImdbState};
 use app::*;
 mod connection;
+mod attach;
 #[path = "screens/torrents.rs"]
 mod screens_torrents;
 #[path = "screens/search.rs"]
@@ -109,7 +110,10 @@ impl Model for TuiApp {
             }
             Msg::Raw(_) => Cmd::none(),
             Msg::Poll => {
-                if self.cfg.native() && crate::network_app::check_transition(&self.cfg, &self.lifecycle) { return Cmd::quit(); }
+                // CLI settings can reopen the daemon slot while this UI stays attached.
+                if self.cfg.native() {
+                    if let Ok(cfg) = Config::load() { self.cfg = cfg; }
+                }
                 self.tick += 1; self.maybe_reload_theme(); self.poll()
             }
             Msg::Hover => {
@@ -133,6 +137,7 @@ impl Model for TuiApp {
                 match r {
                     Ok((ts, ti)) => {
                         self.online = true;
+                        self.failed_polls = 0; self.daemon_stopped = false;
                         self.backend_error.clear();
                         let sel_hash = self.selected_torrent().map(|t| t.hash.clone());
                         self.torrents = ts;
@@ -145,10 +150,25 @@ impl Model for TuiApp {
                         }
                         self.transfer = ti;
                     }
-                    Err(e) => { self.online = false; self.backend_error = e; }
+                    Err(e) => {
+                        self.online = false; self.backend_error = e;
+                        self.failed_polls = self.failed_polls.saturating_add(1);
+                        self.daemon_stopped = self.cfg.native() && self.failed_polls >= 2;
+                    }
                 }
                 Cmd::none()
             }
+            Msg::Attached(result) => match result {
+                Ok(presence) => { self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; self.poll() }
+                Err(error) => { self.set_status(error,true); Cmd::none() }
+            },
+            Msg::OwnerShutdown(result) => match result {
+                Ok(()) => Cmd::quit(), Err(error) => { self.set_status(error,true); Cmd::none() }
+            },
+            Msg::SettingsSaved(result) => match result {
+                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_status("download settings saved",false); self.poll() }
+                Err(error) => { if let Some(modal)=self.settings.as_mut() { modal.saving=false; modal.error=error; } Cmd::none() }
+            },
             Msg::ActionDone(r) => {
                 match r { Ok(s) => self.set_status(s, false), Err(e) => self.set_status(e, true) }
                 self.poll()

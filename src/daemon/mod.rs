@@ -221,6 +221,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
         );
+        engine::migrate_legacy(cfg, &engine.dispatcher())?;
         daemon.replace(Slot::Running(engine))?;
     }
     Ok(())

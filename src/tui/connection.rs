@@ -1,18 +1,25 @@
 //! Connection actions, lifetime and quit handling.
 use super::*;
 
-pub fn run(cfg: Config, screen: Screen, lifecycle: Lifecycle) -> Result<()> {
-    let mut model = TuiApp::with_lifecycle(cfg, screen, Shows::load()?, lifecycle);
+pub fn run(cfg: Config, screen: Screen) -> Result<()> {
+    let presence=if cfg.native() { Some(attach::connect(&cfg)?) } else { None };
+    // This guard owns only UI cleanup, never an engine or the instance lock.
+    let _terminal=signals::AppGuard::new(());
+    let native=cfg.native();
+    let mut model = TuiApp::new(cfg, screen, Shows::load()?);
+    model.presence=presence;
     model.pointer_motion_on_start = true;
-    // AppBuilder::run exits the process on a signal, skipping the outer engine
-    // guard. Program returns instead, so our application owner drains first.
+    // Program returns on signals, allowing the presence connection and terminal
+    // to close while the separate daemon continues its work.
     let mut program = ftui::Program::with_config(model, ftui::ProgramConfig::fullscreen().with_mouse())?;
     let result = program.run();
     signals::event("shutdown_once end (Program::run returned)");
     let signal = program.model().termination_signal;
+    let notice = native && program.model().quit_notice;
     drop(program);
     if let Some(signal) = signal { return Err(SignalTermination(signal).into()); }
     result?;
+    attach::after_detach(notice);
     Ok(())
 }
 
@@ -32,8 +39,13 @@ impl TuiApp {
     pub(super) fn poll(&mut self) -> Cmd<Msg> {
         if self.poll_inflight { return Cmd::none(); }
         self.poll_inflight = true;
-        let cfg = self.cfg.clone();
+        let mut cfg = self.cfg.clone();
+        if cfg.native() { cfg.timeout_secs=1; }
+        let presence = self.presence.clone();
         Cmd::task(move || {
+            if presence.as_ref().is_some_and(|connection| !connection.alive()) {
+                return Msg::Torrents(Err("fbittorrent stopped".into()));
+            }
             let c = Client::from_config(&cfg);
             let r = c.login().and_then(|_| Ok((c.torrents()?, c.transfer_info()?)));
             Msg::Torrents(r.map_err(|e| e.to_string()))

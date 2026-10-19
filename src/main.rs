@@ -32,10 +32,8 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use engine::migrate_legacy;
 #[cfg(test)]
 use engine::LegacyMigration;
-use daemon::lifecycle::{Lifecycle, Request as LifecycleRequest};
 use qbt::{human_bytes, human_eta, human_rate, AddOptions, Client, Torrent};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -271,9 +269,8 @@ fn run(cli: Cli) -> Result<Code> {
                 return Err(AppError::new(Code::Usage, "the TUI needs a terminal; stdout is not a TTY").hint("fbittorrent triage --json   # the non-interactive overview").into());
             }
             let screen = if search { tui::Screen::Search } else if rss { tui::Screen::Rss } else if shows { tui::Screen::Shows } else { tui::Screen::Torrents };
-            if cfg.native() && ipc::is_running(&cfg) { tui::run(cfg, screen, Lifecycle::default())?; }
-            else if cfg.native() && !no_start { run_native_app(cfg, screen)?; }
-            else { connect(&cfg, &c)?; tui::run(cfg, screen, Lifecycle::default())?; }
+            if !cfg.native() { connect(&cfg, &c)?; }
+            tui::run(cfg, screen)?;
             Ok(Code::Ok)
         }
         Cmd::List { active } => {
@@ -634,52 +631,6 @@ fn reconcile_result(cfg: &Config, legacy: impl FnOnce() -> Result<usize>) -> Res
 struct SearchCleanup;
 impl Drop for SearchCleanup {
     fn drop(&mut self) { search::shutdown_all(); }
-}
-
-fn run_native_app(mut cfg: Config, screen: tui::Screen) -> Result<()> {
-    if ipc::is_running(&cfg) { return backend::open_app(); }
-    let lifecycle = Lifecycle::default();
-    loop {
-    let snapshot = network_app::state(&cfg);
-    lifecycle.set_expected_network(Some(snapshot.clone()));
-    if !snapshot.ready {
-        let parked = tui::signals::AppGuard::new(network_app::ParkedEngine::start(&cfg, snapshot, lifecycle.clone())?);
-        let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-        drop(parked);
-        result?;
-        if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-            cfg = Config::load()?;
-            continue;
-        }
-        return Ok(());
-    }
-    let mut engine_cfg = cfg.clone();
-    if cfg.network_interface.is_some() { engine_cfg.network_interface = snapshot.interface.clone(); }
-    let mut app = match engine::start(&engine_cfg, lifecycle.clone()) {
-        Ok(app) => app,
-        Err(error) if error.to_string().contains("already open") => return backend::open_app(),
-        Err(_) if cfg.network_interface.is_some() && network_app::state(&cfg) != snapshot => continue,
-        Err(error) => return Err(error),
-    };
-    let dispatcher = app.dispatcher();
-    migrate_legacy(&cfg, &dispatcher)?;
-    let controls_lifecycle = lifecycle.clone();
-    app.serve(&cfg, move |request| {
-        network_app::controls(request, &snapshot, &controls_lifecycle).or_else(|| dispatcher.dispatch(request))
-            .unwrap_or_else(|| Err(anyhow::anyhow!("unsupported native engine request {}", request.path)))
-    })?;
-    let app = tui::signals::AppGuard::new(app);
-    // The guard drops before run() returns, including a TUI initialization error.
-    // main() only calls process::exit after network activity and searches stop.
-    let result = tui::run(cfg.clone(), screen, lifecycle.clone());
-    drop(app);
-    result?;
-    if matches!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Restart(_))) {
-        cfg = Config::load()?;
-        continue;
-    }
-    return Ok(());
-    }
 }
 
 #[cfg(test)]

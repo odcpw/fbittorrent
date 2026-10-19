@@ -30,6 +30,7 @@ impl TuiApp {
                 ModalKind::Providers => "Providers",
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",
+                ModalKind::Stopped => "Stopped",
             },
             Scope::Prompt => {
                 if self.prompt.as_ref().is_some_and(|p| p.yes_no) {
@@ -67,6 +68,7 @@ impl TuiApp {
     }
 
     pub(super) fn footer_selection(&self) -> Option<String> {
+        if self.daemon_stopped {return Some("fbittorrent stopped · Enter starts it again".into());}
         if let Some(files) = &self.files {
             return files
                 .list

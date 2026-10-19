@@ -79,7 +79,7 @@ impl TuiApp {
         block.render(cols[0], frame);
 
         if !self.online {
-            let msg = format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error);
+            let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
             Paragraph::new(msg).style(th.err()).wrap(WrapMode::Word).render(pad(inner), frame);
         } else if self.torrents.is_empty() {
             let text = if !network.ready { format!("{}\n\nConnect your VPN to start transfers.\n(F6) Download and VPN settings\n\nYour saved downloads stay here.", network.message) }
