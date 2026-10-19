@@ -144,7 +144,7 @@ impl Shared {
             Err(stopping())
         } else {
             match &job.request.call {
-                Call::ShowsList {..}|Call::ShowsFollow {..}|Call::ShowsUnfollow {..}|Call::ShowsCheck {..}|Call::ShowsReleases {..}|Call::ShowsSetRead {..}|Call::ShowsMarkShowRead {..}|Call::ShowsUndoRead {..}|Call::ShowsGrab {..}=>ops::shows::dispatch(&self.daemon,&job.request.call),
+                Call::ShowsList {..}|Call::ShowsFollow {..}|Call::ShowsSetQuality {..}|Call::ShowsUnfollow {..}|Call::ShowsCheck {..}|Call::ShowsReleases {..}|Call::ShowsSetRead {..}|Call::ShowsMarkShowRead {..}|Call::ShowsUndoRead {..}|Call::ShowsGrab {..}=>ops::shows::dispatch(&self.daemon,&job.request.call),
                 Call::RssFeeds {..}|Call::RssAdd {..}|Call::RssRemove {..}|Call::RssItems {..}|Call::RssSetRead {..}|Call::RssMarkFeedRead {..}|Call::RssGrab {..}|Call::RssRefresh {..}=>ops::rss::dispatch(&self.daemon,&job.request.call),
                 Call::AppClipboardDismiss { .. }
                 | Call::AppLog { .. }

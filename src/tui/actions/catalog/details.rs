@@ -24,6 +24,8 @@ macro_rules! detail {
     };
 }
 pub(super) const ACTIONS: &[Action] = &[
+    action!("details.rename",Scope::Modal(ModalKind::Details),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
+        |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),T,None,None,None),
     action!(
         "details.close",
         Scope::Modal(ModalKind::Details),

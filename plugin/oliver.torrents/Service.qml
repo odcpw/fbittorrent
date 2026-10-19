@@ -24,6 +24,10 @@ Item {
   property var manifest: ({version: "0.2.0"})
   property var settings: ({})
   property bool popupOpen: false
+  property bool quickVisible:false
+  property var quickTopics:[]
+  signal apiFrame(var frame,var request)
+  function parseAddSource(text){return AddSource.parse(text)}
   property bool dashboardVisible: false
   property var dashboardState:null
   property var dashboardOwner:null
@@ -35,6 +39,8 @@ Item {
   property var detailFlow:null
   property int detailRevision:0
   property int logRevision:0
+  property int statsRevision:0
+  readonly property var statistics:{var revision=statsRevision;return online ? (store.topics.stats || null) : null}
   property real detailsWidth:360
   property var savedPreferences:({})
   onDetailsWidthChanged:if(preferencesLoaded)savePreferences.restart()
@@ -198,7 +204,9 @@ Item {
     if(detailFlow)detailFlow.frame(frame,request)
     if(searchFlow)searchFlow.frame(frame)
     if(showsFlow)showsFlow.frame(frame,request)
+    apiFrame(frame,request)
     if(frame.topic==="torrents" || (frame.topic && frame.topic.indexOf("torrent:")===0) || (request && request.op.indexOf("torrents.")===0))detailRevision++
+    if(frame.topic==="stats" || (request && request.op==="hello"))statsRevision++
     if(frame.topic==="log" || (request && request.op==="app.log"))logRevision++
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
@@ -329,13 +337,15 @@ Item {
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onShowsTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
-  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
+  onQuickVisibleChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onQuickTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onDetailTopicsChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
+  onShowsTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
 
   FileView {
     id:preferences
@@ -417,7 +427,7 @@ Item {
       disconnect:function() { socket.connected = false }
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
-    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics))
+    client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics),quickVisible)
     if (socket.connected) client.connected()
     else { client.attempt(); if (socket.connected) client.connected() }
     if (!socket.connected) reconnect.start()

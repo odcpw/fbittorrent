@@ -14,6 +14,7 @@ pub(super) struct Prompt {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum PromptKind {
     AddMagnet,
+    RenameTorrent {hash:String},
     SettingLimit(usize),
     SettingPeerPort,
     AddFeed,
@@ -31,10 +32,20 @@ impl TuiApp {
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
         if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
         if kind==PromptKind::SettingPeerPort {input=input.with_max_length(5);}
+        if matches!(kind,PromptKind::RenameTorrent {..}) {input=input.with_max_length(512);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
         self.prompt = Some(Prompt { kind, label: label.to_string(), input, yes_no, add_flags, native_streaming: self.cfg.native() });
+    }
+
+    pub(super) fn rename_prompt(&mut self)->Cmd<Msg> {
+        if let Some(t)=self.selected_torrent() {
+            let (hash,name)=(t.hash.clone(),t.name.clone());
+            self.open_prompt(PromptKind::RenameTorrent {hash},"Rename to: (empty restores original)",false);
+            self.prompt.as_mut().unwrap().input.set_value(name);
+        }
+        Cmd::none()
     }
 
     pub(super) fn close_prompt(&mut self) {
@@ -88,12 +99,17 @@ impl TuiApp {
             actions::Intent::FirstLast if p.kind == PromptKind::AddMagnet && !p.native_streaming => { p.add_flags.1 = !p.add_flags.1; Cmd::none() }
             actions::Intent::Seed if p.kind == PromptKind::AddMagnet => { p.add_flags.2 = !p.add_flags.2; Cmd::none() }
             actions::Intent::Primary => {
-                let value = p.input.value().trim().to_string();
+                let raw=p.input.value().to_string();
+                let value = raw.trim().to_string();
                 let kind = p.kind.clone();
                 let (seq, fl, seed) = p.add_flags;
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
+                if let PromptKind::RenameTorrent {hash}=kind {
+                    if !crate::engine::rename::valid_name(&raw){self.set_status("Name must contain no controls and at most 512 characters",true);return Cmd::none();}
+                    return self.service_action("torrents.rename",serde_json::json!({"hash":hash,"name":raw}),"renamed torrent");
+                }
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

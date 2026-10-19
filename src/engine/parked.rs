@@ -95,7 +95,7 @@ impl ParkedLedger {
                 cfg.save()?;
                 return Ok(EngineResult::Acknowledged);
             }
-            EngineOp::Queue
+            EngineOp::Rename {..} | EngineOp::Queue
             | EngineOp::Info
             | EngineOp::Files { .. }
             | EngineOp::Trackers { .. }
@@ -111,6 +111,7 @@ impl ParkedLedger {
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
         ledger.generation = self.generation.clone();
+        if let EngineOp::Rename {hash,name}=&op {rename::apply(&mut ledger,hash,name)?;save_parked_ledger(&self.directory,&ledger)?;return Ok(EngineResult::Acknowledged);}
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
             let folder=Config::load()?.save_path.map(PathBuf::from).unwrap_or_else(||dirs::download_dir().unwrap_or_else(||crate::config::data_dir().join("downloads")));
             return staging::execute(&self.directory,&folder,&mut ledger,&op);

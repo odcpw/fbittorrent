@@ -14,9 +14,10 @@ ColumnLayout {
   readonly property string networkingText:overview.item ? overview.item.networkingText : ""
   readonly property bool posterLoaded:overview.item ? overview.item.posterLoaded : false
   readonly property var piecesState:pieces.item ? pieces.item.state : null
-  readonly property bool editing:files.item ? files.item.editing : false
+  readonly property bool editing:(overview.item && overview.item.editing) || (files.item && files.item.editing) || false
+  function renameTitle(){flow.selectTab("overview");Qt.callLater(function(){if(overview.item)overview.item.renameTitle()})}
   signal recheckRequested(string hash)
-  function key(event){if(files.item && files.item.key(event))return true;return false}
+  function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(files.item && files.item.key(event))return true;return false}
   spacing:Commons.Style.spacing.sm
   Rectangle {Layout.fillWidth:true;Layout.preferredHeight:Commons.Style.space(2);color:Commons.Color.accent;opacity:root.focused ? 1 : 0}
   Flow {

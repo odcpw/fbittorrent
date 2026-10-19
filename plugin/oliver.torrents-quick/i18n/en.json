@@ -1,0 +1,11 @@
+{
+  "title": "Torrent quick add/search",
+  "hint": "Paste a magnet or an absolute .torrent path, then press Enter to add. Type ordinary text to search.",
+  "keys": "↑/↓ choose · Enter add/review · Esc close",
+  "starting": "Starting fbittorrent… Press Enter again when connected.",
+  "searching": "Searching…",
+  "adding": "Adding…",
+  "invalidSource": "Enter a valid magnet or absolute .torrent path",
+  "dashboardUnavailable": "Dashboard unavailable. Enable the oliver.torrents plugin to review this result.",
+  "finishReview": "Finish or discard the current dashboard add first."
+}

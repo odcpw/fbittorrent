@@ -230,7 +230,7 @@ pub enum Reply {
     SearchGrab(AddResult),
 
     TorrentsRecheck(RecheckReply),
-    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
+    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsSetQuality(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
     RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
     RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
@@ -257,6 +257,7 @@ pub enum Reply {
     TorrentsRemove(RemoveResult),
     TorrentsFiles(FilesResult),
     TorrentsPeers(PeersResult),
+    TorrentsRename(DoneResult),
     TorrentsAddTracker(DoneResult),
     TorrentsRemoveTracker(DoneResult),
     TorrentsSetFiles(DoneResult),
@@ -288,7 +289,7 @@ impl Reply {
             "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
 
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
-            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
+            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.set_quality"=>serde_json::from_value(result).map(Self::ShowsSetQuality),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
             "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
             "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
             "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),
@@ -317,6 +318,7 @@ impl Reply {
             "torrents.start" => serde_json::from_value(result).map(Self::TorrentsStart),
             "torrents.stop" => serde_json::from_value(result).map(Self::TorrentsStop),
             "torrents.remove" => serde_json::from_value(result).map(Self::TorrentsRemove),
+            "torrents.rename"=>serde_json::from_value(result).map(Self::TorrentsRename),
             "torrents.add_tracker" => serde_json::from_value(result).map(Self::TorrentsAddTracker),
             "torrents.remove_tracker" => serde_json::from_value(result).map(Self::TorrentsRemoveTracker),
             "torrents.peers" => serde_json::from_value(result).map(Self::TorrentsPeers),
@@ -377,7 +379,12 @@ pub struct QueueMoveResult { pub state: DoneState, pub queue_pos: u64 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogResult { pub entries: Vec<LogEntry>, pub next_seq: u64 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StatsResult { pub active_clients: ClientCounts, pub connections: ClientCounts }
+pub struct StatsResult {
+    #[serde(skip_serializing_if="Option::is_none")] pub session:Option<super::SessionTotals>,
+    #[serde(skip_serializing_if="Option::is_none")] pub all_time:Option<super::AllTimeTotals>,
+    pub active_clients: ClientCounts, pub connections: ClientCounts,
+    #[serde(skip_serializing_if="Option::is_none")] pub history:Option<super::RateHistory>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackersResult { pub trackers:Vec<Tracker> }

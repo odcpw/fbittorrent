@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("statistics",include_str!("../../contracts/ipc/v1/statistics.ndjson")),
+    ("history",include_str!("../../contracts/ipc/v1/history.ndjson")),
+    ("shows-quality",include_str!("../../contracts/ipc/v1/shows-quality.ndjson")),
     ("tracker-edit",include_str!("../../contracts/ipc/v1/tracker-edit.ndjson")),
     ("download-limit",include_str!("../../contracts/ipc/v1/download-limit.ndjson")),
     ("peers",include_str!("../../contracts/ipc/v1/peers.ndjson")),
@@ -245,6 +248,9 @@ fn roundtrip() {
 
 /// Report JSON pointers, including escaped object keys, to the exact bad value.
 fn sentinel(value: &Value, path: &str) -> Result<(), String> {
+    sentinel_input(value,path,false)
+}
+fn sentinel_input(value: &Value, path: &str, quality_reset: bool) -> Result<(), String> {
     if value
         .as_f64()
         .is_some_and(|n| n == -1.0 || n == 8_640_000.0)
@@ -284,18 +290,19 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
                     return Err(format!("{pointer}: zero substitutes for an unknown value"));
                 }
             }
-            // Null is meaningful only in a deletion patch, an explicit input
-            // upload-limit reset, or the required invalid-ID response envelope.
+            // Null is meaningful in a deletion patch, an explicit input reset,
+            // or the required invalid-ID response envelope.
             if child.is_null() {
                 if path.contains("/changed/")
                     || key == "id" && map.get("ok") == Some(&Value::Bool(false))
                     || matches!(key.as_str(), "bps" | "download_bps" | "upload_bps" | "alt_download_bps" | "alt_upload_bps") && path.ends_with("/args")
+                    || quality_reset && key == "quality"
                 {
                     continue;
                 }
                 return Err(format!("{pointer}: omit unknown full-object fields"));
             }
-            sentinel(child, &pointer)?;
+            sentinel_input(child, &pointer, key=="args" && map.get("op").and_then(Value::as_str)==Some("shows.set_quality"))?;
         }
     } else if let Some(items) = value.as_array() {
         for (i, child) in items.iter().enumerate() {
@@ -344,6 +351,15 @@ fn sentinel_negative_controls() {
     )
     .unwrap();
     sentinel(&json!({"changed":{"a/b":{"eta_s":null}}}), "").unwrap();
+}
+
+#[test]
+fn quality_reset_null_is_scoped_to_setter_input() {
+    sentinel(&json!({"frame":{"op":"shows.set_quality","args":{"imdb":"tt1234001","quality":null}}}),"").unwrap();
+    for value in [
+        json!({"frame":{"op":"shows.follow","args":{"imdb":"tt1234001","quality":null}}}),
+        json!({"frame":{"result":{"show":{"quality":null}}}}),
+    ] {assert!(sentinel(&value,"").is_err());}
 }
 
 #[test]
@@ -452,10 +468,18 @@ fn operation_event_error_and_document_coverage() {
             }
         }
     }
+    // P7-03 uses behavioural request/reply coverage instead of a new frozen transcript.
+    for name in ["Friendly title", ""] {
+        let request:Request=serde_json::from_value(serde_json::json!({"id":81,"op":"torrents.rename","args":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":name}})).unwrap();
+        request.validate().unwrap();
+        assert!(matches!(Reply::decode("torrents.rename",serde_json::json!({"state":"done"})).unwrap(),Reply::TorrentsRename(_)));
+        operations.insert(request.call.op());
+    }
     let ipc = include_str!("../../docs/IPC.md");
     // Additions to this literal require their owning bead (imdb.lookup: P3-04).
     // TABLE and fixture changes alone cannot authorize an operation.
     let required_operations = [
+        "torrents.rename",
         "torrents.commit",
         "torrents.discard",
         "torrents.move",
@@ -467,7 +491,7 @@ fn operation_event_error_and_document_coverage() {
         "search.start", "search.stop", "search.providers", "search.set_provider",
         "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
-        "shows.list","shows.follow","shows.unfollow","shows.check","shows.releases","shows.set_read","shows.mark_show_read","shows.undo_read","shows.grab",
+        "shows.list","shows.follow","shows.set_quality","shows.unfollow","shows.check","shows.releases","shows.set_read","shows.mark_show_read","shows.undo_read","shows.grab",
         "rss.feeds","rss.add","rss.remove","rss.refresh","rss.items","rss.set_read","rss.mark_feed_read","rss.grab",
         "app.clipboard.dismiss",
         "app.log",
@@ -748,5 +772,18 @@ fn tracker_edits_validate_url_without_echoing_passkeys() {
         assert_eq!(request.call.op(),op);
         assert!(Reply::decode(op,json!({"state":"done"})).is_ok());
         println!("{op}: strict URL validation and done result round-trip passed; query redacted");
+    }
+}
+
+#[test]
+fn rename_validation_preserves_empty_and_rejects_controls() {
+    for name in ["", "  Personal title ✨  ", &"é".repeat(512)] {
+        let request:Request=serde_json::from_value(json!({"id":1,"op":"torrents.rename","args":{"hash":"5656565656565656565656565656565656565656","name":name}})).unwrap();
+        request.validate().unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap()["args"]["name"],name);
+    }
+    for name in ["bad\nname", "bad\0name", &"é".repeat(513)] {
+        let request=serde_json::from_value::<Request>(json!({"id":1,"op":"torrents.rename","args":{"hash":"5656565656565656565656565656565656565656","name":name}}));
+        assert!(request.is_err(),"request decoding validates name: {name:?}");
     }
 }

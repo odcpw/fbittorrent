@@ -64,6 +64,13 @@ mod format;
 mod palette;
 mod feedback;
 mod limits;
+mod statistics;
+#[cfg(test)]
+#[path="tests/statistics.rs"]
+mod statistics_tests;
+#[cfg(test)]
+#[path="tests/history.rs"]
+mod history_tests;
 #[cfg(test)]
 #[path="tests/limits.rs"]
 mod limit_tests;
@@ -76,6 +83,9 @@ mod disk_tests;
 #[cfg(test)]
 #[path="tests/port.rs"]
 mod port_tests;
+#[cfg(test)]
+#[path="tests/rename.rs"]
+mod rename_tests;
 #[cfg(test)]
 #[path="tests/log.rs"]
 mod log_tests;

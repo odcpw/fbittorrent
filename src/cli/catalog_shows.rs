@@ -67,6 +67,14 @@ fn print_releases(rows:&[api::Release]) {
 pub(crate) fn run(cfg:&Config,sub:&ShowsCmd,json_mode:bool,no_start:bool)->Result<Code> {
     let source=Source::new(cfg)?;
     match sub {
+        ShowsCmd::Quality {show,quality}=>{
+            let shows=source.shows()?;let selected=select(&shows,show)?;
+            let quality=(quality!="default").then_some(quality.as_str());
+            let args=serde_json::from_value(json!({"imdb":selected.imdb,"quality":quality}))?;
+            source.call(api::Call::ShowsSetQuality {args})?;
+            crate::emit(json_mode,json!({"ok":true,"action":"shows-quality","imdb":selected.imdb,"quality":quality}),
+                ||println!("{}: {}",show,quality.unwrap_or("default")));
+        },
         ShowsCmd::List=>{
             let shows=source.shows()?;let values:Vec<_>=shows.iter().map(shapes::show).collect();
             crate::emit(json_mode,json!({"ok":true,"count":shows.len(),"new":shows.iter().map(|show|show.unread).sum::<u64>(),"path":crate::shows::path(),"shows":values}),||{

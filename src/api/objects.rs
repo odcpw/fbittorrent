@@ -312,6 +312,8 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TorrentDetail {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub original_name:Option<String>,
     #[serde(flatten)]
     pub torrent: Torrent,
     pub private: bool,

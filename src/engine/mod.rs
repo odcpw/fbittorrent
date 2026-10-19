@@ -33,6 +33,7 @@ use crate::ipc::{InstanceLock, Request, Server};
 use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
 
 mod ledger;
+pub(crate) mod rename;
 pub(crate) mod staging;
 pub(crate) mod pieces;
 mod bus;
@@ -97,6 +98,7 @@ struct RestoreTask {
 struct Inner {
     session: Arc<Session>,
     bus_changed: rqbit_runtime::sync::Notify,
+    completed_count: std::sync::atomic::AtomicU64,
     completions: std::sync::Mutex<std::collections::VecDeque<serde_json::Value>>,
     ledger: Arc<Mutex<Ledger>>,
     additions: Arc<Mutex<()>>,
@@ -206,6 +208,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     let inner = Arc::new(Inner {
         session,
         bus_changed: rqbit_runtime::sync::Notify::new(),
+        completed_count: Default::default(),
         completions: Default::default(),
         ledger: Arc::new(Mutex::new(ledger)),
         additions: Arc::new(Mutex::new(())),
@@ -306,7 +309,7 @@ fn drain_failure(message: &str, detail: Option<String>) -> String {
 
 impl AppEngine {
     // Drop uses the production budget; tests exercise the same path with a short fuse.
-    fn drain(&mut self, bound: Duration) -> bool {
+    pub(crate) fn drain(&mut self, bound: Duration) -> bool {
         let began = std::time::Instant::now();
         self.dispatcher
             .inner

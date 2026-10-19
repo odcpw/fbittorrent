@@ -179,16 +179,20 @@ fn watch_capability_checks_are_on_the_roundtrip_path() {
         .remove("playable")
         .is_some());
     check_group("watch-omitted", &encode(&lines)).unwrap();
-    // Keep the actual no-watch transcript unchanged, including its deliberate
-    // revision gap. Its torrent snapshots/models omit playable throughout.
+    // Canonical hello lists track the live caps. Derive an explicit no-watch
+    // control while preserving every payload and deliberate revision gap.
     let gap = GROUPS
         .iter()
         .find(|(group, _)| *group == "subscribe-gap")
         .unwrap()
         .1;
+    check_group("subscribe-gap",gap).unwrap();
+    let mut gap:Vec<Value>=gap.lines().map(|line|serde_json::from_str(line).unwrap()).collect();
+    for line in &mut gap {if let Some(caps)=line.get_mut("frame").and_then(|frame|frame.get_mut("result")).and_then(|result|result.get_mut("caps")).and_then(Value::as_array_mut){caps.retain(|cap|cap!="watch");}}
+    let gap=encode(&gap);
     assert!(!gap.contains("\"watch\"") && !gap.contains("\"playable\""));
-    check_group("subscribe-gap", gap).unwrap();
-    println!("watch capability positives passed: negotiated watch; no watch with playable omitted; unchanged subscribe-gap");
+    check_group("subscribe-gap", &gap).unwrap();
+    println!("watch capability positives passed: live-cap canonical gap and no-watch gap with all payloads unchanged");
 }
 
 #[test]

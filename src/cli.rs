@@ -14,7 +14,7 @@ pub(super) mod restart;
 mod native;
 mod handler;
 mod download_limit;
-mod offline;
+pub(super) mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
@@ -108,6 +108,8 @@ pub(super) enum Cmd {
         #[arg(long)] alt_down: Option<String>,
         #[arg(long)] alt_up: Option<String>,
     },
+    /// Set the displayed name only; an empty name restores the original
+    Rename {selector:String,name:String},
     /// Set a torrent download cap in bytes/s (K/M suffix); none clears
     Limit { selector:String, #[arg(long)] down:String },
     /// Restart the running daemon and wait up to 30 seconds for its replacement
@@ -263,14 +265,17 @@ pub(super) enum Cmd {
         /// Link the checkout's plugin or copy it for a stable installation
         #[arg(long, value_parser=["link", "copy"])]
         plugin: Option<String>,
+        /// Opt into the quick palette and its Hyprland shortcut (choose an unused chord)
+        #[arg(long, num_args=0..=1, default_missing_value="SUPER + CTRL + ALT + T")]
+        quick: Option<String>,
         /// List exact planned actions without writing files or running commands
         #[arg(long)]
         dry_run: bool,
         /// Remove desktop integration while keeping saved data
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         uninstall: bool,
         /// Remove integration and application data (never downloaded payloads)
-        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin"])]
+        #[arg(long, conflicts_with_all = ["magnet", "save", "plugin", "quick"])]
         purge: bool,
         /// Confirm application-data removal with --purge
         #[arg(long)]
@@ -343,6 +348,12 @@ pub(super) enum RssCmd {
 
 #[derive(Subcommand)]
 pub(super) enum ShowsCmd {
+    /// Set a show's preferred quality without checking or starting the daemon
+    Quality {
+        show: String,
+        #[arg(value_parser=["2160p","1080p","720p","480p","default"])]
+        quality: String,
+    },
     /// Followed shows with new / seen / grabbed counts
     #[command(alias = "ls")]
     List,

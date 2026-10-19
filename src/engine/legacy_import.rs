@@ -77,6 +77,7 @@ impl EngineDispatcher {
                     }
                 }
                 let record = Record {
+                    display_name:None,
                     hash: torrent.hash.clone(),
                     name: torrent.name,
                     source: String::new(),

@@ -30,6 +30,13 @@ fn dispatch_in(service:&crate::daemon::shows::Service,imdb:&crate::imdb::service
     add_torrent:impl FnOnce(AddArgs,crate::daemon::staged_sources::Source)->ApiResult<AddResult>)->ApiResult<Reply>{
     Ok(match call{
         Call::ShowsList {..}=>Reply::ShowsList(ShowsResult {shows:service.list().map_err(failure)?}),
+        Call::ShowsSetQuality {args}=>{
+            let _edit=service.edit.lock().unwrap();require_in(service,&args.imdb)?;
+            let mut all=Shows::load().map_err(failure)?;
+            all.set_quality(&args.imdb,if let Update::Set(q)=args.quality {Some(q.as_str())} else {None}).map_err(failure)?;
+            all.save().map_err(failure)?;
+            Reply::ShowsSetQuality(ShowResult {show:require_in(service,&args.imdb)?})
+        },
         Call::ShowsFollow {args}=>{
             if args.imdb.is_some()==args.query.is_some(){return Err(error(ErrorCode::InvalidArgs,"choose exactly one of query or imdb",Some("query")));}
             if args.imdb.as_ref().is_some_and(|id|!crate::imdb::service::valid_id(id)){return Err(error(ErrorCode::InvalidArgs,"invalid IMDb id",Some("imdb")));}
@@ -128,6 +135,15 @@ mod tests {
             let rejected = catalogue(&service, &imdb, &[], &call).unwrap_err();
             assert_eq!(rejected.code, ErrorCode::EngineUnavailable);
         }
-        println!("shared Shows grab: stage forwarded, edit lock released, source marks delegated, local grab refused");
+        let original = Shows::load().unwrap().get("tt1234001").unwrap().episodes.clone();
+        for quality in [Some("720p"), None] {
+            let args=serde_json::from_value(json!({"imdb":"tt1234001","quality":quality})).unwrap();
+            assert!(matches!(catalogue(&service,&imdb,&[],&Call::ShowsSetQuality {args}).unwrap(),Reply::ShowsSetQuality(_)));
+            let saved=Shows::load().unwrap();let show=saved.get("tt1234001").unwrap();
+            assert_eq!(show.quality.as_deref(),quality);
+            assert_eq!(show.episodes,original);
+            assert!(show.grabbed.is_empty());
+        }
+        println!("shared Shows grab/quality: stage forwarded, edit lock released, marks delegated, local grab refused, quality saved without changing releases");
     }
 }

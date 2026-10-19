@@ -132,14 +132,14 @@ fn run(cli: Cli) -> Result<Code> {
     // Commands that never touch the backend.
     match cmd {
         Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }
-        Cmd::Setup { port, save, magnet, plugin, dry_run, uninstall, purge, yes } => {
+        Cmd::Setup { port, save, magnet, plugin, quick, dry_run, uninstall, purge, yes } => {
             if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
             if cfg.native() {
-                let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,dry_run,uninstall,purge})?;
+                let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,quick,dry_run,uninstall,purge})?;
                 emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
                 return Ok(Code::Ok);
             }
-            if dry_run || plugin.is_some() || purge { return Err(AppError::new(Code::Usage,"extended desktop setup requires the native engine").into()); }
+            if dry_run || plugin.is_some() || quick.is_some() || purge { return Err(AppError::new(Code::Usage,"extended desktop setup requires the native engine").into()); }
             if uninstall {
                 setup::uninstall()?;
                 emit(json, serde_json::json!({"ok":true,"action":"setup-uninstall"}), || {});
@@ -542,7 +542,7 @@ fn run(cli: Cli) -> Result<Code> {
             });
             Ok(Code::Ok)
         }
-        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } => unreachable!(),
+        Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Rename { .. } | Cmd::Imdb { .. } => unreachable!(),
     }
 }
 

@@ -283,6 +283,18 @@
       "scope": "modal:stopped"
     },
     {
+      "id": "details.rename",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "modal:details"
+    },
+    {
       "id": "details.close",
       "keys": {
         "dashboard": null,
@@ -560,6 +572,20 @@
       },
       "label": "Next tab",
       "scope": "modal:log"
+    },
+    {
+      "id": "torrents.rename",
+      "keys": {
+        "dashboard": [
+          "N"
+        ],
+        "popup": null,
+        "tui": [
+          "N"
+        ]
+      },
+      "label": "Rename",
+      "scope": "screen:torrents"
     },
     {
       "id": "torrents.details_previous",

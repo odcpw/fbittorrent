@@ -4,6 +4,7 @@ mod table;
 mod sort;
 mod notice;
 mod list;
+mod history;
 pub(super) use list::{ListTable,fingerprint};
 pub(super) use table::{Column,Rects,TorrentTable,visible_range};
 
@@ -55,6 +56,7 @@ impl TuiApp {
         let tabs_right = regions.iter().map(Rect::right).max().unwrap_or(area.x);
         let right_x = (area.x + area.width.saturating_sub(w + 1)).max(tabs_right).min(area.right());
         let r = Rect::new(right_x, area.y, w.min(area.right().saturating_sub(right_x)), 1);
+        self.view_speed_history(Rect::new(tabs_right.saturating_add(1),area.y,right_x.saturating_sub(tabs_right+2),1),frame);
         Paragraph::new(Text::from_line(right)).render(r, frame);
     }
 }

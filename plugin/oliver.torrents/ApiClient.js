@@ -6,7 +6,7 @@ var IDEMPOTENT = ["torrents.start", "torrents.stop", "torrents.set_seed", "torre
   "torrents.force_start", "app.settings.set", "app.clipboard.dismiss", "transfer.set_limits", "transfer.set_alt",
   "search.set_provider", "rss.set_read", "rss.mark_feed_read", "shows.set_quality",
   "shows.set_read", "shows.mark_show_read", "torrents.reannounce", "torrents.set_download_limit",
-  "torrents.add_tracker", "torrents.remove_tracker"]
+  "torrents.add_tracker", "torrents.remove_tracker", "torrents.rename"]
 
 function utf8Bytes(s) {
   var bytes = 0
@@ -28,7 +28,7 @@ function create(io, options) {
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
     retryIndex: 0, retryDelay: 500, graceful: false, popupOpen: false,
-    dashboardVisible: false, protocolMismatch: false, details: [], mode: "connecting", lastError: null, pollAt: 0 }
+    dashboardVisible: false, quickVisible:false, protocolMismatch: false, details: [], mode: "connecting", lastError: null, pollAt: 0 }
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
   function fail(entry, failure, status) {
@@ -93,7 +93,7 @@ function create(io, options) {
     if (c.helloSent) return
     c.helloSent = true; c.connecting = true; c.graceful = false; c.lastFrame = now()
     write({ op: "hello", args: { proto: 1, client: { name: "oliver.torrents",
-      version: o.version || "0.2.0", kind: "bar" }, interactive: c.dashboardVisible } }, false)
+      version: o.version || "0.2.0", kind: "bar" }, interactive: c.dashboardVisible || c.quickVisible } }, false)
     changed()
   }
   c.disconnected = function() {
@@ -132,12 +132,12 @@ function create(io, options) {
     io.disconnect(); c.disconnected()
   }
   function presence() {
-    var args = { interactive: c.dashboardVisible, glance: c.popupOpen }
+    var args = { interactive: c.dashboardVisible || c.quickVisible, glance: c.popupOpen, overlay_visible:c.quickVisible }
     if (c.caps.indexOf("dashboard_presence") >= 0) args.dashboard_visible = c.dashboardVisible
     return args
   }
-  c.visibility = function(popup, dashboard, details) {
-    c.popupOpen = !!popup; c.dashboardVisible = !!dashboard; c.details = details || []
+  c.visibility = function(popup, dashboard, details, quick) {
+    c.popupOpen = !!popup; c.dashboardVisible = !!dashboard; c.quickVisible=!!quick; c.details = details || []
     if (c.online) {
       c.request("app.client", presence())
       c.subscribeAll()
@@ -147,6 +147,7 @@ function create(io, options) {
     var wanted = ["summary"]
     if (c.popupOpen || c.dashboardVisible) wanted.push("torrents")
     if(c.dashboardVisible || c.caps.indexOf("clipboard")>=0)wanted.push("events")
+    if(c.dashboardVisible && c.caps.indexOf("history")>=0)wanted.push("stats")
     if(c.dashboardVisible && c.caps.indexOf("settings")>=0)wanted.push("settings")
     if(c.dashboardVisible && c.caps.indexOf("shows")>=0)wanted.push("shows")
     if(c.dashboardVisible && c.caps.indexOf("rss")>=0)wanted.push("rss.feeds")

@@ -47,7 +47,7 @@ impl TuiApp {
         let Some(connection)=self.presence.clone()else{return Cmd::none();};
         Cmd::task(move||{
             let mut topics=vec!["summary","torrents","network"];
-            for (topic,cap) in [("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
+            for (topic,cap) in [("stats","history"),("settings","settings"),("rss.feeds","rss"),("shows","shows"),("log","log")] {
                 if connection.hello.caps.iter().any(|c|c==cap){topics.push(topic);}
             }
             let result=(||->Result<()> {

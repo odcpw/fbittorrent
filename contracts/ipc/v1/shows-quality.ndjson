@@ -1,0 +1,8 @@
+{"dir":"c2s","frame":{"id":1,"op":"shows.set_quality","args":{"imdb":"tt1234001","quality":"2160p"}}}
+{"dir":"s2c","frame":{"id":1,"ok":true,"result":{"show":{"imdb":"tt1234001","title":"Local Fixture","quality":"2160p","unread":0,"added_at":1792396800,"counts":{"episodes":0,"seen":0,"grabbed":0},"checking":false,"catalogue_complete":false}}}}
+{"dir":"c2s","frame":{"id":2,"op":"shows.set_quality","args":{"imdb":"tt1234001","quality":"2160p"}}}
+{"dir":"s2c","frame":{"id":2,"ok":true,"result":{"show":{"imdb":"tt1234001","title":"Local Fixture","quality":"2160p","unread":0,"added_at":1792396800,"counts":{"episodes":0,"seen":0,"grabbed":0},"checking":false,"catalogue_complete":false}}}}
+{"dir":"c2s","frame":{"id":3,"op":"shows.set_quality","args":{"imdb":"tt1234001","quality":null}}}
+{"dir":"s2c","frame":{"id":3,"ok":true,"result":{"show":{"imdb":"tt1234001","title":"Local Fixture","unread":0,"added_at":1792396800,"counts":{"episodes":0,"seen":0,"grabbed":0},"checking":false,"catalogue_complete":false}}}}
+{"dir":"c2s","frame":{"id":4,"op":"shows.set_quality","args":{"imdb":"tt1234001"}}}
+{"dir":"s2c","frame":{"id":4,"ok":true,"result":{"show":{"imdb":"tt1234001","title":"Local Fixture","unread":0,"added_at":1792396800,"counts":{"episodes":0,"seen":0,"grabbed":0},"checking":false,"catalogue_complete":false}}}}

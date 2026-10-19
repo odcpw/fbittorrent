@@ -51,6 +51,7 @@ pub(super) struct Store {
     pub shows:BTreeMap<String,api::Show>,pub show_releases:BTreeMap<String,api::Release>,
     pub transfer: Option<api::TransferInfo>,
     pub summary: Option<api::Summary>,
+    pub stats:Option<api::SampledStats>,
     pub network: Option<api::NetworkState>,
     pub settings: Option<api::Settings>,
     pub subscriptions: BTreeMap<u64, Subscription>,
@@ -63,6 +64,7 @@ impl Store {
     pub fn hello(&mut self, hello: api::HelloResult) {
         self.stale = true;
         self.pieces.clear();
+        self.stats = None;
         self.lose_pending();
         self.subscriptions.clear();
         self.snapshots.clear();
@@ -219,6 +221,7 @@ impl Store {
                     self.pieces_rev+=1;self.pieces.clear();self.pieces.insert(hash.clone(),(data.clone(),data.decode()?));
                 },
                 api::StateData::Summary(data) => self.summary = Some(data.clone()),
+                api::StateData::Stats(data) => self.stats=Some(data.clone()),
                 api::StateData::Network(data) => self.network = Some(data.clone()),
                 api::StateData::Settings(data) => self.settings = Some(data.clone()),
             },

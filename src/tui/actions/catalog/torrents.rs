@@ -1,5 +1,7 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("torrents.rename",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('N'))],"Rename",40,
+        |a|a.cfg.native() && a.selected_torrent().is_some(),Some(TuiApp::rename_prompt),TD,None,None,None),
     action!("torrents.details_previous",Scope::Screen(Screen::Torrents),&[],"Previous details tab",90,
         |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char('['))]),None,None),
     action!("torrents.details_next",Scope::Screen(Screen::Torrents),&[],"Next details tab",90,

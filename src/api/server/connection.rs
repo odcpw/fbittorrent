@@ -167,8 +167,7 @@ impl Connection {
 impl Shared {
     fn presence(&self, connection: &Connection) {
         let client = connection.client.lock().unwrap();
-        let interactive = client.interactive && client.client.as_ref()
-            .is_some_and(|c| c.kind != ClientKind::Bar || client.dashboard_visible);
+        let interactive = client.is_interactive();
         let glance = client.glance;
         let acknowledge = glance || (interactive && client.client.as_ref().is_some_and(|c| c.kind == ClientKind::Bar));
         drop(client);
@@ -346,6 +345,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 client: Some(args.client.clone()),
                 interactive: args.interactive.unwrap_or(false),
                 dashboard_visible: false,
+                overlay_visible:false,
                 glance: false,
                 caps: validation::NegotiatedCaps::from_hello(&hello),
             };
@@ -380,6 +380,7 @@ pub(super) fn read_client(shared: Arc<Shared>, connection: Arc<Connection>, stre
                 client.interactive = value;
             }
             if let Some(value)=args.dashboard_visible {client.dashboard_visible=value;}
+            if let Some(value)=args.overlay_visible {client.overlay_visible=value;}
             if let Some(value) = args.glance {
                 client.glance = value;
             }

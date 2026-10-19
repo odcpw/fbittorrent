@@ -3286,7 +3286,7 @@ from daemon_dormant import lazy_restore_no_checks, dormant_seed_checks, dormant_
 from daemon_fixture_cases import fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair
 from daemon_upgrade import upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts
 
-from daemon_policy import (dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
+from daemon_policy import (quick_palette_presence, dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive,
     idle_exit_interactive_keeps_alive, idle_exit_bar_does_not, idle_exit_parked_keeps_alive,
     idle_exit_disabled_never_exits, idle_exit_disabled_shutdown_drains,
     idle_exit_glance_pauses, idle_exit_glance_drop_resumes, idle_exit_mutation_keeps_alive)
@@ -3930,6 +3930,9 @@ from daemon_inhibit import port_restart_keeps_clients, inhibitor_lifecycle
 from daemon_trackers import tracker_add_remove
 from daemon_download_limit import download_cap_holds
 from daemon_peers import peers_local_swarm, peer_rates_move
+from daemon_history import history_points
+from daemon_stats import stats_persist
+from daemon_show_quality import shows_quality_prefers
 from daemon_shows import shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible
 from daemon_rss import rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success
 from daemon_clipboard import (clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged)
@@ -4919,7 +4922,7 @@ def staged_magnet_metadata_only(binary,systemd):
 
 
 CASES = {function.__name__: function for function in
-         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
+         (tracker_add_remove, download_cap_holds, peers_local_swarm, peer_rates_move, staged_magnet_metadata_only, staged_metadata_timeout, staged_discard_keeps_files, staged_queue_excluded, staged_commit_joins_queue, staged_discarded_at_restart, commit_non_staged_invalid_state, move_same_fs, move_cross_fs, move_failed_copy_keeps_source, stats_persist, history_points, shows_quality_prefers, shows_inbox_semantics, shows_check_never_downloads, shows_check_only_when_asked, shows_cli_edit_visible, rss_refresh_on_interactive, rss_cli_edit_visible, rss_oversized_refused, rss_grab_marks_read_only_on_success, clipboard_watch_offer, clipboard_watch_add, clipboard_watch_dedupe, clipboard_watch_off_kills_child, clipboard_never_logged, port_restart_keeps_clients, inhibitor_lifecycle, disk_summary_subscription_cleanup, disk_low_banner, disk_full_reason, disk_full_recovers, add_warns_disk, alt_limit_holds, global_unlimited_keeps_cap, alt_survives_restart, handler_confirm_stages, tracker_saved_views, tracker_status, reannounce, reannounce_rate_limited, reannounce_not_live_invalid_state, tracker_url_redacted,
           resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
           lazy_restore_no_checks, dormant_seed_checks, dormant_missing_files, dormant_open_no_check,
           fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
@@ -4931,7 +4934,7 @@ CASES = {function.__name__: function for function in
           offline_delete_keep_files_ledger, offline_write_waits_for_draining_daemon,
           notify_completed, notify_action_open, notify_action_default, notify_action_folder,
           notify_added_undo, notify_off, notify_failed, notify_queue_bounded, notify_vpn_once_per_transition, notify_cli_policy, notify_killed_handler, notify_handler_cli_once,
-          dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
+          quick_palette_presence, dashboard_bar_presence, idle_exit_no_torrents, idle_exit_download_keeps_alive, idle_exit_interactive_keeps_alive,
           idle_exit_bar_does_not, idle_exit_parked_keeps_alive, idle_exit_disabled_never_exits,
           idle_exit_disabled_shutdown_drains, idle_exit_glance_pauses, idle_exit_glance_drop_resumes,
           idle_exit_mutation_keeps_alive, bus_subscriptions, events_since_seq_replay,

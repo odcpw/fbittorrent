@@ -23,6 +23,7 @@ pub enum Item {
 #[serde(untagged)]
 pub enum StateData {
     Pieces(super::Pieces),
+    Stats(super::SampledStats),
     Summary(Summary),
     Network(NetworkState),
     Settings(Settings),

@@ -97,9 +97,10 @@ const COALESCED: &[&str] = &[
     "ratio",
 ];
 pub(super) fn structural_projection(topic: &Topic, old: &Value, new: &Value) -> Value {
+    if *topic==Topic::Stats {return old.clone();}
     if matches!(topic, Topic::Summary) {
         let mut v = new.clone();
-        for k in ["counts", "dl_bps", "ul_bps"] {
+        for k in ["counts", "dl_bps", "ul_bps", "history"] {
             if let Some(old) = old.get(k) {
                 v[k] = old.clone();
             } else {

@@ -16,6 +16,7 @@ use std::{
 fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     let hash = match &op {
         EngineOp::Get { hash }
+        | EngineOp::Rename { hash, .. }
         | EngineOp::EditTracker { hash, .. }
         | EngineOp::Commit {hash, ..}
         | EngineOp::Discard {hash}
@@ -212,6 +213,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             daemon.watch.lock().unwrap().decorate(&mut rows);
             Reply::TorrentsGet(GetResult {
                 torrent: TorrentDetail {
+                    original_name:Some(detail.original_name),
                     torrent: rows.remove(0),
                     private: detail.private,
                     file_count: detail.file_count,
@@ -224,6 +226,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 },
             })
         }
+        Call::TorrentsRename {args}=>{execute(daemon,EngineOp::Rename{hash:args.hash.to_string(),name:args.name.clone()})?;Reply::TorrentsRename(DoneResult{state:DoneState::Done})},
         Call::TorrentsAddTracker {args} | Call::TorrentsRemoveTracker {args} => {
             execute(daemon,EngineOp::EditTracker{hash:args.hash.to_string(),url:args.url.clone(),add:matches!(call,Call::TorrentsAddTracker{..})})?;
             if matches!(call,Call::TorrentsAddTracker{..}) {Reply::TorrentsAddTracker(DoneResult{state:DoneState::Done})}

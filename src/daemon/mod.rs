@@ -12,6 +12,8 @@ pub(crate) mod rss;
 pub(crate) mod shows;
 pub(crate) mod staged_sources;
 pub(crate) mod watch;
+pub(crate) mod history;
+pub(crate) mod stats;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -53,6 +55,8 @@ pub struct Daemon {
     pub(crate) shows: shows::Service,
     pub(crate) staged_sources: staged_sources::Registry,
     pub(crate) peers: crate::api::peers::Sampler,
+    pub(crate) history: Mutex<history::History>,
+    pub(crate) stats: Mutex<stats::Stats>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
@@ -62,6 +66,14 @@ pub struct Daemon {
 }
 
 impl Daemon {
+    pub(crate) fn statistics(&self)->(crate::api::SessionTotals,crate::api::AllTimeTotals) {
+        let slot=self.slot.read().unwrap_or_else(|e|e.into_inner());
+        let mut stats=self.stats.lock().unwrap();
+        if let Slot::Running(app)=&slot.slot {stats.observe(slot.engine_epoch,app.dispatcher().transfer_totals());}
+        if let Err(error)=stats.save(Instant::now(),false){eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        (stats.session.clone(),stats.all_time.clone())
+    }
+
     pub(crate) fn idle_exit_secs(&self) -> u64 {
         self.policy.lock().unwrap().seconds()
     }
@@ -230,12 +242,18 @@ impl Daemon {
             app.quiesce();
         }
         let mut slot = self.slot.write().unwrap_or_else(|error| error.into_inner());
-        let old = slot.replace(next)?;
+        let old_epoch=slot.engine_epoch;
+        let mut old = slot.replace(next)?;
         eprintln!(
             "INFO engine state changed state={} engine_epoch={}",
             slot.slot.state().name(),
             slot.engine_epoch
         );
+        drop(slot);
+        if let Slot::Running(app)=&mut old {
+            app.drain(Duration::from_secs(4));
+            self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
+        }
         Ok(old)
     }
 }
@@ -409,6 +427,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         shows: shows::Service::new()?,
         staged_sources: Default::default(),
         peers: Default::default(),
+        history: Default::default(),
+        stats: Mutex::new(stats::Stats::open(stats::path(),Instant::now())?),
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),
@@ -478,6 +498,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         "INFO daemon slot released elapsed_ms={}",
         began.elapsed().as_millis()
     );
+    let stats_saved=daemon.stats.lock().unwrap().save(Instant::now(),true);
     let drain_reason = if panicked.load(Ordering::Acquire) {
         StopReason::Panic
     } else {
@@ -505,6 +526,10 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     };
     drop(hook);
     let reason = reason?;
+    if let Err(error)=stats_saved {
+        eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
+        if reason!=StopReason::Panic {return Err(error);}
+    }
     eprintln!(
         "INFO daemon stopped reason={reason:?} code={}",
         reason.exit_code()
