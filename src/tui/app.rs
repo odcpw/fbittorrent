@@ -82,7 +82,6 @@ pub struct TuiApp {
     pub(super) item_list: RefCell<ListState>,
     pub(super) rss_focus_items: bool,
     pub(super) rss_loaded: bool,
-    pub(super) rss_initial_refresh_pending: bool,
     pub(super) rss_revision: u64,
     pub(super) rss_busy: bool,
     pub(super) rss_loading: bool,
@@ -136,6 +135,7 @@ pub enum Msg {
     Rss { revision: u64, result: Result<Vec<RssFeed>, String> },
     RssAction { revision: u64, label: String, result: Result<Vec<RssFeed>, String>, error: Option<String> },
     RssReload,
+    ShowsCached {connection:u64,result:Result<super::remote::catalogue::ShowsSnapshot,String>},
     ShowGrab { imdb: String, episode: Episode, result: Result<(), String> },
     Browse(String, Result<Vec<SearchResult>, String>),
     /// Fast timer: look the highlighted title up once the cursor has rested on it.
@@ -235,7 +235,6 @@ impl TuiApp {
             item_list: RefCell::new(ListState::default()),
             rss_focus_items: false,
             rss_loaded: false,
-            rss_initial_refresh_pending: true,
             rss_revision: 0,
             rss_busy: false,
             rss_loading: false,

@@ -303,6 +303,9 @@ pub(crate) fn run(
         None => fallback::search(&query, wait)?,
     };
     if result.complete && result.items.is_empty() && !result.warnings.is_empty() {
+        for warning in &result.warnings {
+            eprintln!("WARN search {}: {}",warning.provider,warning.message);
+        }
         return Err(AppError::new(Code::Upstream, "all search providers failed")
             .hint("fbittorrent search --plugins")
             .into());

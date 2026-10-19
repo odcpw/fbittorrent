@@ -47,7 +47,10 @@ impl TuiApp {
         let Some(connection)=self.presence.clone()else{return Cmd::none();};
         Cmd::task(move||{
             let mut topics=vec!["summary"];
-            for topic in ["settings","log"] {if connection.hello.caps.iter().any(|cap|cap==topic){topics.push(topic);}}
+            for(cap,topic)in [("settings","settings"),("log","log"),("rss","rss.feeds"),("shows","shows")] {
+                if connection.hello.caps.iter().any(|value|value==cap){topics.push(topic);}
+            }
+            if connection.hello.caps.iter().any(|cap|cap=="shows"){topics.push("events");}
             Msg::UiSubscribed{connection:connection.id,result:connection.request("subscribe",json!({"topics":topics})).map(|_|()).map_err(|e|e.to_string())}
         })
     }
@@ -108,6 +111,17 @@ impl TuiApp {
                     self.sync_native_search();
                 }
                 if matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Log,..}|api::Event::Delta{topic:api::Topic::Log,..}){self.feedback.dirty.set(true);}
+                let rss_changed=matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::RssFeeds,..}|api::Event::Delta{topic:api::Topic::RssFeeds,..});
+                let shows_changed=matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Shows,..}|api::Event::Delta{topic:api::Topic::Shows,..}|api::Event::ShowsChecked{..}) || match &event {
+                    api::Event::Delta{topic:api::Topic::Events,added,..}=>added.iter().flatten().any(|item|matches!(item,api::Item::Event(event) if matches!(&**event,api::Event::ShowsChecked{..}))),
+                    _=>false,
+                };
+                if rss_changed||shows_changed {
+                    let mut commands=Vec::new();
+                    if rss_changed{commands.push(self.load_rss());}
+                    if shows_changed{commands.push(self.reload_cached_shows());}
+                    return Cmd::batch(commands);
+                }
                 if rows_changed {
                     let rows = self
                         .store

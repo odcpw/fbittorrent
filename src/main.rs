@@ -124,6 +124,11 @@ fn run(cli: Cli) -> Result<Code> {
             .hint("explicitly configure engine = \"qbittorrent\" to use legacy scheduling controls").into());
     }
 
+    if cfg.native() {
+        if let Cmd::Rss(sub)=&cmd {return cli::catalog_rss::run(&cfg,sub,json,no_start);}
+        if let Cmd::Shows(sub)=&cmd {return cli::catalog_shows::run(&cfg,sub,json,no_start);}
+    }
+
     // Commands that never touch the backend.
     match cmd {
         Cmd::Capabilities => { println!("{}", agent::with_warnings(agent::capabilities_json())); return Ok(Code::Ok); }

@@ -6,6 +6,7 @@ pub(super) mod imdb;
 mod metadata;
 pub(super) use client::ScreenClient;
 mod subscription;
+pub(super) mod catalogue;
 use crate::api;
 use serde::de::DeserializeOwned;
 use serde_json::json;

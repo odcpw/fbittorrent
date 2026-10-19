@@ -113,9 +113,7 @@ impl Model for TuiApp {
         }
         self.rss_loaded = true;
         let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
-        let mut cmds = vec![self.subscribe_ui(),first, self.load_plugins(), self.load_ratings(), self.load_rss()];
-        cmds.push(self.refresh_shows(false));
-        Cmd::batch(cmds)
+        Cmd::batch(vec![self.subscribe_ui(),first,self.load_plugins(),self.load_ratings(),self.load_rss()])
     }
 
     fn subscriptions(&self) -> Vec<Box<dyn Subscription<Msg>>> {
@@ -137,6 +135,7 @@ impl Model for TuiApp {
 
     fn update(&mut self, msg: Msg) -> Cmd<Msg> {
         match msg {
+            Msg::ShowsCached{connection,result}=>self.cached_shows(connection,result),
             Msg::Raw(Event::Key(k)) => { let cmd=self.on_key(k); self.sync_marquee(); cmd },
             Msg::Raw(Event::Mouse(m)) => { let cmd=self.on_mouse(m); self.sync_marquee(); cmd },
             Msg::Raw(Event::Resize { .. }) => {
@@ -399,7 +398,14 @@ impl Model for TuiApp {
                 if revision != self.rss_revision { return Cmd::none(); }
                 self.rss_loading = false;
                 match result {
-                    Ok(feeds) => {
+                    Ok(mut feeds) => {
+                        if self.cfg.native() {
+                            for feed in &mut feeds {
+                                if let Some(row)=self.store.rss_feeds.values().find(|row|row.id==feed.uid||row.url==feed.url) {
+                                    feed.is_loading=row.loading;feed.has_error=row.error.is_some();
+                                }
+                            }
+                        }
                         let sel = self.selected_feed().map(|f| f.name.clone());
                         let article = self.item_list.borrow().selected().and_then(|i| self.selected_feed().and_then(|f| f.articles.get(i))).map(|a| a.id.clone());
                         self.feeds = feeds;
@@ -414,10 +420,6 @@ impl Model for TuiApp {
                         if self.feeds.iter().any(|f| f.is_loading) {
                             if self.rss_retry_until.is_none() { self.rss_retry_until = Some(std::time::Instant::now() + Duration::from_secs(45)); }
                         } else { self.rss_retry_until = None; }
-                        if self.rss_initial_refresh_pending {
-                            self.rss_initial_refresh_pending = false;
-                            return self.refresh_rss();
-                        }
                     }
                     Err(e) => self.set_status(e, true),
                 }

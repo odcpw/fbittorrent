@@ -928,7 +928,7 @@ covers known, absent and zero space.
 
 ### Integrated CLI contract patch history
 
-The current CLI contract is **1.2.26**. Each additive change after the 1.2.0
+The current CLI contract is **1.2.27**. Each additive change after the 1.2.0
 baseline has its own patch, assigned in first-parent integration merge order.
 Changes arriving together retain their feature order; the P1-18 event and raw
 API entries receive successive patches. Future merges allocate after the latest
@@ -964,6 +964,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.24` | `search.results[].providers` |
 | `1.2.25` | `playable` |
 | `1.2.26` | `search.torznab` |
+| `1.2.27` | `cli.catalogue` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1132,3 +1133,36 @@ and ordinary TLS verification. Bound `localhost` resolves directly to IPv4/IPv6
 loopback; remote names use bound DNS. Missing/down interfaces fail without retrying
 on an ordinary socket. The HTTP worker owns its small runtime only for the
 request; it never creates an engine session or acquires the daemon lock.
+
+
+## Native CLI catalogues (P3-07, CLI contract 1.2.27)
+
+Search, IMDb, RSS and Shows share the same normalized data and native handlers
+with their local CLI path. A read-only hello has a 200 ms budget. Running capable
+owners answer through api.sock; absent, parked or stopping owners use today's
+local data files and native service functions without starting an engine.
+RSS and Shows grabs use rss.grab/shows.grab and start the owner on demand unless
+startup was disabled. They return the actual confirmed hash and deferred:true
+when the owner accepted a parked intent. Read flags/history change only after
+successful admission. Pending replies wait for their own mutation.result; checks
+also observe the pushed shows.checked event, while RSS refreshes subscribe to
+rss.feeds and return after confirmed loading has cleared. Lost pending results
+exit 8 and are never resubmitted by these commands. Collection reads first use
+a fresh operation result; a response above the single-frame cap uses bounded
+subscription snapshots.
+
+Both data paths use one CLI renderer. Feed/item order is id and published time/id;
+shows sort by title, releases by published time/key. Item dates use canonical UTC
+rather than preserving a source's original date spelling; last_build_date remains
+empty when the channel date is unavailable in A.9. Release read/new intent and
+transfer facts remain separate: added/transfer describe the known transfer or
+retained history; grabbed is omitted where its provenance is unknown from A.9.
+Zero values for unavailable numeric display fields carry seeds_known/size_known.
+The owner explicitly retired old-binary compatibility work on 2026-10-19; no
+v0.1 shape adapter, old-protocol reader or compatibility warning is added.
+
+The TUI no longer initiates an RSS or Shows check merely by opening. The daemon's
+interactive edge refreshes only stale catalogues. The existing UI connection
+subscribes to rss.feeds/shows and reloads today's atomic files on pushed updates;
+shows.checked also refreshes the cached Shows view. A fresh reconnect does not
+fetch again. Explicit user refresh/check remains available.

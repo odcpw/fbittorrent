@@ -69,8 +69,7 @@
     fn app() -> TuiApp {
         let mut app = TuiApp::new(Config::default(), Screen::Torrents, Shows::default());
         app.kitty = None;
-        app.rss_initial_refresh_pending = false;
-        app
+            app
     }
 
     #[test]
@@ -619,12 +618,12 @@
     }
 
     #[test]
-    fn rss_initial_check_and_download_dispatch_only_once() {
+    fn rss_no_initial_refresh() {
         let mut app = app();
-        app.rss_initial_refresh_pending = true;
-        assert!(matches!(app.update(Msg::Rss { revision: 0, result: Ok(vec![feed(vec![article("item", "FeedItemAlpha")])]) }), Cmd::Task(..)));
+        assert!(matches!(app.update(Msg::Rss { revision: 0, result: Ok(vec![feed(vec![article("item", "FeedItemAlpha")])]) }), Cmd::None));
+        assert!(!app.rss_busy);
+        assert!(matches!(app.refresh_rss(),Cmd::Task(..)));
         assert!(app.rss_busy);
-        assert!(!app.rss_initial_refresh_pending);
         assert!(matches!(app.refresh_rss(), Cmd::None));
         let revision = app.rss_revision;
         app.update(Msg::RssAction { revision, label: "checked".into(), result: Ok(app.feeds.clone()), error: None });
