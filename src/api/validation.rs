@@ -131,6 +131,12 @@ impl Validate for Request {
                 if let Some(source) = &args.source { text(source, 64, "source")?; }
                 Ok(())
             },
+            Call::TransferSetLimits { args } => {
+                for (key, value) in [("download_bps", &args.download_bps), ("upload_bps", &args.upload_bps), ("alt_download_bps", &args.alt_download_bps), ("alt_upload_bps", &args.alt_upload_bps)] {
+                    if let Update::Set(bps) = value { require(*bps == 0 || *bps >= 16384, key, "zero, null or at least 16384 bytes/s")?; }
+                }
+                Ok(())
+            },
             Call::Subscribe { args } => args.validate(),
             Call::TorrentsSetUploadLimit { args } => args.validate(),
             Call::Hello { args } => text(args.client.name.as_str(), 64, "client.name"),

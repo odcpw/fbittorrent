@@ -162,7 +162,7 @@ impl Sample {
                 v
             })
             .collect();
-        let mut result = json!({"counts":counts,"alt":false,"limits":{},"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
+        let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":{"needed_bytes":self.rows.iter().map(|r|r.size.unwrap_or(0).saturating_sub(r.completed_bytes.unwrap_or(0))).sum::<u64>(),"low":false}});
         if let Some(v) = self.network.get("interface") {
             result["network"]["interface"] = v.clone();
         }

@@ -329,3 +329,41 @@ main itself remains at 3a4eba8. No agent merge/rebase/branch switch was performe
 On integration, new operation-table rows also need P1-18's args/result catalogue
 metadata. Keep the canonical server layout and the dormant delete-files path.
 M1a installation has not been performed; owner paths/binary remain untouched.
+
+## P5-04 — daemon/API/CLI checkpoint (fbt-p5-04-ipg)
+
+Added persisted `transfer.set_limits`/`transfer.set_alt`, tri-state updates,
+Summary.alt/limits, cap `limits`, offline/live CLI with K/M suffixes and contract
+1.2.6/new limits.ndjson. Existing live session limiters/settings transactions are
+reused; existing fixture bytes stay unchanged. UI criteria: **deferred to track C/D**.
+
+Evidence: `target/test-logs/fbt-p5-04-ipg/`. Its `run.py` proves private
+HOME/TMPDIR/XDG/downloads. `check`, `api`, `policy` pass (`module-fixed/`);
+one full `cargo test --locked -- --nocapture` passes **373/0/3 ignored**
+(`full-rust-final/`). `cases alt_limit_holds global_unlimited_keeps_cap alt_survives_restart`
+and `agent limits_verb` pass in both modes (`final-foreground/`, `final-systemd/`,
+`final-agent-{foreground,systemd}/`). Over 20 s after 5 s warm-up, alternative
+**upload** yields 65,525.8/65,527.4 bytes/s; alt pushes take 96.3/101.7 ms.
+Global upload zero retains the torrent's 32768 cap; turtle survives restart.
+
+The global API now throttles fixtures. Four isolated case workers preserve all
+JSONL/stderr and failures; real CLI/multiple-case/artifact/forced-failure regression
+passes (`worker-tests-artifacts/`, `worker-regression/`). Source-fingerprinted,
+SHA256-checked real upgrade binaries are prepared once (`prepare`,
+`upgrade-preparation-fixed/`: cold build 205.8 s, outside the timed matrix).
+Full foreground/systemd runs schedule 114/132 entries in **125.65/147.75 s**,
+but are **not green** (`all-{foreground,systemd}/processes/daemon/`). Subsequent
+focused repairs pass: live mode for optional-field traces, explicit soak skip
+(`replay-fix-focused/`); loopback IMDb env forwarded before systemd launch,
+incomplete Undo fixture preserving all owned bytes, canonical P1-11 exits
+(`systemd-repairs/`); recording shim limited to the owned unit's show/stop
+(`concurrent-down-final/`). Before the IMDb fix, failed systemd cases contacted
+public IMDb endpoints; every HOME/XDG/cache path remained private.
+
+Unmet: frozen hello/error replay requires exactly four caps; live advertises nine.
+P1-06 normalization says “no extra masks”; ruling requested before changing it.
+No full-suite green/all.sh claim. Follow-up: an initial download-direction live
+reduction probe exceeded the window while admitted requests drained
+(`live-foreground/daemon/alt_limit_holds.jsonl`); final bandwidth proof measures
+upload explicitly. P5-07 is not started: its 64 MiB recovery fixture cannot satisfy
+`free > remaining + 512 MiB`, and that frozen-rule ruling is also pending.
