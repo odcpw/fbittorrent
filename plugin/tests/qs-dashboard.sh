@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+if [[ "${1:-}" == --journeys ]]; then
+  shift
+  exec python3 plugin/tests/journeys.py "$@"
+fi
 if [[ "${1:-}" == --pieces ]]; then
   shift
   exec python3 plugin/tests/pieces.py "$@"

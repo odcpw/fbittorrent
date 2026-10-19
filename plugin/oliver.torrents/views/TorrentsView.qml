@@ -18,15 +18,18 @@ FocusScope {
   property var selection:({})
   property bool detailsOpen:false
   readonly property int tier:TableLayout.tier(windowLogicalWidth)
-  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || (pane && pane.trackerEditing)
+  readonly property bool overviewOpen:service.overviewRevision>=0 && service.overviewFlow && !!service.overviewFlow.modal
+  readonly property bool dialogOpen:removeDialog.opened || recheckConfirm.opened || overviewOpen || (pane && pane.trackerEditing)
   readonly property var pane:docked.item || floating.item
-  readonly property bool editing:filterInput.activeFocus || (pane ? pane.editing : false)
+  readonly property bool editing:overviewOpen || filterInput.activeFocus || (pane ? pane.editing : false)
   readonly property real scale:Commons.Style.effectiveSpacingScale
   readonly property real dockWidth:Math.max(300,Math.min(service.detailsWidth,480,maxDockWidth))
   readonly property real maxDockWidth:windowLogicalWidth-TableLayout.chrome(windowLogicalWidth)+360-(TableLayout.columns(windowLogicalWidth,0,1).reduce(function(sum,c){return sum+(c.name==="name" ? 0 : c.width)},0))-210
   readonly property bool showingDetail:visible && (tier>=2 || detailsOpen)
   readonly property var detailState:({visible:detailsOpen,tab:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.tab : "overview",
     hash:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.hash : "",width:tier>=2 ? dockWidth : sheetFrame.width/scale,
+    overview:pane ? pane.overviewState : null,
+    action:overviewSheet.item ? overviewSheet.item.state : null,actionStatus:service.overviewRevision>=0 && service.overviewFlow ? service.overviewFlow.status(cursorHash) : "",
     mode:tier>=2 ? "docked" : "sheet",files:service.detailRevision>=0 && service.detailFlow ? service.detailFlow.files.map(function(f){return f.index}) : [],pieces:pane ? pane.piecesState : null,networking:pane ? pane.networkingText : "",poster:pane && pane.posterLoaded ? "loaded" : "none"})
   function setPaneWidth(px){service.detailsWidth=Math.max(300,Math.min(480,maxDockWidth,Number(px) || 360));return dockWidth}
   function scheduleDetail(){if(showingDetail)service.scheduleDetail(cursorHash);else service.hideDetail()}
@@ -36,7 +39,7 @@ FocusScope {
   Component.onDestruction:service.hideDetail()
   readonly property var current:service.detailRevision>=0 ? service.store.torrents[cursorHash] || null : null
   readonly property var viewState:({errors:sidebar.count("error"),columns:table.columns,sort:{key:service.sortKey,reverse:service.sortReverse},
-    toast:service.toast,cursor:cursorHash,selection:Object.keys(selection),filter:filter,query:query,
+    cleanup:({undo:undoAvailable,hashes:service.cleanupFlow ? service.cleanupFlow.hashes : []}),toast:service.toast,cursor:cursorHash,rowProgress:service.detailRevision>=0 ? table.progress(cursorHash) : 0,stateLabel:service.detailRevision>=0 ? table.stateText(cursorHash) : "",selection:Object.keys(selection),filter:filter,query:query,
     focus:focusPane,details:detailState,dialog:removeDialog.opened ? {kind:removeDialog.deleteFiles ? "delete" : "remove",selected:removeDialog.selectedIndex} : recheckConfirm.opened ? {kind:"recheck",selected:recheckConfirm.selectedIndex} : null,
     panes:{sidebar:sideFrame.visible,detailsDocked:detailsFrame.visible,detailsSheet:sheet.visible},
     hover:table.hoverHash,rows:table.count,listWidth:table.width})
@@ -44,6 +47,13 @@ FocusScope {
   signal dismissRequested()
   signal changed()
   onViewStateChanged:changed()
+  readonly property bool undoAvailable:service.cleanupRevision>=0 && service.cleanupFlow && service.cleanupFlow.available(service.now)
+  function selectVisible(){var next={};service.store.visibleKeys(filter,query,service.sortKey,service.sortReverse).forEach(function(hash){next[hash]=true});selection=next}
+  function confirmRemove(files){
+    var hashes=Object.keys(selection)
+    if(!hashes.length && current)hashes=[current.hash]
+    removeDialog.show(hashes.map(function(hash){return root.service.store.torrents[hash]}).filter(function(row){return !!row}),files)
+  }
   function focusFilter(){filterInput.forceActiveFocus()}
   function focusTable(){filterInput.focus=false;forceActiveFocus()}
   function rowPoint(index){return table.rowPoint(index)}
@@ -71,10 +81,15 @@ FocusScope {
     return false
   }
   function handleKey(event) {
+    if(overviewSheet.item){return overviewSheet.item.handleKey(event)}
     if(recheckConfirm.opened){recheckConfirm.handleKey(event);return true}
     if(removeDialog.key(event))return true
     if(focusPane==="details" && pane && pane.editing)return pane.key(event)
     if((event.text==="[" || event.text==="]") && service.detailFlow){service.detailFlow.cycle(event.text==="]" ? 1 : -1);return true}
+    if(focusPane==="details" && service.detailFlow && service.detailFlow.tab==="overview" && current){
+      if(event.text==="m" && service.hasCap("move")){service.overviewFlow.open(current.hash,"move");return true}
+      if(event.text==="c" && service.hasCap("download_limit")){service.overviewFlow.open(current.hash,"limit");return true}
+    }
     if(focusPane==="details" && pane && pane.key(event))return true
     if(event.key===Qt.Key_Escape){back();return true}
     if(editing)return false
@@ -97,7 +112,9 @@ FocusScope {
     if(text==="o"){if(current)service.openTarget(cursorHash);return true}
     if(text==="p" || event.key===Qt.Key_Space){if(current)service.toggleTorrent(current);return true}
     if(text==="u"){if(current)service.toggleSeed(cursorHash);return true}
-    if(text==="d" || text==="x" || event.key===Qt.Key_Delete || text==="D"){if(current)removeDialog.show(current,text==="D");return true}
+    if(control && event.key===Qt.Key_A){selectVisible();return true}
+    if(text==="U"){service.cleanupFlow.undo();return true}
+    if(text==="d" || text==="x" || event.key===Qt.Key_Delete || text==="D"){confirmRemove(text==="D");return true}
     if(text==="f"){if(current)service.follow(cursorHash);return true}
     if(text==="i" || text==="w"){if(current)service.titleLink(cursorHash,text==="w");return true}
     if(text==="y"){if(current)service.copyMagnet(cursorHash);return true}
@@ -129,6 +146,16 @@ FocusScope {
       Text {text:"↓ "+Model.rate(root.service.status.dl,true)+"  ↑ "+Model.rate(root.service.status.up,true);textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       Text {visible:sidebar.vpn;text:Glyphs.vpn+" "+(root.service.store.network.selection || root.service.store.settings.network_interface || "");textFormat:Text.PlainText;color:root.service.store.network.ready===false ? Commons.Color.urgent : Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       Item {Layout.fillWidth:true}
+
+    }
+    RowLayout {
+      Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding
+      Ui.Button {text:"Select visible";onClicked:root.selectVisible()}
+      Ui.Button {text:"Remove";enabled:!!root.current || Object.keys(root.selection).length>0;onClicked:root.confirmRemove(false)}
+      Ui.Button {text:"Delete files";enabled:!!root.current || Object.keys(root.selection).length>0;onClicked:root.confirmRemove(true)}
+      Ui.Button {visible:root.undoAvailable;text:"Undo";onClicked:root.service.cleanupFlow.undo()}
+      Item {Layout.fillWidth:true}
+      Text {visible:Object.keys(root.selection).length>0;text:Object.keys(root.selection).length+" selected";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.caption}
     }
     Components.TorrentFilters {
       visible:root.tier===0;Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.lg;Layout.rightMargin:Commons.Style.spacing.lg
@@ -182,7 +209,7 @@ FocusScope {
         }
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u seed   d remove   D delete files   o open   s sort   / filter   q close"}
+    Components.KeyHint {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;text:root.focusPane==="sidebar" ? "j/k filter   l table   / filter" : "Enter details   N rename   p pause   u seed   d remove   D delete files   U undo   Ctrl+A select visible   o open   s sort   / filter   q close"}
     RowLayout {
       Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding
       Text {
@@ -215,5 +242,11 @@ FocusScope {
     onCanceled:opened=false
     onConfirmed:{root.service.recheck(hash);opened=false}
   }
-  Components.RemoveDialog {id:removeDialog;anchors.fill:parent;onRemoveRequested:function(hash,files){root.service.remove(hash,files)}}
+  Components.RemoveDialog {id:removeDialog;anchors.fill:parent;onRemoveRequested:function(hashes,files){root.service.cleanupFlow.remove(hashes,files);root.selection=({})}}
+  Loader {
+    id:overviewSheet;anchors.fill:parent;z:100;active:root.overviewOpen
+    onActiveChanged:if(!active)Qt.callLater(root.focusTable)
+    sourceComponent:OverviewSheet {service:root.service;onChanged:root.changed()}
+  }
+
 }

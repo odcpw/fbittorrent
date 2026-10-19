@@ -486,6 +486,34 @@
       "scope": "modal:files"
     },
     {
+      "id": "details.move",
+      "keys": {
+        "dashboard": [
+          "m"
+        ],
+        "popup": null,
+        "tui": [
+          "m"
+        ]
+      },
+      "label": "Move…",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.download_cap",
+      "keys": {
+        "dashboard": [
+          "c"
+        ],
+        "popup": null,
+        "tui": [
+          "c"
+        ]
+      },
+      "label": "Download cap…",
+      "scope": "modal:details"
+    },
+    {
       "id": "details.open",
       "keys": {
         "dashboard": null,

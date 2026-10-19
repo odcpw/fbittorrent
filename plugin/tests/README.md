@@ -117,3 +117,15 @@ real Qt rowsMoved signal and requires every move inside one boundary, and none
 for an unchanged-order role patch. `FBT_TEST_QS_DIAG=1` enables per-owned-process
 ptrace authorization and a bounded GDB stack capture if the profile stalls; it
 never changes the system ptrace policy or inspects an owner process.
+
+## M2 owner journeys
+
+Run `plugin/tests/qs-dashboard.sh --journeys --binary <current-binary>` at an
+integration release point. `--workflow W1`, `W2` or `W8` selects one journey.
+Each drives the real dashboard with native keyboard input in its own private
+Sway, XDG and loopback network namespace. W1 uses real local providers, IMDb,
+browse data, a tracker and two torrent engines; W2 follows/checks Shows and
+checks read/transfer persistence; W8 verifies Cancel, filtered removal, bounded
+Undo and deletion against private payload digests and unrelated sentinel files.
+Player and notification commands are private recording shims. An unavailable
+workflow fails explicitly. Logs are in `target/test-logs/qs_journey_w1/`, `qs_journey_w2/` and `qs_journey_w8/`.

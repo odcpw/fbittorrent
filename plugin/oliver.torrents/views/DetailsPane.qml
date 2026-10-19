@@ -11,6 +11,7 @@ ColumnLayout {
   readonly property var flow:service.detailFlow
   readonly property var torrent:service.detailRevision>=0 && flow ? flow.row() : null
   readonly property string tab:service.detailRevision>=0 && flow ? flow.tab : "overview"
+  readonly property var overviewState:overview.item ? overview.item.actionState : null
   readonly property string networkingText:overview.item ? overview.item.networkingText : ""
   readonly property bool posterLoaded:overview.item ? overview.item.posterLoaded : false
   readonly property var piecesState:pieces.item ? pieces.item.state : null
