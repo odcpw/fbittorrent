@@ -403,3 +403,6 @@ fn undo_rechecks_real_data_once_without_redownload() {
     println!("undo: dormant removed, appended and checked; physical storage creates=1 reads=1 bytes=5, original payload untouched, no peers");
     drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[path = "fast_resume.rs"]
+mod fast_resume;

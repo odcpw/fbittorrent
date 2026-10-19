@@ -28,6 +28,14 @@ verified bitfield. Snapshots can be mutated or dropped independently and never
 flush or modify the source tracker. Native unit tests cover verified live bits,
 paused/absent trackers, clone independence and a 10,000-piece clone below 1 ms.
 
+P6-06 adds a serde-skipped, app-only `AddTorrentOptions::trusted_have_pieces`.
+The initializer consumes it once, validates byte-rounded length and zero
+padding, and builds the normal chunk tracker without checksum reads. The app
+owns the clean marker, file-stamp/selection/checksum checks and cache invalidation;
+upstream persistence and fastresume remain rejected. Later error recovery never
+reuses admission-time trusted bits. See the fast-resume section in the engine
+evaluation for the trust boundary and physical-read regression evidence.
+
 The app uses TCP peer transport, DHT, HTTP/HTTPS and UDP trackers, local peer
 discovery, file inclusion, sequential piece scheduling, and upload limits.
 P6-07 adds `ManagedTorrent::set_upload_bps(Option<u64>)` for synchronous

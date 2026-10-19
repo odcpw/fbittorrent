@@ -4467,8 +4467,89 @@ def undo_incomplete_download(binary,systemd):
             seedh.stop_serve(seedprocess);seedh.lock_free()
 
 
+def resume_sample(client,h,hashes):
+    samples=[]
+    def checked():
+        rows=undo_rows(client);samples.extend(rows)
+        return len(rows)==len(hashes) and all(r["checked"] for r in rows),json.dumps(rows)
+    h.wait_for(checked,"restored records have verified measurements",timeout=15)
+    return samples
+
+
+def resume_lifecycle(name,binary,systemd,touch=False,crash=False):
+    with Case("daemon",name) as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve();h.receive_ready();h.wait_engine();fixtures_=[]
+        try:
+            with ApiConn(h) as client:
+                client.hello()
+                for index in range(2):
+                    fixture=recheck_local_fixture(sandbox,name=f"resume-{index}.bin",size=32*fixtures.MIB)
+                    if index:fixtures.corrupt_byte(fixture.files[0],0)
+                    fixtures_.append(fixture)
+                    client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),seed=True))
+                resume_sample(client,h,[f.info_hash for f in fixtures_])
+            h.stop_serve(process);h.notify.close()
+            directory=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/resume"
+            case.check((directory/"CLEAN").is_file() and all((directory/(f.info_hash+".bin")).is_file() for f in fixtures_),
+                       "clean drain writes both snapshots and CLEAN before releasing its lock",str(sorted(p.name for p in directory.iterdir())))
+            if touch:
+                path=fixtures_[0].files[0];stat=path.stat();os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns+1_000_000))
+            if crash:
+                process=h.start_serve();h.receive_ready();h.wait_engine()
+                with ApiConn(h) as client:
+                    client.hello();resume_sample(client,h,[f.info_hash for f in fixtures_])
+                case.check(not (directory/"CLEAN").exists(),"active daemon consumed the clean marker while retaining periodic snapshots",str(directory))
+                os.kill(h.daemon_pid(),signal.SIGKILL);process.wait(timeout=5,code=255 if systemd else -signal.SIGKILL);h.notify.close()
+            offset=len(h.stderr())
+            process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();samples=resume_sample(client,h,[f.info_hash for f in fixtures_])
+                text=h.stderr()[offset:]
+                trusted=set(re.findall(r"INFO resume trusted hash=([0-9a-f]{40})",text))
+                required=set(re.findall(r"INFO resume check_required hash=([0-9a-f]{40})",text))
+                expected={f.info_hash for f in fixtures_} if crash else {fixtures_[0].info_hash} if touch else set()
+                case.check(required==expected and trusted=={f.info_hash for f in fixtures_}-expected,
+                           "only eligible untouched snapshots bypass hashing; changed or unclean records request real verification",json.dumps(dict(required=sorted(required),trusted=sorted(trusted),samples=samples)))
+                if not touch and not crash:
+                    case.check(all(r["state"]!="checking" for r in samples),"trusted restart never reports a checksum scan",json.dumps(samples))
+                case.check(not (directory/"CLEAN").exists(),"CLEAN is absent throughout the live session",str(directory))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+
+def resume_trusted(binary,systemd):resume_lifecycle("resume_trusted",binary,systemd)
+def resume_touched_file(binary,systemd):resume_lifecycle("resume_touched_file",binary,systemd,touch=True)
+def resume_after_kill9(binary,systemd):resume_lifecycle("resume_after_kill9",binary,systemd,crash=True)
+
+
+def recheck_drops_resume_file(binary,systemd):
+    with Case("daemon","recheck_drops_resume_file") as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
+        process=h.start_serve();h.receive_ready();h.wait_engine();fixture=recheck_local_fixture(sandbox)
+        try:
+            with ApiConn(h) as client:
+                client.hello();client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(fixture.files[0].parent),seed=True))
+                resume_sample(client,h,[fixture.info_hash])
+            h.stop_serve(process);h.notify.close();process=h.start_serve();h.receive_ready();h.wait_engine()
+            with ApiConn(h) as client:
+                client.hello();resume_sample(client,h,[fixture.info_hash])
+                path=Path(sandbox.env["XDG_DATA_HOME"])/"fbittorrent/engine/resume"/(fixture.info_hash+".bin")
+                case.check(path.exists(),"clean startup retained the prior resume file",str(path))
+                pending=client.call("torrents.recheck",dict(hashes=[fixture.info_hash]),ref="resume-invalidating-check")["result"]
+                case.check(not path.exists() and pending==dict(state="pending",ref="resume-invalidating-check"),"explicit recheck deletes resume data before its pending acknowledgement",json.dumps(pending))
+                deadline=time.monotonic()+10
+                while time.monotonic()<deadline and not any(ev.get("ref")=="resume-invalidating-check" for ev in client.pushed):
+                    client.call("torrents.get",dict(hash=fixture.info_hash));time.sleep(.01)
+                outcome=[ev for ev in client.pushed if ev.get("ref")=="resume-invalidating-check"]
+                case.check(len(outcome)==1 and outcome[0]["outcome"]=="done", "invalidating recheck still finishes with a measured receipt",json.dumps(outcome))
+        finally:
+            if process.child.poll() is None:h.stop_serve(process)
+            h.lock_free()
+
+
 CASES = {function.__name__: function for function in
-         (fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
+         (resume_trusted, resume_touched_file, resume_after_kill9, recheck_drops_resume_file,
+          fixture_serving_states, fixture_launcher_killed, fixture_daemon_killed, fixture_stdin_lifetime, fixture_peer_pair,
           upgrade_idle_exit_75, upgrade_pending_while_busy, restart_now, restart_closed_never_starts,
           log_injected_error, log_follow, hello_counters, log_down_never_starts,
           origin_persists, undo_restore, undo_incomplete_download, bulk_remove_mixed_sizes, undo_expired, undo_owner_lifetime, force_start_bypasses_limit, queue_move_order, force_off_returns_to_queue, queue_parked_persists, recheck_failed_receipt, recheck_corrupt_byte, recheck_corrupt_byte_256k, recheck_dormant, recheck_paused_stays_paused, recheck_resets_completion, recheck_staged_invalid_state,

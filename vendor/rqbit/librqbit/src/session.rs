@@ -277,6 +277,12 @@ pub struct AddTorrentOptions {
     #[serde(skip)]
     pub storage_factory: Option<BoxStorageFactory>,
 
+    /// App-validated have snapshot. Never accepted from the upstream wire or
+    /// persistence format: the embedding owner must validate its clean marker
+    /// and every relevant payload file's identity before supplying these bytes.
+    #[serde(skip)]
+    pub trusted_have_pieces: Option<Vec<u8>>,
+
     /// Additional trackers for public torrents. Ignored for private metainfo.
     pub trackers: Option<Vec<String>>,
 }
@@ -1222,6 +1228,7 @@ impl Session {
                 peer_id: self.peer_id,
                 storage_factory,
                 options: ManagedTorrentOptions {
+                    trusted_have_pieces: parking_lot::Mutex::new(opts.trusted_have_pieces.take()),
                     force_tracker_interval: opts.force_tracker_interval,
                     peer_connect_timeout: peer_opts.connect_timeout,
                     peer_encryption: peer_opts.encryption.unwrap_or_default(),

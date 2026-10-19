@@ -89,6 +89,7 @@ impl EngineDispatcher {
             undo::restore_metadata(&directory, &restore_hash)
         })
         .await??;
+        self.inner.invalidate_resume(hash)?;
         record.completion_on = 0;
         record.deferred = false;
         ledger.records.push(record.clone()); // Undo always appends to queue order.

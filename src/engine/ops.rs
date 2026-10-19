@@ -77,6 +77,7 @@ impl EngineDispatcher {
         if let EngineOp::QueueMove { hash, to } = &op {
             return self.move_queue(cx,hash,*to).await;
         }
+        if let EngineOp::Recheck {hash}=&op {self.inner.invalidate_resume(hash)?;}
         if let Some(result) = self.execute_dormant(cx, &op).await {
             return result;
         }

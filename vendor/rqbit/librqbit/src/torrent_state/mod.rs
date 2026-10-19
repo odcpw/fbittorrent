@@ -111,6 +111,9 @@ pub(crate) struct ManagedTorrentLocked {
 
 #[derive(Default)]
 pub(crate) struct ManagedTorrentOptions {
+    // Consumed once. A later error, recheck or rebuilt initializer must never
+    // re-use an admission-time trusted snapshot.
+    pub trusted_have_pieces: parking_lot::Mutex<Option<Vec<u8>>>,
     pub force_tracker_interval: Option<Duration>,
     pub peer_connect_timeout: Option<Duration>,
     pub peer_encryption: crate::PeerEncryption,

@@ -38,6 +38,7 @@ pub struct Daemon {
     pub(crate) notifier: notify::Notifier,
     pub(crate) undo: Arc<engine::undo::History>,
     pub(crate) logs: Arc<log::Ring>,
+    resume: Arc<engine::resume::Store>,
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
     network: RwLock<network_app::NetworkState>,
@@ -248,7 +249,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         engine_cfg.network_interface = network.interface.clone();
         eprintln!("INFO engine starting session");
         let engine =
-            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone()) {
+            match engine::start_with_lock(&engine_cfg, daemon.lifecycle.clone(), lock.clone(), Some(daemon.resume.clone())) {
                 Ok(engine) => engine,
                 Err(_) if cfg.network_interface.is_some() && !network_state(cfg).ready => {
                     return open_slot(daemon, cfg, lock);
@@ -372,6 +373,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         imdb: Default::default(),
         undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         search: Default::default(),
+        resume: Arc::new(engine::resume::Store::open(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
@@ -434,6 +436,8 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
             .copied()
             .unwrap_or(StopReason::Panic)
     };
+    if drain_reason==StopReason::Panic {daemon.resume.abandon_clean();}
+    else if let Err(error)=daemon.resume.preserve_parked_clean() {eprintln!("WARN resume parked clean marker unavailable error={error:?}");}
     api.drain(drain_reason);
     drop(api);
     drop(server);
