@@ -107,12 +107,12 @@ def tui_release_sort_copy(binary,systemd):
                     h.wait_for(lambda:((rows:=client.call('shows.list')['result']['shows'])and rows[0]['counts']['episodes']==2 and not rows[0]['checking'],json.dumps(rows)),'explicit check loads local release catalogue')
                     ui=native.AttachedTui(case,str(binary),box,h,session='fbt-s05-releases');target,done=ui.start()
                     ui.keys(target,'3');ui.keys(target,'Enter',literal=False);ui.assert_pane(target,'S01E02')
-                    ui.keys(target,'s');ui.assert_pane(target,'title ↑')
+                    ui.keys(target,'s');ui.assert_pane(target,'name ↑')
                     def ordered(keys):
                         pane=ui.capture(target);lines=[line for line in pane.splitlines()if 'Unread' in line and ('S01E01' in line or 'S01E02' in line)]
                         return len(lines)==2 and all(key in line for key,line in zip(keys,lines)),pane
                     h.wait_for(lambda:ordered(['S01E01','S01E02']),'release title sort is ascending')
-                    ui.keys(target,'S');ui.assert_pane(target,'title ↓')
+                    ui.keys(target,'S');ui.assert_pane(target,'name ↓')
                     h.wait_for(lambda:ordered(['S01E02','S01E01']),'release title sort reverses')
                     ui.keys(target,'y');h.wait_for(lambda:(copied.exists(),ui.capture(target)),'release y reaches the clipboard helper')
                     case.check(copied.read_text()=='magnet:?xt=urn:btih:'+f'{2:040x}','sort and reverse preserve the selected release identity',copied.read_text())

@@ -204,8 +204,9 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
             ui.contains('Q','Stop fbittorrent?')
             ui.press('y','confirmed Q stops the daemon and exits the client cleanly',
                      lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()==0 and not d.DaemonContract.socket_path(sandbox).exists())
-            case.check(d.expected_daemon_stderr(h.stderr()),
-                       'confirmed Q emits healthy diagnostics and drains before unlinking sockets',h.stderr())
+            diagnostics=case.path.with_suffix('.shutdown.log');diagnostics.write_text(h.stderr())
+            case.step('check confirmed shutdown diagnostics','confirmed Q emits healthy diagnostics and drains before unlinking sockets').close(
+                d.expected_daemon_stderr(h.stderr()),h.stderr(),[diagnostics])
         except Exception as error:
             ui.observe('finish UI actions','all actions complete without an exception',lambda pane:False,timeout=0)
             setup.check(False,'UI actions complete without exception',f'{type(error).__name__}: {error}')
@@ -312,7 +313,7 @@ def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
             case.check(settings.get('download_limit_bps')==131072 and settings.get('alt_download_limit_bps')==65536 and settings['alt_limits_on'],
                        'F6 saves only the edited rate over API v1',json.dumps(settings))
             rows=client.call('torrents.list',{})['result']['torrents']
-            case.check(all(row.get('upload_limit_bps')==32768 for row in rows),'global unlimited never lifts the per-torrent default cap',json.dumps(rows))
+            case.check(all(row.get('upload_enabled') is False and row.get('seed') is False and row.get('upload_policy')=='off' and row.get('uploaded_bytes',0)==0 for row in rows),'global unlimited never opts torrents into payload upload',json.dumps(rows))
             ui.press('q','q detaches with the confirmed turtle still on',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
         ui.case=setup
 
