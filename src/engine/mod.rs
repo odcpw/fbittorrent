@@ -291,23 +291,17 @@ impl AppEngine {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     drained = false;
-                    eprintln!(
-                        "{}",
-                        drain_failure(
-                            "closing native torrent session:",
-                            Some(format!("joining restore tasks: {error:#}"))
-                        )
-                    );
+                    crate::native_runtime::log_teardown(drain_failure(
+                        "closing native torrent session:",
+                        Some(format!("joining restore tasks: {error:#}")),
+                    ));
                 }
                 Err(_) => {
                     drained = false;
-                    eprintln!(
-                        "{}",
-                        drain_failure(
-                            "native torrent session did not drain before its deadline",
-                            Some("joining restore tasks".into())
-                        )
-                    );
+                    crate::native_runtime::log_teardown(drain_failure(
+                        "native torrent session did not drain before its deadline",
+                        Some("joining restore tasks".into()),
+                    ));
                 }
             }
             match runtime.block_on(time::timeout(
@@ -318,35 +312,32 @@ impl AppEngine {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     drained = false;
-                    eprintln!(
-                        "{}",
-                        drain_failure(
-                            "closing native torrent session:",
-                            Some(format!("{error:#}"))
-                        )
-                    );
+                    crate::native_runtime::log_teardown(drain_failure(
+                        "closing native torrent session:",
+                        Some(format!("{error:#}")),
+                    ));
                 }
                 Err(_) => {
                     drained = false;
-                    eprintln!(
-                        "{}",
-                        drain_failure(
-                            "native torrent session did not drain before its deadline",
-                            None
-                        )
-                    );
+                    crate::native_runtime::log_teardown(drain_failure(
+                        "native torrent session did not drain before its deadline",
+                        None,
+                    ));
                 }
             }
             self.server.take();
             if let Err(error) = runtime.shutdown_timeout(bound.saturating_sub(began.elapsed())) {
                 drained = false;
-                eprintln!(
-                    "{}",
-                    drain_failure("closing native runtime:", Some(format!("{error:#}")))
-                );
+                crate::native_runtime::log_teardown(drain_failure(
+                    "closing native runtime:",
+                    Some(format!("{error:#}")),
+                ));
             }
             if drained {
-                eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis());
+                crate::native_runtime::log_teardown(format!(
+                    "INFO engine drained in {} ms",
+                    began.elapsed().as_millis()
+                ));
             }
         }
         drained

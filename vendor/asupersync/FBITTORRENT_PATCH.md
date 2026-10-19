@@ -83,3 +83,46 @@ build, and isolated native integration.
 
 When upgrading Asupersync, check whether upstream includes these changes and
 rerun the timer, transfer and shutdown checks before removing the patch.
+
+## Bounded deadline snapshots (fbt-50y, 2026-10-19)
+
+`src/observability/task_inspector.rs` adds `SnapshotLimits`, `BoundedSnapshot`
+and `TaskInspector::bounded_snapshot`. Existing inspector and diagnostics methods
+are unchanged. The additive query uses only try-locks for the unified state,
+external task and obligation tables (B -> A -> C), and task checkpoint contexts.
+Contended or poisoned state is returned as partial JSON with omission reasons.
+Requested/owning regions and their ancestors use immutable IDs/parents and atomic
+state; the query never takes RegionInner locks or scans obligations.
+
+Caller limits bound task and region counts, encoded bytes and collection time;
+additional ceilings are 128 tasks, 64 regions, 64 KiB, 5 ms and 4096 arena slots.
+The arena ceiling also bounds iterator work across vacant slots. Checkpoint text
+is copied at a UTF-8 boundary, up to 256 bytes, without cloning checkpoint history
+or unbounded cancellation strings. A byte budget smaller than fixed metadata
+returns an empty payload with `partial=true`. Omitted regions and every exceeded
+ceiling are explicit. This is a best-effort snapshot, never proof of quiescence.
+
+Why: native-runtime shutdown previously called complete, blocking inspection
+queries after its deadline. A contended runtime lock or large snapshot could
+therefore extend shutdown indefinitely. The application now calls this API on
+an observer worker with a separate hard caller fuse, and emits through a bounded
+nonblocking stderr worker. Error propagation does not depend on either worker.
+
+Tests: `cargo test --locked -p asupersync --lib bounded_snapshot -- --nocapture`
+where the complete upstream test tree is available; the new unit control holds
+the actual unified-state, task-table and obligation-table locks in turn and
+requires partial snapshots within the time cap. The published package's omitted
+test sources still prevent its standalone lib tests (see Tests above). The
+application fallback is `cargo test --locked -p fbittorrent
+native_runtime::shutdown_tests:: -- --nocapture`: real native teardown controls,
+a saturated blocking stderr pipe, socket-backed stderr, and 256 actual task records with a held
+CxInner lock verify bounded partial collection, count/byte ceilings and phase
+error preservation. Evidence and exact commands are in
+`docs/validation/2026-10-18/P1-03c.md` and `target/test-logs/fbt-50y/`.
+
+The bounded query also accepts an optional caller-sampled timestamp in the
+runtime's clock domain; otherwise it uses the stored logical time. It never
+calls an arbitrary timer/TimeSource implementation while holding state locks.
+The held-task application control arms a trap clock to verify this property;
+the native observer samples the concrete process-monotonic WallClock outside
+the collection. Socket stderr uses MSG_DONTWAIT rather than reopening procfs.
