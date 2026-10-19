@@ -457,23 +457,23 @@ isolated app fixtures and finishes with the JSONL case summary. Run it before
 each merge, including when hosted Actions is unavailable. On this workstation,
 use the release lock and memory scope prescribed in `AGENTS.md`.
 
-`.github/workflows/ci.yml` runs unit/background-worker, engine-library, native
-CLI/TUI and whitespace jobs on pushes and pull requests, plus a weekly RustSec
-audit. Every job retains `target/test-logs/` even on failure. A manual run can
-set `force_fail` to `native/quit_restart_down` to verify the failing JSONL
-artifact. The workflow's presence is not proof that a hosted run has passed.
+Hosted GitHub Actions is disabled by default. Verification uses the local gates;
+workflow files and retained artifacts do not imply that a hosted run passed.
 
-The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. Run it on the
-reference host before each release. Its checked-in baseline contains three
-idle and three verified loopback-download measurements,
-with the reference machine and workload. Both use a local empty IMDb ratings
-fixture; the active transfer uses the existing plaintext loopback seed.
-Each CPU/RSS observation must stay at
-or below the baseline median plus the larger of 10% of that median and three
-times the baseline range. A different host is rejected. To deliberately record
-a new reference, build `release-perf`, then run the following under the same
-release lock. Review the measured values before committing them. Comparison
-runs never rewrite the baseline.
+The resource gate is local and opt-in: `FBT_TEST_RESOURCES=1`. It measures the
+current daemon with 10 and 100 paused local torrents and 0, 1 and 8 Summary
+subscribers, three 60-second windows per configuration, plus matched CLI polling
+references (about 24 minutes total). Every fixture has private HOME/XDG paths,
+local payloads and a loopback-bound daemon. The retired in-process TUI/engine
+launch path is outside this gate; closing today's TUI detaches from its daemon.
+
+Each CPU/RSS observation must stay at or below the P1-08 baseline median plus
+the larger of 10% of that median and three times the baseline range. One bar
+subscription must cost no more CPU than status polling every ten seconds.
+A different host or measurement window is rejected. Comparison runs never
+rewrite the baseline. To deliberately record a new reference, build
+`release-perf` and run the following under the release lock and memory scope
+from `AGENTS.md`. Review the measured values before committing them.
 
 ```bash
 python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/release-perf/fbittorrent \
@@ -482,14 +482,10 @@ python3 agent_ergonomics_audit/audit/regression_tests/resources.py target/releas
   --output target/test-logs/resources/measurement.json
 ```
 
-The daemon resource gate is separately opt-in: `FBT_TEST_DAEMON_RESOURCES=1`.
-It measures 10 and 100 paused local torrents with 0, 1 and 8 summary subscribers,
-three 60-second windows per configuration, plus matched CLI polling references
-(about 24 minutes total). The daemon entries share `baselines/resources.json`
-with the existing TUI measurements. `resources.py --daemon --matrix --runs 3
---seconds 60 --baseline <path> --output <path>` compares every CPU/RSS sample
-against the same median and spread rule; `--write-baseline` records a complete
-matrix deliberately. Use the reference host and the release-lock/memory scope.
+`resources.py --daemon --torrents N --subscribers K --seconds 60 --runs 3
+--baseline <path> --output <path>` measures one workload; add `--matrix` for the
+complete matrix. `FBT_TEST_DAEMON_RESOURCES=1` also selects that complete matrix
+in the gate; use one resource opt-in per run.
 
 `python3 scripts/dagcheck.py` and `python3 scripts/mockwidth.py` review the plan's
 dependency graph and screen mockups. They run by hand, outside CI.
