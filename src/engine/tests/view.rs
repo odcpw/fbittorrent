@@ -173,14 +173,15 @@ fn policy_and_restore_reason_are_normalized_without_fabricated_completion() {
         "0000000000000000000000000000000000000001",
         Path::new("/fixture"),
     );
-    for (limit, ratio, policy, seed) in [
-        (0, 0.0, UploadPolicy::Off, false),
-        (0, -2.0, UploadPolicy::Unlimited, true),
-        (65536, -2.0, UploadPolicy::Custom, true),
-        (0, 0.0, UploadPolicy::Off, false),
+    for (limit, upload, policy, seed) in [
+        (0, None, UploadPolicy::Off, false),
+        (0, Some(true), UploadPolicy::Unlimited, true),
+        (65536, Some(true), UploadPolicy::Custom, true),
+        (65536, Some(false), UploadPolicy::Off, false),
+        (0, None, UploadPolicy::Off, false),
     ] {
         record.upload_limit = limit;
-        record.ratio_limit = ratio;
+        record.upload = upload;
         let view = TorrentView::unrestored(&record, None);
         assert_eq!((view.upload_policy, view.seed), (policy, seed));
     }

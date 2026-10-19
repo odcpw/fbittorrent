@@ -172,7 +172,7 @@
             only_files: None,
             upload_limit: 0,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
-            ratio_limit: 0.0,
+
             category: String::new(),
             tags: String::new(), origin: "manual".into(),
             added_on: 1,

@@ -166,7 +166,7 @@
     pub(super) fn add_request(sources: Vec<String>, torrent: Option<Vec<u8>>) -> ops::AddRequest {
         ops::AddRequest {
             sources, torrent: torrent.map(|bytes| ("fixture.torrent".into(), bytes)), save_path: None,
-            upload_limit: 0, ratio_limit: 0.0, stopped: false, category: String::new(), tags: String::new(), origin: None,
+            upload_limit: 0, seed: false, stopped: false, category: String::new(), tags: String::new(), origin: None,
         }
     }
     pub(super) fn hashes(values: &[&str]) -> ops::HashSelection {

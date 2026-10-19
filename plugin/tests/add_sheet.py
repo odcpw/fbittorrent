@@ -98,7 +98,7 @@ def handler(binary,suite='qs_dashboard_add',name='handler_confirm_mode'):
         target=sandbox.root/'handler downloads';target.mkdir()
         try:
             q.wait(lambda:q.ipc('ready')=='true')
-            command=[str(binary),'add','--origin','handler','--seed','--save',str(target),str(torrent.torrent),'--json']
+            command=[str(binary),'add','--origin','handler','--upload','--save',str(target),str(torrent.torrent),'--json']
             def invoke():return subprocess.run(command,env=q.env,capture_output=True,text=True,timeout=12)
             def rows():return client.call('torrents.list',{})['result']['torrents']
             def outcome(result):return json.dumps(dict(exit=result.returncode,stdout=result.stdout,stderr=result.stderr))

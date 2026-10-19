@@ -528,7 +528,7 @@ def cap_change_no_check(binary, systemd):
             payload.write_bytes(os.urandom(8 * 1024 * 1024))
             fixture = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
             seed, leech = cap_engine(seedh), cap_engine(leechh)
-            seedh.cli("add", str(fixture.torrent), "--seed", "--quiet")
+            seedh.cli("add", str(fixture.torrent), "--upload", "--quiet")
             if not seedh.wait_for(lambda: (engine_row(seed, fixture.info_hash)["state"] == "seeding",
                                           str(engine_row(seed, fixture.info_hash))), "verified seed"):
                 return
@@ -579,7 +579,7 @@ def seed_toggle_no_check(binary, systemd):
             return
         policies = []
         with cap_observations(case, dict(seed=engine), fixture.info_hash) as sample:
-            for verb, expected in [(None, "off"), ("seed", "unlimited"), ("noseed", "off")]:
+            for verb, expected in [(None, "off"), ("upload", "unlimited"), ("noupload", "off")]:
                 if verb:
                     harness.cli(verb, fixture.info_hash)
                 row = engine_row(engine, fixture.info_hash)
@@ -590,7 +590,7 @@ def seed_toggle_no_check(binary, systemd):
                     policy == expected and row["state"] in ("done", "seeding"),
                     f"Policy={policy}; torrent={row}; transfer.info={engine_value(engine, 'transfer.info')}.")
         case.check(policies == ["off", "unlimited", "off"],
-                   "seed then noseed restores the default policy", str(policies))
+                   "upload then noupload restores the default policy", str(policies))
 
 
 def fixture_payloads(binary, systemd):
@@ -2876,7 +2876,7 @@ def add_starts_unit_no_launcher(binary, systemd):
             source = seed.start_serve()
             if not (seed.receive_ready() and seed.wait_engine()):
                 return
-            seed.cli("add", str(fixture.torrent), "--seed", "--save", str(fixture.files[0].parent))
+            seed.cli("add", str(fixture.torrent), "--upload", "--save", str(fixture.files[0].parent))
             seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True and row.get("state") == "uploading",
                                   f"Seed state={row.get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture and starts serving")
             config = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
@@ -4338,7 +4338,7 @@ def force_start_bypasses_limit(binary,systemd):
         client.call("torrents.add",dict(source=dict(path=str(fixture.torrent)),save_path=str(sandbox.downloads)))
         h.wait_for(lambda: ((row:=client.call("torrents.get",dict(hash=fixture.info_hash))["result"]["torrent"])["state"]=="done",json.dumps(row)),"completed no-seed row ready")
         refused=client.call("torrents.force_start",dict(hashes=[fixture.info_hash],on=True),error="invalid_state")
-        case.check(refused["error"].get("hint")=="fbittorrent seed "+fixture.info_hash,
+        case.check(refused["error"].get("hint")=="fbittorrent upload "+fixture.info_hash,
                    "completed no-seed force refusal has the copy-pasteable seed command",json.dumps(refused))
         case.step("record summary integration", "P1-08 summary counts the two live transfers as downloading").ok(
             "Both normalized rows and physical engine queue report two running transfers; pushed Summary frame awaits track A.")

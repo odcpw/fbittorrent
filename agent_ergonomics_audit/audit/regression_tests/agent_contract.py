@@ -84,7 +84,7 @@ def contract(binary,systemd):
             case.check(waited.get('code_name')=='timeout','R-012 wait retains the timeout envelope',json.dumps(waited)) # R-007
             cli(case,sandbox,binary,'start',digest,'--json')
             cli(case,sandbox,binary,'stop',digest,'--json')
-            cli(case,sandbox,binary,'noseed',digest,'--json') # R-008
+            cli(case,sandbox,binary,'noupload',digest,'--json') # R-008
             cli(case,sandbox,binary,'seq',digest,'--json',code=2)
             cli(case,sandbox,binary,'list','--json') # R-009
             cli(case,sandbox,binary,'no-such-verb','--json',code=2) # R-010
@@ -173,7 +173,7 @@ def exit_code_dictionary_total(binary,systemd):
                 client.hello()
                 h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=added['hash']))['result']['torrent'])['state']=='done',json.dumps(row)),'completed fixture reaches done before explicit Resume refusal')
             refusal,_=cli(case,sandbox,binary,'start',added['hash'],'--json',code=1)
-            case.check(refusal.get('hint')=='fbittorrent seed '+fixture.info_hash,'completion refusal carries the exact seed command',json.dumps(refusal))
+            case.check(refusal.get('hint')=='fbittorrent upload '+fixture.info_hash,'completion refusal carries the exact upload command',json.dumps(refusal))
             cli(case,sandbox,binary,'delete',fixture.info_hash,'--files','--json',code=3)
             cli(case,sandbox,binary,'show','zzzz','--json',code=6)
             for name in ('ambiguous-one','ambiguous-two'):

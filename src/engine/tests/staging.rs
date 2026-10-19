@@ -14,7 +14,7 @@ fn options(folder: &Path) -> ops::AddRequest {
         torrent: Some(("hello.torrent".into(), bytes)),
         save_path: Some(folder.to_string_lossy().into()),
         upload_limit: 0,
-        ratio_limit: 0.0,
+        seed: false,
         stopped: false,
         category: String::new(),
         tags: String::new(),

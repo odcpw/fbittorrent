@@ -237,19 +237,6 @@ impl EngineDispatcher {
                         if ledger.records[index].staged {return Err(InvalidTorrentState {hash:hash.clone(),reason:"staged"}.into());}
                         let mut changed = ledger.records[index].clone();
                         changed.upload = Some(*on);
-                        changed.ratio_limit = if *on { -2.0 } else { 0.0 };
-                        let mut tags: Vec<_> = changed
-                            .tags
-                            .split(',')
-                            .filter(|tag| !tag.is_empty() && *tag != SEED_TAG)
-                            .map(str::to_owned)
-                            .collect();
-                        if *on {
-                            tags.push(SEED_TAG.into());
-                        }
-                        tags.sort();
-                        tags.dedup();
-                        changed.tags = tags.join(",");
                         if *on
                             && (ledger.records[index].completion_on > 0
                                 || self.inner.dormant(&hash))

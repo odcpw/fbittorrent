@@ -25,7 +25,7 @@ fn typed_operations_execute_without_legacy_frames() {
             torrent: Some(("typed.torrent".into(), bytes)),
             save_path: Some(downloads.to_string_lossy().into()),
             upload_limit: 0,
-            ratio_limit: 0.0,
+            seed: false,
             stopped: true,
             category: "typed".into(),
             tags: String::new(), origin: None,

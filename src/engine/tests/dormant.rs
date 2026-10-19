@@ -34,7 +34,7 @@ fn dormant_fixture(
         record.name = name.clone();
         record.completion_on = completion;
         if seed {
-            record.ratio_limit = -2.0;
+            record.upload = Some(true);
         }
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         if !missing {

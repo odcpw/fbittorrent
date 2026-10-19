@@ -566,9 +566,8 @@ RSS/Shows routing and TUI on-open refresh removal follow their service integrati
 The typed engine's existing `SetUploadLimit` operation now applies a validated
 cap synchronously after its durable ledger save. It retains the torrent handle,
 checked data and peers, and returns `EngineResult::Acknowledged` only after the
-live limiter has been updated. Legacy `torrents/setUploadLimit` still replies
-`Ok.`. Existing CLI `seed` / `noseed` use this path and no longer rebuild a
-managed torrent to change its cap. Nonzero caps below 16384 bytes/s or above
+live limiter has been updated. CLI `upload` / `noupload` use this path and do
+not rebuild a managed torrent to change its cap. Nonzero caps below 16384 bytes/s or above
 the native `u32` maximum are rejected. Zero remains legacy unlimited.
 
 For the planned v1 adapter, `torrents.set_upload_limit {hashes, bps?}` can return
@@ -673,7 +672,7 @@ Capability `queue` adds idempotent `torrents.force_start` and non-idempotent
 hashes remain in `started`). Force-on clears user pause and bypasses the ordinary
 queue limit; force-off rejoins the ordinary queue. Stop and completion clear force.
 Staged torrents are refused; completed stop-on-complete records give the explicit
-`fbittorrent seed <hash>` hint. Failed records retry through the existing start
+`fbittorrent upload <hash>` hint. Failed records retry through the existing start
 path. Parked force/order changes persist without opening a session.
 
 Ledger order remains queue order. `queue_pos` is one-based among unforced,

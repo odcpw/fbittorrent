@@ -138,9 +138,9 @@ pub(super) enum Cmd {
         /// Add in stopped state
         #[arg(long)]
         stopped: bool,
-        /// Allow uploading for this torrent (default: no upload, stop when complete)
+        /// Allow uploading for this torrent, including after completion (default: no upload, stop when complete)
         #[arg(long)]
-        seed: bool,
+        upload: bool,
         /// Save path override
         #[arg(long)]
         save: Option<String>,
@@ -197,10 +197,10 @@ pub(super) enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Allow uploading/seeding
-    Seed { selectors: Vec<String> },
-    /// Limit uploading and stop when complete (default for new torrents)
-    Noseed { selectors: Vec<String> },
+    /// Allow uploading, including after completion
+    Upload { selectors: Vec<String> },
+    /// Stop uploading and stop when complete (default for new torrents)
+    Noupload { selectors: Vec<String> },
     /// Add whatever magnet/URL is on the Wayland clipboard
     AddClipboard,
     /// Open the file (single-file torrent) or folder in the desktop
@@ -301,7 +301,7 @@ pub(super) enum Cmd {
         clipboard_watch: Option<bool>,
         #[arg(long)]
         port: Option<u16>,
-        /// Allow payload upload while downloading; completed torrents still require explicit seed opt-in
+        /// Allow payload upload while downloading; completed torrents still require an explicit upload opt-in
         #[arg(long, value_parser=["off", "on"])]
         upload: Option<String>,
     },
@@ -382,6 +382,17 @@ mod tests {
         }
         for option in ["--no-seq","--no-first-last"] {
             assert!(Cli::try_parse_from(["fbittorrent","add","magnet:?xt=urn:btih:0000000000000000000000000000000000000000",option]).is_err());
+        }
+    }
+    #[test]
+    fn upload_is_the_explicit_opt_in_wording() {
+        let magnet = "magnet:?xt=urn:btih:0000000000000000000000000000000000000000";
+        assert!(matches!(Cli::try_parse_from(["fbittorrent","add",magnet,"--upload"]).unwrap().cmd, Some(Cmd::Add { upload: true, .. })));
+        assert!(matches!(Cli::try_parse_from(["fbittorrent","add",magnet]).unwrap().cmd, Some(Cmd::Add { upload: false, .. })));
+        assert!(matches!(Cli::try_parse_from(["fbittorrent","upload","all"]).unwrap().cmd, Some(Cmd::Upload { .. })));
+        assert!(matches!(Cli::try_parse_from(["fbittorrent","noupload","all"]).unwrap().cmd, Some(Cmd::Noupload { .. })));
+        for args in [vec!["add",magnet,"--seed"],vec!["seed","all"],vec!["noseed","all"]] {
+            assert!(Cli::try_parse_from(std::iter::once("fbittorrent").chain(args)).is_err());
         }
     }
     #[test]

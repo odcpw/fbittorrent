@@ -245,8 +245,8 @@ fn typed_seed_live_retains_handle_and_never_checks() {
             assert_eq!(current.is_paused(), !on);
             let saved = read_ledger(&directory.join("torrents.json")).unwrap();
             assert_eq!(saved.records[0].upload_limit, 0);
-            assert_eq!(saved.records[0].ratio_limit, if on { -2.0 } else { 0.0 });
-            assert_eq!(saved.records[0].tags, if on { "keep,seed" } else { "keep" });
+            assert_eq!(saved.records[0].upload, Some(on));
+            assert_eq!(saved.records[0].tags, "keep", "upload intent never rewrites tags");
             states.push(r.state);
             observe("typed_seed_live", "apply typed SetSeed twice to the same checked handle", "No read, new storage, handle/metadata replacement or checking; policy and pause state match seed intent.",
                 serde_json::json!({"seed":on,"handle_id":current.id(),"creates_reads_bytes":counts.snapshot(),"row":wire(&r)}));

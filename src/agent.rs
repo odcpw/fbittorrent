@@ -170,8 +170,8 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "start", aliases: &["resume"], summary: "Start torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "stop", aliases: &["pause"], summary: "Stop torrents", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "delete", aliases: &["rm", "remove"], summary: "Remove torrents; --files deletes data and needs --yes; --dry-run previews", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "seed", aliases: &[], summary: "Allow upload for torrents", json: true, mutating: true, needs_backend: true },
-        CommandDoc { name: "noseed", aliases: &[], summary: "Cap upload and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "upload", aliases: &[], summary: "Allow upload for torrents, including after completion", json: true, mutating: true, needs_backend: true },
+        CommandDoc { name: "noupload", aliases: &[], summary: "Stop uploading and stop when complete (default for new torrents)", json: true, mutating: true, needs_backend: true },
         CommandDoc { name: "open", aliases: &[], summary: "Open the file or folder of a torrent in the desktop", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "rss", aliases: &[], summary: "Local list | add | remove | refresh | items; only grab needs the native engine", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "shows", aliases: &[], summary: "Followed TV shows (local list, checked against EZTV): list | follow | unfollow | check | episodes | grab | seen", json: true, mutating: true, needs_backend: false },
@@ -337,7 +337,7 @@ OTHER USEFUL CALLS
   fbittorrent serve                              # foreground daemon; stop with SIGTERM
   fbittorrent list --json                         # every torrent
   fbittorrent stop|start|delete <sel> --json      # {"ok":true,"action":"stop","hashes":[...]}
-  fbittorrent seed <sel> --json                   # allow upload for one torrent
+  fbittorrent upload <sel> --json                 # allow upload for one torrent; noupload reverts
   fbittorrent search --plugins --json             # providers and whether enabled
   fbittorrent rss list --json / rss items <feed> --json / rss grab <feed> <id> --json
   fbittorrent limit <sel> --down 64K --json           # live download cap; none clears
@@ -499,7 +499,7 @@ fn command_tree(metadata:&[CommandDoc])->Vec<serde_json::Value>{
         for child in command.get_subcommands().filter(|c|c.get_name()!="help"){
             let name=if prefix.is_empty(){child.get_name().to_string()}else{format!("{prefix} {}",child.get_name())};
             let old=metadata.iter().find(|m|m.name==name);
-            let starts=matches!(name.as_str(),"rename"|"limit"|"add"|"add-clipboard"|"start"|"seed"|"noseed"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
+            let starts=matches!(name.as_str(),"rename"|"limit"|"add"|"add-clipboard"|"start"|"upload"|"noupload"|"open"|"up"|"dashboard"|"tui"|"rss grab"|"shows grab");
             out.push(serde_json::json!({"name":name,"aliases":child.get_all_aliases().collect::<Vec<_>>(),"summary":child.get_about().map(ToString::to_string).unwrap_or_default(),"json":old.map(|m|m.json).unwrap_or(true),"mutating":old.map(|m|m.mutating).unwrap_or(starts),"needs_backend":old.map(|m|m.needs_backend).unwrap_or(starts),"starts":starts}));
             walk(child,&name,metadata,out);
         }

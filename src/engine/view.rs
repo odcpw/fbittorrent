@@ -158,8 +158,8 @@ impl TorrentView {
             peers: None,
             seeds: None,
             seed: !record.stop_on_complete(),
-            upload_enabled: record.upload.unwrap_or(!record.stop_on_complete()),
-            upload_policy: if !record.upload.unwrap_or(!record.stop_on_complete()) { UploadPolicy::Off }
+            upload_enabled: record.upload == Some(true),
+            upload_policy: if record.upload != Some(true) { UploadPolicy::Off }
                 else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited },
             upload_limit_bps: u64::try_from(record.upload_limit).ok(),
             download_limit_bps: record.download_limit,
@@ -411,7 +411,7 @@ impl EngineDispatcher {
                 view.completed_bytes = None;
                 view.progress = None;
             }
-            view.upload_enabled = record.upload.unwrap_or(!record.stop_on_complete() || (self.inner.session.upload_enabled() && view.state != TorrentState::Done));
+            view.upload_enabled = record.upload.unwrap_or(self.inner.session.upload_enabled() && view.state != TorrentState::Done);
             view.upload_policy = if !view.upload_enabled { UploadPolicy::Off }
                 else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited };
             view.origin=Some(record.origin.clone());

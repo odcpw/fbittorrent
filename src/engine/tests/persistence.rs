@@ -10,7 +10,7 @@
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         let mut record = review_record(&hash, &directory.join("downloads"));
         record.completion_on = 10;
-        record.ratio_limit = -2.0; // Completed records can resume when seeding is enabled.
+        record.upload = Some(true); // Completed records can resume when seeding is enabled.
         let ledger = Ledger { generation: Default::default(),
             migrated_legacy: false,
             records: vec![record],
@@ -175,7 +175,7 @@
             only_files: Some(vec![1]),
             upload_limit: 0,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
-            ratio_limit: 0.0,
+
             category: String::new(),
             tags: String::new(), origin: "manual".into(),
             added_on: 1,

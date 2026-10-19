@@ -23,7 +23,7 @@ fn upload_cap_edit_retains_handle_and_checked_data() {
             torrent: Some(("hello.torrent".into(), bytes)),
             save_path: Some(downloads.to_string_lossy().into()),
             upload_limit: 0,
-            ratio_limit: 0.0,
+            seed: false,
             stopped: true,
             category: String::new(),
             tags: String::new(), origin: None,

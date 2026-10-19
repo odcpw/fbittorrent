@@ -23,7 +23,8 @@ pub struct AddRequest {
     pub torrent: Option<(String, Vec<u8>)>,
     pub save_path: Option<String>,
     pub upload_limit: i64,
-    pub ratio_limit: f64,
+    /// Explicit upload opt-in, including after completion.
+    pub seed: bool,
     pub stopped: bool,
     pub category: String,
     pub tags: String,
@@ -101,11 +102,6 @@ impl EngineOp {
             Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} | Self::Stage {options, ..} => {
                 if options.upload_limit < 0 {
                     bail!("upload limit cannot be negative");
-                }
-                if !matches!(options.ratio_limit, -2.0 | 0.0) {
-                    bail!(
-                        "native share limits support unlimited (-2) or stop on completion (ratio 0)"
-                    );
                 }
                 if options.sources.is_empty() && options.torrent.is_none() {
                     bail!("no torrent was supplied");

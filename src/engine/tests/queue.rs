@@ -19,7 +19,7 @@
             .info_hash
             .as_string();
         let mut add = add_request(vec![String::new()], Some(bytes));
-        if seed { add.ratio_limit = -2.0; }
+        if seed { add.seed = true; }
         dispatcher.execute(ops::EngineOp::Add(add)).unwrap();
         dispatcher.runtime.block_on(async {
             let handle = dispatcher.inner.handle(&hash).unwrap();
@@ -222,7 +222,7 @@
         download.paused = true;
         let mut seeder = done.clone();
         seeder.hash = seed_hash.into();
-        seeder.ratio_limit = -2.0;
+        seeder.upload = Some(true);
         save_parked_ledger(&directory, &Ledger { generation: Default::default(),
             migrated_legacy: false, records: vec![done, download, seeder],
         }).unwrap();
@@ -233,8 +233,8 @@
             .unwrap_err();
         let typed = error.downcast_ref::<crate::agent::AppError>().unwrap_or_else(|| panic!("typed refusal: {error:#}"));
         assert_eq!(typed.code, crate::agent::Code::Failure);
-        assert_eq!(typed.message, "already complete; seeding is off for this torrent");
-        assert_eq!(typed.hint, Some(format!("fbittorrent seed {done_hash}")));
+        assert_eq!(typed.message, "already complete; upload is off for this torrent");
+        assert_eq!(typed.hint, Some(format!("fbittorrent upload {done_hash}")));
         assert_eq!(std::fs::read(directory.join("torrents.json")).unwrap(), before);
         for _ in 0..2 {
             let ops::EngineResult::Start(result) = parked

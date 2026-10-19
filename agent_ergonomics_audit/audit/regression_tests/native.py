@@ -140,8 +140,8 @@ def launcher_never_called(binary):
             (("--no-start", "start", "all"), 4, {}, "closed"),
             (("--no-start", "delete", "all"), 0, {}, "offline"),
             (("--no-start", "open", "deadbeef"), 4, {}, "closed"),
-            (("--no-start", "seed", "all"), 4, {}, "closed"),
-            (("--no-start", "noseed", "all"), 4, {}, "closed"),
+            (("--no-start", "upload", "all"), 4, {}, "closed"),
+            (("--no-start", "noupload", "all"), 4, {}, "closed"),
             (("--no-start", "add-clipboard"), 4, {}, "closed"),
             (("--no-start", "add", "magnet:?xt=urn:btih:" + "1" * 40), 4, {}, "closed"),
         )
@@ -652,7 +652,7 @@ def resume_done_refused(harness, root):
                    "exit 1; failure envelope with explanatory text and the selected torrent's seed command",
                    json.dumps(envelope), code == 1 and envelope.get("ok") is False
                    and envelope.get("code") == 1 and bool(envelope.get("error"))
-                   and envelope.get("hint") == f"fbittorrent seed {hash_}")
+                   and envelope.get("hint") == f"fbittorrent upload {hash_}")
     code, result = harness.cli_result("start", "all")
     record_bulk_start(harness, code, result, hash_)
     code, result = harness.cli_result("delete", hash_)
@@ -1238,7 +1238,7 @@ def local_download(case, binary, leech):
             process = seedh.start_serve()
             if not (seedh.receive_ready() and seedh.wait_engine()):
                 raise RuntimeError("loopback seed failed to start")
-            seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
+            seedh.cli("add", str(torrent.torrent), "--upload", "--quiet")
             seedh.wait_for(lambda: ((row := seedh.api("torrents.list")["torrents"][0])["state"] == "seeding", str(row)), "verified local seed")
             reply = seedh.api("torrents.set_upload_limit",dict(hashes=[torrent.info_hash],bps=32768))
             case.check(reply.get("state") == "done", "seed upload is capped so the download remains active", str(reply))
@@ -1866,7 +1866,7 @@ def run_cases():
                            "Bulk start accepts -1 and zero dates and skips only the positive date.", json.dumps(result))
                 result = parked_cli("start", done, code=1)
                 case.check(result.get("ok") is False and result.get("code") == 1
-                           and result.get("error") and result.get("hint") == f"fbittorrent seed {done}",
+                           and result.get("error") and result.get("hint") == f"fbittorrent upload {done}",
                            "A positive completion date still refuses explicit start with the seed hint.", json.dumps(result))
                 case.check(json.loads(ledger.read_text())["records"][0]["completion_on"] == -1,
                            "Starting an unknown-date record does not invent a completion timestamp.")

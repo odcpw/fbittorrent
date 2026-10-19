@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::config::Config;
 use crate::daemon::lifecycle::Lifecycle;
 use crate::ipc::InstanceLock;
-use crate::qbt::{TorrentFile, TransferInfo, SEED_TAG};
+use crate::qbt::{TorrentFile, TransferInfo};
 
 mod ledger;
 pub(crate) mod rename;

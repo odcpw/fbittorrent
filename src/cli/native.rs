@@ -23,8 +23,8 @@ pub(crate) fn handles(cmd: &Cmd) -> bool {
             | Cmd::Reannounce { .. }
             | Cmd::Move { .. }
             | Cmd::Delete { .. }
-            | Cmd::Seed { .. }
-            | Cmd::Noseed { .. }
+            | Cmd::Upload { .. }
+            | Cmd::Noupload { .. }
             | Cmd::Wait { .. }
             | Cmd::Open { .. }
             | Cmd::Rename {..}
@@ -192,7 +192,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
         Cmd::Add {
             source,
             stopped,
-            seed,
+            upload,
             save,
             category,
             quiet,
@@ -214,7 +214,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 cfg,
                 source,
                 *stopped,
-                *seed,
+                *upload,
                 save.clone(),
                 category.clone(),
                 if origin == "handler" && (*quiet || json_mode) { "agent" } else { origin },
@@ -251,7 +251,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             value["action"] = json!("add");
             value["sequential"] = json!(true);
             value["first_last"] = json!(true);
-            value["seed"] = json!(*seed);
+            value["upload"] = json!(*upload);
             value["stopped"] = json!(stopped);
             if value["source"].is_null() {
                 value["source"] = json!(if source.starts_with("magnet:") {
@@ -382,8 +382,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
         },
         Cmd::Start { .. }
         | Cmd::Reannounce { .. }
-        | Cmd::Seed { .. }
-        | Cmd::Noseed { .. }
+        | Cmd::Upload { .. }
+        | Cmd::Noupload { .. }
         | Cmd::Delete { .. }
         | Cmd::Open { .. }
         | Cmd::Wait { .. } => {
@@ -394,8 +394,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 Cmd::Open { selector } => vec![selector.clone()],
                 Cmd::Start { selectors }
                 | Cmd::Reannounce { selectors }
-                | Cmd::Seed { selectors }
-                | Cmd::Noseed { selectors }
+                | Cmd::Upload { selectors }
+                | Cmd::Noupload { selectors }
                 | Cmd::Delete { selectors, .. }
                 | Cmd::Wait { selectors, .. } => selectors.clone(),
                 _ => unreachable!(),
@@ -460,9 +460,9 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                         }) {
                             return Err(AppError::new(
                                 Code::Failure,
-                                "already complete; seeding is off for this torrent",
+                                "already complete; upload is off for this torrent",
                             )
-                            .hint(format!("fbittorrent seed {}", row.hash))
+                            .hint(format!("fbittorrent upload {}", row.hash))
                             .into());
                         }
                     }
@@ -492,11 +492,11 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     );
                 }
                 _ => {
-                    let on = matches!(cmd, Cmd::Seed { .. });
+                    let on = matches!(cmd, Cmd::Upload { .. });
                     bulk(&c, "torrents.set_seed", &hashes, json!({"on":on}))?;
                     emit(
                         json_mode,
-                        json!({"ok":true,"action":if on{"seed"}else{"noseed"},"count":hashes.len(),"hashes":hashes}),
+                        json!({"ok":true,"action":if on{"upload"}else{"noupload"},"count":hashes.len(),"hashes":hashes}),
                     );
                 }
             }
@@ -572,7 +572,7 @@ pub(super) fn add(
     cfg: &Config,
     source: &str,
     stopped: bool,
-    seed: bool,
+    upload: bool,
     save: Option<String>,
     category: Option<String>,
     origin: &str,
@@ -581,7 +581,7 @@ pub(super) fn add(
     if let Some(path) = &save { crate::free_space::require_writable(path)?; }
     let input=super::handler::source(source)?;
     let mut args =
-        json!({"source":input,"origin":origin,"stopped":stopped,"seed":seed});
+        json!({"source":input,"origin":origin,"stopped":stopped,"seed":upload});
     if let Some(save) = save.or(cfg.save_path.clone()) {
         args["save_path"] = json!(save);
     }

@@ -193,12 +193,12 @@ impl EngineDispatcher {
                 }
                 let only_files = magnet.get_select_only();
                 let record = Record {
-                    upload: None, display_name:None,
+                    upload: options.seed.then_some(true), display_name:None,
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit,
-                    ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
+                    category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
                 ledger.records.push(record.clone());
@@ -362,7 +362,7 @@ impl EngineDispatcher {
         }
         let paused = options.stopped;
         let mut record = Record {
-            upload: None, display_name:None,
+            upload: options.seed.then_some(true), display_name:None,
             hash: String::new(),
             name: options
                 .torrent
@@ -377,7 +377,6 @@ impl EngineDispatcher {
             only_files: files,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             upload_limit: options.upload_limit,
-            ratio_limit: options.ratio_limit,
             category: options.category.clone(),
             tags: options.tags.clone(),
             origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
@@ -517,9 +516,9 @@ pub(super) fn mutation_hashes(
             if !bulk {
                 return Err(crate::agent::AppError::new(
                     crate::agent::Code::Failure,
-                    "already complete; seeding is off for this torrent",
+                    "already complete; upload is off for this torrent",
                 )
-                .hint(format!("fbittorrent seed {hash}"))
+                .hint(format!("fbittorrent upload {hash}"))
                 .into());
             }
             result.skipped.push(crate::qbt::StartSkipped {

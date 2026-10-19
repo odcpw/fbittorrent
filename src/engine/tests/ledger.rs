@@ -8,7 +8,7 @@ fn deferred_record_from_magnet() {
     let source = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Deferred%20fixture&tr=http%3A%2F%2F127.0.0.1%3A1%2Fannounce";
     let options = AddRequest {
         sources: vec![source.into()], torrent: None, save_path: Some(directory.join("downloads").to_string_lossy().into()),
-        upload_limit: 32768, ratio_limit: 0.0, stopped: false,
+        upload_limit: 32768, seed: false, stopped: false,
         category: "fixture".into(), tags: "fbt-origin:agent".into(), origin: None,
     };
     let record = Record::deferred_magnet(&options, &directory).unwrap();
@@ -172,6 +172,32 @@ fn origin_default_manual() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+
+#[test]
+fn saved_records_upload_only_with_an_explicit_opt_in() {
+    let directory=review_directory("upload-opt-in");
+    std::fs::create_dir_all(&directory).unwrap();
+    let base=serde_json::to_value(crate::engine::tests::review_record(&"b".repeat(40),&directory)).unwrap();
+    let mut records=Vec::new();
+    // Today's records may still carry the retired qBittorrent seed encoding.
+    for (index,(ratio,tags,upload)) in [(-2.0,"seed",None),(0.0,"",None),(-2.0,"seed",Some(true)),(-2.0,"",Some(false))].into_iter().enumerate() {
+        let mut value=base.clone();
+        value["hash"]=serde_json::json!(format!("{index:040x}"));
+        value["ratio_limit"]=serde_json::json!(ratio);
+        value["tags"]=serde_json::json!(tags);
+        if let Some(upload)=upload {value["upload"]=serde_json::json!(upload);}
+        records.push(value);
+    }
+    std::fs::write(directory.join("torrents.json"),serde_json::to_vec(&serde_json::json!({"records":records})).unwrap()).unwrap();
+    let ledger=read_ledger(&directory.join("torrents.json")).unwrap();
+    let seeds:Vec<_>=ledger.records.iter().map(|r|(r.upload,!r.stop_on_complete(),r.options(true).unwrap().upload_enabled)).collect();
+    assert_eq!(seeds,[(None,false,None),(None,false,None),(Some(true),true,Some(true)),(Some(false),false,Some(false))]);
+    save_parked_ledger(&directory,&ledger).unwrap();
+    let saved=std::fs::read_to_string(directory.join("torrents.json")).unwrap();
+    assert!(!saved.contains("ratio_limit"),"the retired field is dropped on the next save");
+    println!("ratio/tag-encoded seeding loads as upload off; explicit upload true/false is kept: {seeds:?}");
+    std::fs::remove_dir_all(directory).unwrap();
+}
 
 #[test]
 fn staged_excluded_from_counts_and_busy() {

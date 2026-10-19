@@ -40,7 +40,6 @@ fn is_false(value: &bool) -> bool { !value }
 
 fn known_progress() -> bool { true }
 
-pub const SEED_TAG: &str = "seed";
 
 impl Torrent {
     pub fn is_active(&self) -> bool {
@@ -57,7 +56,7 @@ impl Torrent {
     pub fn complete_no_seed(&self) -> bool { self.completion_on > 0 && self.ratio_limit == 0.0 }
     /// Explicit permission to continue uploading after completion.
     pub fn seed_allowed(&self) -> bool {
-        self.has_tag(SEED_TAG) || self.ratio_limit != 0.0
+        self.has_tag("seed") || self.ratio_limit != 0.0
     }
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.split(',').any(|t| t.trim() == tag)

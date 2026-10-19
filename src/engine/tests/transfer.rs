@@ -98,8 +98,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
             .as_string();
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         let mut record = review_record(&hash, &downloads);
-        record.ratio_limit = -2.0;
-        record.tags = SEED_TAG.into();
+        record.upload = Some(true);
         record.paused = false;
         let app = test_app(
             &directory,
@@ -214,8 +213,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
             .unwrap()
         });
         let mut add = add_request(vec![String::new()], Some(bytes.to_vec()));
-        add.ratio_limit = -2.0;
-        add.tags = SEED_TAG.into();
+        add.seed = true;
         seed.dispatcher.execute(ops::EngineOp::Add(add)).unwrap();
         let hash = seed.dispatcher.runtime.block_on(async {
             let record = OwnedMutexGuard::lock(seed.dispatcher.inner.ledger.clone(), &test_cx())
