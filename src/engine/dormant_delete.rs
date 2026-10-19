@@ -46,7 +46,7 @@ impl Plan {
 }
 // Validate every parent before changing the ledger or deleting any payload.
 // Keeping descriptors pins the validated directories across concurrent renames.
-pub(super) struct Prepared(Vec<(File, CString)>);
+pub(super) struct Prepared(Vec<(Arc<File>, CString)>);
 impl Prepared {
     pub(super) async fn execute(self, cx: &Cx) -> Result<()> {
         task::spawn_blocking(cx, move || self.unlink()).await?
@@ -67,15 +67,12 @@ impl Prepared {
 /// redirecting unlink outside the configured root. A leaf symlink is unlinked,
 /// never followed. Empty directories and unrelated files are retained.
 fn prepare_files(root: &Path, files: &[PathBuf]) -> Result<Prepared> {
-    let directory = match std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(root)
-    {
-        Ok(directory) => directory,
+    let directory = match open_root(root) {
+        Ok(directory) => Arc::new(directory),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Prepared(Vec::new())),
-        Err(error) => return Err(error).context("opening downloaded-file directory"),
+        Err(error) => return Err(error).context("opening downloaded-file directory without following symlinks"),
     };
+    let mut directories: HashMap<PathBuf, Arc<File>> = HashMap::new();
     let mut entries = Vec::with_capacity(files.len());
     for path in files {
         let parts: Vec<_> = path
@@ -88,9 +85,15 @@ fn prepare_files(root: &Path, files: &[PathBuf]) -> Result<Prepared> {
             })
             .collect::<Result<_>>()?;
         let (leaf, parents) = parts.split_last().context("empty downloaded-file path")?;
-        let mut parent = directory.try_clone()?;
+        let mut parent = directory.clone();
+        let mut prefix = PathBuf::new();
         let mut absent = false;
         for part in parents {
+            prefix.push(std::ffi::OsStr::from_bytes(part.as_bytes()));
+            if let Some(pinned) = directories.get(&prefix) {
+                parent = pinned.clone();
+                continue;
+            }
             let fd = unsafe {
                 libc::openat(
                     parent.as_raw_fd(),
@@ -107,7 +110,8 @@ fn prepare_files(root: &Path, files: &[PathBuf]) -> Result<Prepared> {
                 return Err(error)
                     .context("opening downloaded-file parent without following symlinks");
             }
-            parent = unsafe { File::from_raw_fd(fd) };
+            parent = Arc::new(unsafe { File::from_raw_fd(fd) });
+            directories.insert(prefix.clone(), parent.clone());
         }
         if absent {
             continue;
@@ -116,6 +120,28 @@ fn prepare_files(root: &Path, files: &[PathBuf]) -> Result<Prepared> {
     }
     Ok(Prepared(entries))
 }
+// Guard the entire configured root path, including ancestors above its final
+// component. O_NOFOLLOW on just the last directory still follows an earlier link.
+fn open_root(root: &Path) -> std::io::Result<File> {
+    let absolute = if root.is_absolute() { root.to_path_buf() } else { std::env::current_dir()?.join(root) };
+    let mut directory = std::fs::OpenOptions::new().read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC).open("/")?;
+    for component in absolute.components() {
+        let name = match component {
+            Component::RootDir | Component::CurDir => continue,
+            Component::Normal(name) => name,
+            Component::ParentDir => std::ffi::OsStr::new(".."),
+            Component::Prefix(_) => return Err(std::io::Error::other("unsupported download root prefix")),
+        };
+        let name = CString::new(name.as_bytes())?;
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        directory = unsafe { File::from_raw_fd(fd) };
+    }
+    Ok(directory)
+}
+
 #[cfg(test)]
 fn unlink_files(root: &Path, files: &[PathBuf]) -> Result<()> {
     prepare_files(root, files)?.unlink()
@@ -134,6 +160,33 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &link).unwrap();
         assert!(unlink_files(&link, &["payload".into()]).is_err());
         assert_eq!(std::fs::read(outside.join("payload")).unwrap(), b"outside retained");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn ancestors_of_the_configured_root_cannot_redirect_deletion() {
+        let root = super::super::tests::review_directory("ancestor-unlink");
+        let outside = root.join("outside/collection");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("payload"), b"outside retained").unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), root.join("parent")).unwrap();
+        assert!(unlink_files(&root.join("parent/collection"), &["payload".into()]).is_err());
+        assert_eq!(std::fs::read(outside.join("payload")).unwrap(), b"outside retained");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_large_flat_torrent_shares_one_pinned_directory_and_keeps_unrelated_data() {
+        let root = super::super::tests::review_directory("flat-unlink");
+        std::fs::create_dir_all(&root).unwrap();
+        let paths: Vec<PathBuf> = (0..1024).map(|i| format!("payload-{i}").into()).collect();
+        for path in &paths { std::fs::write(root.join(path), b"owned").unwrap(); }
+        std::fs::write(root.join("owner-notes"), b"unrelated").unwrap();
+        let prepared = prepare_files(&root, &paths).unwrap();
+        assert_eq!(prepared.0.len(), paths.len());
+        assert!(prepared.0.iter().all(|(parent,_)| Arc::ptr_eq(parent, &prepared.0[0].0)),
+                "one descriptor per directory, not per payload file");
+        prepared.unlink().unwrap();
+        assert!(paths.iter().all(|path| !root.join(path).exists()));
+        assert_eq!(std::fs::read(root.join("owner-notes")).unwrap(), b"unrelated");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

@@ -6,8 +6,9 @@ import daemon as d
 import fixtures
 
 
-def bundle(box):
-    root=box.downloads/'owned-torrent';(root/'nested').mkdir(parents=True)
+def bundle(box,nested=False):
+    base=box.downloads/'parent' if nested else box.downloads
+    root=base/'owned-torrent';(root/'nested').mkdir(parents=True)
     payloads={'nested/payload.bin':b'a'*32768,'leaf.bin':b'b'*16384}
     for relative,data in payloads.items():(root/relative).write_bytes(data)
     stream=b''.join(payloads.values())
@@ -20,9 +21,9 @@ def bundle(box):
 
 def run(name,binary,systemd,dormant):
     with d.Case('daemon',name) as case:
-        for substitution in ('ordinary','leaf','parent','root'):
+        for substitution in ('ordinary','leaf','parent','root','ancestor'):
             with d.Sandbox() as box,d.Harness(case,binary,box,systemd) as h:
-                root,torrent,hash_,payloads=bundle(box)
+                root,torrent,hash_,payloads=bundle(box,substitution=='ancestor')
                 unrelated=root/'my-unrelated-notes.txt';unrelated.write_bytes(b'owner file: preserve exactly')
                 p=h.start_serve(idle_exit_secs=0);assert h.receive_ready() and h.wait_engine()
                 with d.ApiConn(h) as client:
@@ -35,8 +36,10 @@ def run(name,binary,systemd,dormant):
                     client.hello();row=client.call('torrents.get',dict(hash=hash_))['result']['torrent']
                     case.check(row['state']==expected and row['checked'] is (not dormant),
                         'delete control uses an actual '+('dormant restored' if dormant else 'live seeding')+' torrent',json.dumps(row))
-                    outside=box.root/'outside';(outside/'nested').mkdir(parents=True)
-                    for relative in payloads:(outside/relative).write_bytes(b'outside: never delete')
+                    outside=box.root/'outside'
+                    outside_payload=outside/root.name if substitution=='ancestor' else outside
+                    (outside_payload/'nested').mkdir(parents=True)
+                    for relative in payloads:(outside_payload/relative).write_bytes(b'outside: never delete')
                     outside_files={path:path.read_bytes() for path in outside.rglob('*') if path.is_file()}
                     if substitution=='leaf':
                         (root/'leaf.bin').unlink();(root/'leaf.bin').symlink_to(outside/'leaf.bin')
@@ -45,6 +48,10 @@ def run(name,binary,systemd,dormant):
                     elif substitution=='root':
                         retained=box.downloads/'original-root';root.rename(retained);unrelated=retained/unrelated.name
                         root.symlink_to(outside,target_is_directory=True)
+                    elif substitution=='ancestor':
+                        retained=box.downloads/'original-parent';root.parent.rename(retained)
+                        unrelated=retained/root.name/unrelated.name
+                        root.parent.symlink_to(outside,target_is_directory=True)
                     step=case.step('delete-with-files '+substitution,'only declared in-root files may be removed; outside and unrelated bytes survive')
                     reply=client.response(client.send('torrents.remove',dict(hashes=[hash_],delete_files=True)))
                     if reply.get('result',{}).get('state')=='pending':
