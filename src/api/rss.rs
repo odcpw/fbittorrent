@@ -41,6 +41,7 @@ pub struct FeedReadArgs { pub feed:String, pub item:String, pub read:bool }
 #[serde(deny_unknown_fields)]
 pub struct FeedGrabArgs {
     pub feed:String, pub item:String,
+    #[serde(skip_serializing_if="Option::is_none")] pub stage:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub seed:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub stopped:Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")] pub save_path:Option<String>,

@@ -61,7 +61,7 @@ function create(service,changed) {
   f.current=current;f.currentFeed=feed
   f.frame=function(frame,request){
     if(!f.visible)return
-    if(frame.ev==="mutation.result" && pending[frame.ref]){
+    if(frame.ev==="mutation.result" && frame.outcome!=="pending" && pending[frame.ref]){
       var task=pending[frame.ref];delete pending[frame.ref]
       if(task.generation===epoch){if(frame.outcome==="done"){if(task.done)task.done(frame.result || {});refreshRead();publish()}else failure(frame.error)}
     }

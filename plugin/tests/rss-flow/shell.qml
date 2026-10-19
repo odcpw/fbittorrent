@@ -24,6 +24,8 @@ ShellRoot {
     check("failed_read_stays_unread",!s.store.topics['rss.items:f'].b.read && f.message==="Could not save read state",f.snapshot())
     f.read(false);call=s.calls[s.calls.length-1];var ref="r"+s.calls.length;call.done({state:"pending"})
     check("pending_read_has_no_optimistic_mark",!s.store.topics['rss.items:f'].b.read,s.calls)
+    s.store.mutations[ref]={status:"pending"};f.frame({ev:"delta",topic:"events"})
+    check("pending_ack_keeps_completion",f.message==="" && !s.store.topics['rss.items:f'].b.read,f.snapshot())
     f.frame({ev:"mutation.result",ref:ref,outcome:"failed",error:{message:"Read rejected"}})
     check("async_failure_is_visible",f.message==="Read rejected" && !s.store.topics['rss.items:f'].b.read,f.snapshot())
     f.hide();check("hidden_releases_items",s.rssTopics.length===0 && !s.store.topics['rss.items:f'],s.rssTopics)
