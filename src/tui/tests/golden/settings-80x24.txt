@@ -10,14 +10,14 @@
 ││   Upload limit             Unlimited                                       ││
 ││   Turtle download limit    Unlimited                                       ││
 ││   Turtle upload limit      Unlimited                                       ││
+││   Peer port                6882                                            ││
 ││ ↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel                     ││
 ││ Limits: bytes/s; K/M suffixes; empty = unlimited.                          ││
 ││                                                                            ││
 ││ Extra downloads wait. Encryption leaves your IP visible.                   ││
 ││ A required VPN blocks transfers while disconnected.                        ││
 ││ Save to apply draft settings.                                              ││
-││ Changing encryption or VPN reopens the engine.                             ││
-││                                                                            ││
+││ Changing encryption, VPN or port reopens the engine.                       ││
 │╰────────────────────────────────────────────────────────────────────────────╯│
 ╰──────────────────────────────────────────────────────────────────────────────╯
 [Settings] (Esc) Cancel  (Enter) Save  (j) Next setting …               (?) Help

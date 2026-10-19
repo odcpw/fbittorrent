@@ -6,7 +6,8 @@ const LIMIT_NAMES: [&str; 4] = [
     "Turtle download limit",
     "Turtle upload limit",
 ];
-pub(super) const SETTINGS_ROWS: usize = 8;
+pub(super) const SETTINGS_ROWS: usize = 9;
+pub(super) const PORT_ROW: usize = 8;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
     match index {
         0 => cfg.download_limit_bps,
@@ -25,6 +26,7 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     let draft = serde_json::to_value(draft).unwrap();
     let mut patch = serde_json::Map::new();
     for key in [
+        "peer_port",
         "max_active_downloads",
         "peer_encryption",
         "network_interface",
@@ -41,6 +43,7 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
     patch.into()
 }
 pub(super) fn native_settings(cfg: &mut Config, settings: &crate::api::Settings) -> Result<()> {
+    cfg.peer_port = u16::try_from(settings.peer_port)?;
     cfg.max_active_downloads = usize::try_from(settings.max_active_downloads)?;
     cfg.peer_encryption = match settings.peer_encryption {
         crate::api::PeerEncryption::Prefer => "prefer",
@@ -89,6 +92,35 @@ fn parse_rate(value: &str) -> Result<Option<u32>> {
     Ok((n != 0).then_some(n))
 }
 impl TuiApp {
+    pub(super) fn edit_peer_port(&mut self) -> Cmd<Msg> {
+        let port = self.settings.as_ref().unwrap().cfg.peer_port;
+        self.open_prompt(
+            PromptKind::SettingPeerPort,
+            "Peer port · 0 automatic · 1–65535",
+            false,
+        );
+        self.prompt
+            .as_mut()
+            .unwrap()
+            .input
+            .set_value(port.to_string());
+        Cmd::none()
+    }
+    pub(super) fn apply_peer_port_input(&mut self, value: &str) -> Cmd<Msg> {
+        if let Some(modal) = self.settings.as_mut() {
+            match value.trim().parse::<u16>() {
+                Ok(port) => {
+                    modal.cfg.peer_port = port;
+                    modal.error.clear();
+                }
+                Err(_) => {
+                    modal.error = "Use a peer port from 0 to 65535 (0 chooses automatically)".into()
+                }
+            };
+        }
+        Cmd::none()
+    }
+
     pub(super) fn edit_limit(&mut self, index: usize) -> Cmd<Msg> {
         let value = self.settings.as_ref().and_then(|m| limit(&m.cfg, index));
         self.open_prompt(
