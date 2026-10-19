@@ -681,3 +681,19 @@ an automatic retry. `torrents.add` optionally adds `disk: {free_bytes: u64,
 needed_bytes: u64}` when known selected metadata exceeds free space; the CLI keeps
 exit 0 and adds warnings[].code=disk_low with a binary-unit message. The new
 disk.ndjson transcript covers add capacity, summary low and disk_full state.
+
+### P6-09: peer port and sleep inhibition
+
+The existing restart-class `peer_port` setting is applied by
+`app.settings.set {peer_port}` or `settings --port N`. The daemon instance,
+API socket and connected clients survive; event subscribers receive both
+starting/running `engine.changed` frames (peer-port.ndjson). This adds no
+operation, capability or field to contract 1.2.8. While any run-intent torrent
+is downloading, stalled, metadata or checking, one owned
+`systemd-inhibit --what=sleep --who=fbittorrent --why=Downloading --mode=block sleep infinity`
+child holds the inhibitor. Queued, paused, seeding-only, done, parked and error
+states do not inhibit. The last eligible torrent stopping or daemon drain kills
+the child's process group within five seconds. A failed launcher is cleaned
+and retried at most every five seconds while work remains; no child or polling
+worker runs while there is no eligible work. The session bus address is
+preserved independently of the child's XDG runtime directory.

@@ -380,6 +380,7 @@ impl Bus {
             _ => Vec::new(),
         };
         self.daemon.disk.lock().unwrap().observe(&rows);
+        if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
         let rows: Vec<Torrent> = rows
             .into_iter()
             .map(ops::torrents::torrent)

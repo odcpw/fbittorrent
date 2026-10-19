@@ -6,6 +6,7 @@ mod log_capture;
 mod runtime_dir;
 mod sdnotify;
 mod signals;
+mod inhibit;
 mod upgrade;
 mod test_ready;
 pub(crate) mod supervisor;
@@ -38,6 +39,7 @@ pub struct Daemon {
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
+    pub(crate) inhibitor: inhibit::Inhibitor,
     pub(crate) logs: Arc<log::Ring>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
@@ -379,6 +381,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,
+        inhibitor: inhibit::Inhibitor::new()?,
         logs: log_capture.ring.clone(),
         disk: Default::default(),
         imdb: Default::default(),
@@ -414,6 +417,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.inhibitor.stop();
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.

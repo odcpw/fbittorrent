@@ -418,3 +418,37 @@ Every fresh run is mirrored under `/tmp/fbt-track-a-evidence/fbt-p5-07-gei/`.
 UI banner/urgent icon/add-sheet refusal/goldens: deferred to track C/D. No all.sh
 between track beads by owner instruction. Follow-up: no disk-capacity proof yet
 for deferred URL/magnet metadata; these adds omit disk until size is known.
+
+## P6-09 — daemon/API/CLI (fbt-p6-09-omx)
+
+Added one condition-variable-driven inhibitor owner, observing run-intent
+downloading/stalled/metadata/checking states with no allocations on unchanged
+samples. It cleans its process group independently of launcher exit, releases
+on last stop and drain, and retries failed launchers at most every five seconds
+while eligible work remains. The child has an unblocked signal mask and keeps
+the session bus environment without changing its XDG runtime directory. Existing
+peer_port/settings --port paths are reused. Neighbour edits: bus observation,
+daemon lifecycle wiring, fixture registry; peer-port.ndjson documents the existing
+settings acknowledgement and engine.changed pair (no new wire field/cap/op).
+`FBT_BEAD=fbt-p6-09-omx python3 /tmp/fbt-track-a-run.py check`,
+`units inhibit::`, `units api::fixtures`, `build` pass (one injected-spawner
+lifecycle test, 30 fixture tests). `full` passes **379/0/3 ignored** (`full-final/`).
+The first live runs exposed inherited blocked SIGTERM; the final spawn-mask fix
+was verified with the targeted unit, build and live cases after that full run.
+`cases port_restart_keeps_clients inhibitor_lifecycle` passes foreground and
+systemd (`final-{foreground,systemd}/daemon/`): same instance, surviving API
+connection, two engine.changed frames, actual new loopback TCP listener, one
+inhibitor during actual download, recorded SIGTERM and no live descendants after
+stop/drain. All JSONL/stderr/timestamp traces live under
+`target/test-logs/fbt-p6-09-omx/` and are mirrored under
+`/tmp/fbt-track-a-evidence/fbt-p6-09-omx/`. Actual host sleep inhibition is not
+exercised: the child is a recording shim in both private environments. Settings
+sheet/F6 UI fields are deferred to tracks C/D. No all.sh between track beads.
+
+P6-13 framing conflict found before implementation: installed
+`/usr/share/man/man1/wl-clipboard.1.gz` says --watch automatically enables
+--no-newline and runs the command with selection bytes on stdin. Therefore the
+literal planned `wl-paste --watch cat` loses selection boundaries for ordinary
+newline-free magnets. Requested an explicit ruling for a NUL-delimited
+`wl-paste --watch sh -c 'cat; printf "\\0"'`, retaining one watcher and no
+fbittorrent CLI per change. No P6-13 source edits before that ruling.
