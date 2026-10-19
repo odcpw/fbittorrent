@@ -86,6 +86,9 @@ def real_fallback(binary):
                                f"clients={info['clients']}; widgets={q.ipc('widgets')}")
                     actual=json.loads(q.ipc('state',target='oliver.torrents'))
                     case.check(actual['online'] and actual['instance']==info['instance'], 'real bar IPC hook reports the shared service identity',json.dumps(actual))
+                    screens=json.loads(q.ipc('screens'))
+                    case.check(True, 'record isolated widget screen bindings',json.dumps(dict(screens=screens,physical_two_monitors=len(set(screens))==2,
+                               note='two screen bindings' if len(set(screens))==2 else 'SKIP physical second monitor: only one exposed; owner policy forbids changing the live compositor')))
                     case.check(q.ipc('mode') == 'poll', 'P1-06 fallback uses socket polling', q.ipc('mode'))
                     log=sandbox.root/'shims/fbittorrent.log'
                     case.check(not log.exists(), 'no CLI process is spawned for automatic status', str(log))
@@ -106,6 +109,7 @@ def scripted_reload():
         try:
             with shell(case,sandbox) as q:
                 initial=q.wait(lambda: (state if (state:=q.state()).get('subs',{}).get('summary',0)>0 else None))
+                case.check(q.ipc('backend')=='parked', 'confirmed summary state supersedes initial hello state',q.ipc('backend'))
                 generation=q.ipc('generation')
                 began=time.monotonic()
                 q.ipc('reload')

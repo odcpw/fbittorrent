@@ -18,7 +18,7 @@ function bytes(n) {
   return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]
 }
 
-function rate(n) { return bytes(n) + "/s" }
+function rate(n) { return n === undefined || n === null ? "—" : bytes(n) + "/s" }
 
 function eta(secs) {
   secs = Number(secs)
@@ -67,10 +67,10 @@ function glyph(t) {
 function meta(t) {
   if (t.intent !== undefined) {
     var values = []
-    if (t.progress !== undefined) values.push((t.progress * 100).toFixed(1) + "%")
-    if (t.dl_bps !== undefined) values.push(rate(t.dl_bps))
-    if (t.eta_s !== undefined) values.push(eta(t.eta_s))
-    if (!values.length && t.size !== undefined) values.push(bytes(t.size))
+    if (t.progress !== undefined && t.progress !== null) values.push((t.progress * 100).toFixed(1) + "%")
+    if (t.dl_bps !== undefined && t.dl_bps !== null) values.push(rate(t.dl_bps))
+    if (t.eta_s !== undefined && t.eta_s !== null) values.push(eta(t.eta_s))
+    if (!values.length && t.size !== undefined && t.size !== null) values.push(bytes(t.size))
     values.push(t.seed ? "seeding allowed" : "seed off")
     return values.join(" · ")
   }
@@ -109,6 +109,7 @@ function pctDigits(t) { return Number(t.progress) < 0.1 ? 2 : 1 }
 
 function heroMeta(s) {
   if (!s.ok) return "Backend offline"
+  if (s.loaded === false) return "Loading torrents…"
   if (s.connection === "vpn_waiting") return "Waiting for VPN"
   if (s.active > 0 || Number(s.up) > 0 || Number(s.dl) > 0) return "↓ " + rate(s.dl) + "   ↑ " + rate(s.up)
   if (s.total === 0) return "No torrents"
@@ -124,16 +125,12 @@ function detailPill(s) {
 }
 
 function apiStatus(store, online) {
-  var rows = store.rows(), summary = store.summary, counts = summary.counts || {}
-  var result = {ok:online, torrents:rows, total:rows.length, active:0, seeding:0, stopped:0, queued:0,
+  var summary = store.summary, counts = summary.counts || store.counts
+  var result = {ok:online, loaded:!!summary.counts || store.hasTorrents, total:counts.total || 0,
+    active:(counts.downloading || 0) + (counts.metadata || 0) + (counts.checking || 0) + (counts.stalled || 0),
+    seeding:counts.seeding || 0, stopped:(counts.paused || 0) + (counts.done || 0), queued:counts.queued || 0,
     dl:summary.dl_bps === undefined ? store.transfer.dl_bps : summary.dl_bps,
     up:summary.ul_bps === undefined ? store.transfer.ul_bps : summary.ul_bps}
-  rows.forEach(function(t) {
-    if (isActive(t)) result.active++
-    else if (t.state === "seeding") result.seeding++
-    else if (t.state === "queued") result.queued++
-    else result.stopped++
-  })
   if (store.info.state === "parked" || (summary.network && summary.network.state !== "ready")) result.connection = "vpn_waiting"
   return result
 }

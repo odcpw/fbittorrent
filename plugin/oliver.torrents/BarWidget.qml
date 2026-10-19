@@ -34,7 +34,7 @@ Ui.Panel {
   // The widget only exists while the backend runs: launching fbittorrent brings
   // it up, stopping the backend makes it leave the bar again.
   visible: !!svc && svc.online
-  readonly property var rows: svc ? svc.activeTorrents.concat(svc.otherTorrents) : []
+  readonly property var rows: svc ? svc.torrents : []
   property var pendingRemoval: null
 
   function requestRemoval(t) {
@@ -333,7 +333,7 @@ Ui.Panel {
             textFormat: Text.PlainText
             visible: svc && svc.online && root.rows.length === 0
             width: parent.width
-            text: "Nothing here yet.\nCopy a magnet link and press a."
+            text: svc && svc.status.loaded === false ? "Loading torrents…" : "Nothing here yet.\nCopy a magnet link and press a."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -354,13 +354,13 @@ Ui.Panel {
             spacing: Style.space(6)
 
             Repeater {
-              model: root.rows
+              model: svc ? svc.torrentModel : null
               TorrentRow {
                 host: root
-                required property var modelData
+                required property var model
                 required property int index
                 width: rowColumn.width
-                torrent: modelData
+                torrent: model
                 rowIdx: index
               }
             }

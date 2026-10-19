@@ -27,6 +27,15 @@ Item {
   property var pending: []
   readonly property bool busy: pending.length > 0
   property var torrents: []
+  property string sortKey: "added"
+  property bool sortReverse: false
+  readonly property alias torrentModel: rowsModel
+  ListModel { id: rowsModel; dynamicRoles: true }
+  function syncRows() {
+    if (store.syncModel(rowsModel, sortKey, sortReverse)) torrents = store.rows(store.modelOrder())
+  }
+  onSortKeyChanged: syncRows()
+  onSortReverseChanged: syncRows()
   readonly property var activeTorrents: torrents.filter(Model.isActive)
   readonly property var otherTorrents: torrents.filter(function(t) { return !Model.isActive(t) })
   readonly property bool transferring: Number(status.dl) > 0 || Number(status.up) > 0
@@ -59,11 +68,13 @@ Item {
     reconnecting = c.reconnecting; instance = c.instance
     pending = c.state().pending
     lastError = c.lastError ? c.lastError.message : ""
-    backendState = c.online && c.hello ? c.hello.state : c.mode
+    backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
   }
   function applyFrame(frame, request) {
-    var rowsChanged = store.apply(frame, request)
-    if (rowsChanged) torrents = store.rows()
+    var rowsChanged
+    try { rowsChanged = store.apply(frame, request) }
+    catch (error) { client.reset("invalid state stream: " + String(error)); return }
+    syncRows()
     if (rowsChanged || frame.topic === "summary" || (request && frame.ok)) {
       status = Model.apiStatus(store, online)
     }
@@ -155,7 +166,7 @@ Item {
       if (!socket.connected) restart()
     }
   }
-  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: root.client.tick() }
+  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.client.tick(); root.syncRows() } }
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
   Timer { id: stoppedTimer; interval: 10000; onTriggered: root.stoppedRecently = false }
   Process {

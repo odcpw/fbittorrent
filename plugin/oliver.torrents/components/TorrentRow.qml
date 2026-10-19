@@ -16,7 +16,7 @@ CursorSurface {
     property int rowIdx: 0
     readonly property bool active: torrent ? Model.isActive(torrent) : false
     readonly property bool stopped: torrent ? Model.isStopped(torrent) : false
-    readonly property real progress: torrent && torrent.progress !== undefined ? Math.max(0, Math.min(1, Number(torrent.progress))) : 0
+    readonly property real progress: torrent && torrent.progress !== undefined && torrent.progress !== null ? Math.max(0, Math.min(1, Number(torrent.progress))) : 0
 
     hasCursor: host.cursorActive && host.focusSection === "rows" && host.rowIndex === rowIdx
     foreground: host.foreground
@@ -77,7 +77,7 @@ CursorSurface {
         Item {
           Layout.fillWidth: true
           implicitHeight: Style.space(3)
-          visible: row.torrent && row.torrent.progress !== undefined && (row.progress < 1 || row.active)
+          visible: row.torrent && row.torrent.progress !== undefined && row.torrent.progress !== null && (row.progress < 1 || row.active)
           Rectangle {
             anchors.fill: parent
             radius: height / 2
@@ -112,8 +112,9 @@ CursorSurface {
 
       PanelActionButton {
         objectName: "toggle-" + (row.torrent ? row.torrent.hash : "")
-        visible: !(row.torrent && Number(row.torrent.completion_on || 0) > 0
-                   && Number(row.torrent.ratio_limit) === 0)
+        visible: !(row.torrent && (row.torrent.intent !== undefined
+                   ? row.torrent.state === "done" && !row.torrent.seed
+                   : Number(row.torrent.completion_on || 0) > 0 && Number(row.torrent.ratio_limit) === 0))
         iconText: row.stopped ? "󰐊" : "󰏤"
         tooltipText: row.stopped ? "Start (p)" : "Stop (p)"
         foreground: host.foreground

@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 import shutil
+import hashlib
+import json
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -15,7 +17,8 @@ def prepare(sandbox, recipe, source=None, wayland=False):
     shutil.copytree(fixtures, config / 'Fixtures')
     for name in ('Commons', 'Ui'):
         (config / name).symlink_to('/usr/share/omarchy/shell/' + name, target_is_directory=True)
-    env = dict(sandbox.env, FBT_FIXTURE_NAMES=__import__('json').dumps(sorted(p.name for p in fixtures.glob('*.ndjson'))), QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', FBT_TEST_HOOKS='1')
+    env = dict(sandbox.env, FBT_FIXTURE_NAMES=json.dumps(sorted(p.name for p in fixtures.glob('*.ndjson'))), QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software', FBT_TEST_HOOKS='1')
+    env['FBT_FIXTURE_METADATA']=json.dumps({p.name:dict(md5=hashlib.md5(p.read_bytes()).hexdigest(),lines=len(p.read_text().splitlines())) for p in fixtures.glob('*.ndjson')})
     if wayland:
         display = Path(os.environ.get('WAYLAND_DISPLAY', 'wayland-1'))
         if not display.is_absolute(): display = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/' + str(os.getuid()))) / display
