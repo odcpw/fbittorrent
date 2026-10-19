@@ -26,8 +26,10 @@ impl TuiApp {
                 }
             },
             Scope::Modal(kind) => match kind {
+                ModalKind::Log => "Log",
                 ModalKind::Files => "Files",
                 ModalKind::Details => "Details",
+                ModalKind::Poster => "Card",
                 ModalKind::Providers => "Providers",
                 ModalKind::Settings => "Settings",
                 ModalKind::Help => "Help",
@@ -71,6 +73,7 @@ impl TuiApp {
     pub(super) fn footer_selection(&self) -> Option<String> {
         if let Some(notice)=self.connection_banner() {return Some(notice.into_owned());}
         if self.daemon_stopped {return Some("fbittorrent stopped · Enter starts it again".into());}
+        if self.poster_open {return self.poster_target.as_ref().map(|(name,_)|name.clone());}
         if let Some(files) = &self.files {
             return files
                 .list

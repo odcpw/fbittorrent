@@ -26,5 +26,5 @@
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ✓ Done · done · 32 KiB/s cap · stops when complete (u to seed) · /fixture/downloads
-[Torrents] (Enter) Details  (o) Open  (u) Seed  (d) Remove, keep files  (D) Delete with files  (a) Add …        (?) Help
+[Torrents] (Enter) Details  (o) Open  (v) Card  (u) Seed  (d) Remove, keep files  (D) Delete with files …       (?) Help
 Sintel.2010.1080p

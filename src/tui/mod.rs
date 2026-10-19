@@ -29,16 +29,21 @@ use modals_files::*;
 #[path = "modals/details.rs"]
 mod modals_details;
 use modals_details::*;
+#[path = "modals/poster.rs"]
+mod modals_poster;
 #[path = "modals/providers.rs"]
 mod modals_providers;
 use modals_providers::*;
 #[path = "modals/settings.rs"]
 mod modals_settings;
 use modals_settings::*;
+#[path="modals/settings_fields.rs"]
+mod settings_fields;
 #[path = "modals/prompt.rs"]
 mod modals_prompt;
 use modals_prompt::*;
 mod imdb_card;
+mod imdb_cache;
 mod motion;
 mod mouse;
 use mouse::*;
@@ -54,9 +59,25 @@ pub(crate) mod actions;
 mod store;
 mod format;
 mod palette;
+mod feedback;
+mod limits;
+#[cfg(test)]
+#[path="tests/limits.rs"]
+mod limit_tests;
+#[cfg(test)]
+#[path="tests/log.rs"]
+mod log_tests;
+#[path="modals/log.rs"]
+mod modals_log;
 #[cfg(test)]
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
+#[cfg(test)]
+#[path = "tests/palette.rs"]
+mod palette_tests;
+#[cfg(test)]
+#[path = "tests/posters.rs"]
+mod poster_tests;
 #[cfg(test)]
 #[path = "tests/responsive.rs"]
 mod responsive_tests;
@@ -86,7 +107,7 @@ impl Model for TuiApp {
         }
         self.rss_loaded = true;
         let first=if self.cfg.native()&&self.presence.is_none() {self.start_daemon()} else {self.poll()};
-        let mut cmds = vec![first, self.load_plugins(), self.load_ratings(), self.load_rss()];
+        let mut cmds = vec![self.subscribe_ui(),first, self.load_plugins(), self.load_ratings(), self.load_rss()];
         cmds.push(self.refresh_shows(false));
         Cmd::batch(cmds)
     }
@@ -133,7 +154,8 @@ impl Model for TuiApp {
             Msg::Hover => {
                 if self.acknowledge_signal() { return Cmd::quit(); }
                 let ttl = if self.status_is_error { 15 } else { 8 };
-                if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); }
+                if !self.status.is_empty() && !self.search_running && self.status_at.elapsed() > Duration::from_secs(ttl) { self.status.clear(); self.status_is_error=false; self.status_success=false; }
+                self.feedback.tick();
                 let recovery=self.recovery_tick();
                 Cmd::batch(vec![recovery,self.on_hover()])
             }
@@ -182,27 +204,24 @@ impl Model for TuiApp {
                 Cmd::none()
             }
             Msg::Attached(result) => match result {
-                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence); self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume]) }
+                Ok(presence) => { if let Some(previous)=&self.presence {previous.close();} self.poll_inflight=false; self.recovery.connected(&presence.hello.server.version,env!("CARGO_PKG_VERSION")); self.store.hello(presence.hello.clone()); self.presence=Some(presence);self.alt_busy=false; self.failed_polls=0; self.daemon_stopped=false; let resume=self.native_search_resume(); Cmd::batch(vec![self.poll(),self.load_plugins(),resume,self.subscribe_ui()]) }
                 Err(error) => { self.recovery.failed(&error,std::time::Instant::now()); self.online=false; self.set_status(error.message,true); Cmd::none() }
             },
             Msg::OwnerShutdown(result) => match result {
                 Ok(()) => Cmd::quit(), Err(error) => { self.set_status(error,true); Cmd::none() }
             },
             Msg::SettingsSaved(result) => match result {
-                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_status("download settings saved",false); self.poll() }
+                Ok(cfg) => { self.cfg=cfg; self.settings=None; self.set_success("download settings saved"); self.poll() }
                 Err(error) => { if let Some(modal)=self.settings.as_mut() { modal.saving=false; modal.error=error; } Cmd::none() }
             },
+            Msg::UiSubscribed{connection,result}=>{if self.presence.as_ref().is_some_and(|c|c.id==connection){if let Err(error)=result{self.set_status(format!("API updates: {error}"),true);}}Cmd::none()},
+            Msg::AltDone(result)=>{self.alt_busy=false;self.update(Msg::ActionDone(result))},
             Msg::ActionDone(r) => {
-                match r { Ok(s) => self.set_status(s, false), Err(e) => self.set_status(e, true) }
+                match r { Ok(s) => self.set_success(s), Err(e) => self.set_status(e, true) }
                 self.poll()
             }
             Msg::Imdb(key, r) => {
-                let st = match r {
-                    Ok(Some((t, p))) => ImdbState::Ready(Box::new(t), p),
-                    Ok(None) => ImdbState::Missing,
-                    Err(e) => ImdbState::Failed(e),
-                };
-                self.imdb.insert(key, st);
+                self.remember_imdb(key,r);
                 Cmd::none()
             }
             Msg::NativeSearchStarted {connection,sequence,result} => self.native_search_started(connection,sequence,result),
@@ -212,7 +231,7 @@ impl Model for TuiApp {
                 self.browse_loading=None;
                 match result {
                     Ok(Some(mut rows))=>{rows.sort_by(|a,b|store::search_order(a,b,self.search_sort,self.search_descending));self.search_wire=rows;let rows=self.search_wire.iter().take(MAX_RESULTS).map(remote::search::display).collect();self.update(Msg::Browse(label,Ok(rows)))},
-                    Ok(None)=>{self.set_status(format!("opened {label} in browser"),false);Cmd::none()},
+                    Ok(None)=>{self.set_success(format!("opened {label} in browser"));Cmd::none()},
                     Err(error)=>{self.set_status(error,true);Cmd::none()}
                 }
             },
@@ -338,8 +357,7 @@ impl Model for TuiApp {
                         if let Some(i) = self.shows.shows.iter().position(|s| s.imdb == t.id) { self.select_show_parent(i + 1); }
                         self.ep_list.borrow_mut().select(None);
                         self.rebuild_inbox();
-                        self.save_shows();
-                        self.set_status(if added { format!("following {label}") } else { format!("already following {label}") }, false);
+                        if self.save_shows() { self.set_success(if added { format!("following {label}") } else { format!("already following {label}") }); }
                         if added { return self.refresh_show(t.id); }
                     }
                     Err(e) => self.set_status(format!("follow: {e}"), true),
@@ -352,9 +370,10 @@ impl Model for TuiApp {
                     Ok(()) => {
                         if let Some(show) = self.shows.get_mut(&imdb) { show.mark_grabbed(&episode.key, &episode.magnet); }
                         self.rebuild_inbox();
-                        self.save_shows();
-                        let title = self.shows.get(&imdb).map(|s| s.title.as_str()).unwrap_or(&imdb);
-                        self.set_status(format!("added {title} {}", episode.key), false);
+                        if self.save_shows() {
+                            let title = self.shows.get(&imdb).map(|s| s.title.as_str()).unwrap_or(&imdb);
+                            self.set_success(format!("added {title} {}", episode.key));
+                        }
                     }
                     Err(e) => self.set_status(format!("adding {}: {e}", episode.key), true),
                 }
@@ -366,7 +385,7 @@ impl Model for TuiApp {
                 self.rss_busy = false;
                 let succeeded = result.is_ok() && error.is_none();
                 let reload = self.update(Msg::Rss { revision, result });
-                if succeeded { self.set_status(label, false); }
+                if succeeded { self.set_success(label); }
                 if let Some(error) = error { self.set_status(error, true); }
                 Cmd::batch(vec![reload, self.poll()])
             }
@@ -405,7 +424,12 @@ impl Model for TuiApp {
         let th = &self.theme;
         self.last_bounds.set(frame.bounds());
         self.rects.borrow_mut().begin();
+        self.feedback.rects.set([None;2]);
         self.poster_drawn.set(false);
+        let hard_overlay=self.log_open||self.files.is_some()||self.details.is_some()||self.providers.is_some()||self.settings.is_some()||self.show_help||self.prompt.is_some();
+        let covered=hard_overlay||self.feedback.queue.visible_count()>0;
+        self.graphics_suppressed.set(covered||self.poster_open);
+        if covered {if let Some(kitty)=&self.kitty {kitty.borrow_mut().clear();}}
         let banner=self.priority_banner();
         let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
@@ -422,9 +446,13 @@ impl Model for TuiApp {
         if let Some(text)=banner {Paragraph::new(format!("! {text}")).style(th.err().bold()).wrap(WrapMode::None).render(root[4],frame);}
         self.rects.borrow_mut().footer=root[5];
         if self.details.is_none(){self.view_status(root[5], frame);}
+        self.graphics_suppressed.set(covered);
         if self.details.is_some() { self.view_details(frame); }
         else if self.files.is_some() { self.view_files(frame); }
+        if !hard_overlay && !self.poster_open {self.feedback.view_toasts(root[1],th,frame);}
+        if self.poster_open {self.view_poster_overlay(frame);}
         if self.providers.is_some() { self.view_providers(frame); }
+        if self.log_open {self.view_log(frame);}
         if self.settings.is_some() { self.view_settings(frame); }
         if self.show_help { self.view_help(frame); }
         if let Some(p) = &self.prompt {
@@ -442,8 +470,7 @@ impl Model for TuiApp {
         // Graphics-layer posters sit above text, so anything drawn over the card
         // (modals, other screens) needs the placement gone.
         if let Some(k) = &self.kitty {
-            let overlay = self.details.is_some() || self.files.is_some() || self.providers.is_some() || self.settings.is_some() || self.show_help || self.prompt.is_some();
-            if !self.poster_drawn.get() || overlay { k.borrow_mut().clear(); }
+            if !self.poster_drawn.get() { k.borrow_mut().clear(); }
         }
     }
 }

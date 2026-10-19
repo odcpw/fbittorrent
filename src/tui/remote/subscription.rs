@@ -43,6 +43,15 @@ impl Subscription<Msg> for ApiSub {
     }
 }
 impl TuiApp {
+    pub(in crate::tui) fn subscribe_ui(&self)->Cmd<Msg>{
+        let Some(connection)=self.presence.clone()else{return Cmd::none();};
+        Cmd::task(move||{
+            let mut topics=vec!["summary"];
+            for topic in ["settings","log"] {if connection.hello.caps.iter().any(|cap|cap==topic){topics.push(topic);}}
+            Msg::UiSubscribed{connection:connection.id,result:connection.request("subscribe",json!({"topics":topics})).map(|_|()).map_err(|e|e.to_string())}
+        })
+    }
+
     pub(in crate::tui) fn api_update(
         &mut self,
         connection: u64,
@@ -98,6 +107,7 @@ impl TuiApp {
                     |api::Event::Delta {topic:api::Topic::Search(_)|api::Topic::Events,..}|api::Event::SearchDone {..}) {
                     self.sync_native_search();
                 }
+                if matches!(&event,api::Event::SnapshotEnd{topic:api::Topic::Log,..}|api::Event::Delta{topic:api::Topic::Log,..}){self.feedback.dirty.set(true);}
                 if rows_changed {
                     let rows = self
                         .store

@@ -76,6 +76,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
     match surface {
         "torrents" => {},
         "details" => {let t=app.torrents[0].clone(); let _=app.open_details(&t);},
+        "poster" => {let key=app.torrents[0].name.clone();crate::tui::poster_tests::ready(&mut app,&key);let _=app.on_key(KeyEvent::new(KeyCode::Char('v')));},
         "done" => app.tor_list.borrow_mut().select(Some(1)),
         "search" => { let _ = app.set_screen(Screen::Search); },
         "shows" => { let _ = app.set_screen(Screen::Shows); },
@@ -96,7 +97,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
             });
         },
         "settings" => app.settings = Some(SettingsModal {
-            cfg: app.cfg.clone(), list: selected_list(), saving:false, connections: vec![Some("proton".into()), None],
+            original:app.cfg.clone(),cfg: app.cfg.clone(), list: selected_list(), saving:false, connections: vec![Some("proton".into()), None],
             error: String::new(),
         }),
         "prompt" => {

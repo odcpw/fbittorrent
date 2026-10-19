@@ -1,6 +1,7 @@
 ╭ Keys ────────────────────────────────────────────────────────────────────────╮
 │                                                                              │
 │ GLOBAL                                                                       │
+│   (z) Turtle limits                                                          │
 │   (1) Torrents                                                               │
 │   (2) Search                                                                 │
 │   (3) Shows                                                                  │
@@ -13,12 +14,11 @@
 │   (Q) Stop fbittorrent                                                       │
 │   (c) Clipboard                                                              │
 │   (r) Refresh                                                                │
+│   (L) Log                                                                    │
 │   (a) Add                                                                    │
+│   (v) Card                                                                   │
 │                                                                              │
 │ SCREEN:TORRENTS                                                              │
-│   (j/↓) Next                                                                 │
-│   (k/↑) Previous                                                             │
-│   (g/Home) First                                                             │
 │ (PgUp) Page up · (PgDn) Page down · (Esc/q/?) Close                          │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯

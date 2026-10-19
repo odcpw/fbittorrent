@@ -457,6 +457,7 @@ test also needs the Omarchy shell running with the plugin enabled.
 <!-- keys:begin -->
 | Scope | Action | tui | dashboard | popup | Note |
 | --- | --- | --- | --- | --- | --- |
+| `global` | Turtle limits | `z` | `z` | `z` |  |
 | `global` | Torrents | `1` | `1` | — |  |
 | `global` | Search | `2` | `2` | — |  |
 | `global` | Shows | `3` | `3` | — |  |
@@ -486,6 +487,17 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `modal:details` | Delete files | `D` | — | — |  |
 | `modal:details` | IMDb | `i` | — | — |  |
 | `modal:details` | Wikipedia | `w` | — | — |  |
+| `global` | Log | `L` | `L` | — |  |
+| `modal:log` | Back | `Esc` | — | — |  |
+| `modal:log` | Back | `L` | — | — |  |
+| `modal:log` | Level | `l` | — | — |  |
+| `modal:log` | Source | `h` | — | — |  |
+| `modal:log` | Previous | `↑` | — | — |  |
+| `modal:log` | Next | `↓` | — | — |  |
+| `modal:log` | First | `Home` | — | — |  |
+| `modal:log` | Last | `End` | — | — |  |
+| `modal:log` | Files | `[` | — | — |  |
+| `modal:log` | Next tab | `]` | — | — |  |
 | `global` | Add | `a` | `a` | `a` |  |
 | `screen:torrents` | Next | `j`, `↓` | `j`, `↓` | `j`, `↓` |  |
 | `screen:torrents` | Previous | `k`, `↑` | `k`, `↑` | `k`, `↑` |  |
@@ -505,7 +517,6 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `screen:torrents` | Follow show (legacy) | `F` | — | — |  |
 | `screen:torrents` | Sequential (legacy) | `s` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
 | `screen:torrents` | First/last priority (legacy) | `f` | — | — | Legacy qBittorrent only; native streaming priority is automatic. |
-| `screen:search` | Card | `v` | — | — |  |
 | `screen:search` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:search` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:search` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -598,6 +609,10 @@ test also needs the Omarchy shell running with the plugin enabled.
 | `prompt` | Sequential (legacy) | `F2` | — | — |  |
 | `prompt` | First/last (legacy) | `F3` | — | — |  |
 | `prompt` | Seed on/off | `F4` | — | — |  |
+| `global` | Card | `v` | — | — |  |
+| `modal:poster` | Back | `Esc`, `v` | — | — |  |
+| `modal:poster` | IMDb | `i` | — | — |  |
+| `modal:poster` | Wikipedia | `w` | — | — |  |
 <!-- keys:end -->
 
 The daemon checks its executable inode and modification time every 30 seconds.

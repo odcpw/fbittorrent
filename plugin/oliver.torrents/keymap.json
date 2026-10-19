@@ -1,6 +1,22 @@
 {
   "actions": [
     {
+      "id": "limits.toggle",
+      "keys": {
+        "dashboard": [
+          "z"
+        ],
+        "popup": [
+          "z"
+        ],
+        "tui": [
+          "z"
+        ]
+      },
+      "label": "Turtle limits",
+      "scope": "global"
+    },
+    {
       "id": "screen.torrents",
       "keys": {
         "dashboard": [
@@ -384,6 +400,140 @@
       "scope": "modal:details"
     },
     {
+      "id": "log.open",
+      "keys": {
+        "dashboard": [
+          "L"
+        ],
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Log",
+      "scope": "global"
+    },
+    {
+      "id": "log.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "L"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.level",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "l"
+        ]
+      },
+      "label": "Level",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.source",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "h"
+        ]
+      },
+      "label": "Source",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.up",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↑"
+        ]
+      },
+      "label": "Previous",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.down",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "↓"
+        ]
+      },
+      "label": "Next",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.first",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Home"
+        ]
+      },
+      "label": "First",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.last",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "End"
+        ]
+      },
+      "label": "Last",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.previous_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "["
+        ]
+      },
+      "label": "Files",
+      "scope": "modal:log"
+    },
+    {
+      "id": "log.next_tab",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "]"
+        ]
+      },
+      "label": "Next tab",
+      "scope": "modal:log"
+    },
+    {
       "id": "torrents.add",
       "keys": {
         "dashboard": [
@@ -681,18 +831,6 @@
       "label": "First/last priority (legacy)",
       "note": "Legacy qBittorrent only; native streaming priority is automatic.",
       "scope": "screen:torrents"
-    },
-    {
-      "id": "search.card",
-      "keys": {
-        "dashboard": null,
-        "popup": null,
-        "tui": [
-          "v"
-        ]
-      },
-      "label": "Card",
-      "scope": "screen:search"
     },
     {
       "id": "search.next",
@@ -1981,6 +2119,55 @@
       },
       "label": "Seed on/off",
       "scope": "prompt"
+    },
+    {
+      "id": "poster.toggle",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "v"
+        ]
+      },
+      "label": "Card",
+      "scope": "global"
+    },
+    {
+      "id": "poster.close",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "Esc",
+          "v"
+        ]
+      },
+      "label": "Back",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.imdb",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "i"
+        ]
+      },
+      "label": "IMDb",
+      "scope": "modal:poster"
+    },
+    {
+      "id": "poster.wiki",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "w"
+        ]
+      },
+      "label": "Wikipedia",
+      "scope": "modal:poster"
     }
   ],
   "version": 1

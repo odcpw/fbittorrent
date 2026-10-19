@@ -45,6 +45,7 @@ impl TuiApp {
                 Span::styled("  ↑ ", th.dimmed()), Span::styled(self.store.transfer.as_ref().map_or_else(||human_rate(self.transfer.up_info_speed),|info|format::rate(info.ul_bps)), th.text()),
                 Span::styled(if Tier::at(area.width)==Tier::Wide {format!("  {} ", th.name)} else {String::new()}, th.dimmed()),
             ];
+            if self.turtle_on()==Some(true){spans.insert(0,Span::styled("󰢃 Turtle ",th.text()));}
             if self.poll_inflight { spans.insert(0, Span::styled(format!("{} ", SPINNER[self.tick % 4]), th.dimmed())); }
             Line::from_spans(spans)
         } else {

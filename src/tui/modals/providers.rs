@@ -77,7 +77,7 @@ impl TuiApp {
             return;
         }
         if !m.error.is_empty() {
-            Paragraph::new(m.error.clone()).style(bg.fg(th.red)).wrap(WrapMode::Word).render(inner, frame);
+            Paragraph::new(th.error_message(&m.error)).style(th.err().bg(th.selection)).wrap(WrapMode::Word).render(inner, frame);
             return;
         }
         if m.plugins.is_empty() {

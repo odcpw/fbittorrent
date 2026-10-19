@@ -29,6 +29,7 @@ ACTIVE='The Diplomat S04E01 1080p WEB-DL H264-GROUP'
 DONE='Sintel.2010.1080p'
 META='Other.Movie.2026.1080p'
 SIZES={'layout_80x24':(80,24),'layout_120x30':(120,30),'layout_160x45':(160,45)}
+CASES=(*SIZES,'poster_overlay_cleanup','low_chroma_theme_markers','log_history','turtle_limits')
 
 
 class PaneUi(native.AttachedTui):
@@ -37,6 +38,7 @@ class PaneUi(native.AttachedTui):
         self.setup_case=self.case
         self.panes=0
         self.target=None
+        self.context=""
 
     def start_owned(self):
         self.case=self.setup_case
@@ -56,7 +58,7 @@ class PaneUi(native.AttachedTui):
         self.panes+=1
         artifact=self.case.path.with_suffix(f'.{self.panes:03}.pane.txt')
         artifact.write_text(pane)
-        return step.close(ok,pane+(f'\nCheck error: {error}' if error else ''),[artifact])
+        return step.close(ok,(self.context+'\n'if self.context else '')+pane+(f'\nCheck error: {error}' if error else ''),[artifact])
 
     def press(self,key,expect,predicate=lambda pane:True,*,literal=True):
         result=self.tmux('send-keys','-t',self.target,*(['-l',key]if literal else[key]))
@@ -145,7 +147,9 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
                 ui.contains(']','Overview  [Files]')
                 ui.observe('read files','real file names and include controls are visible',
                            lambda pane:all(text in pane for text in('The.Diplomat.S04E01.mkv','English.srt','sample.mkv','include/skip')))
-                ui.contains(']','Overview  [Files]')
+                ui.contains(']','Overview  Files  [Log]')
+                ui.contains(']','Overview  Files  [Log]')
+                ui.contains('[','Overview  [Files]')
                 ui.contains('[','[Overview]  Files')
                 ui.contains('Escape','[Torrents]',literal=False)
                 before=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']['intent']
@@ -181,19 +185,163 @@ def drive_size(name,size,binary,setup,sandbox,h,ui,process,torrent):
     ui.case=setup
 
 
+def poster_overlay_cleanup(binary,setup,sandbox,h,ui,process,torrent):
+    """Real decoded poster through the portable path; log actual tmux capability."""
+    import re,shutil
+    cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent'
+    identifier='tt17491088'
+    title=dict(id=identifier,name='The Diplomat',year=2023,kind='TV series',stars='Keri Russell, Rufus Sewell',
+               poster_url='http://127.0.0.1/poster-fixture.jpg',rating=7.9,votes=102000,
+               blurb='A veteran US diplomat takes a new assignment.',wiki_url='')
+    def document(kind,key,value):
+        directory=cache/'imdb'/kind;directory.mkdir(parents=True,exist_ok=True)
+        path=directory/(re.sub('[^a-z0-9]','_',key.lower())[:120]+'.json');path.write_text(json.dumps(value));path.chmod(0o600)
+    document('by-name-v2',ACTIVE,dict(id=identifier));document('by-id',identifier,title)
+    posters=cache/'posters';posters.mkdir(exist_ok=True)
+    shutil.copyfile(fixtures.HERE/'fixtures/imdb/poster.jpg',posters/(identifier+'.jpg'))
+    (posters/(identifier+'.jpg')).chmod(0o600)
+    (cache/'title.ratings.tsv').write_text('tconst\taverageRating\tnumVotes\n'+identifier+'\t7.9\t102000\n')
+    target,done=ui.start_owned()
+    with Case('tui_smoke','poster_overlay_cleanup')as case:
+        ui.case=case
+        ui.tmux('resize-window','-t',target,'-x','80','-y','24')
+        # kitty_supported() intentionally disables the graphics layer under tmux.
+        # Text capture can prove the half-block path; the real kitty encoder has
+        # its own delete/restore control in tui::poster_tests.
+        features=ui.tmux('display-message','-p','-t',target,'#{pane_tty} #{client_termfeatures}').stdout.strip()
+        ui.observe('detect terminal graphics; kitty=false under tmux; '+features,
+                   'portable half-block path is exercised without inventing kitty support',lambda pane:'Torrents (3)'in pane)
+        with d.ApiConn(h)as client:
+            client.hello();ui.select_active(client)
+        ui.contains('v','IMDb · v/Esc Back')
+        ui.observe('read decoded poster','local poster pixels, title, year, rating and cast are visible',
+                   lambda pane:'The Diplomat (2023)'in pane and '7.9'in pane and 'Keri Russell'in pane and any(c in pane for c in('▀','▄')))
+        ui.contains('?','GLOBAL')
+        ui.observe('capture Help over poster; kitty=false','no poster cells remain in the Help capture',lambda pane:'GLOBAL'in pane and '▀'not in pane and '▄'not in pane)
+        ui.press('Escape','closing Help restores the poster card',lambda pane:'IMDb · v/Esc Back'in pane and any(c in pane for c in('▀','▄')),literal=False)
+        ui.press('Escape','Esc hides the centered card and returns to the list',lambda pane:'IMDb · v/Esc Back'not in pane and '[Torrents]'in pane,literal=False)
+        ui.press('q','q detaches the card test while the owner survives',lambda pane:done.exists()and done.read_text()=='0'and process.child.poll()is None)
+    ui.case=setup
+
+
+def low_chroma_theme_markers(binary,setup,sandbox,h,ui,process,torrent):
+    """Actual failed recheck/open, never fabricated API state or UI text."""
+    import shutil
+    with d.ApiConn(h)as client:
+        client.hello()
+        rows=client.call('torrents.list',{})['result']['torrents']
+        selected=next(row for row in rows if row['name']==ACTIVE)
+        cached=Path(sandbox.env['XDG_DATA_HOME'])/'fbittorrent/engine'/(selected['hash']+'.torrent')
+        metainfo=cached.read_bytes();cached.unlink();cached.mkdir()
+        hidden=sandbox.root/'held-downloads'
+        try:
+            client.call('torrents.recheck',dict(hashes=[selected['hash']]),ref='theme-error')
+            h.wait_for(lambda:((rows:=client.call('torrents.list',{})['result']['torrents'])and any(row['hash']==selected['hash']and row['state']=='error'for row in rows),json.dumps(rows)),
+                       'real failed metainfo-cache write becomes an engine error')
+            sandbox.downloads.rename(hidden)
+            with Case('tui_smoke','low_chroma_theme_markers')as case:
+                for name,low in [('owner',True),('tokyo-night',False)]:
+                    source=REPO/'contracts/ui/themes'/(name+'.toml')
+                    destination=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
+                    destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,destination)
+                    target,done=ui.start_owned();ui.tmux('resize-window','-t',target,'-x','80','-y','24')
+                    ui.case=case;ui.context=f'theme={name}; colors={destination}; fixture={source}'
+                    ui.observe('load isolated theme','the real error row has its worded state cell',lambda pane:'! Error'in pane)
+                    current=client.call('torrents.list',{})['result']['torrents'];current.sort(key=lambda row:(-row['added_at'],row['hash']))
+                    ui.press('Home','first row selected',lambda pane:pane.splitlines()[-1].strip()==current[0]['name'],literal=False)
+                    for row in current[1:]:
+                        if ui.capture(target).splitlines()[-1].strip()==ACTIVE:break
+                        ui.press('Down','select '+row['name'],lambda pane,title=row['name']:pane.splitlines()[-1].strip()==title,literal=False)
+                    ui.observe('read keyboard target','the failed downloading fixture is selected',lambda pane:pane.splitlines()[-1].strip()==ACTIVE)
+                    ui.press('o','failed open reports an error with the correct monochrome marker',
+                             lambda pane:('! Error'in pane)and(pane.splitlines()[-1].lstrip().startswith('!')==low)and
+                             any(text in pane.splitlines()[-1].lower()for text in('missing','not found','directory','cannot','no such','could not','reading','internal','invalid_state')))
+                    ui.press('q','q detaches after the error',lambda pane:done.exists()and done.read_text()=='0')
+                    ui.case=setup;ui.context=''
+        finally:
+            if hidden.exists():hidden.rename(sandbox.downloads)
+            cached.rmdir();cached.write_bytes(metainfo);cached.chmod(0o600)
+
+
+def turtle_limits(binary,setup,sandbox,h,ui,process,torrent):
+    with d.ApiConn(h)as client:
+        client.hello();client.call('transfer.set_limits',dict(alt_download_bps=65536,upload_bps=0));client.call('transfer.set_alt',dict(on=True))
+        ui.start_owned();ui.tmux('resize-window','-t',ui.target,'-x','80','-y','24')
+        with Case('tui_smoke','turtle_limits')as case:
+            ui.case=case
+            ui.observe('receive confirmed summary','the initial turtle indicator arrives by push',lambda pane:'󰢃 Turtle'in pane.splitlines()[0])
+            ui.tmux('send-keys','-t',ui.target,'-l','z')
+            ui.observe('toggle z off','the indicator disappears within the one-second TUI push interval',lambda pane:'󰢃 Turtle'not in pane.splitlines()[0]and'turtle limits off'in pane.splitlines()[-1],timeout=1)
+            ui.tmux('send-keys','-t',ui.target,'-l','z')
+            ui.observe('toggle z on','the indicator returns within the one-second TUI push interval',lambda pane:'󰢃 Turtle'in pane.splitlines()[0]and'turtle limits on'in pane.splitlines()[-1],timeout=1)
+            ui.contains('F6','Download settings',literal=False)
+            for _ in range(4):ui.press('Down','select next settings field',lambda pane:'Download settings'in pane,literal=False)
+            ui.contains('Right','Download limit · B/s',literal=False)
+            ui.press('128K','type a numeric rate with K suffix',lambda pane:'128K'in pane)
+            ui.contains('Enter','131072 B/s',literal=False)
+            ui.contains('Enter','[Torrents]',literal=False)
+            settings=client.call('app.settings.get')['result']
+            case.check(settings.get('download_limit_bps')==131072 and settings.get('alt_download_limit_bps')==65536 and settings['alt_limits_on'],
+                       'F6 saves only the edited rate over API v1',json.dumps(settings))
+            rows=client.call('torrents.list',{})['result']['torrents']
+            case.check(all(row.get('upload_limit_bps')==32768 for row in rows),'global unlimited never lifts the per-torrent default cap',json.dumps(rows))
+            ui.press('q','q detaches with the confirmed turtle still on',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
+        ui.case=setup
+
+
+def log_history(binary):
+    """A real injected engine error and a failed open survive in the pushed log."""
+    import shutil
+    with Case('tui_smoke_setup','log_fixtures')as setup, fixtures.Sandbox()as sandbox:
+        source=sandbox.downloads/'history.mkv';source.write_bytes(b'local log fixture'*1024)
+        item=fixtures.torrent_fixture(sandbox.root,[source]);fixtures.corrupt_byte(source,0)
+        sandbox.env['FBT_TEST_INJECT_ERROR']=item.info_hash;sandbox.keys.append('FBT_TEST_INJECT_ERROR')
+        theme=Path(sandbox.env['XDG_STATE_HOME'])/'omarchy/current/theme/colors.toml'
+        theme.parent.mkdir(parents=True);shutil.copyfile(REPO/'contracts/ui/themes/owner.toml',theme)
+        with d.Harness(setup,binary,sandbox)as h:
+            process=h.start_serve()
+            if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('private log owner failed startup')
+            ui=PaneUi(setup,str(binary),sandbox,h,session='fbt-fbt-p4-08-p3e')
+            try:
+                with d.ApiConn(h)as client:
+                    client.hello()
+                    ui.start_owned();ui.tmux('resize-window','-t',ui.target,'-x','120','-y','30')
+                    h.wait_for(lambda:((info:=client.call('app.info')['result'])['subscriptions']['by_topic'].get('log',0)==1,json.dumps(info['subscriptions'])),'the TUI subscribes before the injected diagnostic occurs')
+                    client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(sandbox.downloads),stopped=True))
+                    h.wait_for(lambda:((entries:=client.call('app.log',dict(hash=item.info_hash,level='error'))['result']['entries'])and any('injected engine error'in row['message']for row in entries),json.dumps(entries)),'the real error-injection hook writes the engine log')
+                    source.unlink()
+                    with Case('tui_smoke','log_history')as case:
+                        ui.case=case;ui.context=f'private theme={theme}; injected hash={item.info_hash}'
+                        ui.observe('load torrent','the incomplete fixture appears in the attached terminal',lambda pane:'history.mkv'in pane)
+                        ui.press('o','the real open action fails with a worded monochrome status',lambda pane:pane.splitlines()[-1].lstrip().startswith('!'))
+                        failure=ui.capture(ui.target).splitlines()[-1].lstrip('! ').strip();needle=failure[:32]
+                        expires=time.monotonic()+10.5
+                        ui.observe('wait for the ten-second toast expiry','the action toast expires without changing the footer geometry',lambda pane:time.monotonic()>=expires and needle not in '\n'.join(pane.splitlines()[:-2]),timeout=12)
+                        ui.press('L','Log retains the failed action and the actual injected engine diagnostic',lambda pane:'injected engine error'in pane and needle in pane and 'level: warn'in pane)
+                        ui.contains('l','level: info')
+                        ui.press('Escape','Esc returns to the unchanged torrent list',lambda pane:'[Torrents]'in pane,literal=False)
+                        ui.press('q','q detaches the log test while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
+            finally:
+                ui.close()
+                if process.child.poll()is None:h.stop_serve(process)
+                h.lock_free()
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',nargs='?',type=Path,default=REPO/'target/debug/fbittorrent')
-    parser.add_argument('--case',choices=SIZES)
+    parser.add_argument('--case',choices=CASES)
     parser.add_argument('--list',action='store_true')
     parser.add_argument('--log-root',type=Path,help='override root for a retained independent harness run')
     args=parser.parse_args()
-    if args.list:print('\n'.join(SIZES));return 0
+    if args.list:print('\n'.join(CASES));return 0
     private_net.enter()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
+    if args.case=='log_history':
+        log_history(args.binary.resolve());return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
     with Case('tui_smoke_setup','fixtures')as setup:
         with owned_fixture(args.binary.resolve(),setup)as(sandbox,h,ui,process,torrent):
-            for index,(name,size)in enumerate(([(args.case,SIZES[args.case])]if args.case else SIZES.items())):
+            for index,(name,size)in enumerate(([]if args.case in('poster_overlay_cleanup','low_chroma_theme_markers','turtle_limits')else[(args.case,SIZES[args.case])]if args.case else SIZES.items())):
                 if index:
                     h.notify.close()
                     process=h.start_serve()
@@ -203,6 +351,18 @@ def main():
                         h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent'])['state']=='downloading',json.dumps(row)),
                                    'saved incomplete fixture resumes its real loopback transfer')
                 drive_size(name,size,args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'poster_overlay_cleanup'):
+                if process.child.poll()is not None:
+                    h.notify.close();process=h.start_serve()
+                    if not(h.receive_ready()and h.wait_engine()):raise RuntimeError('poster fixture owner did not restart')
+                poster_overlay_cleanup(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'turtle_limits'):
+                turtle_limits(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+            if args.case in(None,'low_chroma_theme_markers'):
+                low_chroma_theme_markers(args.binary.resolve(),setup,sandbox,h,ui,process,torrent)
+
+
+    if args.case is None:log_history(args.binary.resolve())
     return int(bool(suite_status('tui_smoke')or suite_status('tui_smoke_setup')))
 
 

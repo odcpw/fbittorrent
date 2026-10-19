@@ -1,5 +1,8 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("limits.toggle",Scope::Global,&[KeyChord::plain(KeyCode::Char('z'))],"Turtle limits",90,
+        |a|a.cfg.native()&&a.turtle_on().is_some()&&!a.alt_busy&&a.online&&a.store.hello.as_ref().is_some_and(|h|h.caps.iter().any(|cap|cap=="limits")),
+        Some(TuiApp::toggle_alt),TDP,None,None,None),
     action!(
         "screen.torrents",
         Scope::Global,

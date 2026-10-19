@@ -14,6 +14,7 @@ pub(super) struct Prompt {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum PromptKind {
     AddMagnet,
+    SettingLimit(usize),
     AddFeed,
     ConfirmDeleteTorrent { hash: String, files: bool },
     ConfirmRemoveFeed { name: String },
@@ -27,6 +28,7 @@ impl TuiApp {
         let mut input = TextInput::new()
             .with_style(self.theme.text())
             .with_cursor_style(Style::new().bg(self.theme.accent).fg(self.theme.selection));
+        if matches!(kind,PromptKind::SettingLimit(_)){input=input.with_max_length(16);}
         input.set_focused(!yes_no);
         self.search_input.set_focused(false);
         let add_flags = (self.cfg.native() || self.cfg.sequential, self.cfg.native() || self.cfg.first_last, self.cfg.seed_by_default);
@@ -60,14 +62,14 @@ impl TuiApp {
                         PromptKind::ConfirmUnfollow { imdb, title } => {
                             self.shows.unfollow(&imdb);
                             if self.inbox_last_read.as_ref().is_some_and(|target| target.imdb == imdb) { self.inbox_last_read = None; }
-                            self.save_shows();
+                            let saved=self.save_shows();
                             let n = self.shows.shows.len() + 1;
                             let mut st = self.show_list.borrow_mut();
                             match st.selected() { Some(i) if i < n => {}, _ => st.select(n.checked_sub(1)) }
                             drop(st);
                             self.ep_list.borrow_mut().select(None);
                             self.rebuild_inbox();
-                            self.set_status(format!("unfollowed {title}"), false);
+                            if saved {self.set_success(format!("unfollowed {title}"));}
                             Cmd::none()
                         }
                         _ => Cmd::none(),
@@ -86,6 +88,7 @@ impl TuiApp {
                 let kind = p.kind.clone();
                 let (seq, fl, seed) = p.add_flags;
                 self.close_prompt();
+                if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {

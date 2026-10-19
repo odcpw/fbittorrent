@@ -16,17 +16,17 @@
 │                                        │   Peer encryption          Prefer encryption                               │                                        │
 │                                        │   VPN connection           Off · ordinary connection                       │the cursor rests here                   │
 │                                        │   Reduce motion            Off                                             │                                        │
-│                                        │ ↑/↓ choose · ←/→ change · Enter save · Esc cancel                          │                                        │
+│                                        │   Download limit           Unlimited                                       │                                        │
+│                                        │   Upload limit             Unlimited                                       │                                        │
+│                                        │   Turtle download limit    Unlimited                                       │                                        │
+│                                        │   Turtle upload limit      Unlimited                                       │                                        │
+│                                        │ ↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel                     │                                        │
+│                                        │ Limits: bytes/s; K/M suffixes; empty = unlimited.                          │                                        │
 │                                        │                                                                            │                                        │
-│                                        │ Extra downloads wait their turn. Encryption protects peer traffic; your IP │                                        │
-│                                        │ remains visible.                                                           │                                        │
-│                                        │                                                                            │                                        │
-│                                        │ A required VPN blocks torrent transfers when disconnected. Feed and search │                                        │
-│                                        │ websites use your usual connection.                                        │                                        │
-│                                        │                                                                            │                                        │
-│                                        │ VPN binding off                                                            │                                        │
-│                                        │ Changing encryption or VPN reopens the app's engine.                       │                                        │
-│                                        │                                                                            │                                        │
+│                                        │ Extra downloads wait. Encryption leaves your IP visible.                   │                                        │
+│                                        │ A required VPN blocks transfers while disconnected.                        │                                        │
+│                                        │ Save to apply draft settings.                                              │                                        │
+│                                        │ Changing encryption or VPN reopens the engine.                             │                                        │
 │                                        │                                                                            │                                        │
 │                                        ╰────────────────────────────────────────────────────────────────────────────╯                                        │
 │                                                                                           ││                                                                 │

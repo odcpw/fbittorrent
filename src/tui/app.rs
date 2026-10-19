@@ -48,7 +48,7 @@ pub struct TuiApp {
     pub(super) search_wire: Vec<crate::api::SearchItem>,
     pub(super) search_seq: u64,
     pub(super) search_browse: bool,
-    pub(super) search_card: bool,
+    pub(super) poster_open: bool,
     pub(super) search_sort: super::store::SearchSort,
     pub(super) search_descending: bool,
     pub(super) browse_entries: Vec<browse::Entry>,
@@ -100,9 +100,16 @@ pub struct TuiApp {
     pub(super) shows_rects: Cell<[Rect; 2]>,
     // imdb
     pub(super) imdb: HashMap<String, ImdbState>,
+    pub(super) imdb_aliases: HashMap<String,String>,
+    pub(super) poster_target: Option<(String,Option<String>)>,
+    pub(super) graphics_suppressed: Cell<bool>,
     pub(super) prompt: Option<Prompt>,
     pub(super) status: String,
     pub(super) status_is_error: bool,
+    pub(super) status_success: bool,
+    pub(super) feedback:super::feedback::Feedback,
+    pub(super) log_open:bool,
+    pub(super) alt_busy:bool,
 }
 
 /// A row identity survives source reordering and the same episode key in another show.
@@ -119,6 +126,8 @@ pub enum Msg {
     SettingsSaved(Result<Config,String>),
     Torrents(Result<(Vec<Torrent>, TransferInfo), String>),
     ActionDone(Result<String, String>),
+    AltDone(Result<String,String>),
+    UiSubscribed{connection:u64,result:Result<(),String>},
     Imdb(String, Result<Option<(Title, Option<Poster>)>, String>),
     NativeSearchStarted {connection:u64,sequence:u64,result:Result<super::remote::search::Session,String>},
     SearchDisposed,
@@ -194,7 +203,7 @@ impl TuiApp {
             search_wire: vec![],
             search_seq: 0,
             search_browse: false,
-            search_card: false,
+            poster_open: false,
             search_sort:super::store::SearchSort::Seeds,
             search_descending:true,
             browse_entries: browse::catalogue(),
@@ -241,18 +250,26 @@ impl TuiApp {
             inbox_last_read: None,
             shows_rects: Cell::new([Rect::new(0, 0, 0, 0); 2]),
             imdb: HashMap::new(),
+            imdb_aliases: HashMap::new(),
+            poster_target: None,
+            graphics_suppressed: Cell::new(false),
             prompt: None,
             status: String::new(),
             status_is_error: false,
+            status_success:false,feedback:Default::default(),log_open:false,alt_busy:false,
         };
         app.show_list.borrow_mut().select(Some(0));
         app.rebuild_inbox();
         app
     }
 
+    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,false,hash);}
+
     pub(super) fn set_status(&mut self, s: impl Into<String>, err: bool) {
         self.status = s.into();
         self.status_is_error = err;
+        if err {let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,true,hash);}
+        self.status_success=false;
         self.status_at = std::time::Instant::now();
     }
 }

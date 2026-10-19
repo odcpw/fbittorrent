@@ -67,9 +67,21 @@ pub fn kitty_supported() -> bool {
 pub struct KittyPlacer {
     current: Option<(String, Rect)>,
     next_id: u32,
+    #[cfg(test)]
+    output: Option<Box<dyn Write+Send>>,
 }
 
 impl KittyPlacer {
+    fn emit(&mut self,bytes:&[u8]) {
+        #[cfg(test)]
+        if let Some(output)=&mut self.output {let _=output.write_all(bytes);let _=output.flush();return;}
+        let mut output=std::io::stdout().lock();let _=output.write_all(bytes);let _=output.flush();
+    }
+    #[cfg(test)]
+    pub fn with_output(output:impl Write+Send+'static)->Self {Self{output:Some(Box::new(output)),..Default::default()}}
+    #[cfg(test)]
+    pub fn is_placed(&self)->bool{self.current.is_some()}
+
     /// Show `poster` for `key` at `area` (cells). No-op when already placed there.
     pub fn place(&mut self, key: &str, poster: &Poster, area: Rect) {
         if area.width == 0 || area.height == 0 { return; }
@@ -93,18 +105,14 @@ impl KittyPlacer {
             out.push_str("\x1b\\");
         }
         out.push_str("\x1b8"); // restore cursor
-        let mut so = std::io::stdout().lock();
-        let _ = so.write_all(out.as_bytes());
-        let _ = so.flush();
+        self.emit(out.as_bytes());
         self.current = Some((key.to_string(), area));
     }
 
     /// Remove the placement (and its data) if any.
     pub fn clear(&mut self) {
         if self.current.take().is_some() {
-            let mut so = std::io::stdout().lock();
-            let _ = so.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\");
-            let _ = so.flush();
+            self.emit(b"\x1b_Ga=d,d=A,q=2\x1b\\");
         }
     }
 
