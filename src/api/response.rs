@@ -229,7 +229,7 @@ pub enum Reply {
     SearchGrab(AddResult),
 
     TorrentsRecheck(RecheckReply),
-    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
+    ShowsList(ShowsResult),ShowsFollow(ShowResult),ShowsSetQuality(ShowResult),ShowsUnfollow(EmptyResult),ShowsCheck(ShowCheckResult),ShowsReleases(ReleasesResult),ShowsSetRead(EmptyResult),ShowsMarkShowRead(CountResult),ShowsUndoRead(UndoReadResult),ShowsGrab(AddResult),
     RssFeeds(FeedsResult), RssAdd(FeedResult), RssRemove(EmptyResult), RssRefresh(MutationResult),
     RssItems(FeedItemsResult), RssSetRead(EmptyResult), RssMarkFeedRead(CountResult), RssGrab(AddResult),
     AppClipboardDismiss(EmptyResult),
@@ -286,7 +286,7 @@ impl Reply {
             "search.grab" => serde_json::from_value(result).map(Self::SearchGrab),
 
             "torrents.recheck" => serde_json::from_value(result).map(Self::TorrentsRecheck),
-            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
+            "shows.list"=>serde_json::from_value(result).map(Self::ShowsList),"shows.follow"=>serde_json::from_value(result).map(Self::ShowsFollow),"shows.set_quality"=>serde_json::from_value(result).map(Self::ShowsSetQuality),"shows.unfollow"=>serde_json::from_value(result).map(Self::ShowsUnfollow),
             "shows.check"=>serde_json::from_value(result).map(Self::ShowsCheck),"shows.releases"=>serde_json::from_value(result).map(Self::ShowsReleases),"shows.set_read"=>serde_json::from_value(result).map(Self::ShowsSetRead),
             "shows.mark_show_read"=>serde_json::from_value(result).map(Self::ShowsMarkShowRead),"shows.undo_read"=>serde_json::from_value(result).map(Self::ShowsUndoRead),"shows.grab"=>serde_json::from_value(result).map(Self::ShowsGrab),
             "rss.feeds"=>serde_json::from_value(result).map(Self::RssFeeds), "rss.add"=>serde_json::from_value(result).map(Self::RssAdd),

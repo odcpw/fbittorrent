@@ -71,6 +71,19 @@ pub(super) fn shows_cmd(cfg: &Config, c: &Client, sub: ShowsCmd, json: bool) -> 
         }
     };
     match sub {
+        ShowsCmd::Quality {show,quality} => {
+            let quality=(quality!="default").then_some(quality);
+            let id=all.find(&show)?.imdb.clone();
+            if let Ok(client)=crate::api::client::Client::connect(cfg,json) {
+                client.call("shows.set_quality",serde_json::json!({"imdb":id,"quality":quality}))?;
+            } else {
+                let (_lock,_)=crate::cli::offline::locked()?;
+                let mut current=Shows::load()?;
+                current.set_quality(&id,quality.as_deref())?;current.save()?;
+            }
+            emit(json,serde_json::json!({"ok":true,"action":"shows-quality","imdb":id,"quality":quality}),
+                 ||println!("{}: {}",show,quality.as_deref().unwrap_or("default")));
+        },
         ShowsCmd::List => {
             emit(json, serde_json::json!({"ok": true, "count": all.shows.len(), "new": all.new_total(), "path": shows::path(),
                 "shows": all.shows.iter().map(|s| s.to_json()).collect::<Vec<_>>()}), || {

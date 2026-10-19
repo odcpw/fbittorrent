@@ -169,6 +169,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `app.restart` | `scope: enum(engine\|daemon)` | `{state: "pending"}` | yes | P1-06, P1-17 |
 | `shows.list` | none | `{shows: [Show]}` | no | P3-03 |
 | `shows.follow` | `query?: str`, `imdb?: str`, `quality?: str` | `{show: Show}` | yes | P3-03 |
+| `shows.set_quality` | `imdb: str`, `quality?: enum(2160p\|1080p\|720p\|480p)\|null` (default) | `{show: Show}` | yes | P3-18 |
 | `shows.unfollow` | `imdb: str` | `{}` | yes | P3-03 |
 | `shows.check` | `imdb?: str` | `{state: "pending", ref: str}`, then `shows.checked` and `mutation.result {new}` | yes | P3-03 |
 | `shows.releases` | `imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str` | `{releases: [Release]}` | no | P3-03 |
@@ -951,6 +952,7 @@ NDJSON framing or the capability arrays in the wire fixtures.
 | `1.2.26` | `list[].num_seeds` |
 | `1.2.27` | `download_limit_bps` |
 | `1.2.28` | `search.install_torznab` |
+| `1.2.30` | `shows.quality` |
 | `1.2.29` | `trackers.edit` |
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
@@ -1140,3 +1142,14 @@ Both operations are available through the existing raw CLI `api` command.
 credentials remain in a private file. Provider listings distinguish `kind`
 `nova` and `torznab`; the existing search capability and normalized result
 shapes are shared by both provider kinds. Invalid configuration exits 2.
+
+### P3-18: per-show quality (contract 1.2.30)
+
+`shows.set_quality {imdb, quality}` is idempotent and uses the existing `shows`
+capability. Values are 2160p, 1080p, 720p or 480p; null or omission clears the
+override, so the next check uses `Settings.show_quality`. Saving never checks
+or downloads. CLI `shows quality <show> <q|default>` returns
+`{ok, action: "shows-quality", imdb, quality}` and never starts a stopped daemon;
+exit codes are 0, 2 (quality), 6 (not followed) and 7 (ambiguous selector).
+`shows.releases {inbox:true, unread_only:true, quality:"2160p"}` applies both
+filters; `unread_only:false` explicitly includes read releases.

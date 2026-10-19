@@ -126,6 +126,7 @@ impl Validate for UploadLimitArgs {
 impl Validate for Request {
     fn validate(&self) -> Checked {
         match &self.call {
+            Call::ShowsSetQuality {args} => require(crate::imdb::service::valid_id(&args.imdb),"imdb","an IMDb id (tt followed by digits)"),
             Call::AppLog { args: Some(args) } => {
                 require(args.limit.is_none_or(|v| v <= 1000), "limit", "at most 1000")?;
                 if let Some(source) = &args.source { text(source, 64, "source")?; }

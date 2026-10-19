@@ -15,6 +15,13 @@ pub(crate) fn releases(daemon:&Daemon,args:&ShowReleasesArgs)->ApiResult<Vec<Rel
 pub fn dispatch(daemon:&Daemon,call:&Call)->ApiResult<Reply>{
     Ok(match call{
         Call::ShowsList {..}=>Reply::ShowsList(ShowsResult {shows:daemon.shows.list().map_err(failure)?}),
+        Call::ShowsSetQuality {args}=>{
+            let _edit=daemon.shows.edit.lock().unwrap();require(daemon,&args.imdb)?;
+            let mut all=Shows::load().map_err(failure)?;
+            all.set_quality(&args.imdb,if let Update::Set(q)=args.quality {Some(q.as_str())} else {None}).map_err(failure)?;
+            all.save().map_err(failure)?;
+            Reply::ShowsSetQuality(ShowResult {show:require(daemon,&args.imdb)?})
+        },
         Call::ShowsFollow {args}=>{
             if args.imdb.is_some()==args.query.is_some(){return Err(error(ErrorCode::InvalidArgs,"choose exactly one of query or imdb",Some("query")));}
             if args.imdb.as_ref().is_some_and(|id|!crate::imdb::service::valid_id(id)){return Err(error(ErrorCode::InvalidArgs,"invalid IMDb id",Some("imdb")));}

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 const GROUPS: &[(&str, &str)] = &[
+    ("shows-quality",include_str!("../../contracts/ipc/v1/shows-quality.ndjson")),
     ("tracker-edit",include_str!("../../contracts/ipc/v1/tracker-edit.ndjson")),
     ("download-limit",include_str!("../../contracts/ipc/v1/download-limit.ndjson")),
     ("peers",include_str!("../../contracts/ipc/v1/peers.ndjson")),
@@ -244,6 +245,9 @@ fn roundtrip() {
 
 /// Report JSON pointers, including escaped object keys, to the exact bad value.
 fn sentinel(value: &Value, path: &str) -> Result<(), String> {
+    sentinel_input(value,path,false)
+}
+fn sentinel_input(value: &Value, path: &str, quality_reset: bool) -> Result<(), String> {
     if value
         .as_f64()
         .is_some_and(|n| n == -1.0 || n == 8_640_000.0)
@@ -283,18 +287,19 @@ fn sentinel(value: &Value, path: &str) -> Result<(), String> {
                     return Err(format!("{pointer}: zero substitutes for an unknown value"));
                 }
             }
-            // Null is meaningful only in a deletion patch, an explicit input
-            // upload-limit reset, or the required invalid-ID response envelope.
+            // Null is meaningful in a deletion patch, an explicit input reset,
+            // or the required invalid-ID response envelope.
             if child.is_null() {
                 if path.contains("/changed/")
                     || key == "id" && map.get("ok") == Some(&Value::Bool(false))
                     || matches!(key.as_str(), "bps" | "download_bps" | "upload_bps" | "alt_download_bps" | "alt_upload_bps") && path.ends_with("/args")
+                    || quality_reset && key == "quality"
                 {
                     continue;
                 }
                 return Err(format!("{pointer}: omit unknown full-object fields"));
             }
-            sentinel(child, &pointer)?;
+            sentinel_input(child, &pointer, key=="args" && map.get("op").and_then(Value::as_str)==Some("shows.set_quality"))?;
         }
     } else if let Some(items) = value.as_array() {
         for (i, child) in items.iter().enumerate() {
@@ -343,6 +348,15 @@ fn sentinel_negative_controls() {
     )
     .unwrap();
     sentinel(&json!({"changed":{"a/b":{"eta_s":null}}}), "").unwrap();
+}
+
+#[test]
+fn quality_reset_null_is_scoped_to_setter_input() {
+    sentinel(&json!({"frame":{"op":"shows.set_quality","args":{"imdb":"tt1234001","quality":null}}}),"").unwrap();
+    for value in [
+        json!({"frame":{"op":"shows.follow","args":{"imdb":"tt1234001","quality":null}}}),
+        json!({"frame":{"result":{"show":{"quality":null}}}}),
+    ] {assert!(sentinel(&value,"").is_err());}
 }
 
 #[test]
@@ -465,7 +479,7 @@ fn operation_event_error_and_document_coverage() {
         "search.start", "search.stop", "search.providers", "search.set_provider",
         "search.install", "search.browse_sources", "search.browse", "search.grab",
         "torrents.recheck",
-        "shows.list","shows.follow","shows.unfollow","shows.check","shows.releases","shows.set_read","shows.mark_show_read","shows.undo_read","shows.grab",
+        "shows.list","shows.follow","shows.set_quality","shows.unfollow","shows.check","shows.releases","shows.set_read","shows.mark_show_read","shows.undo_read","shows.grab",
         "rss.feeds","rss.add","rss.remove","rss.refresh","rss.items","rss.set_read","rss.mark_feed_read","rss.grab",
         "app.clipboard.dismiss",
         "app.log",

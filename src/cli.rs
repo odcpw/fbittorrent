@@ -11,7 +11,7 @@ pub(super) mod restart;
 mod native;
 mod handler;
 mod download_limit;
-mod offline;
+pub(super) mod offline;
 pub(super) mod settings;
 pub(super) mod limits;
 pub(super) use native::{handles as native_handles, run as run_native};
@@ -340,6 +340,12 @@ pub(super) enum RssCmd {
 
 #[derive(Subcommand)]
 pub(super) enum ShowsCmd {
+    /// Set a show's preferred quality without checking or starting the daemon
+    Quality {
+        show: String,
+        #[arg(value_parser=["2160p","1080p","720p","480p","default"])]
+        quality: String,
+    },
     /// Followed shows with new / seen / grabbed counts
     #[command(alias = "ls")]
     List,

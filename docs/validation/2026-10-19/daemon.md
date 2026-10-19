@@ -848,3 +848,28 @@ mount namespace even in the outer `--systemd` matrix; the subscription-only
 case uses a real transient unit there. No product/contract thresholds or wall
 budget changed. Python compilation and diff checks pass; test-only delta,
 so no new Cargo or umbrella run. No acceptance checks removed or relaxed.
+
+### P3-18 fbt-p3-18-3pe — per-show quality and inbox filters (daemon/API/CLI)
+
+Added idempotent typed `shows.set_quality`, durable four-quality overrides and
+null/omitted reset to the configured default, plus `shows quality <show>
+<q|default>` without autostart. Existing inbox read/quality filters are proven
+against real mixed-quality EZTV results. Contract 1.2.30 adds a new transcript,
+operation/catalogue/CLI entry and changelog row; existing fixture bytes stay
+unchanged. Minimal neighbours: server dispatch/preflight, a setter-only null
+reset validator rule with negative controls, and visibility of the existing
+offline owner lock. Private-XDG final evidence below
+`target/test-logs/fbt-p3-18-3pe/`: check (`check-final/`) and debug build
+(`build-owned/`) passed; `daemon.py ... --case shows_quality_prefers` passed in
+foreground and systemd (`owned-{foreground,systemd}/processes/daemon/`), proving
+restart persistence, 2160p preferred over 900-seed 1080p, read and quality filters,
+validation, default reset and no downloads. `agent_contract.py ... --case
+shows_quality_verb` passed (`owned-cli/processes/agent_contract/`), covering exit
+0/2/6/7, live API and offline edits, default and no autostart. Full locked Cargo
+suite on this tree passed 550/0 with three existing opt-in ignores (`full-owned/`),
+including storage, wire/null and transcript tests. Initial runs caught missing
+null-reset preflight/validator and changelog bookkeeping; fixed with no relaxed
+expectations. Both daemon acceptance criteria met; dropdown/TUI rendering is
+deferred to tracks C/D. Python compile/diff/source-size checks passed. Per the
+ownership correction, 553b597 was fully reversed by 7fd01cd; P6-10 is solely
+track D's a5d35d0, with no duplicate implementation retained. No umbrella rerun.

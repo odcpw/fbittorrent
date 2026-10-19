@@ -36,6 +36,22 @@
     }
 
     #[test]
+    fn quality_persists() {
+        let root=std::env::temp_dir().join(format!("fbt-quality-{}",std::process::id()));
+        let path=root.join("shows.json");
+        let mut all=Shows::default();
+        all.follow(&Title {id:"tt1234001".into(),name:"Local quality".into(),..Default::default()});
+        for quality in [Some("2160p"),Some("1080p"),Some("720p"),Some("480p"),None] {
+            all.set_quality("tt1234001",quality).unwrap();all.save_to(&path).unwrap();
+            all=Shows::load_from(&path).unwrap();
+            assert_eq!(all.get("tt1234001").unwrap().quality.as_deref(),quality);
+        }
+        assert!(all.set_quality("tt1234001",Some("4k")).is_err());
+        assert!(all.get("tt1234001").unwrap().quality.is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn picks_preferred_quality_then_seeds() {
         let eps = reduce(
             vec![

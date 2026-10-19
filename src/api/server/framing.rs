@@ -126,6 +126,7 @@ pub(super) fn argument_types(raw: &Value) -> Option<String> {
         let valid = match key.as_str() {
             "interactive" | "glance" | "stage" | "stopped" | "seed" | "force" | "delete_files"
             | "on" | "unread_only" | "read" | "inbox" => value.is_boolean(),
+            "quality" if op=="shows.set_quality" => value.is_null() || serde_json::from_value::<ShowQuality>(value.clone()).is_ok(),
             "feed" | "item" | "url" | "name" | "imdb" | "query" | "key" | "quality" => value.is_string(),
             "proto" | "file" | "sub" | "interval_ms" | "since_seq" => value.is_u64(),
             "bps" => value.is_u64() || (matches!(op,"torrents.set_upload_limit"|"torrents.set_download_limit") && value.is_null()),

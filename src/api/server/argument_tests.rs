@@ -1,5 +1,16 @@
 use super::*;
 #[test]
+fn show_quality_reset_and_invalid_enum_are_classified_at_the_wire() {
+    for args in [json!({"imdb":"tt1234001","quality":null}),json!({"imdb":"tt1234001"}),json!({"imdb":"tt1234001","quality":"2160p"})] {
+        assert!(decode(&serde_json::to_vec(&json!({"id":1,"op":"shows.set_quality","args":args})).unwrap()).is_ok());
+    }
+    for (op,quality) in [("shows.set_quality",json!("4k")),("shows.set_quality",json!(2160)),("shows.follow",Value::Null)] {
+        let failure=decode(&serde_json::to_vec(&json!({"id":1,"op":op,"args":{"imdb":"tt1234001","quality":quality}})).unwrap()).unwrap_err();
+        assert_eq!(failure.error.code,ErrorCode::InvalidArgs);
+        assert_eq!(failure.error.details.unwrap()["key"],"quality");
+    }
+}
+#[test]
 fn subscription_operations_are_routed_in_p1_08() {
     for (op, args) in [
         ("subscribe", json!({"topics":["torrents"]})),

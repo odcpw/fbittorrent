@@ -56,6 +56,7 @@ pub const TABLE: &[Operation] = &[
     Operation {name:"torrents.peers",mutating:false,idempotent:false,since:"P5-01",args:"`{hash}`",result:"`{peers: [Peer]}`"},
     Operation { name:"shows.list",mutating:false,idempotent:false,since:"P3-03",args:"none",result:"`{shows: [Show]}`" },
     Operation { name:"shows.follow",mutating:true,idempotent:false,since:"P3-03",args:"`query?: str`, `imdb?: str`, `quality?: str`",result:"`{show: Show}`" },
+    Operation { name:"shows.set_quality",mutating:true,idempotent:true,since:"P3-18",args:"`imdb: str`, `quality?: enum(2160p|1080p|720p|480p)|null` (default)",result:"`{show: Show}`" },
     Operation { name:"shows.unfollow",mutating:true,idempotent:false,since:"P3-03",args:"`imdb: str`",result:"`{}`" },
     Operation { name:"shows.check",mutating:true,idempotent:false,since:"P3-03",args:"`imdb?: str`",result:"`{state: \"pending\", ref: str}`, then `shows.checked` and `mutation.result {new}`" },
     Operation { name:"shows.releases",mutating:false,idempotent:false,since:"P3-03",args:"`imdb?: str`, `inbox?: bool`, `unread_only?: bool`, `quality?: str`",result:"`{releases: [Release]}`" },

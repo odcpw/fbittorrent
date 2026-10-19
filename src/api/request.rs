@@ -354,6 +354,7 @@ pub enum Call {
     TorrentsRecheck { args: HashesArgs },
     #[serde(rename="shows.list")] ShowsList {#[serde(skip_serializing_if="Option::is_none")] args:Option<EmptyArgs>},
     #[serde(rename="shows.follow")] ShowsFollow {args:ShowFollowArgs},
+    #[serde(rename="shows.set_quality")] ShowsSetQuality {args:ShowQualityArgs},
     #[serde(rename="shows.unfollow")] ShowsUnfollow {args:ShowArgs},
     #[serde(rename="shows.check")] ShowsCheck {#[serde(skip_serializing_if="Option::is_none")] args:Option<ShowCheckArgs>},
     #[serde(rename="shows.releases")] ShowsReleases {args:ShowReleasesArgs},
@@ -472,7 +473,7 @@ impl Call {
             Self::SearchGrab { .. } => "search.grab",
 
             Self::TorrentsRecheck { .. } => "torrents.recheck",
-            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
+            Self::ShowsList {..}=>"shows.list",Self::ShowsFollow {..}=>"shows.follow",Self::ShowsSetQuality {..}=>"shows.set_quality",Self::ShowsUnfollow {..}=>"shows.unfollow",Self::ShowsCheck {..}=>"shows.check",
             Self::ShowsReleases {..}=>"shows.releases",Self::ShowsSetRead {..}=>"shows.set_read",Self::ShowsMarkShowRead {..}=>"shows.mark_show_read",Self::ShowsUndoRead {..}=>"shows.undo_read",Self::ShowsGrab {..}=>"shows.grab",
             Self::RssFeeds { .. }=>"rss.feeds", Self::RssAdd { .. }=>"rss.add", Self::RssRemove { .. }=>"rss.remove", Self::RssRefresh { .. }=>"rss.refresh",
             Self::RssItems { .. }=>"rss.items", Self::RssSetRead { .. }=>"rss.set_read", Self::RssMarkFeedRead { .. }=>"rss.mark_feed_read", Self::RssGrab { .. }=>"rss.grab",
