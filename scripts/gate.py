@@ -191,6 +191,8 @@ def cases(mode, binary, env, registry):
     # These drive the actual plugin client on a private headless compositor.
     result.append(python_check('plugin_stop_rule','plugin/tests/stop_policy.py',
                               '--binary',str(binary),'--case','power','--log-root','{logs}'))
+    result.append(python_check('plugin_connection_recovery','plugin/tests/admission_recovery.py',
+                              '--binary',str(binary),'--log-root','{logs}'))
     if mode == 'full':
         result += [python_check('plugin_glance_policy','plugin/tests/stop_policy.py',
                                 '--binary',str(binary),'--case','glance','--log-root','{logs}'),

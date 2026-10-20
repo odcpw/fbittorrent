@@ -23,7 +23,7 @@ from daemon_policy import hello,subscribe,idle_exit
 def stopped(case,q,dashboard,phase):
     def empty():
         state=json.loads(q.ipc('activity'))
-        return state if not json.loads(q.ipc('state'))['online'] and state['model']==state['rows']==0 else None
+        return state if not json.loads(q.ipc('state'))['online'] and state['model']==state['rows']==0 and 'fbittorrent stopped' in ' '.join(state['texts']) else None
     state=q.wait(empty)
     texts=' '.join(state['texts'])
     case.check(not json.loads(q.ipc('groups')) and state['progress']==0 and state['summary']=={}
@@ -32,7 +32,7 @@ def stopped(case,q,dashboard,phase):
                and 'Stopped' in texts and 'fbittorrent stopped' in texts
                and not any(word in texts for word in ('DOWNLOADING','UPLOADING','peers','↓','↑')),
                phase+': popup renders stopped with no live groups, rates, peers or progress',json.dumps(state))
-    window=dashboard.wait(lambda:value if (value:=json.loads(dashboard.ipc('stoppedState')))['visible'] and not value['table'] else None)
+    window=dashboard.wait(lambda:value if (value:=json.loads(dashboard.ipc('stoppedState')))['visible'] and not value['table'] and value['message']=='fbittorrent stopped' else None)
     case.check(window['message']=='fbittorrent stopped' and window['model']==0 and not window['review']
                and json.loads(dashboard.ipc('renderedRows'))==[],
                phase+': already-open dashboard renders stopped and unloads its table',json.dumps(window))

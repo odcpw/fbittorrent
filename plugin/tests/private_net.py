@@ -3,6 +3,7 @@ import atexit
 import errno
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import struct
@@ -67,7 +68,12 @@ def require():
         with tempfile.TemporaryDirectory(prefix='fbt-net-',dir='/tmp') as root:
             resolver=Path(root)/'resolv.conf';resolver.write_text('nameserver 192.0.2.53\noptions attempts:1 timeout:1\n')
             hosts=Path(root)/'hosts';hosts.write_text('127.0.0.1 localhost\n::1 localhost\n')
-            for source,target in [(resolver,'/etc/resolv.conf'),(hosts,'/etc/hosts')]:subprocess.run(['mount','--bind',str(source),target],check=True)
+            # NSS `resolve`/`mymachines` can ask a host daemon over a Unix
+            # socket and bypass this namespace's resolver/network entirely.
+            # Change only hosts lookup, and only inside this private mount.
+            nsswitch=Path(root)/'nsswitch.conf'
+            nsswitch.write_text(re.sub(r'^hosts:.*$', 'hosts: files dns', Path('/etc/nsswitch.conf').read_text(), flags=re.M))
+            for source,target in [(resolver,'/etc/resolv.conf'),(hosts,'/etc/hosts'),(nsswitch,'/etc/nsswitch.conf')]:subprocess.run(['mount','--bind',str(source),target],check=True)
         _dns=LocalDns();atexit.register(_dns.close)
         os.environ['FBT_PRIVATE_DNS_PID']=str(os.getpid())
     else:

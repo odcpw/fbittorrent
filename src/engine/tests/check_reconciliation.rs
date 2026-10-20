@@ -79,16 +79,23 @@ impl Drop for ReleaseOnDrop {
 #[derive(Clone)]
 struct GatedFactory {
     counted: CountedFilesystemFactory,
-    gate: Arc<ReadGate>,
+    gates: Vec<Arc<ReadGate>>,
 }
 pub(in crate::engine::tests) fn read_gate_storage(offset: u64) -> (BoxStorageFactory, Arc<ReadGate>) {
-    let gate = Arc::new(ReadGate { offset: Some(offset), ..Default::default() });
-    gate.arm();
-    (GatedFactory { counted: CountedFilesystemFactory(Arc::new(StorageCounts::default())), gate: gate.clone() }.boxed(), gate)
+    let (factory, gates) = read_gates_storage(&[offset]);
+    (factory, gates[0].clone())
+}
+pub(in crate::engine::tests) fn read_gates_storage(offsets: &[u64]) -> (BoxStorageFactory, Vec<Arc<ReadGate>>) {
+    let gates: Vec<_> = offsets.iter().map(|offset| {
+        let gate = Arc::new(ReadGate { offset: Some(*offset), ..Default::default() });
+        gate.arm();
+        gate
+    }).collect();
+    (GatedFactory { counted: CountedFilesystemFactory(Arc::new(StorageCounts::default())), gates: gates.clone() }.boxed(), gates)
 }
 struct GatedStorage {
     storage: Box<dyn TorrentStorage>,
-    gate: Arc<ReadGate>,
+    gates: Vec<Arc<ReadGate>>,
 }
 impl StorageFactory for GatedFactory {
     type Storage = GatedStorage;
@@ -99,7 +106,7 @@ impl StorageFactory for GatedFactory {
     ) -> Result<Self::Storage> {
         Ok(GatedStorage {
             storage: Box::new(self.counted.create(shared, metadata)?),
-            gate: self.gate.clone(),
+            gates: self.gates.clone(),
         })
     }
     fn clone_box(&self) -> BoxStorageFactory {
@@ -111,7 +118,9 @@ impl TorrentStorage for GatedStorage {
         self.storage.init(shared, metadata)
     }
     fn pread_exact(&self, file: usize, offset: u64, buf: &mut [u8]) -> Result<()> {
-        self.gate.before_read(offset)?;
+        for gate in &self.gates {
+            gate.before_read(offset)?;
+        }
         self.storage.pread_exact(file, offset, buf)
     }
     fn pwrite_all(&self, file: usize, offset: u64, buf: &[u8]) -> Result<()> {
@@ -129,7 +138,7 @@ impl TorrentStorage for GatedStorage {
     fn take(&self) -> Result<Box<dyn TorrentStorage>> {
         Ok(Box::new(Self {
             storage: self.storage.take()?,
-            gate: self.gate.clone(),
+            gates: self.gates.clone(),
         }))
     }
 }
@@ -202,7 +211,7 @@ fn gated_fixture() -> (
             default_storage_factory: Some(
                 GatedFactory {
                     counted: CountedFilesystemFactory(counts.clone()),
-                    gate: gate.clone(),
+                    gates: vec![gate.clone()],
                 }
                 .boxed(),
             ),
@@ -480,7 +489,7 @@ fn committed_check_admits_without_a_maintenance_tick() {
                 default_storage_factory: Some(
                     GatedFactory {
                         counted: CountedFilesystemFactory(counts),
-                        gate: gate.clone(),
+                        gates: vec![gate.clone()],
                     }
                     .boxed(),
                 ),

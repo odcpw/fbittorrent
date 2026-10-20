@@ -17,7 +17,7 @@ class SafetyTests(unittest.TestCase):
     def test_successful_retry_keeps_every_safety_family_red(self):
         for name in ('daemon/zero_upload', 'daemon/delete_files_safety_live',
                      'tracker_privacy', 'native/q_confirms', 'daemon/idle_exit_glance_pauses',
-                     'daemon/search_binding_change_cancels_old_route'):
+                     'plugin_connection_recovery', 'daemon/search_binding_change_cancels_old_route'):
             with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='fbt-strict-') as directory:
                 root=Path(directory); marker=root/'ran'
                 script=('import json,sys;from pathlib import Path;'
@@ -44,6 +44,7 @@ class SafetyTests(unittest.TestCase):
                             ('engine::dormant_delete::tests::parent_symlinks',True),
                             ('api::trackers::tests::redaction',True),
                             ('native_runtime::shutdown_tests::deadline',True),
+                            ('engine::tests::stop_can_persist_intent_with_both_checksum_workers_blocked',True),
                             ('durable_sync::tests::cancelled_fallback_never_publishes_and_drains_the_blocking_pool',True),
                             ('daemon::watch::tests::watch_persistence_survives_ring_setup_failure',True),
                             ('daemon::stats::tests::statistics_survive_ring_setup_failure',True),
