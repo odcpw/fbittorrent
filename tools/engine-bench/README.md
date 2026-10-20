@@ -148,3 +148,46 @@ python3 tools/engine-bench/shutdown_test.py --binary /evidence/bin/fbittorrent \
   --binary-source BUILT_COMMIT --seed /evidence/bin/fbt-bench-seed \
   --output /evidence/shutdown-pressure --disk-root /path/on/btrfs
 ```
+
+## Installed-client comparison
+
+`head_to_head.py` compares a retained fbittorrent binary with the installed
+qBittorrent-nox 5.2 client using private HOME/XDG paths and a new qBittorrent
+profile. Its WebUI binds localhost, and listener PID ownership is checked before
+any settings mutation. The local matrix is 1/4 GiB single-file and 2 GiB across
+1,000 files, each with 1/4/16 distinct seed endpoints. Both use first/last plus
+sequential selection; the qBittorrent private profile permits multiple peers
+from one IP and limits upload to 1 KiB/s. Native upload remains off.
+
+```sh
+flock -w 7200 /tmp/fbittorrent-release.lock systemd-run --user --scope \
+  -p MemoryHigh=10G -p MemoryMax=14G --quiet -- \
+  python3 tools/engine-bench/head_to_head.py --binary /evidence/bin/fbittorrent \
+  --binary-source REV_OR_PATCH --seed /evidence/bin/fbt-bench-seed \
+  --output /evidence/client-normal --runs 3
+python3 tools/engine-bench/summarize_clients.py /evidence/client-normal
+```
+
+Trials alternate client order. Independent post-timer verification hashes every
+piece across file boundaries and compares whole-payload SHA-256 between clients.
+The shared playable byte condition is the first file's verified 3%/32 MiB prefix
+(or the complete file if smaller), plus its last piece; the prefix must decode.
+Native `app_ready_s` is separate. API polling adds at least 20 ms uncertainty.
+`/proc` CPU/RSS/write-call counters describe the client process and all its
+threads; write calls include sockets. Use separate `--strace /path/to/strace`
+trials for positioned disk-write call counts, and `--profile` for per-phase CPU
+samples. Instrumented timings never enter the comparison summary.
+
+Use `--public-torrent /path/to/legal.torrent` for one back-to-back sanity pair:
+the tool refuses payloads above 200 MiB and limits downloads to 4 MiB/s. Public
+swarm timings are not a controlled comparison. `--pilot-mib 64` exercises the
+harness at small scale and is rejected by the normal summary. Every benchmark,
+including pilots and diagnostics, uses the lock and scope wrapper above.
+
+Focused controls (tiny transfers, no timing qualification):
+
+```sh
+FBT_BENCH_BINARY=/evidence/bin/fbittorrent FBT_BENCH_SEED=/evidence/bin/fbt-bench-seed \
+  python3 tools/engine-bench/head_to_head_test.py
+python3 tools/engine-bench/seed_test.py /evidence/bin/fbt-bench-seed --multi
+```

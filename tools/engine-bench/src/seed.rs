@@ -58,7 +58,18 @@ impl Hosted {
         let key = u64::from_str_radix(std::str::from_utf8(key_hex).map_err(|e| e.to_string())?, 16)
             .map_err(|e| e.to_string())?;
         let field = |name: &[u8]| info.get(&data, name).and_then(|(v, _)| v.int());
-        let size = field(b"length").ok_or("multi-file torrents are not generated")? as u64;
+        let size = if let Some(size) = field(b"length") {
+            u64::try_from(size).map_err(|_| "negative length")?
+        } else {
+            let Some((bencode::Value::List(files), _)) = info.get(&data, b"files") else {
+                return Err("no length or files".into());
+            };
+            files.iter().try_fold(0u64, |total, (file, _)| {
+                let size = file.get(&data, b"length").and_then(|(v, _)| v.int())
+                    .and_then(|n| u64::try_from(n).ok()).ok_or("invalid file length")?;
+                total.checked_add(size).ok_or("file lengths overflow")
+            })?
+        };
         let piece_len = field(b"piece length").ok_or("no piece length")? as u64;
         let name = info
             .get(&data, b"name")
