@@ -27,6 +27,8 @@ STRICT_RUST_TESTS = (
     'engine::tests::*redact*', 'engine::tests::*shutdown*',
     'engine::tests::*stops_with_app*', 'engine::tests::*stop_during_hashing*',
     'native_runtime::shutdown_tests::*', 'daemon::lifecycle::*', 'daemon::policy::*',
+    'durable_sync::tests::*', 'daemon::watch::tests::*persistence*',
+    'daemon::stats::tests::statistics_survive_ring_setup_failure',
     'api::trackers::*', 'search::torznab::tests::*credentials*',
     'search::proxy::tests::*', 'search::torznab::bound::cancellation_tests::*',
     'tui::attach::tests::detach_never_requests_owner_shutdown',

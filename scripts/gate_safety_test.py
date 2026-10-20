@@ -44,6 +44,9 @@ class SafetyTests(unittest.TestCase):
                             ('engine::dormant_delete::tests::parent_symlinks',True),
                             ('api::trackers::tests::redaction',True),
                             ('native_runtime::shutdown_tests::deadline',True),
+                            ('durable_sync::tests::cancelled_fallback_never_publishes_and_drains_the_blocking_pool',True),
+                            ('daemon::watch::tests::watch_persistence_survives_ring_setup_failure',True),
+                            ('daemon::stats::tests::statistics_survive_ring_setup_failure',True),
                             ('search::proxy::tests::proxy_requires_credentials_and_rejects_non_connect_without_outbound_traffic',True),
                             ('search::torznab::bound::cancellation_tests::cancelling_a_pending_bound_operation_does_not_wait_for_its_dns_budget',True),
                             ('engine::tests::timing_only',False)]:

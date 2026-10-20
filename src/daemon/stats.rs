@@ -114,6 +114,13 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
     #[test]
+    fn statistics_survive_ring_setup_failure() {
+        crate::durable_sync::fault::isolated(&[libc::ENOMEM, libc::EPERM], |errno| {
+            crate::durable_sync::fault::deny_setup(errno);
+            save_throttle_30s();
+        });
+    }
+    #[test]
     fn save_throttle_30s() {
         let root = std::env::temp_dir().join(format!(
             "fbt-stats-{}-{}",
