@@ -3159,6 +3159,7 @@ impl RuntimeState {
     /// publication. Used to avoid polling ordinary ready work ahead of a
     /// reentrant cancellation request.
     #[inline]
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn has_deferred_cancel_dispatches(&self) -> bool {
         self.pending_cancel_dispatch_ready.load(Ordering::Acquire)
     }
@@ -4005,6 +4006,7 @@ impl RuntimeState {
     /// This is for runtime owners that also own the scheduler publication
     /// boundary. They must inject the returned task into a ready/cancel lane,
     /// release scheduler locks, and then dispatch the returned effects.
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn create_task_with_deferred_spawn_effects<F, T>(
         &mut self,
         region: RegionId,
@@ -4094,6 +4096,7 @@ impl RuntimeState {
     /// (`resolve_cancelled` / `resolve_failed`) **after** releasing the state
     /// lock — completion slots are user code and must not run under the
     /// runtime lock.
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn admit_spawn_request(
         &mut self,
         parts: crate::runtime::spawn_mailbox::SpawnRequestParts,
@@ -4327,12 +4330,14 @@ impl RuntimeState {
     /// normal close carries an explicit completion reason instead of calling
     /// the subscriber-free `begin_close` directly. Remaining live tasks are
     /// cancelled exactly as the structured-close protocol requires.
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn close_region_command(&mut self, region_id: RegionId, reason: &CancelReason) {
         let effects = self.cancel_request(region_id, reason, None);
         self.advance_region_state(region_id);
         self.defer_cancel_dispatch(effects);
     }
 
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn close_region_command_with_budget(
         &mut self,
         region_id: RegionId,
@@ -9559,6 +9564,7 @@ impl RuntimeState {
         }
     }
 
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn finalizer_history(&self) -> &[FinalizerHistoryEvent] {
         &self.finalizer_history
     }

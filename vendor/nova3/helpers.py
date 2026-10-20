@@ -73,6 +73,78 @@ socket.setdefaulttimeout(_TIMEOUT_SECS)
 _original_socket = socket.socket
 
 
+def _enable_bound_proxy() -> None:
+    """App-owned SOCKS5h: providers never invoke the machine's DNS resolver."""
+    parts = urllib.parse.urlsplit(os.environ.get("qbt_socks_proxy", ""))
+    if (parts.scheme != "socks5h" or parts.hostname != "127.0.0.1"
+            or not parts.port or not parts.username or not parts.password):
+        raise RuntimeError("Nova VPN proxy configuration is missing or invalid")
+    proxy = (socks.SOCKS5, parts.hostname, parts.port, True,
+             parts.username.encode(), parts.password.encode())
+    socks.setdefaultproxy(socks.SOCKS5, parts.hostname, parts.port, True,
+                          parts.username, parts.password)
+
+    class BoundSocket(socks.socksocket):
+        def __new__(cls, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None):
+            # Multiprocessing uses local Unix sockets; these have no route.
+            if family == socket.AF_UNIX:
+                return _original_socket(family, type, proto, fileno=fileno)
+            return super().__new__(cls)
+
+        def __init__(self, family=socket.AF_INET, type=socket.SOCK_STREAM, proto=0, fileno=None):
+            if family not in (socket.AF_INET, socket.AF_INET6) or type != socket.SOCK_STREAM or fileno is not None:
+                raise OSError("Nova VPN proxy supports TCP CONNECT only")
+            # The proxy endpoint is IPv4, even when the destination is IPv6.
+            super().__init__(socket.AF_INET, type, proto)
+            self.proxy = proxy
+            self.settimeout(_TIMEOUT_SECS)
+
+        def connect(self, address, *args, **kwargs):
+            self.proxy = proxy
+            return super().connect((address[0], address[1]), *args, **kwargs)
+
+        def set_proxy(self, *args, **kwargs):
+            raise OSError("Nova VPN proxy cannot be replaced")
+
+        setproxy = set_proxy
+
+    def create_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+                          source_address=None, *, all_errors=False):
+        stream = BoundSocket()
+        try:
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                stream.settimeout(timeout)
+            if source_address:
+                # Providers do not own the outbound interface; the daemon does.
+                raise OSError("Nova VPN proxy owns the source address")
+            stream.connect(address)
+            return stream
+        except BaseException:
+            stream.close()
+            raise
+
+    def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        # Libraries which resolve before connect must preserve the hostname for
+        # SOCKS5h. No NSS, systemd-resolved or local DNS packets in this process.
+        if type not in (0, socket.SOCK_STREAM):
+            raise socket.gaierror("Nova VPN proxy supports TCP CONNECT only")
+        if isinstance(host, bytes):
+            host = host.decode("ascii")
+        port = socket.getservbyname(port, "tcp") if isinstance(port, str) and not port.isdecimal() else int(port)
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (host, port))]
+
+    def no_local_dns(*args, **kwargs):
+        raise socket.gaierror("Nova VPN DNS is remote; pass the hostname to connect")
+
+    socket.socket = BoundSocket
+    socket.create_connection = create_connection
+    socket.getaddrinfo = getaddrinfo
+    socket.gethostbyname = no_local_dns
+    socket.gethostbyname_ex = no_local_dns
+    socket.gethostbyaddr = no_local_dns
+    socket.getnameinfo = no_local_dns
+
+
 def _read_bounded(response: Any) -> bytes:
     """ Read at most _MAX_BODY bytes, and gunzip at most _MAX_DECOMPRESSED """
     data: bytes = response.read(_MAX_BODY + 1)
@@ -87,6 +159,10 @@ def _read_bounded(response: Any) -> bytes:
 
 
 def enable_socks_proxy(enable: bool) -> None:
+    if os.environ.get("FBT_NOVA_BOUND") == "1":
+        # A provider cannot opt out of the owner's binding by calling False.
+        _enable_bound_proxy()
+        return
     if enable:
         socksURL = os.environ.get("qbt_socks_proxy")
         if socksURL is not None:

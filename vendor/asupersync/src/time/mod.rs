@@ -70,7 +70,7 @@ pub use driver::{
 };
 pub use elapsed::Elapsed;
 pub use interval::{Interval, MissedTickBehavior, interval, interval_at};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub(crate) use sleep::process_epoch;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use sleep::wasm_monotonic_nanos;

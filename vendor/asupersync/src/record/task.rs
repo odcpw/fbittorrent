@@ -39,9 +39,12 @@ pub type TaskOutcome = Outcome<(), crate::error::Error>;
 /// Wakers travel separately in the opaque [`CancellationEffects`] envelope.
 #[derive(Debug)]
 pub(crate) struct CheckpointCancelAck {
+    // Keep the native checkpoint receipt intact when its Lab reader is absent.
+    #[cfg_attr(not(any(test, feature = "lab-runtime")), allow(dead_code))]
     pub(crate) effective_reason: CancelReason,
     pub(crate) cleanup_priority: u8,
     pub(crate) request_transition: Option<(TaskState, TaskState)>,
+    #[cfg_attr(not(any(test, feature = "lab-runtime")), allow(dead_code))]
     pub(crate) acknowledge_transition: Option<(TaskState, TaskState)>,
     pub(crate) region_id: RegionId,
     pub(crate) spawned_at: Time,

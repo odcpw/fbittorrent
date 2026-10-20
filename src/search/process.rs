@@ -7,6 +7,7 @@ pub(super) fn python(directory: &Path) -> Command {
         .current_dir(directory)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env("FBT_NOVA_RUNNER", "1")
         // Few malloc arenas keep idle address-space reservations far below the cap.
         .env("MALLOC_ARENA_MAX", "2")
         .stdin(Stdio::null());
@@ -75,6 +76,7 @@ pub(super) fn isolated(command:&mut Command) {
 pub(super) struct ProcessGroup {
     pub(super) child: Child,
     pub(super) pid: i32,
+    proxy: Option<super::proxy::Proxy>,
 }
 impl ProcessGroup {
     pub(super) fn spawn(mut command: Command) -> Result<Self> {
@@ -83,6 +85,14 @@ impl ProcessGroup {
             .map_err(|_| anyhow!("search lifecycle lock failed"))?;
         if registry.closing {
             bail!("the app is closing; search providers cannot start");
+        }
+        let nova = command.get_envs().any(|(key, value)|
+            key == "FBT_NOVA_RUNNER" && value == Some(std::ffi::OsStr::new("1")));
+        let proxy = if nova { super::proxy::Proxy::configured()? } else { None };
+        if let Some(proxy) = &proxy {
+            command.env("qbt_socks_proxy", proxy.url()).env("FBT_NOVA_BOUND", "1");
+        } else {
+            command.env_remove("FBT_NOVA_BOUND");
         }
         let child = command
             .stdout(Stdio::piped())
@@ -93,7 +103,16 @@ impl ProcessGroup {
         // Track metadata/compile runners too, before shutdown can acquire the
         // mutex. Search-job registration may happen after the worker is created.
         registry.processes.insert(pid);
-        Ok(Self { child, pid })
+        Ok(Self { child, pid, proxy })
+    }
+    pub(super) fn redact(&self, text: &str) -> String {
+        self.proxy.as_ref().map_or_else(|| text.to_owned(), |proxy| proxy.redact(text))
+    }
+    pub(super) fn redact_bytes<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        match &self.proxy {
+            Some(proxy) => std::borrow::Cow::Owned(proxy.redact_bytes(bytes)),
+            None => std::borrow::Cow::Borrowed(bytes),
+        }
     }
     pub(super) fn kill(&self) {
         unsafe {
@@ -143,10 +162,10 @@ pub(super) fn capture_process(mut process: ProcessGroup, budget: Duration) -> Re
         bail!("search provider output exceeded 2 MiB");
     }
     match status {
-        Some(status) if status.success() => Ok(output),
+        Some(status) if status.success() => Ok(process.redact_bytes(&output).into_owned()),
         Some(_) => bail!(
             "search provider runtime failed: {}",
-            String::from_utf8_lossy(&errors).trim()
+            process.redact(String::from_utf8_lossy(&errors).trim())
         ),
         None => bail!("search provider runtime timed out"),
     }

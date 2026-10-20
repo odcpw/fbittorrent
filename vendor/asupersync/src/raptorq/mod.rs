@@ -29,6 +29,7 @@ pub mod linalg;
 pub mod offline_tuner;
 pub mod pipeline;
 pub mod proof;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod regression;
 pub mod rfc6330;
 pub mod systematic;

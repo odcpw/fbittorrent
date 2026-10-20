@@ -267,8 +267,10 @@ pub use pool_sizing::{
     PoolSizingTarget, PoolWorkloadEstimate, decide_pool_sizing, pool_sizing_candidate_metrics,
     recommend_pool_size, square_root_staffing_size,
 };
+#[cfg(any(test, feature = "lab-runtime"))]
+pub use reactor::LabReactor;
 pub use reactor::{
-    BrowserReactor, BrowserReactorConfig, Event, Events, Interest, LabReactor, Reactor,
+    BrowserReactor, BrowserReactorConfig, Event, Events, Interest, Reactor,
     Registration, Source, Token,
 };
 pub use region_heap::{HeapIndex, HeapRef, HeapStats, RegionHeap, global_alloc_count};

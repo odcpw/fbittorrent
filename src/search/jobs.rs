@@ -62,22 +62,12 @@ fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:
     {
         bail!("the app is closing; search providers cannot start");
     }
-    let mut providers: Vec<_> = plugins_in(store)?
+    let providers: Vec<_> = plugins_in(store)?
         .into_iter()
         .filter(|plugin| plugin.enabled && selected.is_none_or(|names| names.contains(&plugin.name)))
         .collect();
     if providers.is_empty() && native.is_empty() {
         bail!("no enabled search providers; install providers with fbittorrent search --install");
-    }
-    // Python providers open their own, unbound sockets: under a VPN binding
-    // they are skipped (Torznab indexers still run bound) or refused.
-    let mut warnings = Vec::new();
-    if !providers.is_empty() {
-        if let Err(error) = crate::outbound::unbound_helpers_allowed("Nova search providers") {
-            if native.is_empty() { return Err(error); }
-            warnings.push(crate::api::ProviderWarning { provider: "nova".into(), message: format!("{error:#}").chars().take(200).collect() });
-            providers.clear();
-        }
     }
     let process=if providers.is_empty(){None}else {
         let names=providers.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(",");
@@ -94,7 +84,7 @@ fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:
             raw: vec![],
             hashes: BTreeMap::new(),
             error: String::new(),
-            warnings,
+            warnings: Vec::new(),
         }),
         worker: Mutex::new(None),
     });
@@ -166,6 +156,7 @@ fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob)
                     process.kill(); break;
                 }
                 retained += count;
+                let line = process.redact_bytes(&line);
                 let result = std::str::from_utf8(&line).ok().and_then(|text| parse_result(text, &providers));
                 let hash = result.as_ref().and_then(|r| inspected.entry(r.file_url.clone()).or_insert_with(|| normalize::torrent_hash(&r.file_url)).clone());
                 if let Ok(mut state) = job.state.lock() {
@@ -182,7 +173,7 @@ fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob)
             let status = process.child.wait();
             process.kill();
             job.pid.store(0, Ordering::Release);
-            let errors = errors.join().unwrap_or_default();
+            let errors = process.redact(&errors.join().unwrap_or_default());
             if expired && !job.cancelled.load(Ordering::Acquire) {
                 if let Ok(mut state) = job.state.lock() {
                     if state.error.is_empty() { state.error = format!("search providers timed out after {} seconds", deadline.as_secs()); }
