@@ -30,10 +30,12 @@ impl EngineDispatcher {
     pub(super) async fn observation_ledger(&self) -> Result<ledger::ReadLedger> {
         if self.inner.stopping.load(Ordering::Acquire) { bail!("native engine is closing"); }
         self.runtime.cx().checkpoint()?;
-        Ok(match OwnedMutexGuard::try_lock(self.inner.ledger.clone()) {
+        let ledger = match OwnedMutexGuard::try_lock(self.inner.ledger.clone()) {
             Ok(ledger) => ledger::ReadLedger::Current(ledger),
             Err(_) => ledger::ReadLedger::Committed(self.inner.committed_ledger.read().unwrap().clone()),
-        })
+        };
+        self.inner.saved.retain_records(&ledger.records);
+        Ok(ledger)
     }
     pub(crate) fn transfer_totals(&self)->(u64,u64,u64) {
         let counters=self.inner.session.stats_snapshot().counters;

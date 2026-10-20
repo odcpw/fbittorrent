@@ -191,6 +191,7 @@ impl ParkedLedger {
         }
         if matches!(&op, EngineOp::Info) {
             let records = self.saved_records()?;
+            self.saved.retain_records(&records);
             let mut queue_position=0;
             let mut rows=records.iter().map(|record| {
                 let mut view=parked_view(record,&self.directory,&self.saved)?;
@@ -202,6 +203,7 @@ impl ParkedLedger {
             return Ok(EngineResult::Torrents(rows));
         }
         let mut ledger = read_ledger(&self.directory.join("torrents.json"))?;
+        self.saved.retain_records(&ledger.records);
         ledger.generation = self.generation.clone();
         if let EngineOp::Rename {hash,name}=&op {rename::apply(&mut ledger,hash,name)?;save_parked_ledger(&self.directory,&ledger)?;return Ok(EngineResult::Acknowledged);}
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {

@@ -147,6 +147,29 @@ pub(crate) struct SavedCache {
 }
 
 impl SavedCache {
+    /// Removed records must not keep parsed file lists or presence observations
+    /// alive until restart. Allocate an index only when churn exceeds the live
+    /// row count. Maintenance never waits for another reader's filesystem scan;
+    /// concurrent old readers are pruned by a later observation.
+    pub(super) fn retain_records(&self, records: &[Record]) {
+        fn oversized<T>(cache: &StdMutex<HashMap<String, T>>, count: usize) -> bool {
+            cache.try_lock().is_ok_and(|cache| cache.len() > count)
+        }
+        let count = records.len();
+        if !oversized(&self.metadata, count) && !oversized(&self.presence, count)
+            && !oversized(&self.live, count) { return; }
+        let current: HashSet<_> = records.iter().map(|record| record.hash.as_str()).collect();
+        if let Ok(mut cache) = self.metadata.try_lock() {
+            cache.retain(|hash, _| current.contains(hash.as_str()));
+        }
+        if let Ok(mut cache) = self.presence.try_lock() {
+            cache.retain(|hash, _| current.contains(hash.as_str()));
+        }
+        if let Ok(mut cache) = self.live.try_lock() {
+            cache.retain(|hash, _| current.contains(hash.as_str()));
+        }
+    }
+
     /// Validated saved metainfo for `record`, or None when no file exists.
     pub(super) fn info(&self, record: &Record, directory: &Path) -> Result<Option<Arc<SavedInfo>>> {
         let path = directory.join(format!("{}.torrent", record.hash));
@@ -288,6 +311,36 @@ mod tests {
         record.only_files = Some(vec![3, 1]);
         assert!(!info.present(&record), "missing selected files remain visible");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removed_and_discarded_metadata_is_released_on_observation() {
+        for operation in ["discard", "delete", "undo-remove"] {
+            let (root, mut record) = fixture(operation);
+            record.staged = operation == "discard";
+            let app = crate::engine::tests::test_app(&root, &root.join("downloads"), Ledger {
+                records: vec![record.clone()], ..Ledger::default()
+            }, None);
+            let dispatcher = app.dispatcher();
+            dispatcher.execute(ops::EngineOp::Info).unwrap();
+            let info = dispatcher.inner.saved.info(&record, &root).unwrap().unwrap();
+            let retained = Arc::downgrade(&info);
+            drop(info);
+            let hashes = ops::HashSelection(vec![record.hash.clone()]);
+            let op = match operation {
+                "discard" => ops::EngineOp::Discard { hash: record.hash.clone() },
+                "delete" => ops::EngineOp::Delete { hashes, files: false },
+                _ => ops::EngineOp::RemoveKeep { hashes },
+            };
+            dispatcher.execute(op).unwrap();
+            let ops::EngineResult::Torrents(rows) = dispatcher.execute(ops::EngineOp::Info).unwrap() else { panic!() };
+            assert!(rows.is_empty());
+            assert!(retained.upgrade().is_none(), "{operation} must release removed metainfo, not retain it until engine restart");
+            assert_eq!(std::fs::read(root.join("downloads/hello.txt")).unwrap(), b"hello");
+            drop(dispatcher);
+            drop(app);
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
