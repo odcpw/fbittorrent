@@ -90,18 +90,16 @@ Column {
   ListView {
     id:list
     width:parent.width;height:Math.max(0,root.height-header.height-root.spacing)
-    clip:true;reuseItems:true;currentIndex:-1
+    // Qt 6.12 can reuse a proxy delegate with its previous model-role wrapper
+    // after a remove/reinsert or reset. Keep live delegates for role patches,
+    // but create a fresh binding when a row enters the viewport again.
+    clip:true;reuseItems:false;currentIndex:-1
     model:proxy
     boundsBehavior:Flickable.StopAtBounds
     ScrollBar.vertical:ScrollBar {policy:ScrollBar.AsNeeded}
     delegate:TorrentTableRow {
       required property var model
-      // A pooled delegate can remain attached to the proxy's content item.
-      // Hide it immediately, before its old role bindings lose their hash.
-      property bool pooled:false
-      ListView.onPooled:pooled=true
-      ListView.onReused:pooled=false
-      visible:!pooled && !!model.hash
+      visible:!!model.hash
       width:list.width;host:root;torrent:model.uiTorrent
       selected:!!root.selection[model.hash]
     }
