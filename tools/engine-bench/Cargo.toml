@@ -1,0 +1,19 @@
+[package]
+name = "fbt-engine-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic loopback seed, tracker and payload tools for fbittorrent engine benchmarks"
+license = "MIT"
+publish = false
+
+# Measurement tool only: a standalone workspace with no dependencies, so the
+# application lockfile and build are unaffected.
+[workspace]
+
+[[bin]]
+name = "fbt-bench-seed"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+debug = "line-tables-only"
