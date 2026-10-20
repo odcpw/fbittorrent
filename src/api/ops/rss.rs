@@ -57,7 +57,16 @@ fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl 
             let item=service.snapshot().map_err(failure)?.sources.get(&args.feed).into_iter().flatten().find(|a|a.id==args.item).cloned()
                 .ok_or_else(||error(ErrorCode::NotFound,"unknown feed item",None))?;
             let source=if let Some(magnet)=item.magnet {AddSource::Magnet(magnet)}else if let Some(url)=item.torrent_url {AddSource::Url(url)}else {return Err(error(ErrorCode::InvalidState,"item has no downloadable source",Some("item")));};
-            let add=serde_json::from_value(json!({"source":source,"stopped":args.stopped,"seed":args.seed,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"rss","stage":args.stage})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
+            let add = AddArgs {
+                source,
+                stage: args.stage,
+                stopped: args.stopped,
+                seed: args.seed,
+                save_path: args.save_path.clone(),
+                files: args.files.clone(),
+                category: args.category.clone(),
+                origin: Some("rss".into()),
+            };
             let added=add_torrent(add,&f.id,&args.item)?;
             Reply::RssGrab(added)
         },

@@ -3,20 +3,6 @@ use crate::{api, config::Config, search};
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-pub(crate) fn providers() -> Result<Vec<api::Provider>> {
-    Ok(search::plugins()?
-        .into_iter()
-        .map(|p| api::Provider {
-            name: p.name,
-            kind: if p.kind=="torznab" {api::ProviderKind::Torznab}else{api::ProviderKind::Nova},
-            enabled: p.enabled,
-            full_name: (!p.full_name.is_empty()).then_some(p.full_name),
-            url: (!p.url.is_empty()).then_some(p.url),
-            version: (!p.version.is_empty()).then_some(p.version),
-        })
-        .collect())
-}
-
 pub(crate) struct Search {
     pub items: Vec<api::SearchItem>,
     pub complete: bool,

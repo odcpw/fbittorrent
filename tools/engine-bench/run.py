@@ -108,6 +108,10 @@ class Run:
         self.pressure_begin = self.pressure()
         self.sandbox = Sandbox(directory=self.args.disk_root)
         self.owners.register(self.sandbox.root)
+        # Retain exact ownership evidence even if the driver is killed before
+        # its finally block can run. Never infer ownership from a /tmp prefix.
+        (self.output / "fixture.json").write_text(
+            json.dumps({"private_root": str(self.sandbox.root)}) + "\n")
         # The filesystem is intentional. /tmp is tmpfs on the benchmark host.
         self.disk = self.sandbox.root
         self.metadata = self.disk / "metainfo"
