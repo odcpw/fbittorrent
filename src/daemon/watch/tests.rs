@@ -281,6 +281,8 @@ fn once_pause_ack_restart_and_lost_prefix() {
     paused.dl_bps = None;
     assert!(w.sample(vec![paused]).is_empty());
     assert!(w.rows[&"a".repeat(40)].value.ready);
+    w.flush(Instant::now() + Duration::from_secs(1));
+    assert!(!w.persistence.pending(), "restart observes a fully durable checkpoint");
     let mut restarted = Watch::open(path.clone());
     assert!(restarted.sample(vec![sample(40 * MIB)]).is_empty());
     assert!(restarted.sample(vec![sample(0)]).is_empty());
@@ -295,6 +297,8 @@ fn once_pause_ack_restart_and_lost_prefix() {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
         0o600
     );
+    restarted.flush(Instant::now() + Duration::from_secs(1));
+    drop((w, restarted));
     std::fs::remove_dir_all(dir).unwrap();
     println!("pause retains readiness; acknowledgement and restart suppression durable; a lost prefix re-arms next daemon");
 }

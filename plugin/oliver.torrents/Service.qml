@@ -20,6 +20,7 @@ import "SearchFlow.js" as SearchFlow
 import "ShowsFlow.js" as ShowsFlow
 import "RssFlow.js" as RssFlow
 import "BrowsePosters.js" as BrowsePosters
+import "OfflineState.js" as OfflineState
 
 Item {
   id: root
@@ -196,9 +197,8 @@ Item {
     if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
-      var connectionStatus = Object.assign({}, status)
-      connectionStatus.ok = c.online; connectionStatus.running = c.online
-      status = connectionStatus
+      if(!c.online)OfflineState.clear(root)
+      status = Model.apiStatus(store,c.online)
     }
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
@@ -206,12 +206,13 @@ Item {
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
-    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=({});toastTimer.stop();actionStatus=""}
+    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=null;toastTimer.stop();actionStatus=""}
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
   }
   function applyFrame(frame, request) {
+    if(client && !client.online && frame.ev!=="bye")return
     var rowsChanged
     try { rowsChanged = store.apply(frame, request) }
     catch (error) { client.reset("invalid state stream: " + String(error)); return }
@@ -258,12 +259,12 @@ Item {
         var command=String(root.store.settings.open_command || "xdg-open")
         // Match Config::open: the owner-configured command is shell syntax;
         // the daemon-provided path remains a literal positional parameter.
-        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.path])
+        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.stream_url || result.path])
       }
     }})
   }
   readonly property string diskBanner: {var confirmed=status;return online ? PopupState.diskBanner(store.summary.disk) : ""}
-  readonly property bool turtleOn: {var confirmed=status;return store.summary.alt===true}
+  readonly property bool turtleOn: {var confirmed=status;return online && store.summary.alt===true}
   function toggleTurtle(){return setTurtle(!turtleOn)}
   function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
   function recheck(hash) {
@@ -388,7 +389,7 @@ Item {
   }
   Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify(Object.assign({},root.savedPreferences,{details_width:root.detailsWidth,sort:{key:root.sortKey,reverse:root.sortReverse}}))+"\n")}
   Timer {id:toastTimer;interval:5000;onTriggered:root.toast=null}
-  Timer {interval:125;repeat:true;running:(root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
+  Timer {interval:125;repeat:true;running:root.online && (root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
   // FileView follows the existing parent when the runtime directory is absent.
   // Probe only on filesystem/input edges. Stat checks socket type/identity
   // without connecting; an unchanged stale socket is attempted just once.

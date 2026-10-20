@@ -2,6 +2,11 @@
 use super::*;
 use crate::daemon::watch::{self, Sample};
 impl EngineDispatcher {
+    pub(crate) fn prioritize_metadata(
+        &self, hash: &str, file: usize, range: Option<std::ops::Range<u64>>,
+    ) -> Result<()> {
+        self.inner.handle(hash)?.prioritize_metadata(file, range)
+    }
     pub(crate) fn watch_samples(&self) -> Result<Vec<Sample>> {
         self.runtime.block_on(async {
             let ledger =

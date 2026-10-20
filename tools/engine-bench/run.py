@@ -358,7 +358,12 @@ class Run:
                 raise TimeoutError("explicit recheck did not finish")
             measured = delta(before, proc(self.pid), time.monotonic()-started, self.size)
             assert self.api("torrents.get", dict(hash=item["hash"]))["torrent"]["state"] == "paused"
-            return self.finish_row(dict(initial=initial, recheck=measured, bytes=self.size))
+            payload = self.sandbox.downloads/item["name"]
+            self.tool("verify", file=payload, size=self.size, key=42)
+            with payload.open("rb") as source:
+                digest = hashlib.file_digest(source, "sha256").hexdigest()
+            return self.finish_row(dict(initial=initial, recheck=measured, bytes=self.size,
+                                        payload_sha256=digest))
 
     def many(self, name, count, active):
         with self.setup(name, count=count, size=64*MIB, rate=32*1024):

@@ -8,6 +8,24 @@ fn speed_bytes(mbps: f64) -> u64 {
     (mbps * 1024f64 * 1024f64) as u64
 }
 
+/// Receiving is a structural row state, not just a sampled counter. Observe
+/// the estimator crossing zero alongside lifecycle/completion changes. Arm the
+/// lifecycle waiter before discovering Live, then arm activity before sampling.
+async fn torrent_changed(handle: Arc<ManagedTorrent>) {
+    let mut state = std::pin::pin!(handle.state_changed());
+    if std::future::poll_fn(|cx| Poll::Ready(state.as_mut().poll(cx).is_ready())).await {
+        return;
+    }
+    if let Some(live) = handle.live() {
+        rqbit_runtime::select! {
+            _ = &mut state => {},
+            _ = live.down_speed_estimator().activity_changed() => {},
+        }
+    } else {
+        state.await;
+    }
+}
+
 impl Inner {
     /// Sum of the live handles' estimator rates: the same values Info reports
     /// as each Live row's dl_bps/ul_bps, without building any row.
@@ -136,7 +154,7 @@ impl EngineDispatcher {
                         waits = handles
                             .into_iter()
                             .map(|handle| {
-                                Box::pin(async move { handle.state_changed().await })
+                                Box::pin(torrent_changed(handle))
                                     as Pin<Box<dyn Future<Output = ()> + Send>>
                             })
                             .collect();

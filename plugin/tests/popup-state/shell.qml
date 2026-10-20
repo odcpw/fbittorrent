@@ -54,6 +54,8 @@ ShellRoot {
     s.store.summary={daemon:{warnings:[{source:"config",message:"parsing config.toml"},{source:"rss",message:"parsing rss.json"}]}};r=State.describe(s);check("states","unreadable config banner keeps last valid settings",r,r.banner==="config.toml is unreadable; using the last valid settings (+1 more). Fix the file to clear this." && !r.urgent)
     s.store.summary={daemon:{idle_exit_in_s:240}};r=State.describe(s);check("states","optional idle countdown",r,r.idle==="Idle · stops in 4 min")
     s.online=false;r=State.describe(s);check("states","offline omits the cached idle countdown",r,r.idle==="" && r.message.indexOf("stopped.")>=0)
+    s.store.summary={disk:{low:true,needed_bytes:100},daemon:{upgrade_pending:true,idle_exit_in_s:240}}
+    r=State.describe(s);check("states","stopped hides cached disk/upgrade activity and uses the shared stopped wording",r,r.banner==="" && r.idle==="" && r.message.indexOf("fbittorrent stopped")===0 && Model.heroMeta({ok:false})==="Stopped")
     s.online=true
     s.store.summary={};r=State.describe(s);check("states","idle countdown omitted when absent; empty message stays outside list",r,r.idle==="" && r.message.indexOf("Nothing here yet")===0)
     s.backendState="parked";s.store.summary={disk:{low:true,needed_bytes:104857600,free_bytes:67108864},network:{interface:"fixture0"}}

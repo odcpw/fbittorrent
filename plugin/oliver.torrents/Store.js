@@ -5,7 +5,6 @@
 
 // Filtering uses native scalar roles; cells receive one immutable row snapshot.
 // Optional observations stay absent instead of inventing numeric/boolean values.
-var DISPLAY_ROLES={staged:false}
 var STATES = ["metadata", "checking", "downloading", "stalled", "queued", "paused", "done", "seeding", "waiting_vpn", "error"]
 function dictionary() { return Object.create(null) }
 function equal(a, b) {
@@ -311,7 +310,7 @@ function create(options) {
   }
   // Qt's model owns stable delegates. Only changed roles emit row updates.
   var mirror = {model:null, indexes:dictionary(), order:[], generation:-1, sorted:null}
-  function modelRow(hash,row){return Object.assign({},DISPLAY_ROLES,row,{uiTorrent:Object.assign({},row),uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)})}
+  function modelRow(hash,row){return {hash:hash,uiTorrent:Object.assign({},row),uiReady:ready(row),uiName:s.sortNames[hash],uiVisible:s.matches(rowState(row),ready(row),s.sortNames[hash],s.filterState,s.filterText)}}
   s.syncModel = function(model, key, reverse, reorder) {
     var structural = false
     if (mirror.model !== model) {
@@ -347,7 +346,6 @@ function create(options) {
           model.append(modelRow(change.hash,row)); structural = true
         } else {
           model.setProperty(index,"uiTorrent",Object.assign({},row))
-          change.fields.forEach(function(field) { model.setProperty(index,field,row[field] === undefined ? (field==="staged" ? false : null) : row[field]) })
           if(change.fields.some(function(field){return ["playable","name","state","staged"].indexOf(field)>=0}))model.setProperty(index,"uiVisible",s.matches(rowState(row),ready(row),s.sortNames[change.hash],s.filterState,s.filterText))
           if(change.fields.indexOf("playable")>=0 || change.fields.indexOf("staged")>=0)model.setProperty(index,"uiReady",ready(row))
           if(change.fields.indexOf("name")>=0)model.setProperty(index,"uiName",s.sortNames[change.hash])

@@ -144,15 +144,13 @@ impl PieceTracker {
 
         // Then check naturally ordered queued pieces
         // Note: iter_queued_pieces only returns pieces in queue_pieces (not in-flight)
-        let queued: Vec<_> = self
+        let queued = self
             .chunks
             .iter_queued_pieces(req.file_priorities, req.file_infos)
-            .collect();
+            .find(|piece| (req.peer_has_piece)(*piece));
 
-        for piece in queued {
-            if (req.peer_has_piece)(piece) {
-                return self.reserve_piece(piece, req.peer);
-            }
+        if let Some(piece) = queued {
+            return self.reserve_piece(piece, req.peer);
         }
 
         // 3. Try steal with 3x threshold (moderately slow peer)
@@ -318,6 +316,7 @@ impl PieceTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("piece_tracker/optimization_tests.rs");
     use crate::{bitv::BitV as BitVTrait, type_aliases::BF};
     use librqbit_core::lengths::Lengths;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};

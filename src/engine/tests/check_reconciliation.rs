@@ -10,21 +10,23 @@ struct GateState {
     blocked: bool,
     released: bool,
     timed_out: bool,
+    cx: Option<Cx>,
 }
 #[derive(Default)]
-struct ReadGate {
+pub(in crate::engine::tests) struct ReadGate {
     state: StdMutex<GateState>,
     changed: Condvar,
+    offset: Option<u64>,
 }
 impl ReadGate {
-    fn arm(&self) {
+    pub(in crate::engine::tests) fn arm(&self) {
         *self.state.lock().unwrap() = GateState {
             armed: true,
             ..Default::default()
         };
     }
     fn before_read(&self, offset: u64) -> Result<()> {
-        if offset != PIECE as u64 {
+        if offset != self.offset.unwrap_or(PIECE as u64) {
             return Ok(());
         }
         let state = self.state.lock().unwrap();
@@ -34,6 +36,7 @@ impl ReadGate {
         let mut state = state;
         state.armed = false;
         state.blocked = true;
+        state.cx = Cx::current();
         self.changed.notify_all();
         let (mut state, deadline) = self
             .changed
@@ -45,15 +48,18 @@ impl ReadGate {
         }
         Ok(())
     }
-    fn wait_blocked(&self) {
+    pub(in crate::engine::tests) fn wait_blocked(&self) {
         let state = self.state.lock().unwrap();
         let (state, _) = self
             .changed
             .wait_timeout_while(state, Duration::from_secs(5), |state| !state.blocked)
             .unwrap();
-        assert!(state.blocked, "the real check must reach its second piece");
+        assert!(state.blocked, "the real check must reach read offset {}", self.offset.unwrap_or(PIECE as u64));
     }
-    fn release(&self) {
+    pub(in crate::engine::tests) fn cancelled(&self) -> bool {
+        self.state.lock().unwrap().cx.as_ref().is_some_and(|cx| cx.checkpoint().is_err())
+    }
+    pub(in crate::engine::tests) fn release(&self) {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -61,7 +67,7 @@ impl ReadGate {
         self.changed.notify_all();
     }
 }
-struct ReleaseOnDrop(Arc<ReadGate>);
+pub(in crate::engine::tests) struct ReleaseOnDrop(pub(in crate::engine::tests) Arc<ReadGate>);
 impl Drop for ReleaseOnDrop {
     fn drop(&mut self) {
         self.0.release();
@@ -74,6 +80,11 @@ impl Drop for ReleaseOnDrop {
 struct GatedFactory {
     counted: CountedFilesystemFactory,
     gate: Arc<ReadGate>,
+}
+pub(in crate::engine::tests) fn read_gate_storage(offset: u64) -> (BoxStorageFactory, Arc<ReadGate>) {
+    let gate = Arc::new(ReadGate { offset: Some(offset), ..Default::default() });
+    gate.arm();
+    (GatedFactory { counted: CountedFilesystemFactory(Arc::new(StorageCounts::default())), gate: gate.clone() }.boxed(), gate)
 }
 struct GatedStorage {
     storage: Box<dyn TorrentStorage>,
@@ -123,18 +134,7 @@ impl TorrentStorage for GatedStorage {
     }
 }
 
-fn gated_fixture() -> (
-    AppEngine,
-    PathBuf,
-    String,
-    Arc<StorageCounts>,
-    Arc<ReadGate>,
-) {
-    let directory = review_directory("check-reconciliation");
-    let downloads = directory.join("downloads");
-    std::fs::create_dir_all(&downloads).unwrap();
-    let name = "incomplete.bin";
-    std::fs::write(downloads.join(name), vec![b'a'; 2 * PIECE]).unwrap();
+fn check_fixture_bytes(name: &str) -> Vec<u8> {
     let mut bytes = format!(
         "d4:infod6:lengthi{}e4:name{}:{name}12:piece lengthi{PIECE}e6:pieces40:",
         2 * PIECE,
@@ -149,6 +149,22 @@ fn gated_fixture() -> (
     ]);
     bytes.extend_from_slice(&[0; 20]);
     bytes.extend_from_slice(b"7:privatei1eee");
+    bytes
+}
+
+fn gated_fixture() -> (
+    AppEngine,
+    PathBuf,
+    String,
+    Arc<StorageCounts>,
+    Arc<ReadGate>,
+) {
+    let directory = review_directory("check-reconciliation");
+    let downloads = directory.join("downloads");
+    std::fs::create_dir_all(&downloads).unwrap();
+    let name = "incomplete.bin";
+    std::fs::write(downloads.join(name), vec![b'a'; 2 * PIECE]).unwrap();
+    let bytes = check_fixture_bytes(name);
     let hash = librqbit::torrent_from_bytes(&bytes)
         .unwrap()
         .info_hash
@@ -435,4 +451,142 @@ fn remove_during_recheck_does_not_poison_undo_restore() {
     }
     println!("remove cancels/settles old recheck before undo can append a fresh generation");
     drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+
+#[test]
+fn committed_check_admits_without_a_maintenance_tick() {
+    for (label, stopped, blocked) in [
+        ("run", false, false),
+        ("stop", true, false),
+        ("vpn", false, true),
+    ] {
+        let directory = review_directory(&format!("commit-ready-{label}"));
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::write(downloads.join("commit.bin"), vec![b'a'; 2 * PIECE]).unwrap();
+        let gate = Arc::new(ReadGate::default());
+        gate.arm();
+        let counts = Arc::new(StorageCounts::default());
+        let app = test_app_with_session(
+            &directory,
+            &downloads,
+            Ledger::default(),
+            SessionOptions {
+                upload_enabled: false,
+                dht: None,
+                disable_trackers: true,
+                disable_local_service_discovery: true,
+                default_storage_factory: Some(
+                    GatedFactory {
+                        counted: CountedFilesystemFactory(counts),
+                        gate: gate.clone(),
+                    }
+                    .boxed(),
+                ),
+                ..Default::default()
+            },
+            false,
+        );
+        let dispatcher = app.dispatcher();
+        let _release = ReleaseOnDrop(gate.clone());
+        let EngineResult::Added(rows) = dispatcher
+            .execute(EngineOp::Stage {
+                options: add_request(vec![], Some(check_fixture_bytes("commit.bin"))),
+                files: Some(vec![0]),
+            })
+            .unwrap()
+        else {
+            panic!("stage result")
+        };
+        let hash = rows[0].hash.clone();
+        let take_restore = || {
+            dispatcher
+                .inner
+                .restores
+                .lock()
+                .unwrap()
+                .get_mut(&hash)
+                .unwrap()
+                .task
+                .take()
+                .unwrap()
+        };
+        dispatcher.runtime.block_on(async {
+            time::timeout(&test_cx(), Duration::from_secs(5), take_restore())
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        dispatcher
+            .execute(EngineOp::Commit {
+                hash: hash.clone(),
+                files: None,
+                seed: Some(false),
+                save_path: None,
+            })
+            .unwrap();
+        gate.wait_blocked();
+        let handle = dispatcher.inner.handle(&hash).unwrap();
+        let task = take_restore();
+        dispatcher.runtime.block_on(async {
+            // Admission owns the ledger through its first queue decision. Acquiring
+            // it proves that decision has happened while the real read is gated.
+            let mut ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), &test_cx())
+                .await
+                .unwrap();
+            assert!(handle.is_paused());
+            assert_eq!(dispatcher.inner.restore_admission.available_permits(), 4,
+                "checksum waiting must not retain a background admission permit");
+            assert!(matches!(
+                handle.stats().state,
+                TorrentStatsState::Initializing { .. }
+            ));
+            if stopped {
+                ledger
+                    .records
+                    .iter_mut()
+                    .find(|r| r.hash == hash)
+                    .unwrap()
+                    .paused = true;
+                dispatcher.inner.save(&test_cx(), &ledger).await.unwrap();
+            }
+            dispatcher
+                .inner
+                .network_blocked
+                .store(blocked, Ordering::Release);
+            gate.release();
+            time::timeout(
+                &test_cx(),
+                Duration::from_secs(5),
+                handle.wait_until_initialized(&test_cx()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            drop(ledger);
+            time::timeout(&test_cx(), Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        let row = crate::engine::tests::row(&dispatcher, &hash);
+        assert_eq!(
+            handle.is_paused(),
+            stopped || blocked,
+            "{label}: completed validation must apply current intent without a maintenance tick; stats={:?}, row={row:?}, restore={:?}",
+            handle.stats(),
+            dispatcher.restore_outcome(&hash)
+        );
+        assert!(row.checked && !row.staged);
+        assert!(!row.upload_enabled);
+        assert!(!gate.state.lock().unwrap().timed_out);
+        println!(
+            "commit readiness {label}: real checksum barrier released; restore joined; paused={}",
+            handle.is_paused()
+        );
+        drop(dispatcher);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
