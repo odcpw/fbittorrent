@@ -53,7 +53,9 @@ def proc(pid):
     fields = (root / "stat").read_text().rsplit(")", 1)[1].split()
     status = dict(line.split(":", 1) for line in (root / "status").read_text().splitlines())
     io = dict(line.split(":", 1) for line in (root / "io").read_text().splitlines())
-    return dict(cpu_s=(int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK"),
+    ticks = os.sysconf("SC_CLK_TCK")
+    return dict(cpu_s=(int(fields[11]) + int(fields[12])) / ticks,
+                user_s=int(fields[11]) / ticks, system_s=int(fields[12]) / ticks,
                 rss_kb=int(status["VmRSS"].split()[0]), peak_rss_kb=int(status["VmHWM"].split()[0]),
                 read_calls=int(io["syscr"]), write_calls=int(io["syscw"]),
                 read_bytes=int(io["read_bytes"]), write_bytes=int(io["write_bytes"]))
