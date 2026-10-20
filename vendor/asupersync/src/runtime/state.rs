@@ -6554,6 +6554,17 @@ impl RuntimeState {
             .count()
     }
 
+    pub(super) fn set_resolved_obligation_history_limit(&mut self, limit: usize) {
+        match self.shard_tables.as_ref() {
+            Some(shards) => shards
+                .obligations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set_resolved_history_limit(limit),
+            None => self.obligations.set_resolved_history_limit(limit),
+        }
+    }
+
     /// Counts pending obligations.
     ///
     /// O(1) — delegates to `ObligationTable::pending_count()` which maintains

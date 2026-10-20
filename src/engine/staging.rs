@@ -185,6 +185,10 @@ impl EngineDispatcher {
         })
         .await?;
         let result = result?;
+        // execute() saved through the parked-store path while retaining the
+        // exclusive ledger. Publish that durable result for nonblocking reads,
+        // just as Inner::save does for the normal engine mutations.
+        *self.inner.committed_ledger.write().unwrap() = Arc::new(ledger.clone());
         match &op {
             EngineOp::Discard { hash } => self.inner.cancel_restore(hash, true),
             EngineOp::Commit { hash, .. } => {

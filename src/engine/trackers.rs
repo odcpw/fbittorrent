@@ -30,8 +30,8 @@ pub(super) fn saved(record: &Record, directory: &Path) -> Result<Vec<librqbit::T
         .collect())
 }
 impl EngineDispatcher {
-    pub(super) async fn trackers(&self, cx: &Cx, hash: &str) -> Result<EngineResult> {
-        let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+    pub(super) async fn trackers(&self, _cx: &Cx, hash: &str) -> Result<EngineResult> {
+        let ledger = self.observation_ledger().await?;
         let record = ledger
             .records
             .iter()
