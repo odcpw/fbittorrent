@@ -40,3 +40,10 @@ script, never when spawn imports it as `__mp_main__`. A pool can retire an idle
 worker before its initializer has run; the worker's import must therefore keep
 the default TERM handler too. The importing-worker regression holds one worker
 inside helper import while another finishes both providers and retires the pool.
+
+With fbittorrent interface binding enabled, nova2.py and nova2dl.py enable the
+daemon-provided SOCKS5h proxy before importing engines. helpers.py also routes
+create_connection and getaddrinfo through remote DNS, refuses local DNS lookups
+and UDP, and keeps the proxy enabled when a provider calls enable_socks_proxy(False).
+The daemon owns authenticated CONNECT-only endpoints, bounds connections and
+timeouts, and closes each endpoint and its relays with the provider runner.

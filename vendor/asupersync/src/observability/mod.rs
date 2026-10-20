@@ -68,6 +68,7 @@ pub mod otel;
 pub mod otel_conformance_tests;
 #[cfg(test)]
 pub mod otel_sampling_strategy_audit_test;
+#[cfg(feature = "metrics")]
 pub mod otel_structured_concurrency;
 #[cfg(test)]
 pub mod otlp_attribute_size_cap_audit_test;
@@ -96,6 +97,7 @@ pub mod otlp_collector_oom_recovery_audit_test;
 pub mod otlp_compression_audit_test;
 #[cfg(test)]
 pub mod otlp_compression_negotiation_audit_test;
+#[cfg(test)]
 pub mod otlp_dst_clock_jump_audit_test;
 #[cfg(test)]
 pub mod otlp_empty_key_attribute_audit_test;
@@ -125,6 +127,7 @@ pub mod otlp_span_deduplication_audit_test;
 pub mod otlp_span_event_timestamping_audit_test;
 #[cfg(test)]
 pub mod otlp_tail_based_sampling_audit_test;
+#[cfg(feature = "metrics")]
 pub mod otlp_trace_exporter;
 #[cfg(test)]
 pub mod otlp_trace_state_propagation_audit_test;
@@ -296,9 +299,11 @@ pub use otel::{
     OwnedOtlpMetricsConfig, OwnedOtlpMetricsError, OwnedOtlpSpanKind, OwnedOtlpStatusCode,
     OwnedOtlpTraceCollection, OwnedOtlpTraceConfig, OwnedOtlpTraceError, OwnedOtlpTraces,
 };
+#[cfg(feature = "metrics")]
 pub use otel_structured_concurrency::{
     EntityId, OtelStructuredConcurrencyConfig, SpanStorage, SpanType,
 };
+#[cfg(feature = "metrics")]
 pub use otlp_trace_exporter::{
     LoadSheddingTraceExporter, OTLP_TAIL_SAMPLING_E2E_BEAD_ID, OTLP_TAIL_SAMPLING_SCOPE_BEAD_ID,
     OTLP_TAIL_SAMPLING_SCOPE_CONTRACT_VERSION, OtlpSpan, OtlpTailSamplingScope,

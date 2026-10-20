@@ -259,6 +259,13 @@ fn container_headers_bounded_and_validated() {
     println!("Matroska Duration/TimecodeScale and ISO mvhd durations; all truncations safe");
 }
 #[test]
+fn watch_persistence_survives_ring_setup_failure() {
+    crate::durable_sync::fault::isolated(&[libc::ENOMEM, libc::EPERM], |errno| {
+        crate::durable_sync::fault::deny_setup(errno);
+        once_pause_ack_restart_and_lost_prefix();
+    });
+}
+#[test]
 fn once_pause_ack_restart_and_lost_prefix() {
     let dir = std::env::temp_dir().join(format!(
         "fbt-watch-{}-{}",

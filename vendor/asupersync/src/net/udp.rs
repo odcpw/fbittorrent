@@ -2597,6 +2597,7 @@ impl UdpSocket {
     /// without an error. Its caller owns and retries the unsent suffix. No
     /// datagram has been sent when this returns Pending.
     // Native-only callers (the QUIC endpoint); wasm32 explicitly returns Unsupported.
+    #[cfg(any(test, feature = "extended-network"))]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn poll_send_batch_to_with_strategy(
         &mut self,
@@ -3476,6 +3477,7 @@ impl UdpSocket {
 
     /// Release readiness ownership without requiring a live cancellation context.
     // Native-only callers (the QUIC endpoint).
+    #[cfg(any(test, feature = "extended-network"))]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn clear_registration(&mut self) {
         self.registration.clear();

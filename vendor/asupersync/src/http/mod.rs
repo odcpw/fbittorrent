@@ -51,6 +51,7 @@ pub mod h3 {
         NativeH3ResponseWriter, NativeH3WriteEvent, h3_data_frame_wire_len,
     };
 }
+#[cfg(feature = "extended-network")]
 pub mod h3_native;
 #[cfg(feature = "http3")]
 pub mod h3_quic;
@@ -75,13 +76,10 @@ pub use h1::{
 /// [`Client::default_for_runtime`](client::Client::default_for_runtime).
 pub use client::Client;
 
-// br-asupersync-um5wbj: H3Error is the public-facing alias for
-// H3NativeError; expose it unconditionally (was previously gated behind
-// `feature = "http3"` while H3NativeError was unconditional, producing
-// surface inconsistency under non-default feature configs where one
-// name was reachable and the other was not). Both names now resolve to
-// the same type regardless of feature flags.
+// Keep both names for the same native HTTP/3 error inside its feature boundary.
+#[cfg(feature = "extended-network")]
 pub use h3_native::H3NativeError as H3Error;
+#[cfg(feature = "extended-network")]
 pub use h3_native::{
     H3ConnectionConfig, H3ConnectionState, H3ControlState, H3EndpointRole,
     H3Frame as NativeH3Frame, H3NativeError, H3PseudoHeaders, H3QpackMode, H3RequestHead,

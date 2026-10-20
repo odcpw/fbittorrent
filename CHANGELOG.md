@@ -47,7 +47,9 @@ restarts and resume when a required network interface returns.
 - Private local sockets and stores, bounded API frames and provider processes,
   redacted feed/tracker credentials, protected Torznab keys, and safe handling of
   payload paths, file deletion, terminal text and links. Configured interface
-  binding also governs app HTTP requests.
+  binding governs all app traffic, including RSS/Shows, IMDb and Nova search.
+  Python providers use an authenticated local SOCKS5h proxy with interface-bound
+  DNS and TCP; an unavailable tunnel fails closed without a normal-route fallback.
   ([Input and credential hardening](https://github.com/odcpw/fbittorrent/commit/f5d17cd42a9a5bcd7c2e08d694630ce447f59ba6),
   [bound outbound traffic](https://github.com/odcpw/fbittorrent/commit/d5f2c4ecaf16eba24263ac803ad5083259dbd0a9))
 

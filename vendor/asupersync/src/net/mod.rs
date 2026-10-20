@@ -6,10 +6,10 @@
 #![allow(clippy::unused_async)]
 
 /// ATP (Asupersync Transfer Protocol) - Self-contained data movement layer.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub mod atp;
 /// ATP UDP socket capability boundary.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 #[path = "atp/udp/mod.rs"]
 pub mod atp_udp;
 /// DNS resolution with caching and Happy Eyeballs support.
@@ -17,9 +17,10 @@ pub mod dns;
 /// Happy Eyeballs v2 (RFC 8305) concurrent dual-stack connection racing.
 pub mod happy_eyeballs;
 /// Native QUIC protocol core codecs and types (Tokio-free, runtime-agnostic).
+#[cfg(feature = "extended-network")]
 pub mod quic_core;
 /// Native QUIC transport state machines (TLS, recovery, streams).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub mod quic_native;
 /// STUN protocol for NAT traversal and ICE candidate gathering.
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,11 +51,11 @@ pub mod sys;
 /// but native socket entry points fail fast with `io::ErrorKind::Unsupported`.
 pub mod tcp;
 mod udp;
-#[cfg(all(unix, not(target_arch = "wasm32")))]
+#[cfg(all(feature = "extended-services", unix, not(target_arch = "wasm32")))]
 pub(crate) use udp::Armed;
 /// Fallback-aware reactor registration shared by every fd-backed async handle
 /// in the crate (sockets here, child-process pipes in `crate::process`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-services", not(target_arch = "wasm32")))]
 pub(crate) use udp::ReactorRegistration;
 /// Unix domain socket networking primitives (includes `UnixListener`, `UnixStream`).
 #[cfg(unix)]
@@ -64,12 +65,12 @@ pub mod websocket;
 /// MessagePort-based coordination utilities for browser worker runtimes.
 pub mod worker_channel;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub use atp::protocol::{
     AtpFrameCodec, Frame as AtpFrame, FrameError, FrameHeader, FrameType, ProtocolVersion,
     SessionTranscript, TranscriptHash, TranscriptHasher, VarInt, VarIntError,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub use atp_udp::{
     ATP_UDP_DEFAULT_BATCH_SIZE, ATP_UDP_DEFAULT_MAX_PACKET_SIZE, AtpUdpPacket, AtpUdpPressure,
     AtpUdpReceivedPacket, AtpUdpRecvBatch, AtpUdpSocket, AtpUdpSocketConfig, AtpUdpSocketProfile,
@@ -82,7 +83,7 @@ pub use quic::{
     QuicConfig, QuicConnection, QuicError, RecvStream as QuicRecvStream,
     SendStream as QuicSendStream,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub use quic_native::{
     AckEvent, AckRange, CryptoLevel, FlowControlError, FlowCredit, KeyUpdateEvent,
     NativeQuicConnection, NativeQuicConnectionConfig, NativeQuicConnectionError, PacketNumberSpace,
