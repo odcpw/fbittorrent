@@ -14,10 +14,10 @@ private native-runtime fork, not an API-compatible distribution of upstream.
 The app and rqbit enable `native-runtime`, `tls`, `tls-native-roots` and
 `tls-webpki-roots`; `epoch-diagnostics` remains an optional measurement feature.
 ATP, native QUIC and HTTP/3 were being compiled even with that feature set.
-They and their Lab helpers now require `extended-network`, which fbittorrent
-does not enable. The protocol declarations, exports and the ATP journal-tag
-helper are gated together, along with private ATP encoding/decoding and QUIC
-UDP helpers (retained for unit tests). Their implementations are unchanged.
+The first cut gated them behind `extended-network`; the subsequent pruning
+removed those unused protocol trees, their Lab helpers and the ATP journal-tag
+wrapper. Private ATP encoding/decoding and QUIC UDP helpers remain available to
+unit tests. Retained implementations are unchanged.
 Shared decode variants and outcome fields retain their layout and computation;
 their existing conditional dead-code allowances also cover profiles without
 ATP consumers. Native runtime,
@@ -34,9 +34,22 @@ two Lab-only observations have conditional dead-code allowances when Lab is off.
 
 The unused gRPC, messaging and process APIs, adapter certification, agent-swarm
 and audit tooling, plan/conformance/session modules, and Lab's swarm-replay and
-deadlock-radar tools require `extended-services`. The remaining OTLP exporter
-and structured-concurrency adapters follow the existing `metrics` boundary.
-None of those features is enabled by the app or its consumer test suites.
+deadlock-radar tools were first gated behind `extended-services`, then removed.
+The CLI/doctor binary, database drivers, OTLP adapters and their private regex
+implementation are also removed. None was used by the app or its consumer
+test suites.
+
+The manifest exposes only the native/TLS features above, `epoch-diagnostics`
+and `lab-runtime`, with empty defaults. The retired optional dependencies and
+upstream binary/example targets are removed. Remaining inactive upstream cfg
+fragments in shared files are explicitly recognized by `check-cfg`, but are not
+selectable Cargo features. This avoids changing shared runtime logic merely to
+remove an inactive branch. The obsolete upstream manifest is removed.
+
+Generic server primitives, HTTP/1 and HTTP/2, and the actor frameworks remain:
+native TLS RPC and retained Lab tests share some of their internal machinery.
+Removing those safely needs a separate dependency split. Native platform
+backends and existing tests for retained behavior are preserved.
 
 ## Original runtime patches
 

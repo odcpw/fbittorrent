@@ -79,24 +79,15 @@
 //!
 //! See the [`chaos`] module for detailed documentation on chaos testing.
 
-#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
-pub mod atp_lab {
-    pub use crate::atp::lab::*;
-}
-#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
-pub mod atp_path;
 #[cfg(feature = "benchmark-adapters")]
 pub mod benchmark_cartel;
 pub mod chaos;
 pub mod config;
 pub mod conformal;
 pub mod crashpack;
-#[cfg(feature = "extended-services")]
-pub mod deadlock_radar;
 pub mod dual_run;
 pub mod exploration_budget;
 pub mod explorer;
-pub mod fixtures;
 #[cfg(feature = "benchmark-adapters")]
 pub mod forensics;
 pub mod fuzz;
@@ -118,8 +109,6 @@ pub mod scenario;
 pub mod scenario_runner;
 pub mod snapshot_restore;
 pub mod spork_harness;
-#[cfg(feature = "extended-services")]
-pub mod swarm_replay;
 pub mod util;
 pub mod virtual_time_wheel;
 
@@ -128,12 +117,6 @@ mod deterministic_validation_tests;
 
 pub use crate::util::{
     StrictEntropyGuard, disable_strict_entropy, enable_strict_entropy, strict_entropy_enabled,
-};
-#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
-pub use atp_lab::{
-    ATP_LAB_MODEL_SCHEMA_VERSION, AtpLabArtifact, AtpLabAttachment, AtpLabEvent, AtpLabFailure,
-    AtpLabFault, AtpLabOracleConfig, AtpLabRegime, AtpLabReplayMetadata, AtpLabScenario,
-    AtpLabTransferSpec, AtpTransferLabPlan,
 };
 pub use config::LabConfig;
 pub use conformal::{
@@ -145,13 +128,6 @@ pub use crashpack::{
     AtpTransferOracle, AtpTransferState, CrashpackBuilder, CrashpackError, ReplayError,
     TraceMinimizer, TraceMinimizerConfig, TransferOracle, TransferOracleResult, TransferState,
     TransferViolation, ViolationSeverity,
-};
-#[cfg(feature = "extended-services")]
-pub use deadlock_radar::{
-    DEADLOCK_RADAR_SCHEMA_VERSION, DeadlockRadarCandidate, DeadlockRadarEvidence,
-    DeadlockRadarFinding, DeadlockRadarHazardClass, DeadlockRadarInterleavingStep,
-    DeadlockRadarLockRank, DeadlockRadarProofStatus, DeadlockRadarReport, DeadlockRadarVerdict,
-    run_deadlock_radar,
 };
 pub use dual_run::{
     CancelTerminalPhase, CancellationRecord, CaptureAnnotation, CaptureManifest, ComparisonVerdict,
@@ -176,12 +152,6 @@ pub use exploration_budget::{
 pub use explorer::{
     CoverageMetrics, DporCoverageMetrics, DporExplorer, ExplorationReport, ExplorerConfig,
     RunResult, ScheduleExplorer, TopologyExplorer, ViolationReport,
-};
-#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
-pub use fixtures::{
-    E2eReport, ExpectedOutcome, PerformanceImpact, ProofArtifactRef, RegimeSummary,
-    RepairDecisionLog, RepairRoiE2eHarness, RepairRoiE2eResult, RepairRoiE2eScenario,
-    TransferConfig, TransferResult,
 };
 pub use fuzz::{
     FuzzConfig, FuzzFinding, FuzzHarness, FuzzRegressionCase, FuzzRegressionCorpus, FuzzReport,
@@ -262,55 +232,6 @@ pub use snapshot_restore::{
 pub use spork_harness::{
     HarnessError, ScenarioRunnerError, SporkAppHarness, SporkScenarioConfig, SporkScenarioResult,
     SporkScenarioRunner, SporkScenarioSpec,
-};
-#[cfg(feature = "extended-services")]
-pub use swarm_replay::{
-    SWARM_AGENT_RUN_SCHEMA_VERSION, SWARM_CONTENTION_HEATMAP_LEDGER_SCHEMA_VERSION,
-    SWARM_FAILURE_MINIMIZER_SCHEMA_VERSION, SWARM_HANDOFF_VERIFICATION_SCHEMA_VERSION,
-    SWARM_OPERATOR_COCKPIT_REPORT_SCHEMA_VERSION, SWARM_PRESSURE_SCHEMA_VERSION,
-    SWARM_PRESSURE_TRACE_SUMMARY_SCHEMA_VERSION, SWARM_PROOF_LANE_ATLAS_REPORT_SCHEMA_VERSION,
-    SWARM_PROOF_LANE_PLAN_SCHEMA_VERSION, SWARM_REPLAY_SCHEMA_VERSION,
-    SWARM_WHAT_IF_PLAN_SCHEMA_VERSION, SwarmAgentRunEvent, SwarmAgentRunEventKind,
-    SwarmAgentRunForbiddenActions, SwarmAgentRunScenario, SwarmAgentRunSummary,
-    SwarmContentionHeatmapInput, SwarmContentionHeatmapLedger, SwarmContentionHeatmapVerdict,
-    SwarmContentionHotSpot, SwarmContentionHotspotKind, SwarmContentionLockMetric,
-    SwarmContentionSchedulerLaneMetric, SwarmContentionSeverity, SwarmDiskPressureLevel,
-    SwarmDiskPressureTransition, SwarmFailureBundle, SwarmFailureInvariantClass,
-    SwarmFailureMinimizerInput, SwarmFailureMinimizerReport, SwarmFailureMinimizerStopReason,
-    SwarmFailureMinimizerVerdict, SwarmFailureReductionStep, SwarmHandoffCapsule,
-    SwarmHandoffCommit, SwarmHandoffDecision, SwarmHandoffDirtyOwner, SwarmHandoffDirtyPath,
-    SwarmHandoffInboxAck, SwarmHandoffProofCommand, SwarmHandoffReservation,
-    SwarmHandoffVerification, SwarmHandoffVerifierReason, SwarmOperatorCockpitInput,
-    SwarmOperatorCockpitMemoryDecision, SwarmOperatorCockpitObligationVerdict,
-    SwarmOperatorCockpitOutcome, SwarmOperatorCockpitProofLaneSummary, SwarmOperatorCockpitReport,
-    SwarmPressureEvent, SwarmPressureEventKind, SwarmPressureLane, SwarmPressureScenario,
-    SwarmPressureSummary, SwarmPressureTraceAdmission, SwarmPressureTraceCancellation,
-    SwarmPressureTraceCleanup, SwarmPressureTraceDrainHotSpot, SwarmPressureTraceHotRegion,
-    SwarmPressureTraceObligationLeakSuspect, SwarmPressureTraceObligations,
-    SwarmPressureTraceQueueHotSpot, SwarmPressureTraceQueuePressure,
-    SwarmPressureTraceRegionLifecycle, SwarmPressureTraceSourceKind, SwarmPressureTraceSummary,
-    SwarmPressureTraceTaskLifecycle, SwarmPressureTraceVerdict, SwarmProofLaneAdmissionDecision,
-    SwarmProofLaneAtlasAdmissionContext, SwarmProofLaneAtlasReport, SwarmProofLaneDecision,
-    SwarmProofLaneFallbackPolicy, SwarmProofLaneFinding, SwarmProofLaneFindingSeverity,
-    SwarmProofLanePeerReservationOverlapStatus, SwarmProofLanePlan, SwarmProofLaneRchProvenance,
-    SwarmProofLaneRequest, SwarmProofLaneTargetDirIsolationStatus,
-    SwarmProofLaneTrappedCycleWitnessStatus, SwarmRchWorkerEvent, SwarmRchWorkerEventKind,
-    SwarmReplayAdmissionDecision, SwarmReplayAdmissionDrainResult, SwarmReplayAdmissionRecord,
-    SwarmReplayBudgetClass, SwarmReplayError, SwarmReplayEvent, SwarmReplayEventKind,
-    SwarmReplayScenario, SwarmReplayShrinkHint, SwarmReplaySummary, SwarmReplayTaskOutcome,
-    SwarmReplayTaskStatus, SwarmWhatIfInputFreshness, SwarmWhatIfPlan, SwarmWhatIfPriority,
-    SwarmWhatIfRecommendation, SwarmWhatIfScenario, SwarmWhatIfStarvationRisk,
-    SwarmWhatIfWorkClass, SwarmWhatIfWorkload, build_swarm_contention_heatmap,
-    build_swarm_operator_cockpit_report, build_swarm_proof_lane_atlas_report,
-    minimize_swarm_failure, plan_swarm_admission_wave, plan_swarm_proof_lane,
-    render_swarm_contention_heatmap_text, render_swarm_failure_minimizer_text,
-    render_swarm_operator_cockpit_text, render_swarm_pressure_trace_text,
-    render_swarm_proof_lane_agent_mail_summary, render_swarm_proof_lane_atlas_report_json,
-    render_swarm_proof_lane_atlas_report_markdown, run_swarm_agent_run_scenario,
-    run_swarm_pressure_scenario, run_swarm_replay_scenario,
-    scheduler_feedback_metrics_from_swarm_replay, summarize_swarm_agent_run_trace,
-    summarize_swarm_pressure_trace, summarize_swarm_replay_trace,
-    summarize_swarm_trace_artifact_json, verify_swarm_handoff_capsule,
 };
 pub use util::{
     StackTraceConfig, capture_stack_trace, capture_stack_trace_default, capture_stack_trace_depth,
