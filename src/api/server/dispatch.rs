@@ -179,6 +179,14 @@ impl Shared {
                 _ => ops::torrents::dispatch(&self.daemon, &job.request.call),
             }
         };
+        // Settings do not save the torrent ledger, so its generation waker
+        // cannot publish these structural changes. Wake only after apply and
+        // persistence succeeded, independently of counter sampling intervals.
+        if result.is_ok() && matches!(&job.request.call,
+            Call::AppSettingsSet { .. } | Call::TransferSetLimits { .. } | Call::TransferSetAlt { .. })
+        {
+            self.bus.refresh();
+        }
         if let Ok(Reply::TorrentsAdd(added)) = &result {
             if matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Magnet(_)) && args.stage!=Some(true))
                 && added.duplicate != Some(true)
