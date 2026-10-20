@@ -102,16 +102,23 @@ impl SpeedEstimator {
                 instant.saturating_duration_since(previous.instant) > self.window_duration
             });
             window.latest = Some(current);
-            if expired {
+            let expired_rate = if expired {
                 // A long scheduler/suspend gap gives no information about when
                 // these bytes arrived. Start fresh rather than averaging an
                 // arbitrarily old sample into the current speed and ETA.
                 window.anchors.clear();
-                self.bytes_per_second.store(0, Ordering::Relaxed);
                 self.time_remaining_millis.store(0, Ordering::Relaxed);
-            }
+                self.bytes_per_second.swap(0, Ordering::Relaxed)
+            } else {
+                0
+            };
             if window.anchors.is_empty() {
                 window.anchors.push_back(current);
+                drop(window);
+                if expired_rate != 0 {
+                    self.activity_revision.fetch_add(1, Ordering::Release);
+                    self.activity_notify.notify_waiters();
+                }
                 return;
             }
             if let Some(cutoff) = instant.checked_sub(self.window_duration) {
@@ -224,11 +231,19 @@ mod tests {
             change.as_mut().poll(&mut cx).is_ready(),
             "construction-to-poll gap must not lose a transition"
         );
+        let mut change = std::pin::pin!(estimator.activity_changed());
+        assert!(change.as_mut().poll(&mut cx).is_pending());
+        sample(300, 10);
+        assert_eq!(estimator.bps(), 0);
+        assert!(
+            change.as_mut().poll(&mut cx).is_ready(),
+            "an expired estimate must wake observers of the zero crossing"
+        );
     }
 }
 
 #[cfg(test)]
-mod tests {
+mod time_window_tests {
     use super::*;
 
     #[test]
