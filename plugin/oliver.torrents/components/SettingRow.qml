@@ -15,9 +15,15 @@ ColumnLayout {
  readonly property var textField:editor.item
  readonly property var toggle:switchControl.item
  readonly property var dropdown:choices.item
+ property string confirmedText:""
  readonly property var options:{var revision=service.settingsRevision;return spec.kind==="interface" ? [{value:"",label:"Off — no binding"}].concat(flow.interfaces.map(function(name){return {value:name,label:name}})).concat(value && flow.interfaces.indexOf(value)<0 ? [{value:value,label:value+" (not present)"}] : []) : spec.options || []}
  onPendingChanged:if(!pending && !flow.errors[spec.key] && textField)textField.text=Schema.text(service.store.settings[spec.key])
- onValueChanged:if(textField && !textField.activeFocus)textField.text=Schema.text(value)
+ onValueChanged:{
+  var next=Schema.text(value)
+  if(textField && textField.text===confirmedText)textField.text=next
+  confirmedText=next
+ }
+ Component.onCompleted:confirmedText=Schema.text(value)
  spacing:Commons.Style.spacing.sm
  RowLayout {
   Layout.fillWidth:true;spacing:Commons.Style.spacing.lg
