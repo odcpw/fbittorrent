@@ -27,7 +27,8 @@ impl ScreenClient {
     pub fn open(&self, torrent: &Torrent) -> Result<()> {
         let result: api::OpenTargetResult = request(self.connection()?, "torrents.open_target", json!({"hash":torrent.hash}))?;
         crate::public_text::openable_payload(std::path::Path::new(&result.path))?;
-        std::process::Command::new("xdg-open").arg(result.path).spawn()?;
+        let cfg = crate::config::Config::load()?;
+        cfg.open_target(result.stream_url.as_deref().unwrap_or(&result.path))?;
         Ok(())
     }
     pub fn add_url(&self, source: &str, options: &AddOptions) -> Result<()> {

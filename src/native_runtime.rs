@@ -29,16 +29,21 @@ impl Handle {
         &self.cx
     }
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.try_block_on(future).expect("native runtime is closed")
+    }
+    /// A bounded external reader can race engine-slot teardown between polls.
+    /// Report a closed owner instead of panicking after its final read guard.
+    pub(crate) fn try_block_on<F: Future>(&self, future: F) -> Result<F::Output> {
         let shared = self.shared.read().unwrap();
-        let runtime = shared.as_ref().expect("native runtime is closed");
+        let runtime = shared.as_ref().ok_or_else(|| anyhow!("native runtime is closed"))?;
         let mut future = std::pin::pin!(future);
-        runtime.block_on(std::future::poll_fn(|task| {
+        Ok(runtime.block_on(std::future::poll_fn(|task| {
             // Native filesystem effects consult the ambient Cx. Mirror our
             // runtime-owned application principal for every request poll so
             // those effects belong to the same application child region.
             let _guard = Cx::set_current(Some(self.cx.clone()));
             future.as_mut().poll(task)
-        }))
+        })))
     }
 }
 pub struct NativeRuntime {
@@ -204,23 +209,43 @@ mod tests {
             let output = child.wait_with_output().unwrap();
             assert!(output.status.success(), "{output:?}");
             assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "probe must execute: {output:?}");
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
             return;
         }
+        let began = Instant::now();
+        eprintln!("CAPACITY starting");
         let runtime = NativeRuntime::new().unwrap();
+        eprintln!("CAPACITY runtime_created elapsed_ms={}", began.elapsed().as_millis());
         runtime.block_on(async {
             let mut regions = Vec::new();
             for index in 0..1100 {
                 regions.push(runtime.cx().open_child_region(ChildRegionSpec::inherit())
                     .await.unwrap_or_else(|error| panic!("region {index}: {error}")));
+                if index % 250 == 0 { eprintln!("CAPACITY admitted={} elapsed_ms={}", index + 1, began.elapsed().as_millis()); }
             }
-            for region in regions {
+            assert_eq!(regions.iter().map(ChildRegion::region_id).collect::<std::collections::HashSet<_>>().len(), 1100,
+                "all admitted regions must coexist with distinct identities");
+            eprintln!("CAPACITY admitted=1100 elapsed_ms={}", began.elapsed().as_millis());
+            for (index, region) in regions.into_iter().enumerate() {
                 region.cancel(CancelReason::user("capacity probe finished")).unwrap();
                 region.close().await.unwrap();
+                if index % 250 == 0 { eprintln!("CAPACITY closed={} elapsed_ms={}", index + 1, began.elapsed().as_millis()); }
             }
         });
+        eprintln!("CAPACITY closed=1100 elapsed_ms={}", began.elapsed().as_millis());
         runtime.shutdown_timeout(Duration::from_secs(2)).unwrap();
+        eprintln!("CAPACITY shutdown elapsed_ms={}", began.elapsed().as_millis());
     }
+
     use std::task::Poll;
+
+    #[test]
+    fn closed_runtime_refuses_external_reader_polls_without_panicking() {
+        let runtime = NativeRuntime::new().unwrap();
+        let reader = runtime.handle();
+        runtime.shutdown_timeout(Duration::from_secs(2)).unwrap();
+        assert!(reader.try_block_on(async { 42 }).unwrap_err().to_string().contains("closed"));
+    }
 
     #[test]
     fn requests_use_the_application_region_for_native_effects() {

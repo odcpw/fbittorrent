@@ -143,6 +143,7 @@ pub(crate) struct Watch {
     next: Instant,
     fired: BTreeSet<String>,
     active: bool,
+    metadata: Vec<(String, usize, Option<std::ops::Range<u64>>)>,
 }
 impl Watch {
     pub fn open(path: PathBuf) -> Self {
@@ -180,6 +181,7 @@ impl Watch {
             next: Instant::now(),
             fired: BTreeSet::new(),
             active: false,
+            metadata: Vec::new(),
         }
     }
     pub fn due(&self) -> bool {
@@ -200,12 +202,16 @@ impl Watch {
     pub fn sample(&mut self, samples: Vec<Sample>) -> Vec<Value> {
         self.sample_at(samples, Instant::now())
     }
+    pub(crate) fn metadata_demands(&self) -> &[(String, usize, Option<std::ops::Range<u64>>)] {
+        &self.metadata
+    }
     fn sample_at(&mut self, samples: Vec<Sample>, now: Instant) -> Vec<Value> {
         self.persistence.poll();
         self.next = now + Duration::from_secs(1);
         self.active = samples.iter().any(|sample| sample.active);
         let mut dirty = false;
         let mut events = Vec::new();
+        self.metadata.clear();
         for s in samples {
             if !self.saved.contains_key(&s.hash) && self.saved.len() >= 32768 {
                 continue;
@@ -218,9 +224,19 @@ impl Watch {
             let mut movie = cached.map(|r| r.movie.clone()).unwrap_or_default();
             let inspected = s.prefix.min(MIB);
             let iso = iso_movie(&s.path);
+            let missing = std::cell::RefCell::new(None);
             let container_ready = !iso || s.verified.as_ref().is_some_and(|verified| {
-                movie.inspect(&s.path, s.size, |range| verified.contains(range))
+                movie.inspect(&s.path, s.size, |range| {
+                    let have = verified.contains(range.clone());
+                    if !have && missing.borrow().is_none() {
+                        *missing.borrow_mut() = Some(range);
+                    }
+                    have
+                })
             });
+            if iso {
+                self.metadata.push((s.hash.clone(), s.file as usize, missing.into_inner()));
+            }
             let seconds = if iso {
                 if container_ready { movie.duration() } else { None }
             } else if let Some(cached) =

@@ -1503,11 +1503,19 @@ impl AdmittedRegionSlot {
     pub(crate) fn register(&self, waker: std::task::Waker) {
         // Re-check under the lock: publication may have landed between the
         // caller's take() attempt and this registration.
-        if !self.inner.lock().is_none() {
+        let inner = self.inner.lock();
+        if inner.is_some() {
+            // A wake can immediately poll/take the slot: never invoke it
+            // while holding the outcome lock.
+            drop(inner);
             waker.wake_by_ref();
             return;
         }
+        // Match publish's inner -> waiters lock order. Releasing inner before
+        // this insertion lets publish drain an empty waiter list in the gap,
+        // leaving the opening asleep forever with an already-published result.
         self.waiters.lock().push(waker);
+        drop(inner);
     }
 }
 
