@@ -112,6 +112,7 @@
 
 pub mod browser;
 pub mod interest;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod lab;
 mod registration;
 pub mod source;
@@ -138,6 +139,7 @@ pub mod windows;
 
 pub use browser::{BrowserReactor, BrowserReactorConfig};
 pub use interest::Interest;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub use lab::{FaultConfig, LabReactor};
 #[allow(unused_imports)]
 pub(crate) use registration::ReactorHandle;

@@ -120,6 +120,7 @@ repository = "https://github.com/Dicklesworthstone/asupersync"
 
 [features]
 atp-cli = [
+    "extended-network",
     "dep:clap",
     "tls",
     "dep:rustls-native-certs",
@@ -193,6 +194,8 @@ ci-cross-platform = [
     "fuzz",
 ]
 cli = [
+    "extended-network",
+    "extended-services",
     "dep:clap",
     "dep:time",
     "trace-compression",
@@ -220,6 +223,10 @@ dependency-ledger = ["dep:toml"]
 deterministic-mode = []
 # Measurement-only fixed epoch-kind counters; deliberately absent from defaults.
 epoch-diagnostics = []
+# ATP, native QUIC and HTTP/3 are not used by fbittorrent's native profile.
+extended-network = ["lab-runtime"]
+# Upstream service frameworks and tooling, absent from the app's native profile.
+extended-services = ["lab-runtime"]
 distributed-hash-snapshot-recovery-e2e = ["test-internals"]
 fuzz = [
     "dep:arbitrary",
@@ -229,6 +236,8 @@ h3-websocket-e2e = []
 http3 = ["quic"]
 io-uring = ["dep:io-uring"]
 kafka = ["dep:rdkafka"]
+# Deterministic runtime used by rqbit-runtime's cancellation/resource test.
+lab-runtime = []
 lab-stack-traces = [
     "dep:backtrace",
     "dep:rustc-demangle",
@@ -236,8 +245,9 @@ lab-stack-traces = [
 legacy-internal-test-harnesses = []
 lock-metrics = []
 loom-tests = ["dep:loom"]
-messaging-fabric = []
+messaging-fabric = ["extended-services"]
 metrics = [
+    "extended-services",
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
     "dep:regex",
@@ -250,7 +260,7 @@ obligation-cleanup-e2e = []
 obligation-leak-detection = []
 postgres = []
 proc-macros = ["dep:asupersync-macros"]
-quic = []
+quic = ["extended-network"]
 raptorq-roundtrip-e2e = []
 real-service-e2e = [
     "channel-mpsc-select-e2e",
@@ -273,6 +283,7 @@ sqlite = [
 ]
 tailscale-path-provider = []
 test-internals = [
+    "lab-runtime",
     "dep:tracing",
     "dep:tracing-log",
     "dep:tracing-subscriber",
@@ -332,6 +343,7 @@ required-features = ["channel-mpsc-select-e2e"]
 name = "atp_quic_bounded_memory"
 path = "tests/atp_quic_bounded_memory.rs"
 required-features = [
+    "extended-network",
     "tls",
     "test-internals",
 ]

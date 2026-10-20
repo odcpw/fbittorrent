@@ -1,18 +1,60 @@
-# Local Asupersync patch
+# fbittorrent's Asupersync patches
 
 This is the crates.io Asupersync 0.5.0 package (`asupersync-0.5.0.crate`, sha256
 `f34b1a19ffd6b74570339a156912436335bb09c594c675c62ea164b19a1f2511`; upstream
-revision `78b64636e99fea4ea2d868096576021dd3b8e519`) plus the fbittorrent patch
+revision `78b64636e99fea4ea2d868096576021dd3b8e519`) with the fbittorrent changes
 below, retained under its original licence: `LICENSE` is byte-identical to the
 package's, "MIT License (with OpenAI/Anthropic Rider)", and every distribution
 must carry it unmodified. The root `Cargo.toml` selects this tree through
-`[patch.crates-io] asupersync = { path = "vendor/asupersync" }` (plan §8.2
-option B: the full tree is committed; there is no fork).
+`[patch.crates-io] asupersync = { path = "vendor/asupersync" }`. The packaged
+upstream source is retained, including modules outside fbittorrent's feature
+set. Keep the local changes scoped and documented so an upstream update does
+not require reconstructing deleted source.
 
-## What differs from the package
+## Native build scope (2026-10-20)
 
-`diff -r --exclude=.cargo-ok` against the registry copy lists exactly these ten
-files (line counts from `diff`, added/removed):
+The app and rqbit enable `native-runtime`, `tls`, `tls-native-roots` and
+`tls-webpki-roots`; `epoch-diagnostics` remains an optional measurement feature.
+ATP, native QUIC and HTTP/3 were being compiled even with that feature set.
+They and their Lab helpers now require `extended-network`, which fbittorrent
+does not enable. The protocol declarations, exports and the ATP journal-tag
+helper are gated together, along with private ATP encoding/decoding and QUIC
+UDP helpers (retained for unit tests). Their implementations are unchanged.
+Shared decode variants and outcome fields retain their layout and computation;
+their existing conditional dead-code allowances also cover profiles without
+ATP consumers. Native runtime,
+cancellation, TCP/UDP, TLS and the HTTP client retain their implementations.
+
+Lab is behind `lab-runtime`, enabled by a dev dependency for rqbit-runtime's existing
+`lab_pause_drains_a_channel_waiter_and_releases_its_resources` test. That test
+exercises region cancellation and resource release through Lab. The release profile omits
+Lab, its reactor, chaos channels and RaptorQ regression harness. Their source
+and the cancellation test remain available; the test bodies are unchanged.
+Lab-only exact-dispatch and state-command wrappers follow that boundary too.
+The native checkpoint acknowledgement keeps its fields and computation; its
+two Lab-only observations have conditional dead-code allowances when Lab is off.
+
+The unused gRPC, messaging and process APIs, adapter certification, agent-swarm
+and audit tooling, plan/conformance/session modules, and Lab's swarm-replay and
+deadlock-radar tools require `extended-services`. The remaining OTLP exporter
+and structured-concurrency adapters follow the existing `metrics` boundary.
+None of those features is enabled by the app or its consumer test suites.
+The existing CLI, database, messaging-fabric and metrics features also remain
+off. `extended-network` and `extended-services` imply `lab-runtime`; existing
+`cli`, `quic`, `messaging-fabric`, `metrics` and `test-internals` feature
+dependencies preserve access to the helpers those profiles require.
+
+These gates reduce compilation work and compiler memory for the native app;
+they do not change the implementations it uses. All disabled module bodies
+remain in the vendored package. Removing their files would give no additional
+compile-time benefit and would make upstream updates harder. The three gating
+commits are `da4129e`, `4a338d2` and `8998f6e`; the subsequent source deletion
+was reverted in `35bd6a5`.
+
+## Original runtime patches
+
+These are the original local runtime changes, before the later additions
+documented below (the line counts describe those original patches):
 
 | File | Change |
 |---|---|
@@ -38,48 +80,36 @@ that work are in `docs/validation/2026-10-11/cpu-optimization/README.md`,
 `docs/validation/2026-10-12/cpu-root-cause/README.md` (the receipt data itself
 was deleted on 2026-10-18, owner decision Q4).
 
-## Tests
+## Validation
 
-The published package is not test-complete: `cargo test --lib` on this tree
-does not compile, because the package omits test-only modules such as
-`src/actor_conformance_tests.rs`. Test the patch using the complete upstream
-Git source at `78b64636e99fea4ea2d868096576021dd3b8e519`: overlay the eight
-differing Rust files listed above (the metamorphic file already matches),
-retain upstream's workspace manifest and lockfile, and add only
-`epoch-diagnostics = []` to its `[features]`. Every shared `src/` file must
-then be byte-identical to this vendored tree; the licence must match too.
-
-From that prepared source checkout, using the rch cargo shim:
+Run from an isolated fbittorrent worktree with private `XDG_*` and temporary
+directories, using the rch cargo shim:
 
 ```bash
 export PATH="$HOME/.rch/shims:$HOME/.cargo/bin:$PATH"
-export RUSTUP_TOOLCHAIN=1.98.0 CARGO_BUILD_JOBS=4
+export CARGO_BUILD_JOBS=4
 export CARGO_INCREMENTAL=0 CARGO_PROFILE_TEST_DEBUG=0
-export RUSTFLAGS='-C debuginfo=0'
-export CARGO_TARGET_DIR=/absolute/path/to/fbittorrent/target/asupersync-patch-tests
-cargo test --locked -p asupersync --lib --no-default-features \
-  --features proc-macros,native-runtime,tls,tls-webpki-roots,epoch-diagnostics \
-  time::wheel -- --nocapture --test-threads=4
-cargo test --locked -p asupersync --lib --no-default-features \
-  --features proc-macros,native-runtime,tls,tls-webpki-roots,epoch-diagnostics \
-  region_owner_tests -- --nocapture --test-threads=4
+cargo check --locked
+cargo test --locked --workspace --no-default-features --lib --bins -- --test-threads=4
 ```
 
-On 2026-10-18 these commands passed **63 wheel tests** (including all four
-pruning regressions and the metamorphic tests) and **2 region-owner tests**,
-with no failures, ignored tests, or worker-panic scan matches. The upstream
-lockfile remained unchanged. Its conformance dev dependency additionally
-enables `fuzz`, `metrics`, `test-internals`, and `tracing-integration` in this
-test harness. This is scoped patch evidence, not an all-features or full-suite
-result: `--all-features` enables the nightly-only feature and
-`messaging-fabric`, which excludes `region_owner_tests`.
+The workspace test command disables member defaults because the SHA wrapper's
+standalone default selects a different backend from fbittorrent. The app's
+dependency features still select its shipping backend. Library and binary
+suites exclude archived upstream Tokio examples.
 
-See `docs/validation/2026-10-18/P0-02.md` for provenance and
-`target/test-logs/asupersync/{build,test,fork_test}.jsonl` for the retained
-command receipts. The retired standalone wheel runner was not restored.
-The refreshed fbittorrent gate also passed 91 app tests, 14 runtime tests
-(1 existing throughput test ignored), its background-panic scan, the release
-build, and isolated native integration.
+The published Asupersync package is not test-complete: it omits test-only
+modules such as `src/actor_conformance_tests.rs`, and it is not a workspace
+member. The commands above test the app and rqbit consumers, not a complete
+upstream Asupersync suite.
+
+Historical patch validation on 2026-10-18 used the complete upstream Git source
+at the revision above: **63 wheel tests** (including the pruning regressions
+and metamorphic tests) and **2 region-owner tests** passed. Its conformance dev
+dependency also enabled `fuzz`, `metrics`, `test-internals` and
+`tracing-integration`. That result was scoped patch evidence, not an
+all-features or full-suite result. See `docs/validation/2026-10-18/P0-02.md`
+for its provenance.
 
 When upgrading Asupersync, check whether upstream includes these changes and
 rerun the timer, transfer and shutdown checks before removing the patch.

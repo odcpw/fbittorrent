@@ -195,6 +195,7 @@ impl EncodingPipeline {
     /// systematic source symbols when a transport only needs fresh RaptorQ
     /// repair.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn encode_repair_range<'a>(
         &'a mut self,
         object_id: ObjectId,
@@ -231,6 +232,7 @@ impl EncodingPipeline {
     /// at a time but must preserve the same object/SBN layout as
     /// [`Self::encode_with_repair`] would have produced for the whole object.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn encode_single_block_with_repair<'a>(
         &'a mut self,
         object_id: ObjectId,
@@ -243,6 +245,7 @@ impl EncodingPipeline {
 
     /// Encodes only repair symbols for one source block.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn encode_single_block_repair_range<'a>(
         &'a mut self,
         object_id: ObjectId,
@@ -303,6 +306,7 @@ impl EncodingPipeline {
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     fn encode_single_block_internal<'a>(
         &'a mut self,
         object_id: ObjectId,
@@ -369,6 +373,7 @@ impl EncodingPipeline {
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     fn plan_single_block(
         &self,
         sbn: u8,

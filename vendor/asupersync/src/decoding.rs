@@ -139,15 +139,19 @@ pub enum SymbolAcceptResult {
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum FeedDecodeMode {
     Inline,
+    // The shared feed implementation retains this branch; only ATP selects it.
+    #[cfg_attr(not(feature = "extended-network"), allow(dead_code))]
     Deferred,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FeedAuthPolicy {
     VerifyInPipeline,
-    // The pre-verified feed path has no wasm caller yet (browser feeds
-    // always verify in-pipeline); native transports construct it.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    // Only ATP's pre-verified feed entry point constructs this policy.
+    #[cfg_attr(
+        any(target_arch = "wasm32", not(feature = "extended-network")),
+        allow(dead_code)
+    )]
     CallerVerified,
 }
 
@@ -207,13 +211,20 @@ pub(crate) enum BlockDecodeKind {
 #[derive(Debug)]
 pub(crate) struct BlockDecodeOutcome {
     sbn: u8,
+    #[cfg_attr(not(feature = "extended-network"), allow(dead_code))]
     input_symbols: usize,
     retain_decoded_block: bool,
-    // Read only by the native audit/telemetry consumers; the browser
-    // profile records outcomes without re-reading these fields.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    // Shared decode outcomes retain their shape; only ATP's deferred/audit
+    // consumers read these fields outside tests.
+    #[cfg_attr(
+        any(target_arch = "wasm32", not(feature = "extended-network")),
+        allow(dead_code)
+    )]
     kind: BlockDecodeKind,
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg_attr(
+        any(target_arch = "wasm32", not(feature = "extended-network")),
+        allow(dead_code)
+    )]
     elapsed: Duration,
     resolution: BlockDecodeResolution,
 }
@@ -335,6 +346,7 @@ pub(crate) fn run_block_decode_job(job: BlockDecodeJob) -> BlockDecodeOutcome {
     }
 }
 
+#[cfg(any(test, feature = "extended-network"))]
 impl BlockDecodeOutcome {
     // The three accessors below serve native audit/staging consumers
     // (the c54to7 cross-dump and transport telemetry); the browser
@@ -541,6 +553,7 @@ impl DecodingPipeline {
     /// cross-dump (c54to7) needs it to mirror seed-symbol zero-padding.
     #[must_use]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn config_symbol_size(&self) -> u16 {
         self.config.symbol_size
     }
@@ -654,6 +667,7 @@ impl DecodingPipeline {
     /// in this pipeline so existing full-object commit paths can still call
     /// [`Self::into_data`] after joining the decode job.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn feed_deferred(
         &mut self,
         auth_symbol: AuthenticatedSymbol,
@@ -670,6 +684,7 @@ impl DecodingPipeline {
     /// reaches threshold. The caller must run the job and pass its outcome to
     /// [`Self::finish_decode_job`].
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn feed_streaming_block_deferred(
         &mut self,
         auth_symbol: AuthenticatedSymbol,
@@ -691,6 +706,7 @@ impl DecodingPipeline {
     /// at the receiver boundary and then preserve decoder ordering without a
     /// second serial HMAC.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn feed_preverified_streaming_block_deferred(
         &mut self,
         auth_symbol: AuthenticatedSymbol,
@@ -1195,6 +1211,7 @@ impl DecodingPipeline {
     /// Finalizes a previously deferred decode job and updates block state.
     #[must_use]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn finish_decode_job(&mut self, outcome: BlockDecodeOutcome) -> SymbolAcceptResult {
         match self.finish_decode_job_deferred(outcome) {
             DeferredSymbolAcceptResult::Immediate(result) => result,
@@ -1211,6 +1228,7 @@ impl DecodingPipeline {
     /// decode queue.
     #[must_use]
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn finish_decode_job_deferred(
         &mut self,
         outcome: BlockDecodeOutcome,
@@ -1264,6 +1282,7 @@ impl DecodingPipeline {
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn cancel_decode_job(&mut self, sbn: u8) {
         if self.completed_blocks.contains(&sbn) {
             return;
@@ -1276,6 +1295,7 @@ impl DecodingPipeline {
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    #[cfg(any(test, feature = "extended-network"))]
     pub(crate) fn restore_decode_job(&mut self, job: BlockDecodeJob) {
         let sbn = job.sbn;
         if self.completed_blocks.contains(&sbn) {

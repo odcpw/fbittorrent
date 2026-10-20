@@ -1182,6 +1182,7 @@ impl Scheduler {
     /// so lane discovery deliberately resolves `Cancel > Timed > Ready` before
     /// mutating any queue. A lane mismatch or future timed deadline leaves the
     /// scheduler byte-for-byte unchanged.
+    #[cfg(any(test, feature = "lab-runtime"))]
     pub(crate) fn take_exact(
         &mut self,
         task: TaskId,
@@ -1301,6 +1302,7 @@ pub enum DispatchLane {
 /// their normal policy. The deterministic lab runtime uses it to force a
 /// previously recorded choice without falling back to a different task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(any(test, feature = "lab-runtime"))]
 pub(crate) enum ExactDispatchError {
     /// The full task generation is not scheduled.
     NotScheduled,
