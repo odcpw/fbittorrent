@@ -1,5 +1,14 @@
 use super::*;
 
+// Preserve admission order across slow saves without blocking ordinary reads.
+pub(super) struct ControlPermit<'a>(pub(super) &'a Pool);
+impl Drop for ControlPermit<'_> {
+    fn drop(&mut self) {
+        self.0.work.lock().unwrap_or_else(|e| e.into_inner()).control_busy = false;
+        self.0.changed.notify_all();
+    }
+}
+
 impl Pool {
     pub(super) fn submit(&self, job: Job) -> Result<(), Job> {
         let mut work = self.work.lock().unwrap();
@@ -12,10 +21,16 @@ impl Pool {
     }
     pub(super) fn next(&self) -> Option<Job> {
         let mut work = self.work.lock().unwrap();
-        while work.jobs.is_empty() && !work.closed {
+        loop {
+            let next = work.jobs.iter().position(|job| !durable_control(job.request.call.op()) || !work.control_busy);
+            if let Some(index) = next {
+                let job = work.jobs.remove(index).unwrap();
+                if durable_control(job.request.call.op()) { work.control_busy = true; }
+                return Some(job);
+            }
+            if work.closed && work.jobs.is_empty() { return None; }
             work = self.changed.wait(work).unwrap();
         }
-        work.jobs.pop_front()
     }
     pub(super) fn close(&self) {
         self.work.lock().unwrap().closed = true;

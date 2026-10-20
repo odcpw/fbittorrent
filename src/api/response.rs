@@ -110,6 +110,20 @@ pub struct PendingResult {
     pub reference: MutationRef,
 }
 
+/// Admission only: the durable result follows on this ref. Never implies apply.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavingResult {
+    pub state: PendingState,
+    #[serde(rename = "ref")]
+    pub reference: MutationRef,
+    pub saving: Bool<true>,
+}
+
+pub fn durable_control(op: &str) -> bool {
+    matches!(op, "torrents.start" | "torrents.stop" | "app.settings.set"
+        | "transfer.set_limits" | "transfer.set_alt" | "torrents.set_download_limit")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DoneResult {
     pub state: DoneState,
@@ -216,6 +230,7 @@ pub struct AltResult { pub alt: bool }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
+    Saving(SavingResult),
     TorrentsCommit(DoneResult),
     TorrentsDiscard(DoneResult),
     TorrentsMove(MutationResult),
@@ -274,6 +289,9 @@ pub enum Reply {
 }
 impl Reply {
     pub fn decode(op: &str, result: Value) -> Result<Self, serde_json::Error> {
+        if durable_control(op) && result.get("saving").is_some() {
+            return serde_json::from_value(result).map(Self::Saving);
+        }
         let reply = match op {
             "torrents.commit"=>serde_json::from_value(result).map(Self::TorrentsCommit),
             "torrents.discard"=>serde_json::from_value(result).map(Self::TorrentsDiscard),
@@ -355,7 +373,7 @@ pub struct ImdbLookupResult {
     pub card: Option<ImdbCard>,
 }
 
-/// Durable settings acknowledgement; settings never produce mutation.result.
+/// Durable settings acknowledgement, immediate or carried by mutation.result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SettingsSetResult {
     pub applied: Vec<String>,

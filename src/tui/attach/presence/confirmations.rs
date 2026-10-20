@@ -62,7 +62,7 @@ impl Confirmations {
     pub fn wait(
         &self,
         reference: &crate::api::MutationRef,
-        deadline: Instant,
+        deadline: Option<Instant>,
         closed: &AtomicBool,
     ) -> Result<Value> {
         let mut cache = self.cache.lock().unwrap_or_else(|error| error.into_inner());
@@ -73,7 +73,7 @@ impl Confirmations {
             if closed.load(Ordering::Acquire) {
                 bail!("API connection lost; result unknown; check the list");
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = deadline.map_or(Duration::from_secs(60), |at| at.saturating_duration_since(Instant::now()));
             if remaining.is_zero() {
                 bail!("API mutation timed out; result unknown; check the list");
             }
@@ -109,12 +109,12 @@ mod tests {
         };
         cache.observe(&event);
         let result = cache
-            .wait(&reference, Instant::now(), &AtomicBool::new(false))
+            .wait(&reference, Some(Instant::now()), &AtomicBool::new(false))
             .unwrap();
         assert_eq!(result["hash"], "a".repeat(40));
         let missing = crate::api::MutationRef::new("not-confirmed").unwrap();
         assert!(cache
-            .wait(&missing, Instant::now(), &AtomicBool::new(false))
+            .wait(&missing, Some(Instant::now()), &AtomicBool::new(false))
             .is_err());
         let failed = crate::api::Event::MutationResult {
             seq: 2,
@@ -133,7 +133,7 @@ mod tests {
         };
         cache.observe(&failed);
         assert!(cache
-            .wait(&missing, Instant::now(), &AtomicBool::new(false))
+            .wait(&missing, Some(Instant::now()), &AtomicBool::new(false))
             .unwrap_err()
             .to_string()
             .contains("local source failed"));

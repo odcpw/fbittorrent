@@ -48,7 +48,8 @@ pub fn run(
             let ack = if patch.is_empty() {
                 json!({"applied":[],"restart":false})
             } else {
-                client.call("app.settings.set", json!(patch))?
+                let reply = client.call("app.settings.set", json!(patch))?;
+                if reply["state"] == "pending" { super::native::await_mutation(&client, reply)? } else { reply }
             };
             (client.call("app.settings.get", json!({}))?, ack, true)
         }

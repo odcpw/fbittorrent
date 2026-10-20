@@ -23,6 +23,22 @@ ShellRoot {
   }
   Component.onCompleted: {
     var s = session(), i
+    s.c.online=true
+    var savedCalls=[]
+    var savingRef=s.c.request("app.settings.set",{network_interface:"lo",upload:"off"},{mutating:true,callback:function(result,error){savedCalls.push({result:result,error:error})}})
+    s.reply({state:"pending",ref:savingRef,saving:true})
+    check("saving_controls",savedCalls.length===0 && s.c.actions[savingRef].status==="pending","admission never calls the durable settings callback",JSON.stringify(savedCalls))
+    s.time.ms=120000;s.c.lastFrame=s.time.ms;s.c.tick()
+    check("saving_controls",savedCalls.length===0 && !s.c.lastError,"accepted save survives the old deadlines without a false failure",JSON.stringify(s.c.lastError))
+    s.c.receive(JSON.stringify({ev:"mutation.result",ref:savingRef,op:"app.settings.set",outcome:"done",result:{applied:["network_interface"],restart:true}}))
+    check("saving_controls",savedCalls.length===1 && savedCalls[0].result.restart===true && !savedCalls[0].error && s.c.actions[savingRef].status==="done","only durable completion releases the settings callback",JSON.stringify(savedCalls))
+    var failedCalls=[]
+    savingRef=s.c.request("transfer.set_alt",{on:true},{mutating:true,callback:function(result,error){failedCalls.push({result:result,error:error})}})
+    s.reply({state:"pending",ref:savingRef,saving:true})
+    s.c.receive(JSON.stringify({ev:"mutation.result",ref:savingRef,op:"transfer.set_alt",outcome:"failed",error:{code:"internal",message:"disk full",retryable:false}}))
+    check("saving_controls",failedCalls.length===1 && failedCalls[0].result===null && failedCalls[0].error.message==="disk full","a real durability failure reaches the caller instead of a fabricated success",JSON.stringify(failedCalls))
+    console.log("FBTQS-PASS saving_controls")
+    s=session()
     check("idle_deadlines",s.c.nextWakeup()===Infinity,"disconnected idle client has no clock wakeup",s.c.nextWakeup())
     s.c.connected()
     check("idle_deadlines",s.c.nextWakeup()===20000,"hello wakes at its reply deadline, not each second",s.c.nextWakeup())

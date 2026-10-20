@@ -632,7 +632,15 @@ An explicit null clears `network_interface` or an optional speed limit; other
 keys require their declared type. Speed limits range from 16384 through
 4294967295 bytes/second; absence means unlimited.
 
-Settings changes are not pending mutations: no `mutation.result` follows them.
+Fast settings changes reply after the durable save. Under write pressure,
+`app.settings.set`, `transfer.set_limits`, `transfer.set_alt`, `torrents.start`,
+`torrents.stop` and `torrents.set_download_limit` instead acknowledge admission
+with `{state:"pending", ref, saving:true}` after 200 ms. This means “Saving…”,
+not applied: the same ref's `mutation.result` carries the durable result or a
+real failure, without an operation deadline that could falsely fail a write
+still in progress. Clients retain the pending indicator until that receipt or
+connection loss. Network binding and upload permission still save durably before
+taking effect. A fast validation failure remains an ordinary error reply.
 A restart-class change answers `{applied: [keys], restart: true}` after the durable
 save, the supervisor restarts the engine slot, and clients observe completion
 through `engine.changed` (and the `network` state when the binding changed).

@@ -237,7 +237,9 @@ Item {
       status = Model.apiStatus(store, online)
     }
     if(request && !frame.ok && request.ref)notify(frame.error.message+" · Refresh to check the current state")
+    if(request && frame.ok && frame.result && frame.result.saving===true)notify("Saving…")
     if(frame.ev==="mutation.result" && frame.outcome!=="done")notify((frame.error ? frame.error.message : "No answer")+" · Refresh to check the current state")
+    if(frame.ev==="mutation.result" && frame.outcome==="done" && client.actions[frame.ref] && client.actions[frame.ref].saving)notify("Saved")
     if(frame.ev==="mutation.result" && frame.outcome==="done" && client.actions[frame.ref] && client.actions[frame.ref].op==="torrents.recheck")notify("Recheck complete")
     if (frame.ev === "bye") { byeReason=frame.reason; stoppedRecently = true; stoppedTimer.restart() }
   }

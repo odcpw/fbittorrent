@@ -36,6 +36,8 @@ use std::{
 #[path = "server/admission_tests.rs"]
 mod admission_tests;
 #[cfg(test)]
+mod saving_tests;
+#[cfg(test)]
 #[path = "server/argument_tests.rs"]
 mod argument_tests;
 #[cfg(test)]
@@ -86,6 +88,7 @@ struct Background {
     ticket: mutations::Ticket,
     op: String,
     deadline: Option<Instant>,
+    saving_at: Option<Instant>,
     confirmation: Option<Confirmation>,
     _activity: Arc<crate::daemon::policy::Mutation>,
     handler_add: bool,
@@ -140,6 +143,7 @@ struct Job {
 struct Work {
     jobs: VecDeque<Job>,
     closed: bool,
+    control_busy: bool,
 }
 #[derive(Default)]
 struct Pool {
@@ -250,6 +254,7 @@ impl Server {
                     .name(format!("fbt-api-dispatch-{index}"))
                     .spawn(move || {
                         while let Some(job) = state.pool.next() {
+                            let _turn = durable_control(job.request.call.op()).then(|| ControlPermit(&state.pool));
                             state.dispatch(job);
                         }
                     })?,

@@ -10,12 +10,13 @@ impl TuiApp {
         };
         let connection = self.presence.clone();
         self.alt_busy = true;
+        self.set_status("Saving turtle limits…", false);
         Cmd::task(move || {
             Msg::AltDone(
                 (|| -> Result<String> {
                     connection
                         .ok_or_else(|| anyhow::anyhow!("fbittorrent stopped"))?
-                        .request("transfer.set_alt", serde_json::json!({"on":!on}))?;
+                        .request_confirmed("transfer.set_alt", serde_json::json!({"on":!on}))?;
                     Ok(format!("turtle limits {}", if on { "off" } else { "on" }))
                 })()
                 .map_err(|error| error.to_string()),

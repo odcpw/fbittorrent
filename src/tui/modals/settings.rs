@@ -41,12 +41,13 @@ impl TuiApp {
         if intent == actions::Intent::Primary {
             let values=self.settings.as_ref().unwrap().cfg.clone();
             self.settings.as_mut().unwrap().saving=true;
+            self.settings.as_mut().unwrap().error.clear();
             let patch=settings_fields::settings_patch(&self.settings.as_ref().unwrap().original,&values);
             let presence=self.presence.clone();
             return Cmd::task(move|| {
                 let result=(||->Result<Config> {
                     let connection=presence.ok_or_else(||anyhow::anyhow!("fbittorrent stopped"))?;
-                    let _:crate::api::SettingsSetResult=serde_json::from_value(connection.request("app.settings.set",patch)?)?;
+                    let _:crate::api::SettingsSetResult=serde_json::from_value(connection.request_confirmed("app.settings.set",patch)?)?;
                     // app.settings.set owns the restart; sending app.restart here can restart twice.
                     let settings:crate::api::Settings=serde_json::from_value(connection.request("app.settings.get",serde_json::json!({}))?)?;
                     let mut cfg=values;settings_fields::native_settings(&mut cfg,&settings)?;Ok(cfg)
@@ -118,7 +119,9 @@ impl TuiApp {
                 settings_fields::UPLOAD_ROW=>format!("Upload: {}",modal.cfg.upload),
                 _=>settings_fields::limit_label(&modal.cfg,i-4),
             }),frame);
-        let description = if !modal.error.is_empty() { th.error_message(&modal.error) } else {
+        let description = if modal.saving {
+            "Saving…\nNetwork binding and upload changes take effect only after the save completes.".into()
+        } else if !modal.error.is_empty() { th.error_message(&modal.error) } else {
             format!("↑/↓ choose · ←/→ change/edit · Enter save · Esc cancel\nLimits: bytes/s; K/M suffixes; empty = unlimited.\n\nExtra downloads wait. Encryption leaves your IP visible.\nA required VPN blocks transfers while disconnected.\n{}\nUpload on permits sharing while downloading.\nCompleted torrents need their own Upload opt-in.\nChanging encryption, VPN or port reopens the engine.", self.store.network.as_ref().map(|n|n.message.as_str()).unwrap_or("Save to apply draft settings."))
         };
         let remaining = inner.height.saturating_sub(settings_fields::SETTINGS_ROWS as u16);

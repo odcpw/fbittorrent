@@ -192,7 +192,7 @@ impl SyncBatch {
     }
 }
 impl FileSync {
-    async fn wait(mut self, cx: &Cx) -> io::Result<()> {
+    pub(crate) async fn wait(mut self, cx: &Cx) -> io::Result<()> {
         self.wait_ready(cx).await
     }
     async fn wait_ready(&mut self, cx: &Cx) -> io::Result<()> {

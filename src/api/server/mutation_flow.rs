@@ -123,6 +123,7 @@ impl Shared {
                     ticket,
                     op: job.request.call.op().into(),
                     deadline,
+                    saving_at: durable_control(job.request.call.op()).then(|| Instant::now() + Duration::from_millis(200)),
                     confirmation: None,
                     handler_add: matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")),
                     _activity: job._activity.as_ref().unwrap().clone(),
@@ -146,10 +147,14 @@ impl Shared {
         true
     }
     pub(super) fn answer(&self, job: &Job, answer: ApiResult<Reply>) {
-        let confirming = self.mutation_active.lock().unwrap()
+        // Admission and fast completion race. Keep this lock through the
+        // removal, so an initial done reply cannot strand a just-sent saving ref.
+        let mut mutations = self.mutation_active.lock().unwrap();
+        let confirming = mutations
             .get(&(job.connection.number, job.generation))
             .is_some_and(|entry| entry.confirmation.is_some());
         if confirming {
+            drop(mutations);
             // Includes an accepted job rejected by a full/closing dispatch
             // queue: it needs a failed receipt, never a second initial reply.
             self.confirm((job.connection.number, job.generation), answer);
@@ -157,11 +162,8 @@ impl Shared {
         }
         if answer.is_err() && matches!(&job.request.call, Call::TorrentsAdd { args } if args.origin.as_deref() == Some("handler")) { self.daemon.notifier.failed(); }
         if let Some(ticket) = &job.mutation {
-            let active = self
-                .mutation_active
-                .lock()
-                .unwrap()
-                .remove(&(job.connection.number, job.generation));
+            let active = mutations.remove(&(job.connection.number, job.generation));
+            drop(mutations);
             let answer = if active
                 .as_ref()
                 .and_then(|entry| entry.deadline)
@@ -173,6 +175,7 @@ impl Shared {
             };
             ticket.answer(answer, |delivery| self.deliver_mutation(delivery));
         } else {
+            drop(mutations);
             job.connection
                 .complete(job.request.id.get(), job.generation, answer);
         }
@@ -266,6 +269,14 @@ impl Shared {
             .map(|(key, entry)| (*key, entry.clone()))
             .collect();
         for (key, entry) in tasks {
+            if entry.saving_at.is_some_and(|at| at <= Instant::now()) {
+                let mut active = self.mutation_active.lock().unwrap();
+                if let Some(task) = active.get_mut(&key) {
+                    if let Some(reply) = task.saving_reply(Instant::now()) {
+                        task.ticket.answer(Ok(reply), |delivery| self.deliver_mutation(delivery));
+                    }
+                }
+            }
             if entry
                 .deadline
                 .is_some_and(|deadline| deadline <= Instant::now())
@@ -338,6 +349,19 @@ impl Shared {
                 self.confirm(key, result);
             }
         }
+    }
+}
+impl Background {
+    pub(super) fn saving_reply(&mut self, now: Instant) -> Option<Reply> {
+        if self.confirmation.is_some() || !self.saving_at.is_some_and(|at| at <= now) {
+            return None;
+        }
+        self.saving_at = None;
+        self.deadline = None;
+        self.confirmation = Some(Confirmation::Worker);
+        Some(Reply::Saving(SavingResult {
+            state: PendingState::Pending, reference: self.ticket.reference.clone(), saving: Bool,
+        }))
     }
 }
 pub(super) fn queued_reply(call: &Call, reference: &MutationRef) -> Option<Reply> {
