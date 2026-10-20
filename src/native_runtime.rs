@@ -204,22 +204,34 @@ mod tests {
             let output = child.wait_with_output().unwrap();
             assert!(output.status.success(), "{output:?}");
             assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "probe must execute: {output:?}");
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
             return;
         }
+        let began = Instant::now();
+        eprintln!("CAPACITY starting");
         let runtime = NativeRuntime::new().unwrap();
+        eprintln!("CAPACITY runtime_created elapsed_ms={}", began.elapsed().as_millis());
         runtime.block_on(async {
             let mut regions = Vec::new();
             for index in 0..1100 {
                 regions.push(runtime.cx().open_child_region(ChildRegionSpec::inherit())
                     .await.unwrap_or_else(|error| panic!("region {index}: {error}")));
+                if index % 250 == 0 { eprintln!("CAPACITY admitted={} elapsed_ms={}", index + 1, began.elapsed().as_millis()); }
             }
-            for region in regions {
+            assert_eq!(regions.iter().map(ChildRegion::region_id).collect::<std::collections::HashSet<_>>().len(), 1100,
+                "all admitted regions must coexist with distinct identities");
+            eprintln!("CAPACITY admitted=1100 elapsed_ms={}", began.elapsed().as_millis());
+            for (index, region) in regions.into_iter().enumerate() {
                 region.cancel(CancelReason::user("capacity probe finished")).unwrap();
                 region.close().await.unwrap();
+                if index % 250 == 0 { eprintln!("CAPACITY closed={} elapsed_ms={}", index + 1, began.elapsed().as_millis()); }
             }
         });
+        eprintln!("CAPACITY closed=1100 elapsed_ms={}", began.elapsed().as_millis());
         runtime.shutdown_timeout(Duration::from_secs(2)).unwrap();
+        eprintln!("CAPACITY shutdown elapsed_ms={}", began.elapsed().as_millis());
     }
+
     use std::task::Poll;
 
     #[test]
