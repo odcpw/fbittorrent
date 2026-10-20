@@ -177,6 +177,7 @@ impl<'a> FileOps<'a> {
 
                 if current_file.is_broken {
                     // no need to read.
+                    some_files_broken = true;
                     continue;
                 }
 

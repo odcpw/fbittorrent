@@ -226,3 +226,5 @@ fn verify_cancel_does_not_return_partial_have() {
     assert!(began.elapsed() < std::time::Duration::from_secs(1));
 }
 
+#[path = "verify_tests/io_failure.rs"]
+mod io_failure;
