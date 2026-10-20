@@ -489,7 +489,7 @@ fn committed_check_admits_without_a_maintenance_tick() {
                 default_storage_factory: Some(
                     GatedFactory {
                         counted: CountedFilesystemFactory(counts),
-                        gate: gate.clone(),
+                        gates: vec![gate.clone()],
                     }
                     .boxed(),
                 ),
