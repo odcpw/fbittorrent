@@ -265,7 +265,17 @@ impl Server {
                     let stream = match listener.accept() {
                         Ok((stream, _)) => stream,
                         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(10));
+                            // Wake immediately for a connection without probing
+                            // accept 100 times a second while idle. The timeout
+                            // still bounds shutdown's join of this worker.
+                            let mut ready = libc::pollfd {
+                                fd: listener.as_raw_fd(),
+                                events: libc::POLLIN,
+                                revents: 0,
+                            };
+                            // SAFETY: the listener owns this fd for the entire
+                            // call, and poll receives one initialized entry.
+                            unsafe { libc::poll(&mut ready, 1, 100); }
                             continue;
                         }
                         Err(e) => {

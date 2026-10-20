@@ -39,22 +39,60 @@ fn hashes(values: &Hashes) -> HashSelection {
     HashSelection::Hashes(values.as_slice().iter().map(ToString::to_string).collect())
 }
 pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
-    let legacy: serde_json::Value =
-        serde_json::from_str(&view.to_cli_json().map_err(engine_error)?).unwrap();
-    let mut value = serde_json::to_value(view).unwrap();
-    if value["upload_limit_bps"] == 0 {
-        value.as_object_mut().unwrap().remove("upload_limit_bps");
-    }
-    if value.get("origin").is_none() {
-    if let Some(origin) = legacy["tags"].as_str().and_then(|tags| {
-        tags.split(',')
-            .find_map(|tag| tag.strip_prefix("fbt-origin:"))
-    }) {
-        value["origin"] = json!(origin);
-    } else { value["origin"]=json!("manual"); }
-    }
-    serde_json::from_value(value)
-        .map_err(|_| error(ErrorCode::Internal, "invalid normalized torrent", None))
+    use engine::view::{Intent as I, TorrentState as S, UploadPolicy as U};
+    let invalid = || error(ErrorCode::Internal, "invalid normalized torrent", None);
+    // The engine already owns normalized fields. Project them directly rather
+    // than rendering and parsing the CLI object for every row on every tick.
+    Ok(Torrent {
+        hash: Hash::new(view.hash).map_err(|_| invalid())?,
+        name: view.name,
+        state: match view.state {
+            S::Metadata => TorrentState::Metadata,
+            S::Checking => TorrentState::Checking,
+            S::Downloading => TorrentState::Downloading,
+            S::Stalled => TorrentState::Stalled,
+            S::Queued => TorrentState::Queued,
+            S::Paused => TorrentState::Paused,
+            S::Done => TorrentState::Done,
+            S::Seeding => TorrentState::Seeding,
+            S::WaitingVpn => TorrentState::WaitingVpn,
+            S::Error => TorrentState::Error,
+        },
+        intent: match view.intent { I::Run => Intent::Run, I::Pause => Intent::Pause },
+        staged: view.staged,
+        checked: view.checked,
+        seed: view.seed,
+        upload_enabled: view.upload_enabled,
+        upload_policy: match view.upload_policy {
+            U::Off => UploadPolicy::Off,
+            U::Unlimited => UploadPolicy::Unlimited,
+            U::Custom => UploadPolicy::Custom,
+        },
+        save_path: view.save_path,
+        added_at: u64::try_from(view.added_at).map_err(|_| invalid())?,
+        force: view.force,
+        reason: view.reason,
+        error: view.error,
+        progress: view.progress.filter(|v| v.is_finite()),
+        size: view.size,
+        completed_bytes: view.completed_bytes,
+        uploaded_bytes: view.uploaded_bytes,
+        dl_bps: view.dl_bps,
+        ul_bps: view.ul_bps,
+        eta_s: view.eta_s,
+        peers: view.peers,
+        seeds: view.seeds,
+        upload_limit_bps: view.upload_limit_bps.filter(|v| *v != 0),
+        download_limit_bps: view.download_limit_bps,
+        effective_download_limit_bps: view.effective_download_limit_bps,
+        ratio: view.ratio.filter(|v| v.is_finite()),
+        content_path: view.content_path,
+        completed_at: view.completed_at.map(u64::try_from).transpose().map_err(|_| invalid())?,
+        origin: Some(view.origin.unwrap_or_else(|| "manual".into())),
+        queue_pos: view.queue_pos,
+        imdb_id: None,
+        playable: None, // The daemon's watch sampler decorates the API rows.
+    })
 }
 pub fn list(daemon: &Daemon) -> ApiResult<Vec<Torrent>> {
     let EngineResult::Torrents(rows) = execute(daemon, EngineOp::Info)? else {

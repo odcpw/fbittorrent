@@ -18,6 +18,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
+    cell::OnceCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -125,6 +126,7 @@ impl EventRing {
 }
 struct Sample {
     topics: BTreeSet<Topic>,
+    summary_cache: OnceCell<Value>,
     history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
@@ -166,6 +168,11 @@ impl Sample {
         }
     }
     fn summary(&self) -> Value {
+        // A sample is immutable while fanned out to subscribers. Count and
+        // project its rows once, even when several bars share the same tick.
+        self.summary_cache.get_or_init(|| self.build_summary()).clone()
+    }
+    fn build_summary(&self) -> Value {
         let counts = summary_counts(&self.rows);
         let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
@@ -467,7 +474,9 @@ impl Bus {
         let mut effective = cfg;
         effective.idle_exit_secs = self.daemon.idle_exit_secs();
         effective.notify &= !self.daemon.no_notify;
-        let settings = serde_json::to_value(ops::settings::view(&effective)).unwrap();
+        let settings = if topics.contains(&Topic::Settings) || topics.contains(&Topic::Summary) {
+            serde_json::to_value(ops::settings::view(&effective)).unwrap()
+        } else { Value::Null };
         let mut show_releases=BTreeMap::new();
         for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
             show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
@@ -487,6 +496,7 @@ impl Bus {
             (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
             topics: topics.iter().cloned().collect(),
+            summary_cache: OnceCell::new(),
             history,stats,
             peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
@@ -498,7 +508,9 @@ impl Bus {
             state,
             rows,
             completions,
-            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            logs: if topics.contains(&Topic::Log) {
+                serde_json::to_value(self.daemon.logs.all()).unwrap()
+            } else { Value::Null },
             searches,
             files,
             pieces,

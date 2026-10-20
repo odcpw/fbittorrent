@@ -2,6 +2,62 @@ use super::*;
 use crate::engine::tests::review_record;
 
 #[test]
+fn api_projection_keeps_owned_origin_and_unknown_observations() {
+    let mut record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
+    record.display_name = Some("My display name".into());
+    record.tags = "fbt-origin:obsolete-tag".into();
+    let mut view = TorrentView::unrestored(&record, None);
+    view.origin = Some("rss:my-feed".into());
+    view.upload_limit_bps = Some(0);
+    let row = crate::api::ops::torrents::torrent(view.clone()).unwrap();
+    assert_eq!(row.name, "My display name");
+    assert_eq!(row.origin.as_deref(), Some("rss:my-feed"));
+    assert_eq!(row.state, crate::api::TorrentState::Metadata);
+    assert!(!row.upload_enabled);
+    let wire = serde_json::to_value(&row).unwrap();
+    for key in ["progress", "size", "completed_bytes", "uploaded_bytes", "dl_bps",
+        "ul_bps", "eta_s", "peers", "seeds", "upload_limit_bps", "playable"] {
+        assert!(wire.get(key).is_none(), "unknown {key} must stay absent: {wire}");
+    }
+    view.state = TorrentState::Downloading;
+    view.progress = Some(0.25);
+    view.completed_bytes = Some(1024);
+    view.uploaded_bytes = Some(0);
+    view.peers = Some(2);
+    view.seeds = Some(0);
+    view.dl_bps = Some(4096);
+    view.ul_bps = Some(0);
+    view.download_limit_bps = Some(8192);
+    view.effective_download_limit_bps = Some(4096);
+    view.upload_enabled = true;
+    view.upload_policy = UploadPolicy::Custom;
+    view.upload_limit_bps = Some(2048);
+    let row = crate::api::ops::torrents::torrent(view).unwrap();
+    assert_eq!(row.state, crate::api::TorrentState::Downloading);
+    assert_eq!(row.progress, Some(0.25));
+    assert_eq!((row.peers, row.seeds), (Some(2), Some(0)));
+    assert_eq!((row.completed_bytes, row.uploaded_bytes), (Some(1024), Some(0)));
+    assert_eq!((row.dl_bps, row.ul_bps), (Some(4096), Some(0)));
+    assert_eq!((row.download_limit_bps, row.effective_download_limit_bps), (Some(8192), Some(4096)));
+    assert!(row.upload_enabled);
+    assert_eq!(row.upload_policy, crate::api::UploadPolicy::Custom);
+    assert_eq!(row.upload_limit_bps, Some(2048));
+}
+
+#[test]
+fn api_projection_refuses_invalid_owned_identifiers_and_timestamps() {
+    let record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
+    let mut view = TorrentView::unrestored(&record, None);
+    view.hash = "not-a-hash".into();
+    assert_eq!(crate::api::ops::torrents::torrent(view).unwrap_err().code, crate::api::ErrorCode::Internal);
+    for completed in [false, true] {
+        let mut view = TorrentView::unrestored(&record, None);
+        if completed {view.completed_at = Some(-1);} else {view.added_at = -1;}
+        assert_eq!(crate::api::ops::torrents::torrent(view).unwrap_err().code, crate::api::ErrorCode::Internal);
+    }
+}
+
+#[test]
 fn state_mapping_table() {
     use TorrentState::*;
     // Index bits: durable pause, stop-on-complete, finished, handle paused.
