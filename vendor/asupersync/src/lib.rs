@@ -173,11 +173,14 @@ compile_error!("feature `kafka` is unsupported on wasm32 browser preview builds.
 
 // ── Portable modules (no platform assumptions) ──────────────────────────
 pub mod actor;
+#[cfg(feature = "extended-services")]
 pub mod adapter_certification;
+#[cfg(feature = "extended-services")]
 pub mod agent_swarm;
 pub mod app;
 #[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub mod atp;
+#[cfg(feature = "extended-services")]
 pub mod audit;
 pub mod bytes;
 pub mod cancel;
@@ -185,7 +188,9 @@ pub mod channel;
 pub mod codec;
 pub mod combinator;
 pub mod config;
+#[cfg(feature = "extended-services")]
 pub mod conformance;
+#[cfg(feature = "extended-services")]
 pub use conformance::traceability;
 pub mod console;
 pub mod cx;
@@ -206,6 +211,7 @@ pub mod monitor;
 pub mod net;
 pub mod obligation;
 pub mod observability;
+#[cfg(feature = "extended-services")]
 pub mod plan;
 pub mod prelude;
 pub mod raptorq;
@@ -214,6 +220,7 @@ pub mod remote;
 pub mod runtime;
 pub mod security;
 pub mod service;
+#[cfg(feature = "extended-services")]
 pub mod session;
 pub mod spork;
 pub mod stream;
@@ -245,11 +252,11 @@ pub mod tls;
 // (see docs/wasm_platform_trait_seams.md).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fs;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-services", not(target_arch = "wasm32")))]
 pub mod grpc;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-services", not(target_arch = "wasm32")))]
 pub mod messaging;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-services", not(target_arch = "wasm32")))]
 pub mod process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;

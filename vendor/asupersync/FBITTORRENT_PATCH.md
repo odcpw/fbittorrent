@@ -27,6 +27,12 @@ Lab remains available because rqbit-runtime's existing
 `lab_pause_drains_a_channel_waiter_and_releases_its_resources` test exercises
 region cancellation and resource release through it.
 
+The unused gRPC, messaging and process APIs, adapter certification, agent-swarm
+and audit tooling, plan/conformance/session modules, and Lab's swarm-replay and
+deadlock-radar tools require `extended-services`. The remaining OTLP exporter
+and structured-concurrency adapters follow the existing `metrics` boundary.
+None of those features is enabled by the app or its consumer test suites.
+
 ## Original runtime patches
 
 These are the original local runtime changes, before the later additions

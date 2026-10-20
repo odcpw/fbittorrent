@@ -91,6 +91,7 @@ pub mod chaos;
 pub mod config;
 pub mod conformal;
 pub mod crashpack;
+#[cfg(feature = "extended-services")]
 pub mod deadlock_radar;
 pub mod dual_run;
 pub mod exploration_budget;
@@ -117,6 +118,7 @@ pub mod scenario;
 pub mod scenario_runner;
 pub mod snapshot_restore;
 pub mod spork_harness;
+#[cfg(feature = "extended-services")]
 pub mod swarm_replay;
 pub mod util;
 pub mod virtual_time_wheel;
@@ -144,6 +146,7 @@ pub use crashpack::{
     TraceMinimizer, TraceMinimizerConfig, TransferOracle, TransferOracleResult, TransferState,
     TransferViolation, ViolationSeverity,
 };
+#[cfg(feature = "extended-services")]
 pub use deadlock_radar::{
     DEADLOCK_RADAR_SCHEMA_VERSION, DeadlockRadarCandidate, DeadlockRadarEvidence,
     DeadlockRadarFinding, DeadlockRadarHazardClass, DeadlockRadarInterleavingStep,
@@ -260,6 +263,7 @@ pub use spork_harness::{
     HarnessError, ScenarioRunnerError, SporkAppHarness, SporkScenarioConfig, SporkScenarioResult,
     SporkScenarioRunner, SporkScenarioSpec,
 };
+#[cfg(feature = "extended-services")]
 pub use swarm_replay::{
     SWARM_AGENT_RUN_SCHEMA_VERSION, SWARM_CONTENTION_HEATMAP_LEDGER_SCHEMA_VERSION,
     SWARM_FAILURE_MINIMIZER_SCHEMA_VERSION, SWARM_HANDOFF_VERIFICATION_SCHEMA_VERSION,

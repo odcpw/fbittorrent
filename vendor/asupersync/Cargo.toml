@@ -195,6 +195,7 @@ ci-cross-platform = [
 ]
 cli = [
     "extended-network",
+    "extended-services",
     "dep:clap",
     "dep:time",
     "trace-compression",
@@ -224,6 +225,8 @@ deterministic-mode = []
 epoch-diagnostics = []
 # ATP, native QUIC and HTTP/3 are not used by fbittorrent's native profile.
 extended-network = []
+# Upstream service frameworks and tooling, absent from the app's native profile.
+extended-services = []
 distributed-hash-snapshot-recovery-e2e = ["test-internals"]
 fuzz = [
     "dep:arbitrary",
@@ -240,8 +243,9 @@ lab-stack-traces = [
 legacy-internal-test-harnesses = []
 lock-metrics = []
 loom-tests = ["dep:loom"]
-messaging-fabric = []
+messaging-fabric = ["extended-services"]
 metrics = [
+    "extended-services",
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
     "dep:regex",
