@@ -19,8 +19,8 @@ from headless import Headless
 
 
 class Session:
-    def __init__(self,case,sandbox,hooks=True,recipe="dashboard",source_link=None):
-        self.recipe=recipe;self.source_link=source_link;self.hooks=hooks;self.case=case;self.compositor=Headless(sandbox,case)
+    def __init__(self,case,sandbox,hooks=True,recipe="dashboard",source_link=None,journal_tag=None):
+        self.recipe=recipe;self.source_link=source_link;self.hooks=hooks;self.case=case;self.journal_tag=journal_tag;self.compositor=Headless(sandbox,case)
         try:self.start(sandbox)
         except BaseException:self.compositor.close();raise
 
@@ -50,7 +50,14 @@ class Session:
             # A fresh exec wrapper avoids Python preexec_fn after the DNS thread starts.
             script='import ctypes,os,sys; result=ctypes.CDLL(None).prctl(0x59616d61,ctypes.c_ulong(-1),0,0,0); assert result==0; os.execvp("qs",sys.argv[1:])'
             command=[sys.executable,'-c',script,*command]
+        if self.journal_tag:command=['systemd-cat','--identifier='+self.journal_tag,'--',*command]
         self.child=subprocess.Popen(command,env=self.env,stdout=self.output,stderr=subprocess.STDOUT)
+
+    def read_log(self):
+        if self.journal_tag:
+            text=subprocess.check_output(['journalctl','--user','--no-pager','--output=cat','--identifier='+self.journal_tag],text=True,timeout=3)
+            self.log.write_text(text)
+        return self.log.read_text()
 
     def ipc(self,method,*args):
         result=subprocess.run(['qs','ipc','-p',str(self.config),'call','fbt-dashboard',method,*map(str,args)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=3)
@@ -100,7 +107,7 @@ class Session:
                 except subprocess.TimeoutExpired:self.child.terminate()
                 try:self.child.wait(timeout=3)
                 except subprocess.TimeoutExpired:self.child.kill();self.child.wait()
-            self.output.close();text=self.log.read_text()
+            self.output.close();text=self.read_log()
             errors=[line for line in text.splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected','Unexpected token','Error calling method'))]
             self.case.check(self.child.returncode==0 and not errors,'owned dashboard shell closes without QML errors',f'exit={self.child.returncode}; errors={errors}; {self.log}')
         finally:self.compositor.close()
