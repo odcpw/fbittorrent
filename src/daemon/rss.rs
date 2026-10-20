@@ -10,7 +10,12 @@ use std::{
 };
 type Wake = Arc<dyn Fn()+Send+Sync>;
 #[derive(Default)]
-pub(crate) struct Snapshot { pub feeds:Vec<Feed>, pub items:BTreeMap<String,Vec<FeedItem>> }
+pub(crate) struct Snapshot {
+    /// Public views: feed URLs, links, magnets, torrent URLs and errors carry no credentials.
+    pub feeds:Vec<Feed>, pub items:BTreeMap<String,Vec<FeedItem>>,
+    /// Unredacted sources, only for the owner's own grab of an item.
+    pub sources:BTreeMap<String,Vec<FeedItem>>,
+}
 type Stamp = (u64, u64, i64, i64);
 #[derive(Default)]
 struct Cache { stamp:Option<Stamp>, snapshot:Arc<Snapshot>, loaded:bool }
@@ -84,9 +89,10 @@ impl Service {
                         magnet:source.starts_with("magnet:?").then(||source.clone()), torrent_url:(!a.torrent_url.is_empty()&&(source.starts_with("http://")||source.starts_with("https://"))).then(||source.clone()),
                         read:a.is_read, grabbed:row.grabbed.contains(&a.id) }
                 }).collect();
-                snapshot.feeds.push(Feed { id:id.clone(),name:f.name,url:f.url,title:nonempty(&f.title),unread:items.iter().filter(|a|!a.read).count() as u64,
-                    last_refresh_at:(row.last_checked>0).then_some(row.last_checked as u64),loading:false,error:nonempty(&row.error) });
-                snapshot.items.insert(id,items);
+                snapshot.feeds.push(Feed { id:id.clone(),name:f.name,url:crate::public_text::url(&f.url),title:nonempty(&f.title),unread:items.iter().filter(|a|!a.read).count() as u64,
+                    last_refresh_at:(row.last_checked>0).then_some(row.last_checked as u64),loading:false,error:nonempty(&row.error).map(|e|crate::public_text::message(&f.url,&e)) });
+                snapshot.items.insert(id.clone(),items.iter().map(crate::public_text::feed_item).collect());
+                snapshot.sources.insert(id,items);
             }
             snapshot.feeds.sort_by(|a,b|a.id.cmp(&b.id));
             cache.snapshot=Arc::new(snapshot); cache.stamp=next; cache.loaded=true;

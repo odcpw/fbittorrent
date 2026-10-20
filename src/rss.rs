@@ -21,6 +21,7 @@ use crate::qbt::{RssArticle, RssFeed};
 
 const MAX_BODY: u64 = 4 * 1024 * 1024;
 const MAX_CACHED_ARTICLES: usize = 500;
+const MAX_DEPTH: usize = 64;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -76,7 +77,7 @@ impl Default for Store {
 }
 
 pub fn path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".local/share"))
+    crate::config::require_home(dirs::data_dir(), "RSS subscriptions")
         .join("fbittorrent/rss.json")
 }
 
@@ -182,7 +183,7 @@ impl Store {
         validate_url(url)?;
         let chosen = self.mutate(|data| {
             if data.feeds.iter().any(|stored| stored.feed.url == url) {
-                bail!("RSS feed is already followed: {url}");
+                bail!("RSS feed is already followed: {}", crate::public_text::feed_label(url));
             }
             let mut chosen = name.map(str::trim).filter(|name| !name.is_empty())
                 .map(str::to_owned).unwrap_or_else(|| host_name(url));
@@ -274,7 +275,7 @@ impl Store {
                 else { return Ok(()); }; // subscription removed during fetch
                 stored.last_checked = now();
                 stored.feed.is_loading = false;
-                stored.error = fetched.as_ref().err().map(|e|format!("{e:#}")).unwrap_or_default();
+                stored.error = fetched.as_ref().err().map(|e|crate::public_text::message(&snapshot.feed.url, &format!("{e:#}"))).unwrap_or_default();
                 match &fetched {
                     Ok(Some(result)) => {
                         if !result.title.is_empty() { stored.feed.title = result.title.clone(); }
@@ -289,7 +290,7 @@ impl Store {
                 }
                 Ok(())
             })?;
-            if let Err(error) = fetched { failures.push(format!("{}: {error:#}", snapshot.feed.name)); }
+            if let Err(error) = fetched { failures.push(format!("{}: {}", snapshot.feed.name, crate::public_text::message(&snapshot.feed.url, &format!("{error:#}")))); }
         }
         if !failures.is_empty() { bail!("RSS refresh failed: {}", failures.join("; ")); }
         Ok(())
@@ -359,9 +360,9 @@ fn validate_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// The default feed name: the host only, never userinfo, port or query.
 fn host_name(url: &str) -> String {
-    url.split_once("://").map(|(_, rest)| rest.split('/').next().unwrap_or("").to_string())
-        .unwrap_or_default()
+    url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default()
 }
 
 pub(crate) fn stable_id(value: &str) -> String {
@@ -419,6 +420,8 @@ fn parse_feed(bytes: &[u8], base: &str) -> Result<Fetched> {
     loop {
         match reader.read_event().context("parsing RSS/Atom XML")? {
             Event::Start(start) => {
+                // Nested text is copied into every ancestor: bound the depth like Torznab.
+                if stack.len() >= MAX_DEPTH { bail!("feed XML exceeds the nesting limit"); }
                 let name = local_name(start.local_name().as_ref());
                 if stack.is_empty() { known_root = matches!(name.as_str(), "rss" | "feed" | "rdf"); }
                 if name == "item" || name == "entry" {
@@ -662,6 +665,14 @@ mod tests {
             merge_articles(&mut data.feeds[0], vec![RssArticle { id: "old".into(), title: "returning release".into(), ..RssArticle::default() }]); Ok(())
         }).unwrap();
         assert!(store.list().unwrap()[0].articles[0].is_read);
+    }
+
+    #[test]
+    fn deeply_nested_feeds_are_refused() {
+        let nested = |depth: usize| format!("<rss><channel>{}text{}</channel></rss>", "<x>".repeat(depth), "</x>".repeat(depth));
+        assert!(parse_feed(nested(60).as_bytes(), "https://example.org").is_ok());
+        let error = parse_feed(nested(100_000).as_bytes(), "https://example.org").err().unwrap();
+        assert!(format!("{error:#}").contains("nesting limit"));
     }
 
     #[test]

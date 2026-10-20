@@ -1,3 +1,5 @@
+#[macro_use]
+mod terminal_macros;
 mod agent;
 mod cli;
 #[path = "cli/sources.rs"]
@@ -16,6 +18,7 @@ mod feed_date;
 mod native_runtime;
 mod network_app;
 mod outbound;
+mod public_text;
 mod ipc;
 mod imdb;
 mod qbt;
@@ -260,9 +263,10 @@ mod source_tests {
     }
 }
 
+/// A display/default name: the host only, never userinfo (credentials), port or query.
 pub fn host_of(url: &str) -> Option<String> {
-    let rest = url.split_once("://")?.1;
-    Some(rest.split('/').next()?.trim_start_matches("www.").to_string())
+    let parsed = url::Url::parse(url).ok()?;
+    Some(parsed.host_str().filter(|host| !host.is_empty())?.trim_start_matches("www.").to_string())
 }
 
 fn notify(title: &str, body: &str, error: bool) {

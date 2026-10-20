@@ -78,7 +78,8 @@ impl TuiApp {
                 return self.open_wiki(name, id);
             },
             actions::Intent::Source => if let Some(r) = self.selected_result() {
-                if !r.descr_link.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&r.descr_link).spawn(); }
+                // Provider-supplied: only http(s) pages reach xdg-open.
+                if !r.descr_link.is_empty() && !crate::public_text::open_web(&r.descr_link) { self.set_status("source link is not a web page", true); }
             },
             actions::Intent::Follow => if let Some(r) = self.selected_result() {
                 let id = if !r.imdb.is_empty() { Some(r.imdb.clone()) } else { self.name_ids.get(&r.file_name).filter(|i| !i.is_empty()).cloned() };

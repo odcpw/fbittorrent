@@ -36,7 +36,7 @@ impl Title {
 }
 
 pub fn cache_dir() -> PathBuf {
-    dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("fbittorrent")
+    crate::config::require_home(dirs::cache_dir(), "the IMDb cache").join("fbittorrent")
 }
 
 fn private_cache_dir(root: &Path, directory: &Path) -> Result<()> {

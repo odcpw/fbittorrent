@@ -207,8 +207,7 @@ pub struct Shows {
 }
 
 pub fn path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+    crate::config::require_home(dirs::data_dir(), "followed shows")
         .join("fbittorrent")
         .join("shows.json")
 }
@@ -554,7 +553,7 @@ pub(crate) fn fetch_updates_cancelled(show:&Show, quality:&str, cancelled:&std::
     fetch_eztv_inner(&show.imdb,show.quality.as_deref().unwrap_or(quality),boundary,show.catalogue_complete,Some(cancelled))
 }
 pub(crate) fn eztv_endpoint(query:&str)->String {
-    let base=std::env::var("FBT_EZTV_BASE_URL").unwrap_or_else(|_|"https://eztv.re".into());
+    let base=crate::outbound::fixture_base("FBT_EZTV_BASE_URL").map(|u|u.to_string()).unwrap_or_else(||"https://eztv.re".into());
     format!("{}/api/get-torrents?{query}",base.trim_end_matches('/'))
 }
 fn fetch_eztv_inner(imdb:&str,quality:&str,boundary:Option<i64>,complete_before:bool,cancelled:Option<&std::sync::atomic::AtomicBool>)->Result<EpisodeCheck> {

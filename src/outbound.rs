@@ -33,6 +33,30 @@ impl Drop for Http {
     }
 }
 
+/// A fixture endpoint override (`FBT_EZTV_BASE_URL`, `FBT_IMDB_BASE_URL`) is
+/// honoured only as a literal loopback HTTP origin: the regression harness
+/// serves local fixtures to release builds too, but an inherited variable can
+/// never redirect show checks or IMDb cards to another host.
+pub(crate) fn fixture_base(variable: &str) -> Option<url::Url> {
+    let value = std::env::var(variable).ok()?;
+    let base = fixture_origin(&value);
+    if base.is_none() {
+        ::std::eprintln!("WARN ignoring {variable}: only a literal loopback http:// fixture origin is accepted");
+    }
+    base
+}
+
+fn fixture_origin(value: &str) -> Option<url::Url> {
+    let base = url::Url::parse(value).ok()?;
+    let loopback = match base.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    };
+    let plain = base.username().is_empty() && base.password().is_none() && base.query().is_none() && base.fragment().is_none();
+    (base.scheme() == "http" && loopback && plain).then_some(base)
+}
+
 /// External helpers (Nova Python providers) open their own sockets, which
 /// cannot be bound to the VPN interface; they are refused while it is set.
 pub(crate) fn unbound_helpers_allowed(what: &str) -> Result<()> {
@@ -85,6 +109,17 @@ mod tests {
             false
         });
         (url, worker)
+    }
+
+    #[test]
+    fn fixture_overrides_accept_only_loopback_http_origins() {
+        let check = |value: &str| fixture_origin(value).map(|u| u.to_string());
+        assert_eq!(check("http://127.0.0.1:8080").as_deref(), Some("http://127.0.0.1:8080/"));
+        assert_eq!(check("http://[::1]:9/").as_deref(), Some("http://[::1]:9/"));
+        for refused in ["https://eztv.evil.invalid", "http://10.0.0.1:80", "http://localhost.evil.invalid", "http://u:p@127.0.0.1:1",
+                        "file:///tmp/x", "http://127.0.0.1:1/?q=1"] {
+            assert_eq!(check(refused), None, "{refused}");
+        }
     }
 
     #[test]

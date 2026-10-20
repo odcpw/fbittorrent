@@ -12,11 +12,10 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn endpoint(url: &str) -> Result<String> {
-    let Some(base) = std::env::var_os("FBT_IMDB_BASE_URL") else {
+    let Some(mut target) = crate::outbound::fixture_base("FBT_IMDB_BASE_URL") else {
         return Ok(url.into());
     };
     let parsed = url::Url::parse(url)?;
-    let mut target = url::Url::parse(&base.to_string_lossy())?;
     target.set_path(parsed.path());
     target.set_query(parsed.query());
     Ok(target.into())
