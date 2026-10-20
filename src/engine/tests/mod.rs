@@ -215,6 +215,7 @@ include!("metadata_cache.rs");
 include!("queue.rs");
 include!("maintenance.rs");
 include!("persistence.rs");
+include!("durable_fallback.rs");
 include!("transfer.rs");
 include!("live_limits.rs");
 include!("handle_lookup.rs");

@@ -25,9 +25,7 @@ def main():
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
     with fbtlog.Case('tui_everyday','everyday_live') as case,d.Sandbox() as box:
         case.check(bool(d.private_environment(box)),'prove private XDG and download paths before any product starts',str(box.root))
-        # Nova cannot bind to a VPN interface. The verified private network has
-        # only loopback, so exercise its local provider without a VPN binding.
-        d.select_replay_interface(Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml',None)
+        # Torrent and Nova traffic both retain the fixture's loopback binding.
         data=Path(box.env['XDG_DATA_HOME'])/'fbittorrent';data.mkdir(parents=True,exist_ok=True)
         # Fresh persisted Shows avoid both external requests and synthetic API responses.
         episodes=[dict(key=f'S01E{i:02}',season=1,episode=i,title=f'Owned.Show.S01E{i:02}.1080p',magnet='magnet:?xt=urn:btih:'+f'{i+10:040x}',quality='1080p',size=size,seeds=3-i,released=int(time.time())-i,candidates=1) for i,size in [(1,900),(2,1100)]]

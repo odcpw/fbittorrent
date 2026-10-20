@@ -151,6 +151,11 @@ pub fn set(daemon: &Daemon, patch: &Map<String, Value>) -> ApiResult<SettingsSet
             .map_err(engine_error)?;
         return Err(engine_error(failure));
     }
+    if previous.network_interface != cfg.network_interface {
+        // Do not acknowledge the new privacy policy while old-route Nova or
+        // Torznab workers remain alive. Fresh jobs load the saved configuration.
+        daemon.search.network_changed().map_err(engine_error)?;
+    }
     if patch.contains_key("idle_exit_secs") {
         daemon.policy.lock().unwrap().replace_delay(cfg.idle_exit_secs, std::time::Instant::now());
     }

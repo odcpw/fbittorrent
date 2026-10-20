@@ -486,6 +486,7 @@ pub(crate) mod service;
 pub(crate) mod torznab;
 mod jobs;
 mod process;
+mod proxy;
 #[cfg(test)]
 mod tests;
 

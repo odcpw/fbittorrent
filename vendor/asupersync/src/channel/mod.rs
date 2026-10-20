@@ -87,9 +87,12 @@
 //! - [`watch`]: Single-producer, multi-consumer state observation
 
 pub mod broadcast;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod clock_skew;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod crash;
 pub mod erasure;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod fault;
 pub mod flow_control_monitor;
 pub mod mpsc;

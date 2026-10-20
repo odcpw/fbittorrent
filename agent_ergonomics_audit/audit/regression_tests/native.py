@@ -729,11 +729,7 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
     tmux("resize-window", "-t", session, "-x", "160", "-y", "45")
     keys("1", "Home")
     check_capture("01-torrents-160x45.txt", lambda pane: "peers     unknown" in pane)
-    # HARDENING refuses unbindable Nova workers under a VPN binding. These
-    # offline Python providers only print local rows; explicitly opt this
-    # private, paused fixture out, then restore lo before any torrent starts.
-    cli("settings", "--vpn", "off")
-    wait_for(lambda: cli("status").get("daemon", {}).get("state") == "running", "unbound local-provider owner is ready")
+    # Nova search remains bound to lo, like the torrent fixture.
     keys("2", "/", "C-a")
     tmux("send-keys", "-t", session, "-l", "known peers")
     keys("Enter")
@@ -757,8 +753,6 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
     check_capture("10-browse-yts-latest.txt",
                   lambda pane: pane.count("Local YTS unknown counts") == 2 and "source" in pane,
                   blank_seed_column)
-    cli("settings", "--vpn", "lo")
-    wait_for(lambda: cli("status").get("daemon", {}).get("state") == "running", "loopback-bound owner is ready again")
     keys("Escape", "4")
     check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
     step = case.step("Read capabilities --json",

@@ -45,6 +45,7 @@ struct WriteAttempt {
 #[derive(Default)]
 struct FileTrace {
     armed: AtomicBool,
+    fault_file: AtomicUsize,
     attempts: TraceMutex<Vec<WriteAttempt>>,
     successful: TraceMutex<Vec<WriteAttempt>>,
     reads: AtomicUsize,
@@ -61,7 +62,10 @@ impl FileTrace {
             offset,
             length,
         });
-        if file == 0 && offset == 0 && self.armed.swap(false, Ordering::AcqRel) {
+        if file == self.fault_file.load(Ordering::Acquire)
+            && offset == 0
+            && self.armed.swap(false, Ordering::AcqRel)
+        {
             return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, FAULT).into());
         }
         Ok(())
@@ -594,3 +598,7 @@ fn native_live_first_positioned_write_error_signals_fatal_and_stops_later_valid_
     handle.pause().unwrap();
     fixture.finish();
 }
+
+
+#[path = "received_block_tests.rs"]
+mod received_blocks;

@@ -185,6 +185,18 @@ impl Service {
         }
         events
     }
+    /// A new route must not leave providers running with their previous
+    /// sockets/proxy. Serialize admission through the drain and reopen only
+    /// after the new configuration is durable.
+    pub(crate) fn network_changed(&self) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        if state.closed {
+            return Ok(());
+        }
+        state.sessions.clear();
+        shutdown_all();
+        begin_session()
+    }
     pub fn shutdown(&self) {
         let mut state = self.state.lock().unwrap();
         state.closed = true;

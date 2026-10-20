@@ -103,7 +103,7 @@ def cli_search_parked_fallback(binary,systemd):
             with d.ApiConn(h) as observer:
                 hello=observer.hello()['result'];case.check(hello['state']=='parked','owner is really parked before fallback',json.dumps(hello))
                 value,result=cli(case,box,binary,'search','hold-refused','--wait','5','--json',code=1)
-                case.check(value.get('ok') is False and 'VPN binding' in result.stdout
+                case.check(value.get('ok') is False and 'Nova search VPN interface unavailable' in result.stdout
                            and not (runtime/'alpha-raw.txt').exists() and not groups(runtime),
                            'parked fallback refuses unbound Nova before any provider starts',result.stdout)
                 sub=observer.call('subscribe',dict(topics=['events']))['result']['sub']
@@ -124,7 +124,7 @@ def cli_search_silent_hello_fallback(binary,systemd):
     # A real stalled local stream exercises the 200 ms hello deadline, without
     # returning fabricated API data or contacting a service outside this sandbox.
     with d.Case('daemon','cli_search_silent_hello_fallback') as case,d.Sandbox() as box,d.Harness(case,binary,box,systemd) as h:
-        # Fallback may run these local-only providers only without a VPN binding.
+        # Keep an unbound fallback control for these local-only providers.
         d.select_replay_interface(Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml',None)
         engines(box);path=d.DaemonContract.socket_path(box);path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
         listener=socket.socket(socket.AF_UNIX);listener.bind(str(path));listener.listen(1);listener.settimeout(5)

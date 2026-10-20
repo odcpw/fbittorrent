@@ -1,5 +1,5 @@
-//! At most one kernel sync plus one coalesced latest snapshot. No thread or API
-//! reader waits for fsync under Watch's mutex; a successful CQE precedes rename.
+//! At most one asynchronous sync plus one coalesced latest snapshot. No API
+//! reader waits for fsync under Watch's mutex; successful sync precedes rename.
 use crate::durable_sync::FileSync;
 use std::{
     fs::{self, File, OpenOptions},

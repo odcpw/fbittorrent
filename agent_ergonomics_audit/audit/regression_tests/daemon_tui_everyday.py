@@ -39,15 +39,8 @@ def tui_everyday(binary, systemd):
             h.wait_for(lambda:(len(d.undo_rows(client))==1,ui.capture(target)),'U restores the daemon-owned record')
             row=client.call('torrents.get',dict(hash=fixture.info_hash))['result']['torrent']
             case.check(row['hash']==fixture.info_hash and hashlib.sha256(payload.read_bytes()).hexdigest()==checksum,'Undo preserves exact payload bytes and record identity',json.dumps(row))
-            # HARDENING deliberately refuses Nova workers under a VPN binding.
-            # Prove that guard, then opt this offline provider into unbound mode
-            # while its only torrent remains paused. Restore lo before adding.
-            refused=client.call('search.start',dict(query='local everyday'),error='upstream')
-            case.check('VPN binding' in refused['error']['message'],'bound Nova search is refused before the positive UI control',json.dumps(refused))
-            epoch=client.call('app.info')['result']['engine_epoch']
-            client.call('app.settings.set',dict(network_interface=None))
-            h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='running' and info['engine_epoch']>epoch,json.dumps(info)),
-                       'explicitly unbound offline provider configuration is ready')
+            case.check(client.call('app.settings.get')['result']['network_interface']=='lo',
+                       'search retains the VPN binding throughout the TUI journey','lo')
             ui.keys(target,'2');ui.keys(target,'local everyday');ui.keys(target,'Enter',literal=False)
             ui.assert_pane(target,'Zulu.S01E01');ui.assert_pane(target,'Alpha.S01E02');ui.assert_pane(target,'Unknown.S01E03')
             ui.keys(target,'Escape',literal=False)
@@ -61,10 +54,6 @@ def tui_everyday(binary, systemd):
             ui.keys(target,'y')
             h.wait_for(lambda:(copied.exists(),ui.capture(target)),'y copies the same selected search row')
             case.check(copied.read_text()=='magnet:?xt=urn:btih:'+f'{1:040x}','sorting preserves selection identity through clipboard copy',copied.read_text())
-            epoch=client.call('app.info')['result']['engine_epoch']
-            client.call('app.settings.set',dict(network_interface='lo'))
-            h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='running' and info['engine_epoch']>epoch,json.dumps(info)),
-                       'restore loopback binding before exercising download defaults')
             ui.keys(target,'F6',literal=False);ui.assert_pane(target,'Download settings')
             for _ in range(9):ui.keys(target,'Down',literal=False)
             ui.keys(target,'Right',literal=False);ui.assert_pane(target,'Download destination · absolute folder path')
