@@ -4,6 +4,20 @@ pub(super) use super::queue_policy::admit;
 static INJECTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 impl Inner {
+    /// Return whether the background maintenance task should keep running.
+    pub(super) async fn maintenance_tick(&self, cx: &Cx) -> bool {
+        let result = self.maintain(cx).await;
+        // Quiesce can begin while maintenance waits for the ledger. Retire
+        // that tick quietly instead of reporting its expected closing error.
+        if self.stopping.load(Ordering::Acquire) || cx.checkpoint().is_err() {
+            return false;
+        }
+        if let Err(error) = result {
+            eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
+        }
+        true
+    }
+
     /// Apply durable running intent in FIFO order. Pause displaced torrents
     /// before admitting replacements, including checking downloads in the cap.
     pub(super) async fn reconcile_queue(
