@@ -68,7 +68,12 @@ fn outbound_socket_really_has_the_kernel_interface_binding() {
     .unwrap();
     let origin = Origin::new();
     let (socket, _owner) = context
-        .connect("127.0.0.1", origin.address.port(), CONNECT)
+        .connect(
+            "127.0.0.1",
+            origin.address.port(),
+            CONNECT,
+            &AtomicBool::new(false),
+        )
         .unwrap();
     let mut device = [0u8; libc::IFNAMSIZ];
     let mut length = device.len() as libc::socklen_t;

@@ -10,7 +10,9 @@ use std::sync::atomic::AtomicUsize;
 
 const MAX_CONNECTIONS: usize = 32; // across all Nova jobs, including handshakes
 const HANDSHAKE: Duration = Duration::from_secs(3);
-const CONNECT: Duration = Duration::from_secs(5);
+// Bound DNS may try an unreachable primary for both A and AAAA before a
+// working fallback. Match Nova's request timeout; cancellation stays prompt.
+const CONNECT: Duration = Duration::from_secs(20);
 const IDLE: Duration = Duration::from_secs(20);
 const LIFETIME: Duration = Duration::from_secs(120);
 static CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -286,7 +288,7 @@ fn serve(
         }
     };
     let port = u16::from_be_bytes(bytes(&mut client, deadline, stopped)?);
-    let (remote, _owner) = match context.connect(&host, port, CONNECT) {
+    let (remote, _owner) = match context.connect(&host, port, CONNECT, stopped) {
         Ok(connection) => connection,
         Err(error) => {
             reply(&mut client, 4, nowhere)?;
