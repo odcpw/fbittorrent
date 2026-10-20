@@ -22,13 +22,20 @@ refactor and sampler changes are not attributed to this work.
 | Streaming: app playable | 1.030 s (1.010–1.038) | — | 26.9 |
 | Magnet: first verified piece, with choke fix | 1.040 s (1.037–1.052) | — | 23.6 |
 
-Scale controls, one 20-second window each: 100 idle torrents used 0.04 CPU s
-and 215 KiB RSS/torrent; 100 actively progressing torrents used 0.81 CPU s and
-387 KiB/torrent; 500 idle torrents used 0.08 CPU s and 68 KiB/torrent.
+Scale controls, three 20-second windows each, median (min–max):
+
+| Torrents | CPU seconds / window | RSS KiB / torrent |
+|---|---:|---:|
+| 100 idle | 0.04 (0.04–0.04) | 230 (223–232) |
+| 500 idle | 0.09 (0.09–0.10) | 74 (74–77) |
+| 100 active | 0.83 (0.79–0.88) | 399 (397–408) |
+| 400 active | 2.91 (2.77–3.04) | 247 (242–248) |
+
 500 active torrents failed admission with resource pressure preventing a child
 region. That is a failed capacity result, not a successful active measurement.
-Low-rate seeds flush each block: buffering a whole megabyte at 32 KiB/s would
-incorrectly trigger the real client's read timeout. Every active torrent must
+Low-rate seeds flush bounded batches (at most one 128 KiB maximum request,
+plus framing): buffering a whole megabyte at 32 KiB/s would incorrectly trigger
+the real client's read timeout. Every active torrent must
 make verified byte progress; instantaneous zero-speed/stalled gauges between
 blocks are allowed.
 
@@ -66,14 +73,17 @@ Floating-point and RNG behavior are unchanged; this changes only write grouping.
 
 ## Retained observations
 
-Relative to the assigned worktree:
+The original per-case artifacts under `target/engine-bench` disappeared during
+a later build/artifact-retrieval interval; the cause was not established.
+Their console JSON logs survived under `/tmp` and are copied to
+`/home/oliver/Projects/odcpw/fbt-engine-evidence-_d8rk7f7/phase1-logs/`.
+The initial measurements above were recorded before that loss. The original
+individual teardown/profile files are no longer independently inspectable.
 
-- `target/engine-bench/baseline-tmpfs/*/{result,teardown}.json`
-- `target/engine-bench/metadata-proof/*/{result,teardown}.json`
-- `target/engine-bench/scale-paced/idle100-1/`
-- `target/engine-bench/scale-valid/{active100-1,idle500-1,active500-1}/`
-- `target/engine-bench/profile-kernel2/download1-1/{profile,summary}.json`
-- `target/engine-bench/syscalls-tmpfs/download1-1/syscalls.txt`
+Fresh post-merge control measurements and binaries are retained outside all
+Cargo target directories at the same evidence root. They establish the actual
+control for the request-batching comparison; the earlier revision is context,
+not a basis for attributing upstream performance changes to this optimization.
 
 Disk runs on the host's Btrfs volume observed roughly 26–39 MB/s under heavy I/O
 pressure but failed strict shutdown/snapshot drain checks. They are excluded

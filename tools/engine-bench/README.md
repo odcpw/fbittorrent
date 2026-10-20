@@ -31,7 +31,7 @@ the source revision and binary SHA-256. Example (adjust actual artifact paths):
 ```sh
 python3 tools/engine-bench/run.py --binary target/release-perf/fbittorrent --binary-source BUILT_COMMIT \
   --seed tools/engine-bench/target/release/fbt-bench-seed \
-  --output target/engine-bench/baseline --runs 3 --mib 1024
+  --output /path/outside/build-targets/baseline --runs 3 --mib 1024
 ```
 
 The download timer includes API admission, metadata where applicable, initial
@@ -47,6 +47,11 @@ Hostile requests may correctly disconnect that peer; those disruption timings
 are not throughput evidence. The streaming case overlays a deterministic real
 Matroska fixture, measures the app's `playable.ready` transition, and decodes the
 verified prefix with ffmpeg.
+
+Every observed piece map must advertise first/last priority. A single peer also
+proves first/last requests precede sequential middle requests on the wire.
+Arrival order across independent seed threads is not picker order: a scheduled
+peer may receive later work before the peer already assigned the first piece.
 
 Recheck measures both admission of already-existing bytes and explicit recheck,
 with paused intent preserved. The runner does not flush shared caches; actual kernel read/write-byte
@@ -76,10 +81,10 @@ flock -w 7200 /tmp/fbittorrent-release.lock systemd-run --user --scope \
   cc -shared -fPIC -O2 -o /tmp/fbt-engine-alloc.so tools/engine-bench/profile.c
 python3 tools/engine-bench/run.py --binary target/release-perf/fbittorrent \
   --binary-source BUILT_COMMIT --seed target/release/fbt-bench-seed \
-  --output target/engine-bench/profile --runs 1 --cases download1 \
+  --output /evidence/profile --runs 1 --cases download1 \
   --profile --preload /tmp/fbt-engine-alloc.so
 python3 tools/engine-bench/summarize_profile.py \
-  target/engine-bench/profile/download1-1/profile.json \
+  /evidence/profile/download1-1/profile.json \
   --binary target/release-perf/fbittorrent --bytes 1073741824
 ```
 
@@ -111,3 +116,23 @@ starting a private child. Both must fail qualification and reap the child.
 Low-rate active workloads accept transient `stalled` gauges between blocks, but
 require every torrent to make verified byte progress in the measured window.
 Paused and queued torrents cannot pass as active.
+
+Keep retained binaries and measurement outputs **outside all Cargo target
+directories**. Artifact retrieval or build-cache cleanup can replace target
+contents. Use a dedicated evidence directory, with its binary copies identified
+by SHA-256. Do not retain the only copy of a baseline inside `target/`.
+
+For a comparison, alternate the before/after binaries in each repeat (AB then
+BA), using the same seed, workload and private filesystem. Warmup cases run all
+behaviour checks but live under `warmup-*` names and must not enter statistics:
+
+```sh
+python3 tools/engine-bench/compare.py --before /evidence/bin/control \
+  --after /evidence/bin/candidate --before-source CONTROL_REV \
+  --after-source CANDIDATE_REV_OR_PATCH --seed /evidence/bin/fbt-bench-seed \
+  --output /evidence/paired --disk-root /tmp --runs 10 --warmup 3
+```
+
+A completed/dormant API view may report unknown upload counters. Wire-observed
+payload bytes and Unchoke messages must still be zero, and every known API
+counter must be zero. This is independent of prose and optional field presence.

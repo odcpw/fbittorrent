@@ -261,6 +261,9 @@ class Run:
                 row = self.api("torrents.get", dict(hash=item["hash"]))["torrent"]
                 if row["state"] == "error":
                     raise RuntimeError(row)
+                # A parked/dormant typed view can have unknown counters. The
+                # seed independently checks every observed payload/Unchoke.
+                assert row.get("uploaded_bytes") in (None, 0) and not row["upload_enabled"], row
                 if playable is None and (row.get("playable") or {}).get("ready"):
                     playable = time.monotonic() - started
                 complete = row.get("completed_bytes") == self.size and row["state"] == "done"
@@ -274,6 +277,7 @@ class Run:
                         assert frame.get("error",{}).get("code") == "invalid_state", frame
                         continue  # Completion can park the map between these two reads.
                     pieces = frame["result"]
+                    assert {0, pieces["count"]-1} <= set(pieces["priority"]), "streaming must prioritize the first and last pieces"
                     bits = base64.b64decode(pieces["have"])
                     have = lambda i: bool(bits[i//8] & (128 >> (i%8)))
                     now = time.monotonic() - started
@@ -297,13 +301,16 @@ class Run:
             # Keep observations from a failed behaviour check without promoting
             # them to a successful result or including them in comparisons.
             (self.output / "observed.json").write_text(json.dumps(dict(measurement=measurement, seed=stats), indent=2)+"\n")
-            assert row["uploaded_bytes"] == 0 and not row["upload_enabled"], row
             assert stats["uploaded_bytes"] == 0 and stats["unchokes"] == 0, stats
+            if magnet:
+                assert stats["metadata_pieces"] > 0, "magnet must obtain metadata over the peer wire"
             if self.args.probe_upload:
                 assert stats["probes"] > 0, stats
             order = stats["first_requests"]
-            assert {0, (self.size-1)//(256*1024)} <= set(order[:2*peers]), stats
             if peers == 1:
+                # Across independent peers, arrival order also reflects OS
+                # scheduling. Only one wire establishes picker request order.
+                assert {0, (self.size-1)//(256*1024)} <= set(order[:2]), stats
                 middle = [piece for piece in order if piece not in (0,(self.size-1)//(256*1024))]
                 assert middle == sorted(middle), "single-peer streaming must stay sequential"
             self.tool("verify", file=self.sandbox.downloads/item["name"], size=self.size, key=42, **self.prefix_options)
@@ -333,11 +340,13 @@ class Run:
             started = time.monotonic()
             response = self.api("torrents.recheck", dict(hashes=[item["hash"]]), ref="bench-recheck")
             assert response["state"] == "pending", response
-            while True:
+            while time.monotonic() < started + self.args.timeout:
                 event = self.client.pushed.pop(0) if self.client.pushed else self.client.receive()
                 if event.get("ev") == "mutation.result" and event.get("ref") == "bench-recheck":
                     assert event["outcome"] == "done" and event["result"]["have_bytes"][item["hash"]] == self.size, event
                     break
+            else:
+                raise TimeoutError("explicit recheck did not finish")
             measured = delta(before, proc(self.pid), time.monotonic()-started, self.size)
             assert self.api("torrents.get", dict(hash=item["hash"]))["torrent"]["state"] == "paused"
             return self.finish_row(dict(initial=initial, recheck=measured, bytes=self.size))
@@ -356,6 +365,7 @@ class Run:
             after = proc(self.pid)
             measured = delta(before, after, time.monotonic()-started)
             end = self.api("torrents.list")["torrents"]
+            assert len(end) == count and all(r["checked"] and r["state"] in (("downloading", "stalled") if active else ("paused",)) for r in end), "workload must remain active or paused throughout the window"
             if active:
                 assert all(r["completed_bytes"] > old["completed_bytes"] for r,old in zip(sorted(end,key=lambda r:r["hash"]),sorted(rows,key=lambda r:r["hash"]))), "every active torrent must make verified progress"
             stats = self.stats()
