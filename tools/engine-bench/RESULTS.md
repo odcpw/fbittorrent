@@ -1,5 +1,25 @@
 # Engine request batching: 2026-10-20
 
+Follow-up on main through `01ea3bb` (merged at `79c02ec`): retain `c4ae9c0`
+for reproducible allocation/I/O savings. Ten alternating measured pairs after
+three warmups per seed count show normal read/write-call reductions of 5.2%,
+18.0%, and 14.9% (1/4/16 seeds). Separate three-pair diagnostic runs show
+allocation reductions of 6.3%, 12.2%, and 7.7%, and total syscall reductions of
+14.3%, 31.5%, and 23.8%. Throughput remains inconclusive under load 4.2–17.6;
+the four-seed paired median is 15.2% slower, with a bootstrap interval spanning
+35.4% slower to 1.4% faster. Do not claim a throughput or CPU improvement.
+Both binaries now pass 500-active admission/progress 3/3. Both still pass only
+2/3 pressured Btrfs drains; each failure reports the unchanged 3,999 ms runtime
+teardown deadline with no busy blocking workers reported. This is a shared
+failure, not a clean shutdown result.
+
+Exact binaries, all measurements, and `*-summary.json` are retained under
+`/home/oliver/Projects/odcpw/fbt-engine-slice2-r3m29_9p/`. One driver was killed
+with exit 137; its surviving private seed/daemon were stopped and audited, and
+the incomplete pair was discarded and rerun. `batch-paired-qualified/` selects
+only complete, verified, drained pairs from the original and resumed runs.
+The measurements below are the earlier baseline, retained as history.
+
 The candidate change reduces allocation and socket-I/O overhead. It is held
 for review, not qualified for release. It does **not**
 establish an end-to-end throughput or CPU improvement on this shared host.
