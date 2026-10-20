@@ -57,22 +57,14 @@ fn fixture_origin(value: &str) -> Option<url::Url> {
     (base.scheme() == "http" && loopback && plain).then_some(base)
 }
 
-/// External helpers (Nova Python providers) open their own sockets, which
-/// cannot be bound to the VPN interface; they are refused while it is set.
-pub(crate) fn unbound_helpers_allowed(what: &str) -> Result<()> {
-    anyhow::ensure!(network_config()?.network_interface.is_none(),
-        "{what} cannot use the VPN binding (network_interface); use a Torznab indexer or turn the binding off");
-    Ok(())
-}
-
 #[cfg(not(test))]
-fn network_config() -> Result<Config> { Config::load() }
+pub(crate) fn network_config() -> Result<Config> { Config::load() }
 
 // Unit tests never read the owner's real configuration; a test chooses its route.
 #[cfg(test)]
 thread_local! { pub(crate) static TEST_CONFIG: std::cell::RefCell<Config> = std::cell::RefCell::new(Config::default()); }
 #[cfg(test)]
-fn network_config() -> Result<Config> { Ok(TEST_CONFIG.with(|cfg| cfg.borrow().clone())) }
+pub(crate) fn network_config() -> Result<Config> { Ok(TEST_CONFIG.with(|cfg| cfg.borrow().clone())) }
 
 #[cfg(test)]
 pub(crate) fn with_interface<T>(name: Option<&str>, run: impl FnOnce() -> T) -> T {
@@ -128,8 +120,6 @@ mod tests {
         let config = || ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(2))).build();
         let refused = with_interface(Some("fbmissing0"), || Http::new(config(), "RSS refresh").map(|_| ()));
         assert!(refused.is_err(), "an unavailable interface must refuse the request");
-        assert!(with_interface(Some("fbmissing0"), || unbound_helpers_allowed("Nova search providers")).is_err());
-        assert!(unbound_helpers_allowed("Nova search providers").is_ok());
         // The ordinary route still works without a binding.
         let http = Http::new(config(), "RSS refresh").unwrap();
         let body = http.agent().get(&url).call().unwrap().body_mut().read_to_string().unwrap();

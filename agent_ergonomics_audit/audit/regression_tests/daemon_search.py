@@ -12,8 +12,8 @@ from daemon_bus import RevisionStream
 @contextmanager
 def owned(name, binary, systemd, *, bound=False, providers=('alpha', 'beta')):
     with d.Case('daemon', name) as case, d.Sandbox() as sandbox:
-        # These installed providers only print owned fixture rows. Nova cannot
-        # honour an interface binding; ordinary positive cases select no binding.
+        # These providers only print owned rows. Keep unbound controls as well
+        # as the explicitly bound search case.
         if not bound:
             d.select_replay_interface(Path(sandbox.env['XDG_CONFIG_HOME']) / 'fbittorrent/config.toml', None)
         runtime = Path(sandbox.env['XDG_DATA_HOME']) / 'fbittorrent/nova3'
@@ -95,14 +95,8 @@ def search_dedupe_and_repair(binary, systemd):
         providers = client.call('search.providers')['result']['providers']
         case.check({p['name'] for p in providers} == {'alpha', 'beta'} and all(p['kind'] == 'nova' for p in providers),
                    'the daemon inspects both real local Nova scripts', json.dumps(providers))
-        refused = client.call('search.start', dict(query='hold-refused'), error='upstream')
-        case.check('VPN binding' in refused['error']['message'] and not groups(runtime)
-                   and not (runtime / 'alpha-raw.txt').exists(),
-                   'an interface binding refuses Nova before either fixture provider runs', json.dumps(refused))
-        client.call('app.settings.set', dict(network_interface=None))
-        h.wait_for(lambda: ((info := client.call('app.info')['result'])['state'] == 'running'
-                            and info['engine_epoch'] > hello['engine_epoch'], json.dumps(info)),
-                   'the same owner restarts with the explicitly unbound local-provider configuration')
+        case.check(client.call('app.settings.get')['result']['network_interface'] == 'lo',
+                   'Nova search keeps the configured loopback binding', 'lo')
         identifier = start(client, 'Sintel')
         observed = []
         def merged():

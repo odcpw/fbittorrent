@@ -3,7 +3,7 @@
 
     static SEARCH_TESTS: Mutex<()> = Mutex::new(());
 
-    fn session() -> std::sync::MutexGuard<'static, ()> {
+    pub(super) fn session() -> std::sync::MutexGuard<'static, ()> {
         let guard = SEARCH_TESTS.lock().unwrap_or_else(|error| error.into_inner());
         begin_session().unwrap();
         guard
@@ -39,13 +39,13 @@
             .collect()
     }
 
-    struct Scratch(PathBuf);
+    pub(super) struct Scratch(PathBuf);
     impl Drop for Scratch {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-    fn scratch() -> (Scratch, ProviderStore) {
+    pub(super) fn scratch() -> (Scratch, ProviderStore) {
         let dir = std::env::temp_dir().join(format!(
             "fbittorrent-search-test-{}-{}",
             std::process::id(),
@@ -620,13 +620,13 @@ print('bounded')
     }
 
     #[test]
-    fn vpn_binding_refuses_unbound_nova_and_result_urls_are_never_prefetched() {
+    fn missing_vpn_refuses_nova_and_result_urls_are_never_prefetched() {
         let _session = session();
         let (_scratch, store) = scratch();
         store.ensure_runtime().unwrap();
         std::fs::write(store.runtime().join("engines/example.py"), "class example:\n name='Example'\n url='https://example.org'\n def search(self,query):\n  open('provider-ran','w').write('yes')\n").unwrap();
         let refused = crate::outbound::with_interface(Some("fbmissing0"), || start_in(&store, "fixture"));
-        assert!(format!("{:#}", refused.unwrap_err()).contains("VPN binding"));
+        assert!(format!("{:#}", refused.unwrap_err()).contains("Nova search VPN interface unavailable"));
         thread::sleep(Duration::from_millis(200));
         assert!(!store.runtime().join("provider-ran").exists(), "a Nova provider ran outside the VPN binding");
         // Listing results never contacts a provider-supplied .torrent URL.

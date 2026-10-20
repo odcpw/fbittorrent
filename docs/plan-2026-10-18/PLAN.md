@@ -519,10 +519,11 @@ tests pass.
 **W6. Over SSH.** `ssh host fbittorrent tui` attaches to the running daemon (or starts it) and
 offers the same features as locally; quitting the TUI leaves downloads running under policy A1.
 
-**W7. Downloading bound to the VPN.** With `network_interface = "proton"`, torrent traffic uses
-only `proton0`. When the tunnel drops, transfers stop and every UI shows "Waiting for ProtonVPN";
-when it returns, saved intent resumes. Search, RSS and IMDb use the normal route as today
-(`README.md:79-86`).
+**W7. All app traffic bound to the VPN.** With `network_interface = "proton"`, torrents,
+RSS/Shows, IMDb and Python (Nova) search use only `proton0`, including DNS. Nova connects
+through a daemon-owned, authenticated local SOCKS5h proxy. When the tunnel drops, all outbound
+requests fail closed and every UI shows "Waiting for ProtonVPN"; there is no normal-route
+fallback. When it returns, saved download intent resumes and search works again.
 
 **W8. Clean up.** After watching, the owner removes finished torrents (keeping or deleting
 files) one at a time or as a filtered set, always through an explicit choice between "Remove" and

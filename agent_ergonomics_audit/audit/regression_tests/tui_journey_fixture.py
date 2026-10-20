@@ -26,10 +26,6 @@ class Fixture:
 
     def start(self):
         self.box=self.stack.enter_context(fixtures.Sandbox())
-        # Nova cannot honour a VPN binding. This Search journey already runs
-        # inside a verified loopback-only namespace; opt into its local providers.
-        if self.source=='search':
-            d.select_replay_interface(Path(self.box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml',None)
         seedbox=self.stack.enter_context(fixtures.Sandbox())
         self.seed=self.stack.enter_context(d.Harness(self.case,self.binary,seedbox,False))
         self.seed_process=self.seed.start_serve(idle_exit_secs=0)
