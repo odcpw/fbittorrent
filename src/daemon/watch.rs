@@ -2,6 +2,7 @@
 mod duration;
 mod estimate;
 mod mp4;
+mod persistence;
 #[cfg(test)]
 mod tests;
 use crate::api::{self, Playable};
@@ -9,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{File, OpenOptions},
-    io::{Read, Write},
+    fs::OpenOptions,
+    io::Read,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -136,7 +137,7 @@ struct Row {
     movie: mp4::Movie,
 }
 pub(crate) struct Watch {
-    path: PathBuf,
+    persistence: persistence::Store,
     saved: BTreeMap<String, Saved>,
     rows: BTreeMap<String, Row>,
     next: Instant,
@@ -173,7 +174,7 @@ impl Watch {
             BTreeMap::new()
         };
         Self {
-            path,
+            persistence: persistence::Store::new(path),
             saved,
             rows: BTreeMap::new(),
             next: Instant::now(),
@@ -185,36 +186,22 @@ impl Watch {
         Instant::now() >= self.next
     }
     pub fn needs_tick(&self) -> bool {
-        self.active
+        self.active || self.persistence.pending()
     }
-    fn save(&self) {
-        let result = || -> anyhow::Result<()> {
-            let parent = self.path.parent().unwrap();
-            std::fs::create_dir_all(parent)?;
-            let tmp = self
-                .path
-                .with_extension(format!("{}.tmp", std::process::id()));
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&tmp)?;
-            serde_json::to_writer(&mut f, &self.saved)?;
-            f.flush()?;
-            f.sync_all()?;
-            std::fs::rename(&tmp, &self.path)?;
-            File::open(parent)?.sync_all()?;
-            Ok(())
-        };
-        if let Err(e) = result() {
-            eprintln!("WARN saving watch history: {e}");
+    fn save(&mut self) {
+        match serde_json::to_vec(&self.saved) {
+            Ok(bytes) => self.persistence.queue(bytes),
+            Err(error) => eprintln!("WARN saving watch history: {error}"),
         }
+    }
+    pub(crate) fn flush(&mut self, deadline: Instant) {
+        self.persistence.flush(deadline);
     }
     pub fn sample(&mut self, samples: Vec<Sample>) -> Vec<Value> {
         self.sample_at(samples, Instant::now())
     }
     fn sample_at(&mut self, samples: Vec<Sample>, now: Instant) -> Vec<Value> {
+        self.persistence.poll();
         self.next = now + Duration::from_secs(1);
         self.active = samples.iter().any(|sample| sample.active);
         let mut dirty = false;

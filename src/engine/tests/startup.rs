@@ -1,4 +1,4 @@
-    fn hashing_fixture(saved_paused: bool) -> (AppEngine, PathBuf, String, u64) {
+    fn hashing_fixture(saved_paused: bool, storage: Option<librqbit::storage::BoxStorageFactory>) -> (AppEngine, PathBuf, String, u64) {
         let directory = review_directory("stop-during-hashing");
         let downloads = directory.join("downloads");
         std::fs::create_dir_all(&downloads).unwrap();
@@ -26,7 +26,7 @@
         let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
         let app = start_in(&cfg, Lifecycle::default(), directory.clone(), instance, SessionOptions {
             dht: None, disable_trackers: true, disable_local_service_discovery: true,
-            concurrent_init_limit: Some(1), ..Default::default()
+            concurrent_init_limit: Some(1), default_storage_factory: storage, ..Default::default()
         }).unwrap();
         (app, directory, hash, length)
     }
@@ -34,9 +34,13 @@
     #[test]
     fn stop_during_hashing_is_paused_and_can_resume() {
         use std::time::Instant;
+        use typed_seed::check_reconciliation;
         for saved_paused in [false, true] {
-            let (app, directory, hash, length) = hashing_fixture(saved_paused);
+            let (factory, gate) = check_reconciliation::read_gate_storage(65536);
+            let (app, directory, hash, length) = hashing_fixture(saved_paused, Some(factory));
+            let _release = check_reconciliation::ReleaseOnDrop(gate.clone());
             let dispatcher = app.dispatcher();
+            gate.wait_blocked();
             let row = || crate::engine::tests::row(&dispatcher, &hash);
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
@@ -48,7 +52,29 @@
                 assert!(Instant::now() < deadline, "must stop during real hashing: {checking:?}");
                 std::thread::sleep(Duration::from_millis(1));
             }
-            dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[&hash]) }).unwrap();
+            let stop_check = || {
+                let handle = dispatcher.inner.handle(&hash).unwrap();
+                let stop_began = Instant::now();
+                std::thread::scope(|scope| {
+                    let stop = scope.spawn(|| dispatcher.execute(ops::EngineOp::Stop { hashes: crate::engine::tests::hashes(&[&hash]) }));
+                    let deadline = Instant::now() + Duration::from_secs(1);
+                    // Observe cancellation of the actual blocking worker's Cx,
+                    // including a fresh stop of a saved-paused initialization.
+                    while !gate.cancelled() {
+                        if Instant::now() >= deadline { break; }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    let cancelled = gate.cancelled();
+                    gate.release();
+                    stop.join().unwrap().unwrap();
+                    assert!(cancelled, "stop must cancel physical verification before it completes");
+                });
+                assert!(stop_began.elapsed() < Duration::from_secs(1), "stopping an active verifier must stay prompt");
+                assert!(handle.have_pieces_snapshot().is_none(),
+                    "a cancelled check must not publish its partial have map");
+                println!("physical verifier cancelled: stop_ms={} partial_have=false", stop_began.elapsed().as_millis());
+            };
+            stop_check();
             let stopped = row();
             println!("stopped hashing (saved_paused={saved_paused}): state={:?} checked_bytes={:?}", stopped.state, stopped.completed_bytes);
             assert_eq!(stopped.state, view::TorrentState::Paused);
@@ -68,6 +94,24 @@
             assert_eq!(resumed.state, view::TorrentState::Stalled);
             assert!(resumed.completed_bytes.is_some_and(|bytes| bytes > 0 && bytes < length));
             assert!(!read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
+            gate.arm();
+            let batch = match dispatcher.execute(ops::EngineOp::RecheckBatch { hashes: vec![hash.clone()] }).unwrap() {
+                ops::EngineResult::Recheck(batch) => batch,
+                _ => panic!("expected pending recheck"),
+            };
+            gate.wait_blocked();
+            assert!(batch.result().is_none(), "recheck must still be in physical verification");
+            stop_check();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while batch.result().is_none() {
+                assert!(Instant::now() < deadline, "cancelled recheck receipt must settle promptly");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let report = batch.result().unwrap();
+            assert!(report.have_bytes.is_empty() && report.rechecked.is_empty() && report.failed.len() == 1,
+                "cancelled recheck must never publish a partial have measurement: {report:?}");
+            assert_eq!(row().state, view::TorrentState::Paused);
+            assert_eq!(row().intent, view::Intent::Pause);
             drop(app);
             std::fs::remove_dir_all(directory).unwrap();
         }
@@ -76,8 +120,12 @@
     #[test]
     fn saved_paused_check_reports_activity_until_complete() {
         use std::time::Instant;
-        let (app, directory, hash, length) = hashing_fixture(true);
+        use typed_seed::check_reconciliation;
+        let (factory, gate) = check_reconciliation::read_gate_storage(65536);
+        let (app, directory, hash, length) = hashing_fixture(true, Some(factory));
+        let _release = check_reconciliation::ReleaseOnDrop(gate.clone());
         let dispatcher = app.dispatcher();
+        gate.wait_blocked();
         let deadline = Instant::now() + Duration::from_secs(15);
         let mut active_observations = 0;
         loop {
@@ -87,6 +135,7 @@
                 view::TorrentState::Checking => {
                     if row.completed_bytes.is_some_and(|bytes| bytes > 0 && bytes < length) {
                         active_observations += 1;
+                        gate.release();
                     }
                 }
                 view::TorrentState::Paused => {
