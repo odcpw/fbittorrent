@@ -106,7 +106,7 @@ impl EngineDispatcher {
             EngineOp::Get { hash } => {
                 let mut torrent = self.info(cx).await?.into_iter()
                     .find(|view| &view.hash == hash).context("torrent record not found")?;
-                let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+                let ledger = self.observation_ledger().await?;
                 let record = ledger.records.iter().find(|record| &record.hash == hash)
                     .context("torrent record not found")?;
                 torrent.name = record.display_name.as_ref().unwrap_or(&record.name).clone();
@@ -128,7 +128,7 @@ impl EngineDispatcher {
                 let handle = match self.inner.handle(hash) {
                     Ok(handle) => handle,
                     Err(_) => {
-                        let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+                        let ledger = self.observation_ledger().await?;
                         let record = ledger.records.iter().find(|r| &r.hash == hash)
                             .context("torrent record not found")?;
                         return Ok(EngineResult::Files(self.inner.saved_files(record)?));

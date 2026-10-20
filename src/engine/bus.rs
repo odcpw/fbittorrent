@@ -24,14 +24,16 @@ impl Inner {
 }
 
 impl EngineDispatcher {
-    /// Read-only borrowers must release the slot before the daemon joins the
-    /// sampler. A pending durable write must not pin those threads at shutdown.
-    pub(super) async fn observation_ledger(&self) -> Result<OwnedMutexGuard<Ledger>> {
+    /// A durable writer may wait on the filesystem for longer than a client's
+    /// read deadline. Observers retain the confirmed view instead of queueing
+    /// behind that I/O; they never acquire a second mutable ledger.
+    pub(super) async fn observation_ledger(&self) -> Result<ledger::ReadLedger> {
         if self.inner.stopping.load(Ordering::Acquire) { bail!("native engine is closing"); }
-        rqbit_runtime::select! {
-            result = OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()) => Ok(result?),
-            _ = self.inner.session.cancellation_token().cancelled() => bail!("native engine is closing"),
-        }
+        self.runtime.cx().checkpoint()?;
+        Ok(match OwnedMutexGuard::try_lock(self.inner.ledger.clone()) {
+            Ok(ledger) => ledger::ReadLedger::Current(ledger),
+            Err(_) => ledger::ReadLedger::Committed(self.inner.committed_ledger.read().unwrap().clone()),
+        })
     }
     pub(crate) fn transfer_totals(&self)->(u64,u64,u64) {
         let counters=self.inner.session.stats_snapshot().counters;
