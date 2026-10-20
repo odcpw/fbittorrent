@@ -1,4 +1,5 @@
 import QtQuick
+import QtTest
 import Quickshell
 import Quickshell.Io
 import "Plugin"
@@ -27,6 +28,7 @@ ShellRoot {
     barConfig:({position:"top",background:"opaque",layout:{left:[],centerBegin:[],center:[],centerEnd:[],right:[{id:"oliver.torrents"}]}})
   }
   property string payload:"{}"
+  TestCase {id:input;name:"BarSessionInput";when:false}
   Loader {id:dashboard;active:false;source:"Plugin/Dashboard.qml";onLoaded:{item.shell=facade;item.service=service;item.open(root.payload)}}
   IpcHandler {
     target:"shell"
@@ -43,6 +45,9 @@ ShellRoot {
     function ready():bool{return service.online && bar.moduleWidgets("oliver.torrents").length===1}
     function state():string{return JSON.stringify(root.state())}
     function popup():bool{var w=bar.moduleWidgets("oliver.torrents")[0];if(!w)return false;w.open();return true}
+    function clickWidget():bool{var w=bar.moduleWidgets("oliver.torrents")[0];if(!w)return false;input.mouseClick(w,w.width/2,w.height/2,Qt.LeftButton);return true}
+    function hideWindow():bool{return facade._hide("oliver.torrents")}
+    function health():string{return JSON.stringify({online:service.online,rows:service.torrents.length,model:service.torrentModel.count,dashboard:service.dashboardVisible,popup:service.popupOpen,pending:service.client ? Object.keys(service.client.pending).length : 0,state:JSON.parse(service.stateJson())})}
     function grab(path:string):bool{var w=bar.moduleWidgets("oliver.torrents")[0];return w ? w.grabToImage(function(result){result.saveToFile(path)}) : false}
   }
   Component.onCompleted:registry.register("oliver.torrents",widgetComponent,{firstParty:false})

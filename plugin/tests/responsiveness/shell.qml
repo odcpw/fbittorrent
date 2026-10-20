@@ -39,11 +39,11 @@ ShellRoot {
   function readySample(withData){
     if(!pending)return false
     var d=dashboard.item,spec=pending.spec
-    if(spec.kind==="popup")return !!content && widget.opened && content.delegateCount>0
+    if(spec.kind==="popup")return !!content && widget.opened && service.status.loaded && (spec.count===undefined ? content.delegateCount>0 : content.sections.reduce(function(n,g){return n+g.rows.length},0)===spec.count)
     if(!d || !d.perfWindow.visible)return false
     // Production snapshots are now created on demand. Inspect current state
     // for these predicates rather than waiting on a previously cached snapshot.
-    var v=(spec.kind==="rows" || spec.kind==="filter" || spec.kind==="review") ? (JSON.parse(service.stateJson()).view || {}) : {}
+    var v=(spec.kind==="rows" || spec.kind==="filter") ? (JSON.parse(service.stateJson()).view || {}) : {}
     if(spec.kind==="open")return true
     if(spec.kind==="rows")return v.rows===spec.count
     if(spec.kind==="view")return d.currentView===spec.view && (spec.view==="torrents" ? !!d.torrents : spec.view==="search" ? !!d.search : spec.view==="shows" ? !!d.shows : spec.view==="rss" ? !!d.rss : spec.view==="settings" ? !!d.settingsSheet : !!d.logView)
@@ -58,23 +58,24 @@ ShellRoot {
     }
     if(spec.kind==="filter")return v.query===spec.text && v.rows===spec.count
     if(spec.kind==="search")return !!d.search && d.search.queryTarget.text===spec.text
-    if(spec.kind==="review")return !!v.add && v.add.visible && v.add.field==="sheet" && v.add.name===spec.name
+    if(spec.kind==="review"){var add=service.addFlow.snapshot();return add.visible && add.name===spec.name && (!withData || (!!d.perfReview && d.perfReview.activeFocus && d.isWindowActive()))}
+    if(spec.kind==="download"){var row=service.store.torrents[spec.hash];return !!d.torrents && !service.addFlow.snapshot().visible && !!row && !row.staged && row.state==="downloading"}
     return false
   }
   function presented(popup){
     if(!pending || !pending.at || (pending.spec.kind==="popup")!==popup)return
-    var complete=readySample(true),feedback=pending.spec.kind==="detail" && pending.spec.data && !pending.feedback && readySample(false)
+    var complete=readySample(true),feedback=(pending.spec.kind==="review" || (pending.spec.kind==="detail" && pending.spec.data)) && !pending.feedback && readySample(false)
     if(!complete && !feedback)return
     var d=dashboard.item,stats=d ? d.perfPublish : {calls:0,ms:0}
     var sample={name:pending.name,ms:Date.now()-pending.at,frame_at:Date.now(),spec:pending.spec,
       publications:stats.calls-pending.publications,publication_ms:stats.ms-pending.publicationMs,
       api_frames:service.perfFrames-pending.frames,row_syncs:service.perfSyncRows-pending.rowSyncs,
       rows:d && d.torrents ? d.torrents.snapshot().rows : 0}
-    if(feedback){samples.push(Object.assign({},sample,{name:pending.name+"_frame"}));pending.feedback=true}
+    if(feedback){samples.push(Object.assign({},sample,{name:pending.name+(pending.spec.kind==="review" ? "_visible" : "_frame")}));pending.feedback=true}
     if(!complete)return
     if(pending.spec.kind==="open"){
       if(!pending.first){samples.push(Object.assign({},sample));pending.first=true}
-      if(sample.rows!==pending.spec.count)return
+      if(!d.torrents || sample.rows!==pending.spec.count)return
       sample.name="dashboard_usable"
     }
     samples.push(sample)

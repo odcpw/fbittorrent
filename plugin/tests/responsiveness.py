@@ -15,6 +15,7 @@ import time
 import traceback
 
 from dashboard import Session, ROOT
+from perf_support import instrument
 from visual_fixture import running
 from fbtlog import Case, suite_status
 
@@ -72,16 +73,7 @@ def run(args):
     with Case('qs_responsiveness',args.label) as case,running(args.binary,'table-200',case) as (box,h,c,row):
         # Measurement aliases/counters exist only in this disposable copy, never
         # the installed plugin. No timers or synthetic models drive the timings.
-        source=box.root/'instrumented-plugin';shutil.copytree(args.plugin_source,source)
-        path=source/'Dashboard.qml';text=path.read_text().replace('  id:root\n','  id:root\n  readonly property var perfWindow:window\n  property var perfPublish:({calls:0,ms:0})\n',1)
-        # Deferred publication can run during destruction. Preserve the production
-        # disposal guard and the on-demand inspection argument in the wrapper.
-        signature='  function publishNow(inspect) {'
-        assert text.count(signature)==1,'publication instrumentation must wrap the current function'
-        text=text.replace(signature,'  function publishNow(inspect) {if(disposing)return;var at=Date.now();try{return publishMeasured(inspect)}finally{perfPublish.calls++;perfPublish.ms+=Date.now()-at}}\n  function publishMeasured(inspect) {',1);path.write_text(text)
-        path=source/'Service.qml';text=path.read_text().replace('  id: root\n','  id: root\n  property int perfSyncRows:0\n  property int perfFrames:0\n',1)
-        text=text.replace('  function syncRows() {','  function syncRows() {\n    perfSyncRows++')
-        text=text.replace('  function applyFrame(frame, request) {','  function applyFrame(frame, request) {\n    perfFrames++');path.write_text(text)
+        source=box.root/'instrumented-plugin';instrument(args.plugin_source,source)
         q=PerformanceSession(case,box,recipe='responsiveness',source_link=source)
         keyboard=subprocess.Popen(['wtype','-s','600000'],env=q.env)
         result=dict(label=args.label,git=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
