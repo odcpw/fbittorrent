@@ -143,18 +143,7 @@ impl TorrentStorage for GatedStorage {
     }
 }
 
-fn gated_fixture() -> (
-    AppEngine,
-    PathBuf,
-    String,
-    Arc<StorageCounts>,
-    Arc<ReadGate>,
-) {
-    let directory = review_directory("check-reconciliation");
-    let downloads = directory.join("downloads");
-    std::fs::create_dir_all(&downloads).unwrap();
-    let name = "incomplete.bin";
-    std::fs::write(downloads.join(name), vec![b'a'; 2 * PIECE]).unwrap();
+fn check_fixture_bytes(name: &str) -> Vec<u8> {
     let mut bytes = format!(
         "d4:infod6:lengthi{}e4:name{}:{name}12:piece lengthi{PIECE}e6:pieces40:",
         2 * PIECE,
@@ -169,6 +158,22 @@ fn gated_fixture() -> (
     ]);
     bytes.extend_from_slice(&[0; 20]);
     bytes.extend_from_slice(b"7:privatei1eee");
+    bytes
+}
+
+fn gated_fixture() -> (
+    AppEngine,
+    PathBuf,
+    String,
+    Arc<StorageCounts>,
+    Arc<ReadGate>,
+) {
+    let directory = review_directory("check-reconciliation");
+    let downloads = directory.join("downloads");
+    std::fs::create_dir_all(&downloads).unwrap();
+    let name = "incomplete.bin";
+    std::fs::write(downloads.join(name), vec![b'a'; 2 * PIECE]).unwrap();
+    let bytes = check_fixture_bytes(name);
     let hash = librqbit::torrent_from_bytes(&bytes)
         .unwrap()
         .info_hash
@@ -455,4 +460,142 @@ fn remove_during_recheck_does_not_poison_undo_restore() {
     }
     println!("remove cancels/settles old recheck before undo can append a fresh generation");
     drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
+}
+
+
+#[test]
+fn committed_check_admits_without_a_maintenance_tick() {
+    for (label, stopped, blocked) in [
+        ("run", false, false),
+        ("stop", true, false),
+        ("vpn", false, true),
+    ] {
+        let directory = review_directory(&format!("commit-ready-{label}"));
+        let downloads = directory.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::write(downloads.join("commit.bin"), vec![b'a'; 2 * PIECE]).unwrap();
+        let gate = Arc::new(ReadGate::default());
+        gate.arm();
+        let counts = Arc::new(StorageCounts::default());
+        let app = test_app_with_session(
+            &directory,
+            &downloads,
+            Ledger::default(),
+            SessionOptions {
+                upload_enabled: false,
+                dht: None,
+                disable_trackers: true,
+                disable_local_service_discovery: true,
+                default_storage_factory: Some(
+                    GatedFactory {
+                        counted: CountedFilesystemFactory(counts),
+                        gate: gate.clone(),
+                    }
+                    .boxed(),
+                ),
+                ..Default::default()
+            },
+            false,
+        );
+        let dispatcher = app.dispatcher();
+        let _release = ReleaseOnDrop(gate.clone());
+        let EngineResult::Added(rows) = dispatcher
+            .execute(EngineOp::Stage {
+                options: add_request(vec![], Some(check_fixture_bytes("commit.bin"))),
+                files: Some(vec![0]),
+            })
+            .unwrap()
+        else {
+            panic!("stage result")
+        };
+        let hash = rows[0].hash.clone();
+        let take_restore = || {
+            dispatcher
+                .inner
+                .restores
+                .lock()
+                .unwrap()
+                .get_mut(&hash)
+                .unwrap()
+                .task
+                .take()
+                .unwrap()
+        };
+        dispatcher.runtime.block_on(async {
+            time::timeout(&test_cx(), Duration::from_secs(5), take_restore())
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        dispatcher
+            .execute(EngineOp::Commit {
+                hash: hash.clone(),
+                files: None,
+                seed: Some(false),
+                save_path: None,
+            })
+            .unwrap();
+        gate.wait_blocked();
+        let handle = dispatcher.inner.handle(&hash).unwrap();
+        let task = take_restore();
+        dispatcher.runtime.block_on(async {
+            // Admission owns the ledger through its first queue decision. Acquiring
+            // it proves that decision has happened while the real read is gated.
+            let mut ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), &test_cx())
+                .await
+                .unwrap();
+            assert!(handle.is_paused());
+            assert_eq!(dispatcher.inner.restore_admission.available_permits(), 4,
+                "checksum waiting must not retain a background admission permit");
+            assert!(matches!(
+                handle.stats().state,
+                TorrentStatsState::Initializing { .. }
+            ));
+            if stopped {
+                ledger
+                    .records
+                    .iter_mut()
+                    .find(|r| r.hash == hash)
+                    .unwrap()
+                    .paused = true;
+                dispatcher.inner.save(&test_cx(), &ledger).await.unwrap();
+            }
+            dispatcher
+                .inner
+                .network_blocked
+                .store(blocked, Ordering::Release);
+            gate.release();
+            time::timeout(
+                &test_cx(),
+                Duration::from_secs(5),
+                handle.wait_until_initialized(&test_cx()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            drop(ledger);
+            time::timeout(&test_cx(), Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        let row = crate::engine::tests::row(&dispatcher, &hash);
+        assert_eq!(
+            handle.is_paused(),
+            stopped || blocked,
+            "{label}: completed validation must apply current intent without a maintenance tick; stats={:?}, row={row:?}, restore={:?}",
+            handle.stats(),
+            dispatcher.restore_outcome(&hash)
+        );
+        assert!(row.checked && !row.staged);
+        assert!(!row.upload_enabled);
+        assert!(!gate.state.lock().unwrap().timed_out);
+        println!(
+            "commit readiness {label}: real checksum barrier released; restore joined; paused={}",
+            handle.is_paused()
+        );
+        drop(dispatcher);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

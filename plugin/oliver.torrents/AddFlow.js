@@ -182,6 +182,9 @@ function create(service,changed,debug) {
     else close()
   }
   f.keep=function(){if(!s.hash)return;s.phase="keeping";send("torrents.stop",{hashes:[s.hash]},"",function(){close()});publish()}
+  // Retire this connection's review and callbacks locally. A reconnect may
+  // expose a surviving stage for an explicit new review; never commit here.
+  f.disconnected=function(){close()}
   f.tick=function(){
     if(!s.visible)return
     if(s.phase==="connecting" && service.online)stageSource()
