@@ -37,14 +37,17 @@ def run(binary):
         http=stack.enter_context(fixtures.HttpFixture(box.root))
         nova=Path(box.env['XDG_DATA_HOME'])/'fbittorrent/nova3';engines=nova/'engines';engines.mkdir(parents=True,exist_ok=True)
         (nova/'row.json').write_text(json.dumps(dict(link=http.base+'/'+torrent.torrent.name,name=payload.name,size=payload.stat().st_size,seeds=1,leech=0,engine_url=http.base,desc_link=http.base+'/source')))
-        (engines/'rows.py').write_text('''class rows:
+        provider='''class rows:
  name="Row fixture"
  url="http://127.0.0.1"
  def search(self,query):
   import json,pathlib
   from novaprinter import prettyPrinter
   prettyPrinter(json.loads(pathlib.Path("row.json").read_text()))
-''')
+  pathlib.Path("finished-"+type(self).__name__).write_text("done")
+'''
+        for name in ('rows','other'):
+            (engines/(name+'.py')).write_text(provider.replace('class rows:', 'class '+name+':'))
         q=JourneySession(case,box)
         try:
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
@@ -53,11 +56,22 @@ def run(binary):
             def add():return view().get('add') or {}
             q.keys(['2'],lambda:view().get('window',{}).get('view')=='search' and view().get('focus')=='query')
             q.keys(['Row fixture','-k','Return'],lambda:len(view().get('rows',[]))==1)
+            q.wait(lambda:view().get('search',{}).get('phase')=='done',timeout=12)
+            case.check(all((nova/('finished-'+name)).exists() for name in ('rows','other')),
+                       'both real provider tasks return before normal pool retirement',str(list(nova.glob('finished-*'))))
+            def clean_provider_status(step):
+                state=json.loads(q.ipc('gridState'))
+                case.check(state.get('phase')=='done' and state.get('message')=='',
+                           'two finished providers keep a successful Search status '+step,json.dumps(state))
+            clean_provider_status('before review')
             q.keys(['-k','Down'],lambda:view().get('focus')=='results')
             q.keys(['-k','Return'],lambda:add().get('phase')=='ready')
+            clean_provider_status('while opening review')
             q.keys(['-k','Escape'],lambda:not add().get('visible'))
             q.wait(lambda:not client.call('torrents.list',{})['result']['torrents'])
+            clean_provider_status('after Discard')
             q.keys(['-k','Return'],lambda:add().get('phase')=='ready')
+            clean_provider_status('while reopening review')
             q.keys(['-k','Return'],lambda:not add().get('visible') and view().get('window',{}).get('view')=='torrents')
             q.wait(lambda:(row:=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent'])['state']=='downloading' and not row['staged'] and row.get('completed_bytes',0)>0,timeout=15)
             def displayed():

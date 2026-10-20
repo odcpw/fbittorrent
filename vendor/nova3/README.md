@@ -34,3 +34,9 @@ parent alone retains the group-killing handler for cancellation and parent death
 Workers retain their parent-death SIGKILL. The local `shape` provider's empty
 query asserts this signal policy, and CLI source-agreement/cancellation cases
 exercise the actual multiprocessing pool.
+
+The group-killing TERM handler is installed only when Nova runs as the main
+script, never when spawn imports it as `__mp_main__`. A pool can retire an idle
+worker before its initializer has run; the worker's import must therefore keep
+the default TERM handler too. The importing-worker regression holds one worker
+inside helper import while another finishes both providers and retires the pool.
