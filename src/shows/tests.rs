@@ -71,6 +71,25 @@
     }
 
     #[test]
+    fn equal_ranked_releases_keep_source_order() {
+        for titles in [
+            ["First.S01E01.1080p", "Second.S01E01.1080p"],
+            ["Second.S01E01.1080p", "First.S01E01.1080p"],
+        ] {
+            let episodes = reduce(
+                titles.iter().map(|title| raw(title, 1, 1, 50)).collect(),
+                "1080p",
+            );
+            assert_eq!(episodes[0].title, titles[0]);
+            assert_eq!(
+                episodes[0].magnet,
+                format!("magnet:?xt=urn:btih:{}", titles[0])
+            );
+            assert_eq!(episodes[0].candidates, 2);
+        }
+    }
+
+    #[test]
     fn falls_back_to_release_name_and_drops_junk() {
         let eps = reduce(
             vec![

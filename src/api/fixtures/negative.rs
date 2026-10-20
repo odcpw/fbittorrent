@@ -1,6 +1,21 @@
 //! Invalid but losslessly round-trippable frames must fail the same validator
 //! used by `roundtrip`, without panic-catching or weakening the expected gap.
 use super::*;
+
+fn fixture(group: &str) -> &'static str {
+    GROUPS.iter().find(|(name, _)| *name == group).unwrap().1
+}
+
+fn fixture_rows(group: &str) -> impl Iterator<Item = Value> {
+    fixture(group)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+}
+
+fn encode_frames(frames: &[Value]) -> String {
+    frames.iter().map(|frame| format!("{frame}\n")).collect()
+}
+
 fn transcript(op: &str, result: Value) -> String {
     format!(
         "{}\n{}\n",
@@ -45,14 +60,7 @@ fn bounds_cannot_pass_just_by_roundtripping() {
     }
     let bad_upload=json!({"dir":"c2s","frame":{"id":1,"op":"torrents.set_upload_limit","args":{"hashes":["a".repeat(40)],"bps":16383}}}).to_string();
     assert!(check_group("negative", &bad_upload).is_err());
-    let rows: Vec<Value> = GROUPS
-        .iter()
-        .find(|(g, _)| *g == "torrents")
-        .unwrap()
-        .1
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
+    let rows: Vec<_> = fixture_rows("torrents").collect();
     let list = rows
         .iter()
         .find_map(|r| {
@@ -73,13 +81,7 @@ fn bounds_cannot_pass_just_by_roundtripping() {
     let file = json!({"index":0,"path":"a","size":1,"progress":1.1,"included":true,"sort_key":"a"});
     let f = json!({"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":format!("torrent:{}.files","a".repeat(40)),"rev":1,"items":[file]}});
     assert!(check_group("negative", &f.to_string()).is_err());
-    let mut summary = GROUPS
-        .iter()
-        .find(|(g, _)| *g == "subscribe")
-        .unwrap()
-        .1
-        .lines()
-        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+    let mut summary = fixture_rows("subscribe")
         .find(|r| r["frame"]["topic"] == "summary")
         .unwrap();
     summary["frame"]["rev"] = json!(1);
@@ -98,18 +100,12 @@ fn revision_and_typed_loss_checks_remain_on_roundtrip_path() {
         json!({"dir":"s2c","frame":{"ev":"snapshot.chunk","sub":1,"topic":"torrents","rev":2,"items":[]}}),
         json!({"dir":"s2c","frame":{"ev":"snapshot.end","sub":1,"topic":"torrents","rev":3}}),
     ];
-    let encode = |frames: &[Value]| {
-        frames
-            .iter()
-            .map(|v| v.to_string() + "\n")
-            .collect::<String>()
-    };
-    check_group("negative", &encode(&frames)).unwrap();
+    check_group("negative", &encode_frames(&frames)).unwrap();
     for rev in [0, 1, 2, 4] {
         let mut bad = frames.clone();
         bad[2]["frame"]["rev"] = json!(rev);
         assert!(
-            check_group("negative", &encode(&bad)).is_err(),
+            check_group("negative", &encode_frames(&bad)).is_err(),
             "accepted rev {rev}"
         );
     }
@@ -120,13 +116,13 @@ fn revision_and_typed_loss_checks_remain_on_roundtrip_path() {
     pending.push(
         json!({"dir":"s2c","frame":{"ev":"delta","sub":1,"topic":"torrents","rev":4,"removed":[]}}),
     );
-    check_group("negative", &encode(&pending)).unwrap();
+    check_group("negative", &encode_frames(&pending)).unwrap();
     let mut bad = pending.clone();
     bad.last_mut().unwrap()["frame"]["rev"] = json!(1);
-    assert!(check_group("negative", &encode(&bad)).is_err());
+    assert!(check_group("negative", &encode_frames(&bad)).is_err());
     pending.push(json!({"dir":"s2c","frame":{"id":1,"ok":true,"result":{}}}));
     pending.extend(frames.clone());
-    check_group("negative", &encode(&pending)).unwrap();
+    check_group("negative", &encode_frames(&pending)).unwrap();
     let extra = transcript(
         "torrents.add",
         json!({"state":"done","unknown_typed_field":true}),
@@ -146,26 +142,13 @@ fn revision_and_typed_loss_checks_remain_on_roundtrip_path() {
 
 #[test]
 fn watch_capability_checks_are_on_the_roundtrip_path() {
-    let subscribe = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "subscribe")
-        .unwrap()
-        .1;
+    let subscribe = fixture("subscribe");
     check_group("subscribe", subscribe).unwrap();
-    let mut lines: Vec<Value> = subscribe
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let mut lines: Vec<_> = fixture_rows("subscribe").collect();
     let caps = lines[2]["frame"]["result"]["caps"].as_array_mut().unwrap();
     assert!(caps.contains(&json!("watch")));
     caps.retain(|cap| cap != "watch");
-    let encode = |lines: &[Value]| {
-        lines
-            .iter()
-            .map(|line| line.to_string() + "\n")
-            .collect::<String>()
-    };
-    let error = check_group("watch-negative", &encode(&lines)).unwrap_err();
+    let error = check_group("watch-negative", &encode_frames(&lines)).unwrap_err();
     assert!(error.contains("watch-negative.ndjson:6:"), "{error}");
     assert!(
         error.contains("summary.top[0].playable: requires the watch capability"),
@@ -178,18 +161,14 @@ fn watch_capability_checks_are_on_the_roundtrip_path() {
         .unwrap()
         .remove("playable")
         .is_some());
-    check_group("watch-omitted", &encode(&lines)).unwrap();
+    check_group("watch-omitted", &encode_frames(&lines)).unwrap();
     // Canonical hello lists track the live caps. Derive an explicit no-watch
     // control while preserving every payload and deliberate revision gap.
-    let gap = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "subscribe-gap")
-        .unwrap()
-        .1;
+    let gap = fixture("subscribe-gap");
     check_group("subscribe-gap",gap).unwrap();
-    let mut gap:Vec<Value>=gap.lines().map(|line|serde_json::from_str(line).unwrap()).collect();
+    let mut gap: Vec<_> = fixture_rows("subscribe-gap").collect();
     for line in &mut gap {if let Some(caps)=line.get_mut("frame").and_then(|frame|frame.get_mut("result")).and_then(|result|result.get_mut("caps")).and_then(Value::as_array_mut){caps.retain(|cap|cap!="watch");}}
-    let gap=encode(&gap);
+    let gap = encode_frames(&gap);
     assert!(!gap.contains("\"watch\"") && !gap.contains("\"playable\""));
     check_group("subscribe-gap", &gap).unwrap();
     println!("watch capability positives passed: live-cap canonical gap and no-watch gap with all payloads unchanged");
@@ -197,14 +176,7 @@ fn watch_capability_checks_are_on_the_roundtrip_path() {
 
 #[test]
 fn watch_capability_covers_torrent_replies_and_subscription_payloads() {
-    let lines: Vec<Value> = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let lines: Vec<_> = fixture_rows("torrents").collect();
     let hello = format!("{}\n{}\n", lines[1], lines[2]);
     assert!(lines[2]["frame"]["result"]["caps"]
         .as_array()
@@ -252,24 +224,14 @@ fn watch_capability_covers_torrent_replies_and_subscription_payloads() {
 
 #[test]
 fn watch_capability_gates_playable_events_on_the_roundtrip_path() {
-    let mutations = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "mutations")
-        .unwrap()
-        .1;
+    let mutations = fixture("mutations");
     check_group("mutations", mutations).unwrap();
-    let mut lines: Vec<Value> = mutations
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let mut lines: Vec<_> = fixture_rows("mutations").collect();
     assert_eq!(lines[10]["frame"]["ev"], "torrent.playable");
     let caps = lines[2]["frame"]["result"]["caps"].as_array_mut().unwrap();
     assert!(caps.contains(&json!("watch")));
     caps.retain(|cap| cap != "watch");
-    let no_watch = lines
-        .iter()
-        .map(|line| line.to_string() + "\n")
-        .collect::<String>();
+    let no_watch = encode_frames(&lines);
     let error = check_group("mutations", &no_watch).unwrap_err();
     assert_eq!(
         error,
@@ -280,14 +242,7 @@ fn watch_capability_gates_playable_events_on_the_roundtrip_path() {
 
 #[test]
 fn watch_capability_gates_playable_events_in_subscription_batches() {
-    let lines: Vec<Value> = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "mutations")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let lines: Vec<_> = fixture_rows("mutations").collect();
     let hello = format!("{}\n{}\n", lines[1], lines[2]);
     let mut no_watch_hello = lines[2].clone();
     no_watch_hello["frame"]["result"]["caps"]
@@ -328,14 +283,7 @@ fn watch_capability_gates_playable_events_in_subscription_batches() {
 
 #[test]
 fn events_changed_entries_are_rejected_with_and_without_watch() {
-    let lines: Vec<Value> = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "mutations")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let lines: Vec<_> = fixture_rows("mutations").collect();
     let playable = lines[10]["frame"].clone();
     assert_eq!(playable["ev"], "torrent.playable");
     for watch in [true, false] {
@@ -368,19 +316,8 @@ fn events_changed_entries_are_rejected_with_and_without_watch() {
     }
 }
 
-fn encode_file_size_frames(frames: &[Value]) -> String {
-    frames.iter().map(|frame| format!("{frame}\n")).collect()
-}
-
 fn file_size_frames(op: &str) -> (Vec<Value>, Vec<Value>) {
-    let rows: Vec<Value> = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let rows: Vec<_> = fixture_rows("torrents").collect();
     let mut value = if op == "torrents.list" {
         rows[12]["frame"]["result"]["torrents"][0].clone()
     } else {
@@ -408,11 +345,7 @@ fn file_size_frames(op: &str) -> (Vec<Value>, Vec<Value>) {
 
 #[test]
 fn inconsistent_catalogue_file_lengths_fail_at_the_exact_line_and_pointer() {
-    let text = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1;
+    let text = fixture("torrents");
     check_group("torrents", text).unwrap();
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let index=lines.iter().position(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["files"].is_array()).unwrap();
@@ -435,7 +368,7 @@ fn file_lengths_match_list_and_detail_sizes_in_both_reply_orders() {
             } else {
                 [torrent.clone(), files.clone()].concat()
             };
-            check_group("files-size-positive", &encode_file_size_frames(&frames)).unwrap();
+            check_group("files-size-positive", &encode_frames(&frames)).unwrap();
             let mut wrong_files = files;
             wrong_files[1]["frame"]["result"]["files"][0]["size"] = json!(2049);
             let (frames, pointer, rule) = if files_first {
@@ -456,7 +389,7 @@ fn file_lengths_match_list_and_detail_sizes_in_both_reply_orders() {
                 )
             };
             let error =
-                check_group("files-size-negative", &encode_file_size_frames(&frames)).unwrap_err();
+                check_group("files-size-negative", &encode_frames(&frames)).unwrap_err();
             assert_eq!(
                 error,
                 format!("contracts/ipc/v1/files-size-negative.ndjson:4: {pointer}: {rule}")
@@ -475,7 +408,7 @@ fn file_size_checks_preserve_earlier_observations_and_hash_scope() {
     }
     list[1]["frame"]["result"]["torrents"][0]["size"] = json!(4097);
     let frames = [list.clone(), get.clone(), files.clone()].concat();
-    let error = check_group("files-size-history", &encode_file_size_frames(&frames)).unwrap_err();
+    let error = check_group("files-size-history", &encode_frames(&frames)).unwrap_err();
     assert_eq!(error, "contracts/ipc/v1/files-size-history.ndjson:4: /frame/result/torrent/size: must agree with earlier list/get replies for the same hash");
 
     // A file reply can arrive before any torrent reply as well. Retain its
@@ -486,14 +419,14 @@ fn file_size_checks_preserve_earlier_observations_and_hash_scope() {
     }
     wrong_files[1]["frame"]["result"]["files"][0]["size"] = json!(2049);
     let frames = [wrong_files, files.clone(), get.clone()].concat();
-    let error = check_group("files-size-history", &encode_file_size_frames(&frames)).unwrap_err();
+    let error = check_group("files-size-history", &encode_frames(&frames)).unwrap_err();
     assert_eq!(error, "contracts/ipc/v1/files-size-history.ndjson:6: /frame/result/torrent/size: must equal the sum of file lengths for the same hash");
 
     list[1]["frame"]["result"]["torrents"][0]["hash"] = json!("f".repeat(40));
     // Different hashes may have different sizes: correlate the files request,
     // not merely the most recent list/get response or response arrival order.
     let frames = [list, files, get].concat();
-    check_group("files-size-hashes", &encode_file_size_frames(&frames)).unwrap();
+    check_group("files-size-hashes", &encode_frames(&frames)).unwrap();
     println!("earlier list/files observations retained; different hashes remain independent");
 }
 
@@ -504,18 +437,18 @@ fn file_size_sum_checks_empty_lists_and_overflow() {
     files[1]["frame"]["result"]["files"][0]["size"] = json!(u64::MAX);
     files[1]["frame"]["result"]["files"][1]["size"] = json!(0);
     let frames = [torrent.clone(), files.clone()].concat();
-    check_group("files-size-boundary", &encode_file_size_frames(&frames)).unwrap();
+    check_group("files-size-boundary", &encode_frames(&frames)).unwrap();
     files[1]["frame"]["result"]["files"][1]["size"] = json!(1);
     let frames = [torrent.clone(), files.clone()].concat();
-    let error = check_group("files-size-overflow", &encode_file_size_frames(&frames)).unwrap_err();
+    let error = check_group("files-size-overflow", &encode_frames(&frames)).unwrap_err();
     assert_eq!(error, "contracts/ipc/v1/files-size-overflow.ndjson:4: /frame/result/files/1/size: sum of file lengths exceeds u64");
     torrent[1]["frame"]["result"]["torrents"][0]["size"] = json!(0);
     files[1]["frame"]["result"]["files"] = json!([]);
     let frames = [torrent.clone(), files.clone()].concat();
-    check_group("files-size-empty", &encode_file_size_frames(&frames)).unwrap();
+    check_group("files-size-empty", &encode_frames(&frames)).unwrap();
     torrent[1]["frame"]["result"]["torrents"][0]["size"] = json!(1);
     let frames = [torrent, files].concat();
-    let error = check_group("files-size-empty", &encode_file_size_frames(&frames)).unwrap_err();
+    let error = check_group("files-size-empty", &encode_frames(&frames)).unwrap_err();
     assert_eq!(error, "contracts/ipc/v1/files-size-empty.ndjson:4: /frame/result/files: sum of file lengths must equal the torrent size for the same hash");
     println!("file sums: u64::MAX and empty zero-size lists pass; overflow and mismatched empty lists reject");
 }
@@ -532,7 +465,7 @@ fn list_get_reply_agreement_covers_both_fields_and_all_reply_orders() {
             let frames = [earlier.clone(), later.clone()].concat();
             check_group(
                 "reply-agreement-positive",
-                &encode_file_size_frames(&frames),
+                &encode_frames(&frames),
             )
             .unwrap();
             for field in ["size", "completed_bytes"] {
@@ -546,7 +479,7 @@ fn list_get_reply_agreement_covers_both_fields_and_all_reply_orders() {
                 let frames = [earlier.clone(), wrong].concat();
                 let error = check_group(
                     "reply-agreement-negative",
-                    &encode_file_size_frames(&frames),
+                    &encode_frames(&frames),
                 )
                 .unwrap_err();
                 let object = if later_op == "torrents.list" {
@@ -563,21 +496,13 @@ fn list_get_reply_agreement_covers_both_fields_and_all_reply_orders() {
 
 #[test]
 fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
-    let text = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1;
     for (hash, field, wrong_value) in [
         ("2".repeat(40), "size", 4096),
         ("2".repeat(40), "completed_bytes", 2048),
         ("a".repeat(40), "size", 4096),
         ("a".repeat(40), "completed_bytes", 1),
     ] {
-        let mut frames: Vec<Value> = text
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
+        let mut frames: Vec<_> = fixture_rows("torrents").collect();
         let line=frames.iter().position(|row|row["frame"]["result"]["torrent"]["hash"]==hash).unwrap()+1;
         let torrent = frames[12]["frame"]["result"]["torrents"]
             .as_array_mut()
@@ -588,7 +513,7 @@ fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
         torrent[field] = json!(wrong_value);
         let error = check_group(
             "reply-agreement-catalogue",
-            &encode_file_size_frames(&frames),
+            &encode_frames(&frames),
         )
         .unwrap_err();
         assert_eq!(error, format!("contracts/ipc/v1/reply-agreement-catalogue.ndjson:{line}: /frame/result/torrent/{field}: must agree with earlier list/get replies for the same hash"));
@@ -598,13 +523,8 @@ fn catalogue_list_get_disagreements_fail_without_a_files_reply() {
 
 #[test]
 fn missing_files_restore_errors_require_the_matching_reason() {
-    let detail: Value = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone())
+    let detail = fixture_rows("torrents")
+        .map(|row| row["frame"]["result"]["torrent"].clone())
         .find(|row|row["name"]=="Fixture error")
         .unwrap();
     assert_eq!(detail["name"], "Fixture error");
@@ -662,13 +582,8 @@ fn missing_files_restore_errors_require_the_matching_reason() {
 
 #[test]
 fn checking_torrents_cannot_claim_a_completed_hash_check() {
-    let detail: Value = GROUPS
-        .iter()
-        .find(|(group, _)| *group == "torrents")
-        .unwrap()
-        .1
-        .lines()
-        .map(|line|serde_json::from_str::<Value>(line).unwrap()["frame"]["result"]["torrent"].clone())
+    let detail = fixture_rows("torrents")
+        .map(|row| row["frame"]["result"]["torrent"].clone())
         .find(|row|row["name"]=="Fixture checking")
         .unwrap();
     assert_eq!(detail["state"], "checking");
