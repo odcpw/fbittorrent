@@ -525,6 +525,8 @@ fn committed_check_admits_without_a_maintenance_tick() {
                 .await
                 .unwrap();
             assert!(handle.is_paused());
+            assert_eq!(dispatcher.inner.restore_admission.available_permits(), 4,
+                "checksum waiting must not retain a background admission permit");
             assert!(matches!(
                 handle.stats().state,
                 TorrentStatsState::Initializing { .. }

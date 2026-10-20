@@ -268,6 +268,9 @@ impl Inner {
                 // reapply current intent when validation completes. Otherwise a
                 // newly checked download waits for the one-second maintenance tick.
                 inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await?;
+                // The admission bound protects ledger contention, not the time
+                // spent hashing outside it. Keep other restores admissible.
+                drop(_admission);
                 drop(ledger);
                 if initializing {
                     rqbit_runtime::select! {
