@@ -38,6 +38,7 @@ ShellRoot {
   }
   function texts(item){if(!item)return [];var out=[];if(typeof item.text==="string" && item.visible)out.push(item.text);for(var i=0;i<item.children.length;i++)out=out.concat(texts(item.children[i]));return out}
   function torrentItem(item,hash){if(!item)return null;if(item.torrent && item.torrent.hash===hash)return item;for(var i=0;i<item.children.length;i++){var found=torrentItem(item.children[i],hash);if(found)return found}return null}
+  TestCase {id:input;name:"BarSessionInput";when:false}
   Loader {id:dashboard;active:false;source:"Plugin/Dashboard.qml";onLoaded:{item.shell=facade;item.service=service;item.open(root.payload)}}
   IpcHandler {
     target:"shell"
@@ -62,6 +63,9 @@ ShellRoot {
     function applySetting(key:string,text:string):bool{var sheet=dashboard.item ? dashboard.item.settingsSheet : null,row=sheet ? sheet.row(key) : null;if(!row || !row.textField || row.pending)return false;row.textField.text=text;row.textField.accepted();return true}
     function turtle():bool{var widget=bar.moduleWidgets("oliver.torrents")[0],button=widget ? root.find(widget.popupItem(),"popup-turtle") : null;if(!button || !button.enabled)return false;pointer.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
     function popupPause():bool{var widget=bar.moduleWidgets("oliver.torrents")[0],popup=widget ? widget.popupItem() : null;if(!popup || !popup.rows.length)return false;var row=root.torrentItem(popup,popup.rows[0].hash);if(!row)return false;pointer.mouseClick(row,row.width/2,row.height/2,Qt.MiddleButton);return true}
+    function clickWidget():bool{var w=bar.moduleWidgets("oliver.torrents")[0];if(!w)return false;input.mouseClick(w,w.width/2,w.height/2,Qt.LeftButton);return true}
+    function hideWindow():bool{return facade._hide("oliver.torrents")}
+    function health():string{return JSON.stringify({online:service.online,rows:service.torrents.length,model:service.torrentModel.count,dashboard:service.dashboardVisible,popup:service.popupOpen,pending:service.client ? Object.keys(service.client.pending).length : 0,state:JSON.parse(service.stateJson())})}
     function grab(path:string):bool{var w=bar.moduleWidgets("oliver.torrents")[0];return w ? w.grabToImage(function(result){result.saveToFile(path)}) : false}
   }
   Component.onCompleted:registry.register("oliver.torrents",widgetComponent,{firstParty:false})

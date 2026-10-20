@@ -71,6 +71,11 @@ ShellRoot {
   IpcHandler {
     target:"fbt-dashboard"
     function renderedRows():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.tableRows(dashboard.item.torrents) : [])}
+    function stoppedState():string {
+      var owner=dashboard.item,label=root.find(owner,"dashboard-stopped")
+      if(owner && !label)for(var i=0;i<owner.data.length;i++)if(owner.data[i].contentItem){label=root.find(owner.data[i].contentItem,"dashboard-stopped");if(label)break}
+      return JSON.stringify({message:label ? label.text : "",visible:!!label && label.visible,model:service.torrentModel.count,table:!!owner && !!owner.torrents,review:service.addFlow.snapshot().visible})
+    }
     function viewTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents ? root.texts(dashboard.item.torrents) : [])}
     function detailTexts():string{return JSON.stringify(dashboard.item && dashboard.item.torrents && dashboard.item.torrents.pane ? root.texts(dashboard.item.torrents.pane) : [])}
     function setting(key:string,valueJson:string):string {
