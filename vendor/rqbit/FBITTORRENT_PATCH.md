@@ -48,3 +48,17 @@ checks real API/TUI/dashboard/popup and diagnostic output with synthetic secrets
 
 Tests: `cargo test --locked -p librqbit-bencode -p librqbit-dht -p librqbit-tracker-comms nest`;
 `cargo test --locked -p librqbit --no-default-features --features rust-tls --lib -- metadata_piece derived_ budget_tests torrent_paths_cannot selected_folder_can`.
+
+# Queued peer requests (engine performance, 2026-10-20)
+
+The peer writer groups up to sixteen already-queued Request frames in its
+existing buffer. It does not wait to fill a batch, reorder requests, cross
+control/policy messages, or remove cancellation/interface-binding checks.
+The focused `request_batch` tests decode wire fields/order and exercise control
+barriers and empty/closed queues with the application's native-runtime features.
+
+Repeated private 1 GiB measurements show fewer allocator calls and fewer normal
+read/write calls with four/sixteen seeds; they do not establish a throughput or
+CPU gain. This is an unqualified candidate: strict shutdown/workflow failures
+remain red. See `tools/engine-bench/RESULTS.md` at the repository root for the
+before/after measurements, behaviour proofs and retained failures.

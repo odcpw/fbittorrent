@@ -141,6 +141,32 @@ pub enum WriterRequest {
     Disconnect(anyhow::Result<()>),
 }
 
+/// Coalesce only already-queued payload requests. No wait to fill a batch, no
+/// crossing control/policy messages, and a bounded amount of work between the
+/// writer's cancellation checkpoints. Socket writes retain their binding checks.
+fn request_batch(
+    first: peer_binary_protocol::Request,
+    outgoing: &mut rqbit_runtime::sync::mpsc::UnboundedReceiver<WriterRequest>,
+    pending: &mut Option<WriterRequest>,
+    buffer: &mut [u8; MAX_MSG_LEN],
+) -> Result<usize> {
+    const MAX_REQUESTS: usize = 16;
+    let mut len = Message::Request(first).serialize(buffer, &Default::default)?;
+    for _ in 1..MAX_REQUESTS {
+        match outgoing.try_recv() {
+            Ok(WriterRequest::Message(Message::Request(request))) => {
+                len += Message::Request(request).serialize(&mut buffer[len..], &Default::default)?;
+            }
+            Ok(other) => {
+                *pending = Some(other);
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(len)
+}
+
 #[serde_as]
 #[derive(Default, Debug, Copy, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PeerConnectionOptions {
@@ -485,11 +511,15 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
             trace!("sent unchoke");
 
             let mut broadcast_closed = false;
+            let mut pending = None;
 
             loop {
                 cx.checkpoint()?;
                 let req = loop {
                     cx.checkpoint()?;
+                    if let Some(req) = pending.take() {
+                        break req;
+                    }
                     enum Next {
                         Have(
                             std::result::Result<
@@ -560,6 +590,9 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
                         bitfield + message.serialize(&mut write_buf[bitfield..], &Default::default)?
                     }
                     WriterRequest::Message(Message::Unchoke) if !self.handler.upload_enabled() => Message::Choke.serialize(&mut *write_buf, ext_msg_ids)?,
+                    WriterRequest::Message(Message::Request(request)) => {
+                        request_batch(request, &mut outgoing_chan, &mut pending, &mut write_buf)?
+                    }
                     WriterRequest::Message(msg) => msg.serialize(&mut *write_buf, ext_msg_ids)?,
                     WriterRequest::UtMetadata(utm) => {
                         Message::Extended(ExtendedMessage::UtMetadata(utm.as_borrowed()))
@@ -685,3 +718,7 @@ impl<H: PeerConnectionHandler> PeerConnection<H> {
 #[cfg(test)]
 #[path = "peer_connection/upload_tests.rs"]
 mod upload_tests;
+
+#[cfg(test)]
+#[path = "peer_connection/request_batch_tests.rs"]
+mod request_batch_tests;

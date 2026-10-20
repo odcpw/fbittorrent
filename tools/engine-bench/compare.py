@@ -25,14 +25,18 @@ def main():
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--mib", type=int, default=1024)
+    parser.add_argument("--preload", type=Path)
+    parser.add_argument("--strace", type=Path)
+    parser.add_argument("--profile", action="store_true")
     parser.add_argument("--cases", nargs="+", default=["download1", "download4", "download16"])
     args = parser.parse_args()
     if args.output.exists() and any(args.output.iterdir()):
         parser.error("use a new output directory; measurements are never overwritten")
     seed = args.seed.resolve(strict=True)
     common = dict(seed=seed, seed_hash=digest(seed), disk_root=args.disk_root.resolve(strict=True),
-                  mib=args.mib, timeout=300, seconds=20, profile=False, preload=None,
-                  strace=None, probe_upload=False,
+                  mib=args.mib, timeout=300, seconds=20, profile=args.profile,
+                  preload=args.preload.resolve(strict=True) if args.preload else None,
+                  strace=args.strace.resolve(strict=True) if args.strace else None, probe_upload=False,
                   worktree_source=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip())
     variants = {}
     for variant in ("before", "after"):
