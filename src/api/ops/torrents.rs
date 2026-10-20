@@ -137,21 +137,21 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
         .map_err(|_| {
             error(
                 ErrorCode::InvalidArgs,
-                "torrent path must be an accessible regular file without symlinks",
+                crate::user_messages::UNREADABLE_TORRENT,
                 Some("source.path"),
             )
         })?;
     let metadata = file.metadata().map_err(|_| {
         error(
             ErrorCode::InvalidArgs,
-            "cannot inspect torrent path",
+            crate::user_messages::UNREADABLE_TORRENT,
             Some("source.path"),
         )
     })?;
     if !metadata.is_file() || metadata.len() > 16 * 1024 * 1024 {
         return Err(error(
             ErrorCode::InvalidArgs,
-            "torrent must be a regular file at most 16 MiB",
+            "Choose a regular .torrent file smaller than 16 MiB.",
             Some("source.path"),
         ));
     }
@@ -162,7 +162,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
         .map_err(|_| {
             error(
                 ErrorCode::InvalidArgs,
-                "cannot read torrent file",
+                crate::user_messages::UNREADABLE_TORRENT,
                 Some("source.path"),
             )
         })?;
@@ -172,7 +172,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
     {
         return Err(error(
             ErrorCode::InvalidArgs,
-            "torrent must be valid bencoded metainfo at most 16 MiB",
+            crate::user_messages::INVALID_TORRENT,
             Some("source.path"),
         ));
     }
@@ -344,7 +344,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 }
                 AddSource::Magnet(source) => {
                     let mut source = url::Url::parse(source)
-                        .map_err(|_| error(InvalidArgs, "invalid magnet", Some("source.magnet")))?;
+                        .map_err(|_| error(InvalidArgs, crate::user_messages::INVALID_MAGNET, Some("source.magnet")))?;
                     if let Some(files) = &args.files {
                         source.query_pairs_mut().append_pair(
                             "so",
@@ -369,12 +369,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                         ));
                     }
                     let parsed = librqbit::Magnet::parse(source.as_str()).map_err(|_| {
-                        error(InvalidArgs, "invalid v1 magnet", Some("source.magnet"))
+                        error(InvalidArgs, crate::user_messages::INVALID_MAGNET, Some("source.magnet"))
                     })?;
                     if parsed.as_id20().is_none() {
                         return Err(error(
                             Unsupported,
-                            "a v1 magnet hash is required",
+                            crate::user_messages::INVALID_MAGNET,
                             Some("source.magnet"),
                         ));
                     }

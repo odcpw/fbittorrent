@@ -119,7 +119,7 @@ function create(service,changed,debug) {
     settings(options)
     if(!source){publish();return true}
     var parsed=Source.normalize(source)
-    if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}
+    if(!parsed){error(Source.invalidMessage(source && (source.magnet || source.url || source.path)));return false}
     s.source=parsed.source;s.hash=parsed.hash;s.name=Model.sourceName(s.source)
     var existing=s.hash && service.store.torrents[s.hash]
     if(existing){if(existing.staged){adoptStage(existing);return true}s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
@@ -143,7 +143,7 @@ function create(service,changed,debug) {
     s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
     send(op,Object.assign({},args,{stage:true,seed:false}),s.origin,staged);publish();return true
   }
-  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
+  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error(Source.invalidMessage(text));return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
     if(s.visible)return false
     epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.owned=true

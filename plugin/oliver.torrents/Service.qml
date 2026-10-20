@@ -358,7 +358,7 @@ Item {
   function clipboardSource(text,allowDuplicate) {
     var parsed=AddSource.parse(text),source=parsed ? parsed.source : null,hash=parsed ? parsed.hash : ""
     if (hash && store.torrents[hash] && !allowDuplicate) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
-    if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
+    if (!source) { actionStatus = AddSource.invalidMessage(text); noticeTimer.restart() }
     return source
   }
   onQuickVisibleChanged:if(client){if(quickVisible)checkSocket(true);client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}

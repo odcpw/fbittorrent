@@ -50,7 +50,7 @@ fn add_args(source: &str, options: &AddOptions) -> Result<Value> {
     } else if source.starts_with("https://") || source.starts_with("http://") {
         json!({"url":source})
     } else {
-        json!({"path":std::path::Path::new(source).canonicalize()?.to_str().ok_or_else(||anyhow::anyhow!("torrent path is not UTF-8"))?})
+        json!({"path":std::path::Path::new(source).canonicalize().map_err(|_|anyhow::anyhow!(crate::user_messages::UNREADABLE_TORRENT))?.to_str().ok_or_else(||anyhow::anyhow!("torrent path is not UTF-8"))?})
     };
     let mut args = json!({"source":source,"seed":options.seed,"stopped":options.stopped});
     if let Some(path) = &options.save_path {

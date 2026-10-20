@@ -121,7 +121,7 @@ PanelKeyCatcher {
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs
-          HeaderAction {host:root;index:0;iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
+          HeaderAction {host:root;index:0;objectName:"popup-add";iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
           HeaderAction {host:root;index:1;iconText:"▢";tooltipText:"Open window (w)";onClicked:root.dashboard()}
           HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.online && svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
           HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:svc.online ? "Stop fbittorrent (Q)" : "Start fbittorrent";enabled:!svc.startupRequested;onClicked:root.power()}
