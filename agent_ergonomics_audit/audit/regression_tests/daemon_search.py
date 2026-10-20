@@ -324,3 +324,61 @@ def search_stage_peerless(binary, systemd):
 
 
 CASES=CASES+(search_stage_peerless,)
+
+
+def search_binding_change_cancels_old_route(binary, systemd):
+    """Acknowledging a new interface must retire providers using the old route."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    hits = []
+    class Origin(BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200); self.send_header('Content-Length', '2'); self.end_headers()
+            self.wfile.write(b'ok')
+        def log_message(self, *args): pass
+    origin = ThreadingHTTPServer(('127.0.0.1', 0), Origin)
+    worker = threading.Thread(target=origin.serve_forever, daemon=True); worker.start()
+    try:
+        with owned('search_binding_change_cancels_old_route', binary, systemd,
+                   providers=('alpha',)) as (case, box, h, process, runtime), d.ApiConn(h) as client:
+            client.hello()
+            (runtime/'engines/alpha.py').write_text('''
+class alpha:
+ name='Route lifetime probe'
+ url='https://alpha.invalid'
+ def search(self,query):
+  import os,pathlib,time,urllib.request
+  pathlib.Path('route-ready').write_text(str(os.getpgrp()))
+  while not pathlib.Path('route-release').exists():time.sleep(.01)
+  with urllib.request.urlopen('http://127.0.0.1:PORT/old-route',timeout=2) as r:assert r.read()==b'ok'
+'''.replace('PORT', str(origin.server_port)))
+            for interface in (None, 'lo'):
+                if interface is not None:
+                    client.call('app.settings.set', dict(network_interface=interface))
+                    h.wait_engine()
+                identifier = start(client, 'route-lifetime', providers=['alpha'])
+                marker, release = runtime/'route-ready', runtime/'route-release'
+                assert h.wait_for(lambda: (marker.exists(), 'provider waiting before its outbound request'),
+                                  'old-route provider is alive before changing the interface')
+                pgid = int(marker.read_text())
+                client.call('app.settings.set', dict(network_interface='fbmissing0'))
+                release.touch()
+                h.wait_for(lambda: (not live(pgid), json.dumps(live(pgid))),
+                           'setting a missing interface retires the old provider process group', timeout=3)
+                case.check(not hits and not live(pgid),
+                           'no request uses the old route after the new binding is acknowledged',
+                           json.dumps(dict(previous=interface, hits=hits, members=live(pgid))))
+                client.call('subscribe', dict(topics=[f'search:{identifier}']), error='not_found')
+                marker.unlink(); release.unlink()
+            client.call('app.settings.set', dict(network_interface='lo'))
+            h.wait_engine()
+            identifier = start(client, 'new-route', providers=['alpha'])
+            assert h.wait_for(lambda: ((runtime/'route-ready').exists(), 'new provider started'),
+                              'a fresh job can start after the network change')
+            client.call('search.stop', dict(search_id=identifier))
+    finally:
+        origin.shutdown(); origin.server_close(); worker.join(timeout=2)
+
+
+CASES = CASES + (search_binding_change_cancels_old_route,)

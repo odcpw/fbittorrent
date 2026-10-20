@@ -309,8 +309,9 @@ With `network_interface` set, all app traffic uses that interface: torrents,
 RSS/Shows, IMDb/title lookups and Python (Nova) search, including DNS. Nova uses
 an authenticated local SOCKS5h proxy owned by the daemon. An unavailable tunnel
 fails closed; there is no fallback to the normal route. Saved download intent
-resumes when it returns. With no binding, the normal route is used. Turtle limits
-are separate from upload permission.
+resumes when it returns. Changing the binding cancels running search jobs; run
+the query again with the new route. With no binding, the normal route is used.
+Turtle limits are separate from upload permission.
 
 | What | Default location |
 |---|---|
