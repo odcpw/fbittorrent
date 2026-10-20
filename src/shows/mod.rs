@@ -115,15 +115,9 @@ impl Show {
         }
     }
     pub fn mark_all_seen(&mut self) -> usize {
-        let mut n = 0;
-        for e in &self.episodes {
-            if self.is_new(&e.key) {
-                n += 1;
-            }
-        }
-        for e in &self.episodes {
-            self.seen.insert(e.key.clone());
-        }
+        let n = self.new_count();
+        self.seen
+            .extend(self.episodes.iter().map(|e| e.key.clone()));
         n
     }
     pub fn mark_grabbed(&mut self, key: &str, magnet: &str) {
@@ -141,10 +135,9 @@ impl Show {
             .collect();
         let mut fresh = 0;
         for e in episodes {
-            if !by_key.contains_key(&e.key) {
+            if by_key.insert(e.key.clone(), e).is_none() {
                 fresh += 1;
             }
-            by_key.insert(e.key.clone(), e);
         }
         self.episodes = by_key.into_values().collect();
         self.episodes
@@ -571,16 +564,18 @@ fn reduce(items: Vec<Raw>, quality: &str) -> Vec<Episode> {
     let want = quality.to_ascii_lowercase();
     let mut out: Vec<Episode> = groups
         .into_iter()
-        .map(|((s, e), mut v)| {
+        .map(|((s, e), v)| {
             let candidates = v.len();
-            v.sort_by(|a, b| {
-                let qa = !want.is_empty() && a.title.to_ascii_lowercase().contains(&want);
-                let qb = !want.is_empty() && b.title.to_ascii_lowercase().contains(&want);
-                qb.cmp(&qa)
-                    .then(b.seeds.cmp(&a.seeds))
-                    .then(b.released.cmp(&a.released))
-            });
-            let best = v.remove(0);
+            let best = v
+                .into_iter()
+                .min_by(|a, b| {
+                    let qa = !want.is_empty() && a.title.to_ascii_lowercase().contains(&want);
+                    let qb = !want.is_empty() && b.title.to_ascii_lowercase().contains(&want);
+                    qb.cmp(&qa)
+                        .then(b.seeds.cmp(&a.seeds))
+                        .then(b.released.cmp(&a.released))
+                })
+                .unwrap();
             Episode {
                 key: if e == 0 {
                     format!("S{s:02}")

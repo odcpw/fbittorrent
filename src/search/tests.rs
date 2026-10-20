@@ -143,7 +143,7 @@
             ..SearchResult::default()
         };
         assert_eq!(
-            resolve_download_in(&store, &result, 5).unwrap(),
+            resolve_download_in(&store, &result.file_url, &result.engine, 5).unwrap(),
             ResolvedDownload::Url(
                 "magnet:?xt=urn:btih:0123456789012345678901234567890123456789".into()
             )
@@ -173,7 +173,7 @@
             engine: "example".into(),
             ..Default::default()
         };
-        let resolved = resolve_download_in(&store, &result, 5).unwrap();
+        let resolved = resolve_download_in(&store, &result.file_url, &result.engine, 5).unwrap();
         let ResolvedDownload::Torrent { filename, bytes } = resolved else {
             panic!("expected a torrent file");
         };
@@ -200,7 +200,7 @@
                 ..Default::default()
             };
             assert_eq!(
-                resolve_download_in(&store, &result, 5).unwrap(),
+                resolve_download_in(&store, &result.file_url, &result.engine, 5).unwrap(),
                 ResolvedDownload::Url(url.into())
             );
         }
@@ -225,7 +225,7 @@
             ..Default::default()
         };
         assert!(
-            format!("{:#}", resolve_download_in(&store, &result, 5).unwrap_err())
+            format!("{:#}", resolve_download_in(&store, &result.file_url, &result.engine, 5).unwrap_err())
                 .contains("closing")
         );
         assert!(jobs().lock().unwrap().processes.is_empty());
@@ -243,7 +243,7 @@
             engine: "example".into(),
             ..Default::default()
         };
-        let failure = resolve_download_in(&store, &result, 1).unwrap_err();
+        let failure = resolve_download_in(&store, &result.file_url, &result.engine, 1).unwrap_err();
         assert!(format!("{failure:#}").contains("timed out"));
         assert!(jobs().lock().unwrap().processes.is_empty());
     }

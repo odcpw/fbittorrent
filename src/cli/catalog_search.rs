@@ -25,7 +25,7 @@ fn providers(client: Option<&Client>) -> Result<Vec<api::Provider>> {
             c.call("search.providers", json!({}))?,
         )?
         .providers),
-        None => fallback::providers(),
+        None => crate::search::plugins(),
     }
 }
 struct Remote<'a> {
