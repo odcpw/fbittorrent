@@ -546,7 +546,8 @@ class NativeHarness:
                     show_exit, show = self.cli_result("show", hash_, code=(0, 4), timeout=max(.001, end-time.monotonic()))
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
-                    ready = show_exit == 0 and show.get("ok") is True and present
+                    ready = (show_exit == 0 and show.get("ok") is True
+                             and isinstance(show.get("torrent"), dict) and present)
                     observed += (f"; show exit {show_exit}, ok={show.get('ok')}, state={show.get('torrent', {}).get('state')}; "
                                  f"socket={present} after show")
                     if ready:
@@ -718,9 +719,21 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
 
     if not cli("list")["torrents"]:
         cli("add", str(root / "fixture.torrent"), "--quiet")
+    info_hash = next(row["hash"] for row in cli("list")["torrents"]
+                     if row["name"].startswith("Fixture.with.a.long.filename."))
+    # The typed live view now reports measured connected counts, including 0.
+    # Pause explicitly so this first capture really exercises unknown counts.
+    cli("stop", info_hash)
+    case.check("seeds" not in cli("show", info_hash)["torrent"],
+               "paused seed count is unknown before capturing the TUI")
     tmux("resize-window", "-t", session, "-x", "160", "-y", "45")
     keys("1", "Home")
-    check_capture("01-torrents-160x45.txt", lambda pane: "peers     unknown" in pane or "peers connected" in pane)
+    check_capture("01-torrents-160x45.txt", lambda pane: "peers     unknown" in pane)
+    # HARDENING refuses unbindable Nova workers under a VPN binding. These
+    # offline Python providers only print local rows; explicitly opt this
+    # private, paused fixture out, then restore lo before any torrent starts.
+    cli("settings", "--vpn", "off")
+    wait_for(lambda: cli("status").get("daemon", {}).get("state") == "running", "unbound local-provider owner is ready")
     keys("2", "/", "C-a")
     tmux("send-keys", "-t", session, "-l", "known peers")
     keys("Enter")
@@ -744,6 +757,8 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
     check_capture("10-browse-yts-latest.txt",
                   lambda pane: pane.count("Local YTS unknown counts") == 2 and "source" in pane,
                   blank_seed_column)
+    cli("settings", "--vpn", "lo")
+    wait_for(lambda: cli("status").get("daemon", {}).get("state") == "running", "loopback-bound owner is ready again")
     keys("Escape", "4")
     check_capture("14-rss-feeds.txt", lambda pane: "Local feed" in pane)
     step = case.step("Read capabilities --json",
