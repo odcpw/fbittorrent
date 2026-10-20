@@ -91,8 +91,11 @@ def run(args):
             active=None
             if scenario=='active':
                 swarm.payload.write_bytes(os.urandom(64*1024*1024))
-                active,magnet,_=swarm.magnet(0)
-                swarm.client.call('torrents.add',dict(source=dict(magnet=magnet),seed=False))
+                active,_,_=swarm.magnet(0)
+                # Measure steady transfer/UI cost, independent of BEP 9
+                # metadata discovery. Peers and payload still use the real
+                # local tracker; do not relax the payload-readiness check.
+                swarm.client.call('torrents.add',dict(source=dict(path=str(active.torrent)),seed=False))
                 assert swarm.h.wait_for(lambda:((r:=swarm.client.call('torrents.get',dict(hash=active.info_hash))['result']['torrent']).get('completed_bytes',0)>0,json.dumps(r)),'local payload arrives')
             for repeat in range(args.repeats):
                 for opened in (False,True):
