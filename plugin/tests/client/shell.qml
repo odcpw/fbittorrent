@@ -8,12 +8,12 @@ ShellRoot {
       observed:String(observed), ok:!!condition, ms:0, artifacts:[]}))
   }
   function session() {
-    var time = {ms:0}, writes = [], events = [], resets = []
+    var time = {ms:0}, writes = [], events = [], resets = [], recovery = []
     var transport = {write:function(text) { writes.push(text); events.push("write") },
       flush:function() { events.push("flush") }, isConnected:function() { return false },
-      connect:function() { events.push("connect") }, disconnect:function() { resets.push(time.ms) }}
+      connect:function() { events.push("connect") }, disconnect:function(recover) { resets.push(time.ms);recovery.push(recover===true) }}
     var client = ApiClient.create(transport, {now:function() { return time.ms }, frame:function() {}, version:"0.2.0"})
-    return {c:client, time:time, writes:writes, events:events, resets:resets,
+    return {c:client, time:time, writes:writes, events:events, resets:resets, recovery:recovery,
       reply:function(result, id) { client.receive(JSON.stringify({id:id || JSON.parse(writes[writes.length-1]).id, ok:true, result:result})) },
       hello:function(caps, instance) {
         client.connected()
@@ -127,11 +127,32 @@ ShellRoot {
     check("silence", s.resets.length===0, "session lives before 45 s silence", s.resets.length)
     s.time.ms=45000; s.c.tick()
     check("silence", s.resets.length===1, "45 s silence resets session", s.resets.length)
+    check("silence",s.recovery[0]===true,"silence requests reconnection even when the socket inode is unchanged",s.recovery)
+    s.time.ms=1800000;s.c.tick()
+    check("silence",s.resets.length===1,"a long pause does not replay a storm of missed timeout ticks",s.resets.length)
     console.log("FBTQS-PASS silence")
+    s=session();s.hello();s.c.receive(JSON.stringify({ev:"bye",reason:"hello_required"}))
+    check("resume_hello",!s.c.graceful && s.c.reconnecting && s.recovery[0]===true,
+      "expired hello reconnects instead of announcing that the daemon stopped",JSON.stringify(s.c.state()))
+    check("resume_hello",s.c.lastError.code==="timeout" && s.c.lastError.retryable,"hello expiry remains a transient timeout",JSON.stringify(s.c.lastError))
+    s.c.receive(JSON.stringify({ev:"bye",reason:"shutdown"}))
+    check("resume_hello",s.c.graceful && !s.c.reconnecting,"explicit shutdown still stops recovery",JSON.stringify(s.c.state()))
+    console.log("FBTQS-PASS resume_hello")
+    s=session();s.c.connected()
+    s.c.receive(JSON.stringify({ev:"error",error:{code:"busy",message:"server limit reached",retryable:true,details:{limit:"connections"}}}))
+    s.c.receive(JSON.stringify({ev:"bye",reason:"invalid_message"}))
+    check("resume_busy",!s.c.graceful && s.c.reconnecting && s.recovery[0]===true,
+      "connection admission pressure retries instead of declaring the owner stopped",JSON.stringify(s.c.state()))
+    check("resume_busy",s.c.lastError && s.c.lastError.code==="busy" && s.c.lastError.retryable,"admission rejection keeps its actual busy classification",JSON.stringify(s.c.lastError))
+    s=session();s.c.connected();s.c.receive(JSON.stringify({ev:"bye",reason:"invalid_message"}))
+    check("resume_busy",s.c.graceful && !s.c.reconnecting && !s.recovery.length,
+      "a genuine protocol rejection remains terminal",JSON.stringify(s.c.state()))
+    console.log("FBTQS-PASS resume_busy")
     s=session(); s.c.receive("x".repeat(1048577))
     check("line_cap", s.resets.length===1, "1 MiB + 1 line rejected before JSON parse", s.c.lastError.message)
     s=session(); s.c.receive("[")
     check("line_cap", s.resets.length===1, "bad JSON resets session without exception", s.c.lastError.message)
+    check("line_cap",s.recovery[0]===false,"invalid protocol does not request an automatic retry loop",s.recovery)
     console.log("FBTQS-PASS line_cap")
     s=session();s.hello();var subscribe=JSON.parse(s.writes[s.writes.length-1])
     s.c.receive(JSON.stringify({id:subscribe.id,ok:false,error:{code:"unknown_op",message:"unknown op",retryable:false}}))

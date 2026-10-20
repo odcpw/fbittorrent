@@ -172,6 +172,14 @@ pub fn error(code: crate::api::ErrorCode, message: &str, key: Option<&str>) -> c
 
 pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
     use crate::api::ErrorCode::*;
+    if let Some(state) = value.downcast_ref::<crate::daemon::slot::Unavailable>() {
+        let mut failure = error(EngineUnavailable, "engine unavailable", None);
+        failure.details = Some(serde_json::Map::from_iter([
+            ("state".into(), state.0.name().into()),
+            ("message".into(), format!("engine is {}", state.0.name()).into()),
+        ]));
+        return failure;
+    }
     if let Some(app)=value.downcast_ref::<crate::agent::AppError>() {
         let mut failure=error(if app.code==crate::agent::Code::Usage {InvalidArgs}else{Internal},&app.message,None);failure.hint=app.hint.clone();return failure;
     }

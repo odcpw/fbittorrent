@@ -65,7 +65,7 @@ ShellRoot {
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
   function texts(item){var out=[];if(typeof item.text==="string" && item.visible)out.push(item.text);for(var i=0;i<item.children.length;i++)out=out.concat(texts(item.children[i]));return out}
   function tableRows(item){
-    if(item.hasCursor!==undefined && item.torrent!==undefined)return item.visible ? [{hash:item.torrent.hash,texts:texts(item)}] : []
+    if(item.hasCursor!==undefined && item.torrent!==undefined)return item.visible ? [{hash:item.torrent.hash,progress:item.torrent.progress,texts:texts(item)}] : []
     var out=[];for(var i=0;i<item.children.length;i++)out=out.concat(tableRows(item.children[i]));return out
   }
   IpcHandler {
@@ -178,6 +178,8 @@ ShellRoot {
     function scroll(dy:real):bool{if(!dashboard.item)return false;dashboard.item.scroll(dy);return true}
     function grab(path:string):bool{if(!dashboard.item)return false;return dashboard.item.grab(path)}
     function state():string{return service.stateJson()}
+    function disconnectForRecovery():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;service.client.reset("owned recovery probe",true);return true}
+    function connectionState():string{return JSON.stringify({generation:(root.find(service,"api-owner-socket") || {}).generation || 0,recovering:service.recoveringSocket,reconnecting:service.reconnecting,delay:service.recoveryDelay,mode:service.backendState,bye:service.byeReason,error:service.lastError,connecting:service.client.connecting,helloSent:service.client.helloSent,graceful:service.client.graceful})}
     function focusCommand(address:string,lua:bool):string{return Focus.command(address,lua) || "refused"}
     function ready():bool{return service.online && registry.isEnabled("oliver.torrents")}
     function visibility():string{return JSON.stringify({service:service.dashboardVisible,client:service.client ? service.client.dashboardVisible : false})}

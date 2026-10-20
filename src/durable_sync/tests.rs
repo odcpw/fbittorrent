@@ -109,9 +109,9 @@ fn cancelled_fallback_never_publishes_and_drains_the_blocking_pool() {
         let runtime = crate::native_runtime::NativeRuntime::new().unwrap();
         let pool = runtime.cx().blocking_pool_handle().unwrap();
         let mut workers = Vec::new();
-        // Occupy both workers so cancellation exercises a genuinely queued
+        // Occupy the configured pool so cancellation exercises a genuinely queued
         // fsync, rather than racing a completed one. Every blocker has a fuse.
-        for _ in 0..2 {
+        for _ in 0..crate::native_runtime::MAX_BLOCKING_THREADS {
             let (entered, ready) = std::sync::mpsc::channel();
             let (release, held) = std::sync::mpsc::channel();
             let worker = pool.spawn(move || {

@@ -173,12 +173,12 @@ impl Daemon {
     }
 
     fn unavailable(state: State) -> anyhow::Error {
-        AppError::new(
+        anyhow::Error::new(AppError::new(
             Code::Backend,
             format!("engine_unavailable state={} retryable=true", state.name()),
         )
-        .hint("fbittorrent status --json")
-        .into()
+        .hint("fbittorrent status --json"))
+        .context(slot::Unavailable(state))
     }
 
     fn quiesce_engine(&self) {
@@ -528,6 +528,28 @@ impl Drop for PanicHook {
             if let Some(old) = self.0.take() {
                 std::panic::set_hook(old);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod closing_errors_tests {
+    use super::*;
+
+    #[test]
+    fn owner_transition_errors_remain_retryable_at_the_api_boundary() {
+        for state in [State::Starting, State::Parked, State::Stopping] {
+            let value = Daemon::unavailable(state);
+            let (code, _, hint) = crate::agent::classify(&value);
+            assert_eq!(code, Code::Backend);
+            assert_eq!(hint.as_deref(), Some("fbittorrent status --json"));
+            let failure = crate::api::ops::engine_error(value);
+            assert_eq!(failure.code, crate::api::ErrorCode::EngineUnavailable);
+            assert!(failure.retryable);
+            let details = failure.details.unwrap();
+            assert_eq!(details["state"], state.name());
+            assert_eq!(details["message"], format!("engine is {}", state.name()));
+            assert_eq!(failure.hint.as_deref(), Some("retry in a moment"));
         }
     }
 }

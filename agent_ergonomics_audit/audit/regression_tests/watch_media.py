@@ -110,6 +110,7 @@ class Player:
             try: self.file.write(b'{"command":["quit"]}\n')
             except OSError: pass
             self.file.close(); self.connection.close()
+            self.file = None; self.connection = None
         if self.child:
             try: self.child.wait(timeout=5)
             except subprocess.TimeoutExpired: self.child.kill(); self.child.wait()

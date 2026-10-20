@@ -234,6 +234,8 @@ fn serve(
         write!(socket, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", target.video.len)?;
         return Ok(());
     };
+    let _presence = (request[0] == "GET")
+        .then(|| super::policy::Playback::start(owner.policy.clone()));
     write!(socket, "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n",
         if range_header.is_some() {"206 Partial Content"} else {"200 OK"}, target.video.mime, range.end - range.start)?;
     if range_header.is_some() {

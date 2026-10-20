@@ -32,6 +32,51 @@
     }
 
     #[test]
+    fn stop_can_persist_intent_with_both_checksum_workers_blocked() {
+        use std::time::Instant;
+        use typed_seed::check_reconciliation;
+        // The production checker selects two workers on hosts with >=8 CPUs.
+        if std::thread::available_parallelism().unwrap().get() < 8 {
+            eprintln!("requires two production checksum workers (8 logical CPUs)");
+            return;
+        }
+        let (factory, gates) = check_reconciliation::read_gates_storage(&[
+            65536, 512 * 1024 * 1024 + 65536,
+        ]);
+        let (app, directory, hash, _) = hashing_fixture(false, Some(factory));
+        let _release: Vec<_> = gates.iter().cloned()
+            .map(check_reconciliation::ReleaseOnDrop).collect();
+        for gate in &gates {
+            gate.wait_blocked();
+        }
+        let dispatcher = app.dispatcher();
+        assert_eq!(row(&dispatcher, &hash).state, view::TorrentState::Checking);
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            let stop = scope.spawn(|| dispatcher.execute(ops::EngineOp::Stop {
+                hashes: hashes(&[&hash]),
+            }));
+            while !gates.iter().all(|gate| gate.cancelled())
+                && started.elapsed() < Duration::from_secs(1)
+            {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let cancelled = gates.iter().all(|gate| gate.cancelled());
+            for gate in &gates {
+                gate.release();
+            }
+            stop.join().unwrap().unwrap();
+            assert!(cancelled, "durable Stop must not queue behind both physical checksum workers");
+        });
+        assert!(started.elapsed() < Duration::from_secs(1));
+        println!("both physical verifiers cancelled: stop_ms={}", started.elapsed().as_millis());
+        assert!(read_ledger(&directory.join("torrents.json")).unwrap().records[0].paused);
+        assert_eq!(row(&dispatcher, &hash).state, view::TorrentState::Paused);
+        drop(app);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn stop_during_hashing_is_paused_and_can_resume() {
         use std::time::Instant;
         use typed_seed::check_reconciliation;
@@ -533,16 +578,24 @@
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let (exited_tx, exited_rx) = std::sync::mpsc::channel();
-        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |cx| async move {
-            resolver.await.unwrap();
-            // Deliberately uncooperative cleanup, after a real resolver joined.
-            // The owning test releases this barrier after observing the fuse.
-            cx.checkpoint_with("blocked_restore_cleanup at src/engine/tests/startup.rs").unwrap();
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            exited_tx.send(()).unwrap();
-        })
-        .unwrap();
+        // This cleanup belongs to both the restore handle and the session
+        // region, so neither phase can become ready before its deadline.
+        let (task_tx, task_rx) = std::sync::mpsc::channel();
+        dispatcher.inner.session.spawn(tracing::Span::none(), "timeout_control", move |session_cx| async move {
+            let task = task::try_spawn_with(&session_cx, move |cx| async move {
+                resolver.await.unwrap();
+                // Deliberately uncooperative cleanup, after a real resolver joined.
+                // The owning test releases this barrier after observing the fuse.
+                cx.checkpoint_with("blocked_restore_cleanup at src/engine/tests/startup.rs").unwrap();
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                exited_tx.send(()).unwrap();
+            })
+            .unwrap();
+            task_tx.send(task).unwrap();
+            Ok(())
+        });
+        let task = task_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         {
             let mut restores = dispatcher.inner.restores.lock().unwrap();
             let restore = restores.get_mut(hash).unwrap();

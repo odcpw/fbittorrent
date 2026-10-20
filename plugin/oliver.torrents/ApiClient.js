@@ -137,9 +137,10 @@ function create(io, options) {
     changed()
     return true
   }
-  c.reset = function(message) {
-    io.disconnect(); c.disconnected()
-    c.lastError = { code: "invalid_message", message: message, retryable: false };changed()
+  c.reset = function(message, recover, code) {
+    io.disconnect(recover===true); c.disconnected()
+    if(recover){c.reconnecting=true;c.mode="reconnecting"}
+    c.lastError = { code: code || (recover ? "timeout" : "invalid_message"), message: message, retryable: !!recover };changed()
   }
   function presence() {
     return {interactive:c.dashboardVisible || c.quickVisible,glance:c.popupOpen,overlay_visible:c.quickVisible,dashboard_visible:c.dashboardVisible}
@@ -232,7 +233,7 @@ function create(io, options) {
     return at
   }
   c.tick = function() {
-    if (c.helloSent && now() - c.lastFrame >= 45000) { c.reset("45 seconds without a frame"); return }
+    if (c.helloSent && now() - c.lastFrame >= 45000) { c.reset("45 seconds without a frame",true); return }
     Object.keys(c.pending).forEach(function(id) {
       var e = c.pending[id]
       if (now() >= e.deadline) { delete c.pending[id]; fail(e, { code: "timeout", message: "no answer", retryable: true }, "no answer") }
@@ -250,6 +251,14 @@ function create(io, options) {
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) { c.reset("expected an API object"); return }
     c.lastFrame = now()
     if (frame.ev) {
+      // A connection accepted before laptop suspension can expire its hello
+      // deadline while the owner is stopped. Reconnecting may also hit the
+      // connection limit. Neither means the owner exited or the protocol is bad.
+      var admissionBusy=!c.online && c.lastError && c.lastError.code==="busy" &&
+        c.lastError.details && c.lastError.details.limit==="connections"
+      if(frame.ev==="bye" && (frame.reason==="hello_required" || (frame.reason==="invalid_message" && admissionBusy))) {
+        c.reset(admissionBusy ? "Server busy; reconnecting" : "Connection timed out; reconnecting",true,admissionBusy ? "busy" : "timeout");return
+      }
       if(frame.ev==="bye" && frame.reason==="shutdown") {
         Object.keys(c.pending).forEach(function(id){
           var entry=c.pending[id]

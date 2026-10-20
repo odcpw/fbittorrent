@@ -229,7 +229,7 @@ Item {
             Text {
               width:parent.width;textFormat:Text.PlainText;horizontalAlignment:Text.AlignHCenter
               objectName:"dashboard-stopped"
-              text:root.svc && root.svc.backendState==="protocol_mismatch" ? root.svc.lastError : root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent stopped";wrapMode:Text.Wrap
+              text:root.svc && root.svc.backendState==="protocol_mismatch" ? root.svc.lastError : root.svc && root.svc.reconnecting ? "Reconnecting to fbittorrent…" : root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent stopped";wrapMode:Text.Wrap
               color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title
             }
             Ui.Button {id:startButton;anchors.horizontalCenter:parent.horizontalCenter;text:"Start";focusable:true;enabled:!!root.svc && !root.svc.startupRequested && root.svc.backendState!=="protocol_mismatch";onClicked:root.svc.startDaemon()}

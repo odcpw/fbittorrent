@@ -106,7 +106,10 @@ Item {
   readonly property string bin: String(settings.binary || "fbittorrent")
   readonly property bool online: status.ok === true && status.running !== false
   property bool resultUnknown:false
-  property bool reconnecting: false
+  property bool clientReconnecting: false
+  readonly property bool reconnecting: recoveringSocket || clientReconnecting
+  readonly property bool recoveringSocket: socket.recovering
+  readonly property int recoveryDelay: socket.delay
   property string socketIdentity:""
   property bool stoppedRecently: false
   property string byeReason: ""
@@ -195,13 +198,14 @@ Item {
 
   function syncClient(c) {
     clock.schedule()
+    if(c.online || c.graceful || c.protocolMismatch)socket.endRecovery()
     if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
       if(!c.online)OfflineState.clear(root)
       status = Model.apiStatus(store,c.online)
     }
-    reconnecting = c.reconnecting; instance = c.instance
+    clientReconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     if(c.protocolMismatch){startupRequested=false;actionStatus="";startupTimer.stop()}
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
@@ -345,11 +349,10 @@ Item {
   }
   function useRuntimeDir(path) {
     if (Quickshell.env("FBT_TEST_HOOKS") !== "1") return "refused: FBT_TEST_HOOKS=1 required"
-    socket.connected = false
+    socket.replace(false,true)
     runtimeOverride = path
     socketIdentity=""
     client.disconnected()
-    Qt.callLater(root.checkSocket)
     return "ok"
   }
   function stateJson() { if(testHooks && dashboardOwner)dashboardOwner.publishNow(true);var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
@@ -400,13 +403,13 @@ Item {
   // without connecting; an unchanged stale socket is attempted just once.
   function checkSocket(force){
     if(force)socketIdentity=""
-    if(!client || socket.connected || client.connecting || client.protocolMismatch)return
+    if(!client || socket.resetting || socket.connected || client.connecting || client.protocolMismatch)return
     if(socketProbe.running){socketProbe.again=true;return}
     socketAppearance.restart()
   }
   FileView {path:root.runtimeDir+"/fbittorrent";watchChanges:true;preload:false;printErrors:false;onFileChanged:root.checkSocket()}
   Timer {id:socketAppearance;interval:50;onTriggered:{
-    if(!root.client || socket.connected || root.client.connecting || root.client.protocolMismatch)return
+    if(!root.client || socket.resetting || socket.connected || root.client.connecting || root.client.protocolMismatch)return
     socketProbe.probedPath=socket.path;socketProbe.running=true
   }}
   Process {
@@ -421,24 +424,14 @@ Item {
         var identity=socketInfo.text,parts=identity.split(":")
         if(code===0 && parts.length>=4 && (parseInt(parts[2],16)&0xf000)===0xc000){
           if(identity!==root.socketIdentity){root.socketIdentity=identity;root.client.attempt()}
-        }else{root.socketIdentity="";root.client.disconnected()}
+        }else{root.socketIdentity="";socket.endRecovery();root.client.disconnected()}
       }
       if(again){again=false;root.checkSocket()}
     }
   }
-  Socket {
-    id: socket
-    property bool wasOnline:false
-    property bool intentionalClose:false
-    path: root.runtimeDir + "/fbittorrent/api.sock"
-    parser: SplitParser { onRead: function(data) { if (root.client) root.client.receive(data) } }
-    onConnectionStateChanged: {
-      if (!root.client) return
-      if (connected) {wasOnline=false;intentionalClose=false;socketAppearance.stop();root.client.connected()}
-      else {var retry=wasOnline && !intentionalClose && !root.client.graceful;wasOnline=false;intentionalClose=false;root.client.disconnected();if(retry)root.checkSocket(true)}
-    }
-    onError: if (root.client && !connected) root.client.disconnected()
-  }
+  ApiSocket {id:socket;service:root;retry:socketRetry;handshake:socketHello}
+  Timer {id:socketRetry;interval:socket.delay;onTriggered:socket.retryExpired()}
+  Timer {id:socketHello;interval:5000;onTriggered:socket.helloExpired()}
   Timer {id:deadline;property real at:Infinity;onTriggered:clock.wake()}
   ServiceClock {id:clock;service:root;timer:deadline}
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
@@ -488,8 +481,8 @@ Item {
     addFlow=AddFlow.create(root,function(){root.addRevision++},Quickshell.env("FBT_TEST_HOOKS")==="1")
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
-      isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
-      disconnect:function() {socket.intentionalClose=true;socket.connected=false}
+      isConnected:function() { return socket.connected }, connect:function() { socket.connectToOwner() },
+      disconnect:function(recover) {socket.replace(recover===true)}
     }, {version:manifest.version || "0.6.0", changed:syncClient, frame:applyFrame,
       instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)

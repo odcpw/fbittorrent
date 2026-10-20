@@ -17,7 +17,7 @@ STRICT_CHECKS = (
     'native/first_q_notice_once', 'native/stop_during_hashing',
     'daemon/down_*', 'daemon/foreground_down', 'daemon/*shutdown*', 'daemon/*stop*',
     'daemon/cleanup_*stop*', 'daemon/*idle_exit*', 'daemon/killmode_mixed',
-    'plugin_stop_rule', 'plugin_glance_policy', 'plugin_default_idle',
+    'plugin_stop_rule', 'plugin_glance_policy', 'plugin_default_idle', 'plugin_connection_recovery',
     'safety_controls', 'upload_probe_controls',
 )
 STRICT_RUST_TESTS = (
@@ -26,6 +26,7 @@ STRICT_RUST_TESTS = (
     'engine::tests::*native_lifecycle_hashes_existing_data_stops_restores_and_deletes_durably',
     'engine::tests::*redact*', 'engine::tests::*shutdown*',
     'engine::tests::*stops_with_app*', 'engine::tests::*stop_during_hashing*',
+    'engine::tests::*stop_can_persist_intent*',
     'native_runtime::shutdown_tests::*', 'daemon::lifecycle::*', 'daemon::policy::*',
     'durable_sync::tests::*', 'daemon::watch::tests::*persistence*',
     'daemon::stats::tests::statistics_survive_ring_setup_failure',
