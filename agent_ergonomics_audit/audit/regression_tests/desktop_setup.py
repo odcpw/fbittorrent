@@ -102,7 +102,19 @@ def setup_uninstall_keeps_data(binary,systemd=False):
         before=snapshot(sandbox);call(case,binary,sandbox,'--purge',expected=3);case.check(snapshot(sandbox)==before,'unconfirmed purge exits 3 and deletes nothing',json.dumps(before))
         inside=data/'downloads';inside.mkdir();nested=inside/'keep.bin';nested.write_bytes(b'nested payload stays')
         call(case,binary,sandbox,'--save',str(inside))
+        before=snapshot(sandbox);refused=call(case,binary,sandbox,'--purge','--yes',expected=1)
+        case.check('refusing to purge' in refused.get('error','') and snapshot(sandbox)==before,
+                   'even confirmed purge refuses unreadable torrent records without changing data',json.dumps(refused))
+        # A saved torrent can live outside today's configured/default save path,
+        # including inside the app tree that purge would otherwise remove.
+        saved=data/'previous-save';saved.mkdir();saved_payload=saved/'keep.bin';saved_payload.write_bytes(b'saved payload stays')
+        record=dict(hash='a'*40,name='Saved payload',source='magnet:?xt=urn:btih:'+'a'*40,
+                    output_folder=str(saved),only_files=None,upload_limit=0,category='',tags='',
+                    added_on=1,completion_on=0,paused=True)
+        (data/'engine/torrents.json').write_text(json.dumps(dict(records=[record])))
         call(case,binary,sandbox,'--purge','--yes')
-        case.check(all(not path.exists() for path in keep) and download.read_bytes()==b'payload stays' and nested.read_bytes()==b'nested payload stays','confirmed purge removes records and preserves payloads even inside the app data directory',str(nested))
+        case.check(all(not path.exists() for path in keep) and download.read_bytes()==b'payload stays'
+                   and nested.read_bytes()==b'nested payload stays' and saved_payload.read_bytes()==b'saved payload stays',
+                   'confirmed purge removes readable records but preserves configured and saved payload folders',str([download,nested,saved_payload]))
 
 CASES=(setup_dry_run_lists_actions,setup_idempotent,setup_uninstall_keeps_data)
