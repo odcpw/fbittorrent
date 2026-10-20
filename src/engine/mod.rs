@@ -114,6 +114,9 @@ struct Inner {
     queue_pins: std::sync::Mutex<HashSet<String>>,
     network_blocked: AtomicBool,
     restores: std::sync::Mutex<HashMap<String, RestoreTask>>,
+    // Keep background restores from filling the ledger's FIFO with hundreds
+    // of admissions ahead of foreground snapshots and user mutations.
+    restore_admission: rqbit_runtime::sync::Semaphore,
     // Removing/retrying an intent does not end the previous task's cleanup.
     retired_restores: std::sync::Mutex<Vec<task::JoinHandle<()>>>,
     #[cfg(test)]
@@ -212,6 +215,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         committed_ledger,
         additions: Arc::new(Mutex::new(())),
         operations: Default::default(), moves: Default::default(),
+        restore_admission: rqbit_runtime::sync::Semaphore::new(4),
         directory,
         default_folder,
         rechecks: Default::default(),
