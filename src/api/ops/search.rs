@@ -20,18 +20,7 @@ pub fn dispatch(daemon: &Daemon, owner: u64, call: &Call) -> ApiResult<Reply> {
             })
         }
         Call::SearchProviders { .. } => Reply::SearchProviders(ProvidersResult {
-            providers: search::plugins()
-                .map_err(upstream)?
-                .into_iter()
-                .map(|p| Provider {
-                    name: p.name,
-                    kind: if p.kind=="torznab" {ProviderKind::Torznab}else{ProviderKind::Nova},
-                    enabled: p.enabled,
-                    full_name: (!p.full_name.is_empty()).then_some(p.full_name),
-                    url: (!p.url.is_empty()).then_some(p.url),
-                    version: (!p.version.is_empty()).then_some(p.version),
-                })
-                .collect(),
+            providers: search::plugins().map_err(upstream)?,
         }),
         Call::SearchSetProvider { args } => {
             search::set_enabled(&args.name, args.enabled).map_err(upstream)?;
