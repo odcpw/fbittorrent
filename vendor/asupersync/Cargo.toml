@@ -120,6 +120,7 @@ repository = "https://github.com/Dicklesworthstone/asupersync"
 
 [features]
 atp-cli = [
+    "extended-network",
     "dep:clap",
     "tls",
     "dep:rustls-native-certs",
@@ -193,6 +194,7 @@ ci-cross-platform = [
     "fuzz",
 ]
 cli = [
+    "extended-network",
     "dep:clap",
     "dep:time",
     "trace-compression",
@@ -220,6 +222,8 @@ dependency-ledger = ["dep:toml"]
 deterministic-mode = []
 # Measurement-only fixed epoch-kind counters; deliberately absent from defaults.
 epoch-diagnostics = []
+# ATP, native QUIC and HTTP/3 are not used by fbittorrent's native profile.
+extended-network = []
 distributed-hash-snapshot-recovery-e2e = ["test-internals"]
 fuzz = [
     "dep:arbitrary",
@@ -250,7 +254,7 @@ obligation-cleanup-e2e = []
 obligation-leak-detection = []
 postgres = []
 proc-macros = ["dep:asupersync-macros"]
-quic = []
+quic = ["extended-network"]
 raptorq-roundtrip-e2e = []
 real-service-e2e = [
     "channel-mpsc-select-e2e",
@@ -332,6 +336,7 @@ required-features = ["channel-mpsc-select-e2e"]
 name = "atp_quic_bounded_memory"
 path = "tests/atp_quic_bounded_memory.rs"
 required-features = [
+    "extended-network",
     "tls",
     "test-internals",
 ]

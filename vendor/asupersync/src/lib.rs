@@ -176,7 +176,7 @@ pub mod actor;
 pub mod adapter_certification;
 pub mod agent_swarm;
 pub mod app;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
 pub mod atp;
 pub mod audit;
 pub mod bytes;
