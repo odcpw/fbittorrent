@@ -112,7 +112,10 @@ impl Drop for ProcessGroup {
 }
 
 pub(super) fn capture(command: Command, budget: Duration) -> Result<Vec<u8>> {
-    let mut process = ProcessGroup::spawn(command)?;
+    capture_process(ProcessGroup::spawn(command)?, budget)
+}
+
+pub(super) fn capture_process(mut process: ProcessGroup, budget: Duration) -> Result<Vec<u8>> {
     let mut stdout = process.child.stdout.take().unwrap();
     let mut stderr = process.child.stderr.take().unwrap();
     let output = thread::spawn(move || drain_bounded(&mut stdout, MAX_CAPTURE_BYTES));

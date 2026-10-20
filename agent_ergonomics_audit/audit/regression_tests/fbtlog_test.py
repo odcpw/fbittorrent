@@ -44,7 +44,7 @@ def count(name):
     n = int(p.read_text()) + 1 if p.exists() else 1
     p.write_text(str(n))
     return n
-sock = root / "engine.sock"
+sock = root / "api.sock"
 code = 0
 if verb == "status":
     n = count("status")
@@ -60,7 +60,8 @@ if verb == "status":
 else:
     n = count("show")
     code = (1 if mode == "unexpected" else 4) if n == 1 else 0
-    value = dict(ok=False, code=code, error="engine reopening") if code else dict(ok=True, state="downloading" if mode == "wrong_state" else "stoppedDL")
+    value = dict(ok=False, code=code, error="engine reopening") if code else dict(ok=True, torrent=dict(state="downloading" if mode == "wrong_state" else "paused"))
+    if mode == "malformed_show": value = dict(ok=True)
 with (root / "calls.jsonl").open("a") as output:
     output.write(json.dumps(dict(verb=verb, code=code, status=int((root / "status").read_text()) if (root / "status").exists() else 0)) + "\\n")
 print(json.dumps(value))
@@ -69,7 +70,7 @@ sys.exit(code)
         binary.chmod(0o700)
         test.check({"ok": False, "app_open": False}.get("connection") != "vpn_waiting",
                    "the old connection-only predicate incorrectly accepts the closed status shape")
-        for mode in ("ready", "unexpected", "timeout", "slow", "failed_show", "wrong_state"):
+        for mode in ("ready", "unexpected", "timeout", "slow", "failed_show", "wrong_state", "malformed_show"):
             root = fixtures / mode
             root.mkdir()
             diagnostics = io.StringIO()
@@ -78,10 +79,10 @@ sys.exit(code)
                 with Case("reopen_" + mode, "engine") as case:
                     harness = NativeHarness(lambda: case, str(binary), dict(
                         os.environ, FBT_REOPEN_ROOT=str(root), FBT_REOPEN_MODE=mode))
-                    restored = (harness.cli("show", "fixture") if mode == "failed_show" else
-                                harness.wait_for_reopen(root / "engine.sock", "fixture",
-                                                        seconds=.2 if mode in ("timeout", "slow") else 10))
-                    case.check(restored.get("state") == "stoppedDL", "engine reopening preserves the manual pause")
+                    restored = (harness.cli("show", "fixture").get("torrent", {}) if mode == "failed_show" else
+                                harness.wait_for_reopen(root / "api.sock", "fixture",
+                                                        seconds=.2 if mode in ("timeout", "slow") else 1.5 if mode == "malformed_show" else 10))
+                    case.check(restored.get("state") == "paused", "engine reopening preserves the manual pause")
                     case.check(case.steps >= 2, "later case checks still execute")
             (root / "diagnostics.txt").write_text(diagnostics.getvalue())
             rows = [json.loads(line) for line in case.path.read_text().splitlines()]
@@ -116,6 +117,9 @@ sys.exit(code)
                 if mode == "slow":
                     test.check(len(calls) == 1 and not calls[0]["ok"] and "timed out" in calls[0]["observed"],
                                "the CLI subprocess uses the remaining readiness deadline instead of its usual 20 seconds")
+                if mode == "malformed_show":
+                    test.check(any(r["action"] == "CLI show fixture" and 'Exit 0;' in r["observed"] for r in calls),
+                               "a successful but incomplete show envelope was actually observed and rejected")
 
 
 def tmux_relaunch():

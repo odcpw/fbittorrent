@@ -164,6 +164,12 @@ impl Bus {
             .name("fbt-api-bus".into())
             .spawn(move || bus.run())
     }
+    fn expected_transition(&self, error: &super::Error) -> bool {
+        if error.code != ErrorCode::EngineUnavailable {return false;}
+        if self.stopping.load(Ordering::Acquire) || self.daemon.is_stopping() {return true;}
+        let slot = self.daemon.slot.read().unwrap_or_else(|error|error.into_inner());
+        match &slot.slot {Slot::Running(app)=>app.is_quiescing(), Slot::Starting|Slot::Stopping=>true, Slot::Parked(_)=>false}
+    }
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::Release);
         self.wake.signal();
@@ -472,7 +478,7 @@ impl Bus {
                         self.transitions(&mut r, &observed.state, &observed.rows, &observed.completions, &mut ready_seen, &mut previous_rows);
                     }
                     Err(e) => {
-                        eprintln!("ERROR api sample failed message={:?}", e.message);
+                        if !self.expected_transition(&e) {eprintln!("ERROR api sample failed message={:?}", e.message);}
                         next_observation = Instant::now() + Duration::from_secs(1);
                     }
                 }
@@ -511,6 +517,11 @@ impl Bus {
                         }
                     }
                     r.subscriptions.retain(|_, s| !s.sink.closed());
+                }
+                Err(e) if self.expected_transition(&e) => {
+                    // Quiesce cancels ledger borrowers before the owner joins
+                    // this thread. Keep subscriptions through a slot restart;
+                    // final shutdown still sends the normal correlated bye.
                 }
                 Err(e) => {
                     eprintln!("ERROR api sample failed message={:?}", e.message);

@@ -9,6 +9,15 @@ pub(crate) type Stamp=(u64,u64,i64,i64);
 #[derive(Default)] struct Cache {stamp:Option<Stamp>,loaded:bool,rows:Arc<Vec<shows::Show>>,failure:Option<(Option<Stamp>,String)>}
 #[derive(Default)] struct State {requested:bool,clients:BTreeSet<u64>,checking:BTreeSet<String>}
 #[derive(Default)] struct Shared {state:Mutex<State>,changed:Condvar,check:Mutex<()>,stopped:AtomicBool,bus:Mutex<Weak<api::bus::Bus>>}
+impl Shared {
+    fn stop(&self) {
+        // Pair the predicate change with the waiter's mutex. An atomic alone
+        // permits notify to pass between its last predicate read and wait().
+        let _state = self.state.lock().unwrap();
+        self.stopped.store(true, Ordering::Release);
+        self.changed.notify_one();
+    }
+}
 pub(crate) struct Service {
     shared:Arc<Shared>,cache:Mutex<Cache>,worker:Mutex<Option<JoinHandle<()>>>,
     pub edit:Mutex<()>,pub undo:Mutex<Option<api::ReadTarget>>,
@@ -114,6 +123,36 @@ impl Service {
         releases.sort_by(|a,b|b.published_at.cmp(&a.published_at).then(a.key.cmp(&b.key)).then(a.show_imdb.cmp(&b.show_imdb)));Ok(releases)
     }
     pub fn check(&self,id:Option<&str>)->Result<Report>{check(&self.shared,id,false)}
-    pub fn stop(&self){self.shared.stopped.store(true,Ordering::Release);self.shared.changed.notify_one();if let Some(worker)=self.worker.lock().unwrap().take(){let _=worker.join();}}
+    pub fn stop(&self){self.shared.stop();if let Some(worker)=self.worker.lock().unwrap().take(){let _=worker.join();}}
 }
 impl Drop for Service{fn drop(&mut self){self.stop();}}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn stop_cannot_pass_the_workers_predicate_to_wait_boundary() {
+        let shared = Arc::new(Shared::default());
+        let state = shared.state.lock().unwrap();
+        assert!(!shared.stopped.load(Ordering::Acquire));
+        let (entered, receive) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        let owner = shared.clone();
+        let stopper = thread::spawn(move || {
+            entered.send(()).unwrap();
+            owner.stop();
+            done.send(()).unwrap();
+        });
+        receive.recv().unwrap();
+        // The worker has tested the predicate but still holds state. Stop
+        // must wait, then notify after Condvar atomically releases that lock.
+        assert!(finished.recv_timeout(Duration::from_millis(50)).is_err());
+        let (_state, timeout) = shared.changed.wait_timeout_while(state, Duration::from_secs(2),
+            |_| !shared.stopped.load(Ordering::Acquire)).unwrap();
+        assert!(!timeout.timed_out());
+        finished.recv_timeout(Duration::from_secs(1)).unwrap();
+        stopper.join().unwrap();
+    }
+}

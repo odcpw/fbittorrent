@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 mod quick;
 #[path="plugin_reload.rs"]
 mod plugin_reload;
+#[path="plugins.rs"]
+mod plugins;
 
 #[derive(Default)]
 pub struct Options {
@@ -140,35 +142,17 @@ fn existing(path: &Path) -> Result<String> {
         Err(e) => Err(e.into()),
     }
 }
-fn copy_plan(actions: &mut Vec<Action>, source: &Path, target: &Path, force: bool) -> Result<()> {
-    let mut entries = std::fs::read_dir(source)?.collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let kind = entry.file_type()?;
-        let dest = target.join(entry.file_name());
-        if kind.is_symlink() {
-            bail!(
-                "plugin source contains a symlink: {}",
-                entry.path().display()
-            );
-        }
-        if kind.is_dir() {
-            copy_plan(actions, &entry.path(), &dest, force)?;
-        } else if kind.is_file() {
-            let bytes = std::fs::read(entry.path())?;
-            if force {
-                let mut item = action("write", dest);
-                item.bytes = bytes;
-                actions.push(item);
-            } else {
-                write(actions, dest, bytes);
-            }
-        }
-    }
-    Ok(())
+pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>> {
+    // Missing installation files/programs are setup failures, not evidence that
+    // the daemon is stopped. Keep their full I/O context in the CLI envelope.
+    run_inner(cfg, options).map_err(|error| {
+        if error.downcast_ref::<crate::agent::AppError>().is_some() { return error; }
+        crate::agent::AppError::new(crate::agent::Code::Failure,
+            format!("setup failed: {error:#}")).into()
+    })
 }
 
-pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>> {
+fn run_inner(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>> {
     let config = dirs::config_dir().context("no config directory")?;
     let data = dirs::data_local_dir().context("no data directory")?;
     let mut actions = Vec::new();
@@ -346,35 +330,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             }
         }
         if let Some(mode) = &options.plugin {
-            let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("plugin/oliver.torrents")
-                .canonicalize()
-                .context("plugin source unavailable; run setup from an installed checkout")?;
-            let manifest: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(source.join("manifest.json"))?)?;
-            if manifest["id"] != "oliver.torrents" {
-                bail!("unexpected plugin source identity");
-            }
-            plugin_sources.push(source.clone());
-            let metadata = plugin.symlink_metadata().ok();
-            if mode == "link" {
-                if std::fs::read_link(&plugin).ok().as_ref() != Some(&source) {
-                    if metadata.is_some() {
-                        remove(&mut actions, plugin.clone());
-                    }
-                    let mut item = action("link", plugin.clone());
-                    item.args.push(source.display().to_string());
-                    actions.push(item);
-                }
-            } else if mode == "copy" {
-                let linked = metadata.is_some_and(|m| m.file_type().is_symlink());
-                if linked {
-                    remove(&mut actions, plugin.clone());
-                }
-                copy_plan(&mut actions, &source, &plugin, linked)?;
-            } else {
-                bail!("unknown plugin mode");
-            }
+            plugin_sources.push(plugins::install(&mut actions, &config, &plugins::TORRENTS, mode)?);
             let old = existing(&shell)?;
             let new = super::menu::bar(&old, false)?;
             if old != new {
@@ -393,8 +349,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
         }
         if let Some(chord)=options.quick {
             anyhow::ensure!(options.plugin.is_some() || plugin.join("manifest.json").is_file(),"install the shared service first: fbittorrent setup --plugin copy --quick");
-            quick::install(&mut actions,&config,options.plugin.as_deref().unwrap_or("copy"),&chord)?;
-            plugin_sources.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("plugin/oliver.torrents-quick"));
+            plugin_sources.push(quick::install(&mut actions,&config,options.plugin.as_deref().unwrap_or("copy"),&chord)?);
         }
     }
     plugin_reload::plan(&mut actions,&config,&plugin_sources,uninstall)?;

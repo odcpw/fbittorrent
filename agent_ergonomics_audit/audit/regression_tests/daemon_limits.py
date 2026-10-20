@@ -8,8 +8,20 @@ import fixtures
 def alt_limit_holds(binary,systemd):
     with d.Case('daemon','alt_limit_holds') as case,fixtures.daemon_pair(case,binary,systemd,262144) as pair:
         c=pair.seed_client
-        c.call('subscribe',dict(topics=['summary'],interval_ms=250))
+        # Structural settings changes must wake the sampler, even with a slow
+        # counter subscription. Consume its baseline before making the change.
+        c.call('subscribe',dict(topics=['summary'],interval_ms=10000))
+        while not any(f.get('ev')=='state' and f.get('topic')=='summary' for f in c.pushed):
+            frame=c.receive()
+            if frame is None:raise EOFError('summary connection closed before baseline')
+            c.pushed.append(frame)
         c.call('transfer.set_limits',dict(alt_upload_bps=65536))
+        # Drain that distinct settings update: its wake must not accidentally
+        # make the following set_alt look immediate when set_alt has no wake.
+        while not any(f.get('data',{}).get('limits',{}).get('alt_upload_bps')==65536 for f in c.pushed):
+            frame=c.receive()
+            if frame is None:raise EOFError('summary connection closed before limits update')
+            c.pushed.append(frame)
         began=time.monotonic();c.call('transfer.set_alt',dict(on=True))
         frames=[f for f in c.pushed if f.get('ev')=='state' and f.get('topic')=='summary' and f.get('data',{}).get('alt') is True]
         c.socket.settimeout(2)
@@ -20,7 +32,7 @@ def alt_limit_holds(binary,systemd):
                 if frame.get('ev')=='state' and frame.get('topic')=='summary' and frame.get('data',{}).get('alt') is True:frames.append(frame)
         finally:c.socket.settimeout(8)
         elapsed=time.monotonic()-began
-        case.check(elapsed<=.25,'structural turtle state arrives within the 250ms subscription interval',json.dumps(dict(elapsed=elapsed,frames=frames)))
+        case.check(elapsed<=.25,'structural turtle state arrives within 250ms despite a 10s counter interval',json.dumps(dict(elapsed=elapsed,frames=frames)))
         time.sleep(5)
         before=pair.client.call('torrents.get',dict(hash=pair.hash))['result']['torrent']['completed_bytes']
         start=time.monotonic();prior=before;previous=start

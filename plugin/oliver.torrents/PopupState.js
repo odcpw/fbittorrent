@@ -22,7 +22,7 @@ function describe(s) {
   var client=s.client || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
   var r={message:"",banner:"",urgent:false,dim:!s.online,idle:""}
   if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
-  else if(s.reconnecting){r.message="Reconnecting… retry in "+Math.ceil((client.retryDelay || 500)/1000)+" s";r.dim=true}
+  else if(s.reconnecting){r.message="Reconnecting…";r.dim=true}
   else if(!s.online)r.message=s.stoppedRecently ? "fbittorrent stopped. Enter Start · w Open window" : client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent is not running. Enter Start · w Open window"
   if(s.online && (s.backendState==="parked" || network.ready===false || network.state==="waiting")){
     var name=networkName(network)

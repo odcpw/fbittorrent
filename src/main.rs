@@ -16,6 +16,7 @@ mod daemon;
 mod engine;
 mod feed_date;
 mod native_runtime;
+mod durable_sync;
 mod network_app;
 mod outbound;
 mod public_text;

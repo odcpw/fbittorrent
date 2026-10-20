@@ -4,9 +4,22 @@
     static SEARCH_TESTS: Mutex<()> = Mutex::new(());
 
     fn session() -> std::sync::MutexGuard<'static, ()> {
-        let guard = SEARCH_TESTS.lock().unwrap();
+        let guard = SEARCH_TESTS.lock().unwrap_or_else(|error| error.into_inner());
         begin_session().unwrap();
         guard
+    }
+
+    #[test]
+    fn poisoned_search_test_lock_still_runs_later_sessions() {
+        let failed = std::panic::catch_unwind(|| {
+            let _guard = session();
+            // Unwind without the panic hook: this is the deliberately caught
+            // failure used to exercise the real shared test lock.
+            std::panic::resume_unwind(Box::new("fixture test failure"));
+        });
+        assert!(failed.is_err() && SEARCH_TESTS.is_poisoned());
+        let _guard = session();
+        assert!(!jobs().lock().unwrap().closing);
     }
 
     fn live_processes(group: i32) -> Vec<i32> {
@@ -219,6 +232,23 @@
     }
 
     #[test]
+    fn selected_download_timeout_also_bounds_provider_startup() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        std::fs::write(store.runtime().join("engines/example.py"),
+            "import time\ntime.sleep(60)\nclass example:\n def download_torrent(self, parameter): pass\n").unwrap();
+        let result = SearchResult {
+            file_url: "https://example.org/details/123".into(),
+            engine: "example".into(),
+            ..Default::default()
+        };
+        let failure = resolve_download_in(&store, &result, 1).unwrap_err();
+        assert!(format!("{failure:#}").contains("timed out"));
+        assert!(jobs().lock().unwrap().processes.is_empty());
+    }
+
+    #[test]
     fn selected_download_timeout_stops_provider_children() {
         let _session = session();
         let (_scratch, store) = scratch();
@@ -228,24 +258,36 @@
             r#"class example:
     def download_torrent(self, parameter):
         import os, pathlib, subprocess, sys, time
-        subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
-        pathlib.Path('download-group').write_text(str(os.getpgrp()))
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+        pathlib.Path('download-group').write_text(str(os.getpgrp())+' '+str(child.pid))
         time.sleep(60)
 "#,
         )
         .unwrap();
-        let result = SearchResult {
-            file_url: "https://example.org/details/123".into(),
-            engine: "example".into(),
-            ..Default::default()
+        let mut command = python(&store.runtime());
+        command.args(["-c", DOWNLOAD_RUNNER, "example", "https://example.org/details/123"]);
+        let process = ProcessGroup::spawn(command).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (group, child) = loop {
+            let marker = std::fs::read_to_string(store.runtime().join("download-group"))
+                .unwrap_or_default();
+            let ids: Vec<i32> = marker.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            if let [group, child] = ids.as_slice() {
+                if live_processes(*group).contains(child) { break (*group, *child); }
+            }
+            assert!(Instant::now() < deadline, "download hook never spawned its fixture child");
+            thread::sleep(Duration::from_millis(10));
         };
-        let failure = resolve_download_in(&store, &result, 1).unwrap_err();
+        assert_eq!(group, process.pid);
+        // Test timeout cleanup after the real hook has started. Interpreter
+        // startup under load must not turn this into an absent-marker failure.
+        let failure = capture_process(process, Duration::from_secs(1)).unwrap_err();
         assert!(format!("{failure:#}").contains("timed out"));
-        let group = std::fs::read_to_string(store.runtime().join("download-group"))
-            .unwrap()
-            .parse()
-            .unwrap();
-        assert!(live_processes(group).is_empty());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !live_processes(group).is_empty() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(live_processes(group).is_empty(), "live process remained in group {group}, fixture child {child}");
         assert!(jobs().lock().unwrap().processes.is_empty());
     }
 
@@ -335,6 +377,46 @@
             capture(command, Duration::from_secs(2)).unwrap(),
             b"reopened\n"
         );
+    }
+
+    #[test]
+    fn nova_completion_retires_importing_worker_without_killing_parent() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        // Hold worker 2 before its initializer. Worker 1 finishes both real
+        // provider tasks; normal Pool teardown must retire worker 2 alone.
+        // This makes the startup race deterministic even on an unloaded host.
+        OpenOptions::new().append(true).open(store.runtime().join("helpers.py")).unwrap()
+            .write_all(br#"
+import multiprocessing as _mp, pathlib as _pathlib, time as _time
+if _mp.current_process().name.endswith('-2'):
+    _pathlib.Path('blocked-worker').write_text(str(os.getpgrp()))
+    _time.sleep(60)
+"#).unwrap();
+        for name in ["alpha", "beta"] {
+            std::fs::write(store.runtime().join(format!("engines/{name}.py")), format!(r#"class {name}:
+ name='{name}'
+ url='http://127.0.0.1'
+ def search(self,query):
+  import pathlib,time
+  deadline=time.monotonic()+5
+  while not pathlib.Path('blocked-worker').exists():
+   if time.monotonic()>deadline:raise RuntimeError('second worker never reached import barrier')
+   time.sleep(.01)
+  from novaprinter import prettyPrinter
+  prettyPrinter(dict(link='magnet:?xt=urn:btih:'+'a'*40,name='{name}',size=1024,seeds=1,leech=0,engine_url=self.url))
+"#)).unwrap();
+        }
+        let mut command = python(&store.runtime());
+        command.args(["nova2.py", "alpha,beta", "all", "fixture"]);
+        let output = capture(command, Duration::from_secs(8)).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert_eq!(output.lines().count(), 2);
+        assert!(output.contains("|alpha|1024|") && output.contains("|beta|1024|"));
+        let group = std::fs::read_to_string(store.runtime().join("blocked-worker"))
+            .unwrap().parse().unwrap();
+        assert!(live_processes(group).is_empty(), "pool retirement left live provider processes");
     }
 
     #[test]

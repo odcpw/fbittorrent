@@ -10,7 +10,7 @@ from daemon_bus import RevisionStream
 
 
 @contextmanager
-def owned(name, binary, systemd, *, bound=False):
+def owned(name, binary, systemd, *, bound=False, providers=('alpha', 'beta')):
     with d.Case('daemon', name) as case, d.Sandbox() as sandbox:
         # These installed providers only print owned fixture rows. Nova cannot
         # honour an interface binding; ordinary positive cases select no binding.
@@ -19,7 +19,7 @@ def owned(name, binary, systemd, *, bound=False):
         runtime = Path(sandbox.env['XDG_DATA_HOME']) / 'fbittorrent/nova3'
         engines = runtime / 'engines'
         engines.mkdir(parents=True, exist_ok=True)
-        for provider in ('alpha', 'beta'):
+        for provider in providers:
             shutil.copyfile(Path(__file__).parent / 'fixtures/providers' / (provider+'.py'), engines / (provider+'.py'))
         with d.Harness(case, binary, sandbox, systemd) as harness:
             process = harness.start_serve()
@@ -192,7 +192,8 @@ def search_grab_and_ledger(binary, systemd):
         source=sandbox.root/'selected';source.mkdir(); payload=source/'selected.bin';payload.write_bytes(b'local search grab\n'*1024)
         fixture=d.fixtures.torrent_fixture(source,[payload],name='Selected search')
         with d.fixtures.HttpFixture(sandbox.root) as http:
-            result=dict(key=fixture.info_hash,name='Selected search',providers=['alpha'],url=http.base+'/selected/'+fixture.torrent.name)
+            result=dict(key=fixture.info_hash,name='Selected search',providers=['alpha'],
+                        url=http.base+'/selected/'+d.urllib.parse.quote(fixture.torrent.name))
             ref='search-real-url'
             response=client.call('search.grab',dict(result=result,save_path=str(source)),ref=ref)
             case.check(response['result']==dict(state='pending',ref=ref),'grab returns its exact pending ref',json.dumps(response))

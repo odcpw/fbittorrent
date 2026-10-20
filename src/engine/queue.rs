@@ -4,6 +4,23 @@ pub(super) use super::queue_policy::admit;
 static INJECTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 impl Inner {
+    /// Return whether the background maintenance task should keep running.
+    pub(super) async fn maintenance_tick(&self, cx: &Cx) -> bool {
+        let result = rqbit_runtime::select! {
+            result = self.maintain(cx) => result,
+            _ = self.session.cancellation_token().cancelled() => return false,
+        };
+        // Quiesce can begin while maintenance waits for the ledger. Retire
+        // that tick quietly instead of reporting its expected closing error.
+        if self.stopping.load(Ordering::Acquire) || cx.checkpoint().is_err() {
+            return false;
+        }
+        if let Err(error) = result {
+            eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
+        }
+        true
+    }
+
     /// Apply durable running intent in FIFO order. Pause displaced torrents
     /// before admitting replacements, including checking downloads in the cap.
     pub(super) async fn reconcile_queue(
@@ -26,12 +43,20 @@ impl Inner {
         for record in &mut ledger.records {
             cx.checkpoint()?;
             let handle = self.handle(&record.hash).ok();
+            let durable = match &handle {
+                Some(handle) if record.completion_on <= 0 && handle.stats().finished
+                    && !self.rechecks.active(&record.hash) && !self.moves.active(&record.hash)
+                    && !self.recheck_failed(&record.hash)
+                    && !matches!(handle.stats().state,TorrentStatsState::Error) =>
+                        self.sync_completed_payload(cx, record, handle).await?,
+                _ => true,
+            };
             let snapshot = handle.as_ref().map(|handle| {
                 let stats = handle.stats();
                 let rechecking = self.rechecks.active(&record.hash) || self.moves.active(&record.hash);
                 let failed = self.recheck_failed(&record.hash);
                 if stats.finished && !rechecking && !failed && !matches!(stats.state,TorrentStatsState::Error) {
-                    if record.completion_on <= 0 {
+                    if record.completion_on <= 0 && durable {
                         record.completion_on = now();
                         let target = handle.metadata.load_full().filter(|m| m.file_infos.len() == 1)
                             .map(|m| handle.output_folder().join(&m.file_infos[0].relative_filename))
@@ -40,7 +65,7 @@ impl Inner {
                             "name":handle.name().unwrap_or_else(|| record.name.clone()), "open_target":target.to_string_lossy()}));
                         changed = true;
                     }
-                    if record.force { record.force=false;changed=true; }
+                    if record.force && durable { record.force=false;changed=true; }
                 }
                 let active_check = matches!(stats.state, TorrentStatsState::Initializing { .. })
                     && !self.check_cancelled(&record.hash, handle);

@@ -15,7 +15,7 @@ fn tree_revision(path: &Path, hash: &mut impl Hasher) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn plan(actions: &mut Vec<Action>, config: &Path, sources: &[PathBuf], uninstall: bool) -> Result<()> {
+pub(super) fn plan(actions: &mut Vec<Action>, config: &Path, sources: &[plugins::Source], uninstall: bool) -> Result<()> {
     let plugins=config.join("omarchy/plugins");
     let stamp=config.join("fbittorrent/shell-plugin.revision");
     let changed=actions.iter().any(|item|item.path.starts_with(&plugins));
@@ -26,7 +26,15 @@ pub(super) fn plan(actions: &mut Vec<Action>, config: &Path, sources: &[PathBuf]
     }
     if sources.is_empty(){return Ok(());}
     let mut hash=std::collections::hash_map::DefaultHasher::new();
-    for source in sources {source.file_name().hash(&mut hash);tree_revision(source,&mut hash)?;}
+    for source in sources {
+        match source {
+            plugins::Source::Checkout(path) => { path.file_name().hash(&mut hash); tree_revision(path, &mut hash)?; }
+            plugins::Source::Embedded(bundle) => {
+                bundle.id.hash(&mut hash);
+                for (path, bytes) in bundle.files { path.hash(&mut hash); bytes.hash(&mut hash); }
+            }
+        }
+    }
     let revision=format!("{:016x}\n",hash.finish()).into_bytes();
     if !changed && std::fs::read(&stamp).ok().as_deref()==Some(&revision){return Ok(());}
     // Remove the previous revision before restarting: failure must remain retryable even
@@ -47,7 +55,7 @@ mod tests {
         let source=root.join("source");std::fs::create_dir(&source).unwrap();
         let file=source.join("Dashboard.qml");std::fs::write(&file,b"old UI").unwrap();
         let stamp=root.join("fbittorrent/shell-plugin.revision");
-        let sources=vec![source];let mut actions=Vec::new();
+        let sources=vec![plugins::Source::Checkout(source)];let mut actions=Vec::new();
         plan(&mut actions,&root,&sources,false).unwrap();
         assert_eq!(actions[0].path,Path::new("omarchy-restart-shell"));
         assert_eq!(actions.last().unwrap().path,stamp);

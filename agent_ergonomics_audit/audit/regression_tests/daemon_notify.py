@@ -77,9 +77,10 @@ def owned(name,binary,systemd,action='',enabled=True,no_notify=False,delay=0):
                 h.lock_free()
 
 
-def complete(client,box,index=0):
+def complete(client,box,index=0,extension='bin'):
     root=box.root/f'complete-{index}';root.mkdir()
-    payload=root/f'A<&B {index}.bin';payload.write_bytes(os.urandom(16384))
+    payload=root/f'A<&B {index}.{extension}'
+    payload.write_bytes(b'Completed private notification document.\n'*512 if extension=='txt' else os.urandom(16384))
     item=fixtures.torrent_fixture(root,[payload])
     client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(root)))
     return item,payload
@@ -127,11 +128,19 @@ def notify_completed(binary,systemd):
 
 def action_case(binary,systemd,action):
     with owned('notify_action_'+action,binary,systemd,action) as (case,box,h,p,client):
-        item,payload=complete(client,box)
+        # HARDENING refuses executable/launcher suffixes, including .bin.
+        # Exercise a permitted document without relaxing that payload guard.
+        item,payload=complete(client,box,extension='txt')
         h.wait_for(lambda:(bool(calls(box,'xdg-open')),json.dumps(calls(box,'xdg-open'))),'chosen action opens the recorded path')
         rows=observe(case,box);opened=observe(case,box,'xdg-open')
         target=payload.parent if action=='folder' else payload
         case.check(opened==[[str(target)]] and len(rows)==1,'notification action opens exactly its file or containing directory',json.dumps(opened))
+        if action in ('open','default'):
+            complete(client,box,index=1)
+            h.wait_for(lambda:('refusing to open a launcher or executable' in h.stderr(),h.stderr()),
+                       'the same notification action refuses an executable-suffix payload')
+            case.check(len(calls(box))==2 and calls(box,'xdg-open')==opened,
+                       'blocked payload still notifies but never reaches the desktop opener',json.dumps(calls(box,'xdg-open')))
 
 
 def notify_action_open(binary,systemd): action_case(binary,systemd,'open')

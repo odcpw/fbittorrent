@@ -8,7 +8,7 @@ import threading
 import time
 
 import daemon as d
-from daemon_search import groups, live
+from daemon_search import groups, live, owned as search_owned
 
 
 def cli(*args, **kwargs):
@@ -37,8 +37,7 @@ def equal(case,args,first,second):
 
 
 def cli_search_both_paths_identical(binary,systemd):
-    with d.api_owned('cli_search_both_paths_identical',binary,systemd) as (case,box,h,process):
-        engines(box)
+    with search_owned('cli_search_both_paths_identical',binary,systemd,providers=('shape',)) as (case,box,h,process,runtime):
         commands=[['search','Sintel','--wait','5','--limit','3','--json'],['search','Sintel','--wait','5','--limit','3'],
                   ['search','--plugins','--json'],['search','--plugins'],
                   ['search','Sintel','--wait','5','--limit','2','--json'],['search','empty','--wait','5','--json'],
@@ -74,8 +73,7 @@ def cli_search_both_paths_identical(binary,systemd):
 
 
 def cli_search_dedupe_both_paths(binary,systemd):
-    with d.api_owned('cli_search_dedupe_both_paths',binary,systemd) as (case,box,h,process):
-        engines(box,('alpha','beta'))
+    with search_owned('cli_search_dedupe_both_paths',binary,systemd) as (case,box,h,process,runtime):
         value,up=cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
         row=value['results'][0]
         case.check(value['complete'] is True and value['count']==1 and row['name']=='辛特尔' and row['seeds']==9 and row['providers']==['alpha','beta'] and row['provider_url']=='https://beta.invalid',
@@ -86,8 +84,7 @@ def cli_search_dedupe_both_paths(binary,systemd):
 
 
 def cli_search_timeout_cleans_provider(binary,systemd):
-    with d.api_owned('cli_search_timeout_cleans_provider',binary,systemd) as (case,box,h,process):
-        runtime=engines(box,('alpha',))
+    with search_owned('cli_search_timeout_cleans_provider',binary,systemd,providers=('alpha',)) as (case,box,h,process,runtime):
         for mode in ['daemon','local']:
             if mode=='local':h.stop_serve(process)
             value,result=cli(case,box,binary,'search','hold-cli','--wait','1','--json')
@@ -99,14 +96,16 @@ def cli_search_timeout_cleans_provider(binary,systemd):
 def cli_search_parked_fallback(binary,systemd):
     with d.Case('daemon','cli_search_parked_fallback') as case,d.Sandbox() as box,d.Harness(case,binary,box,systemd) as h:
         config=Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
-        d.select_replay_interface(config,'fbmissing0');engines(box)
+        d.select_replay_interface(config,'fbmissing0');runtime=engines(box,('alpha',))
         process=h.start_serve()
         try:
             h.receive_ready();h.wait_engine()
             with d.ApiConn(h) as observer:
                 hello=observer.hello()['result'];case.check(hello['state']=='parked','owner is really parked before fallback',json.dumps(hello))
-                value,_=cli(case,box,binary,'search','Sintel','--wait','5','--json')
-                case.check(value['count']==3,'search works in-process with a parked daemon',json.dumps(value))
+                value,result=cli(case,box,binary,'search','hold-refused','--wait','5','--json',code=1)
+                case.check(value.get('ok') is False and 'VPN binding' in result.stdout
+                           and not (runtime/'alpha-raw.txt').exists() and not groups(runtime),
+                           'parked fallback refuses unbound Nova before any provider starts',result.stdout)
                 sub=observer.call('subscribe',dict(topics=['events']))['result']['sub']
                 from daemon_bus import RevisionStream
                 frames=RevisionStream(observer).snapshot(sub,['events'])
@@ -125,6 +124,8 @@ def cli_search_silent_hello_fallback(binary,systemd):
     # A real stalled local stream exercises the 200 ms hello deadline, without
     # returning fabricated API data or contacting a service outside this sandbox.
     with d.Case('daemon','cli_search_silent_hello_fallback') as case,d.Sandbox() as box,d.Harness(case,binary,box,systemd) as h:
+        # Fallback may run these local-only providers only without a VPN binding.
+        d.select_replay_interface(Path(box.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml',None)
         engines(box);path=d.DaemonContract.socket_path(box);path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
         listener=socket.socket(socket.AF_UNIX);listener.bind(str(path));listener.listen(1);listener.settimeout(5)
         stop=threading.Event()

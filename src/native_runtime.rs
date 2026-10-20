@@ -179,6 +179,47 @@ impl Drop for NativeRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn more_than_one_thousand_owned_regions_admit_and_close() {
+        const CHILD: &str = "FBT_REGION_CAPACITY_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            // A production engine owns one native runtime in its process.
+            // Keep this capacity probe independent of the other tests' global
+            // resource monitors and runtime startup/shutdown races. The same
+            // 1,100 simultaneous regions and checked closes run in the child.
+            let name = format!("{}::more_than_one_thousand_owned_regions_admit_and_close", module_path!().split_once("::").unwrap().1);
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &name, "--nocapture"]).env(CHILD, "1")
+                .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while child.try_wait().unwrap().is_none() {
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    let output = child.wait_with_output().unwrap();
+                    panic!("native capacity probe hung: {output:?}");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "probe must execute: {output:?}");
+            return;
+        }
+        let runtime = NativeRuntime::new().unwrap();
+        runtime.block_on(async {
+            let mut regions = Vec::new();
+            for index in 0..1100 {
+                regions.push(runtime.cx().open_child_region(ChildRegionSpec::inherit())
+                    .await.unwrap_or_else(|error| panic!("region {index}: {error}")));
+            }
+            for region in regions {
+                region.cancel(CancelReason::user("capacity probe finished")).unwrap();
+                region.close().await.unwrap();
+            }
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2)).unwrap();
+    }
     use std::task::Poll;
 
     #[test]

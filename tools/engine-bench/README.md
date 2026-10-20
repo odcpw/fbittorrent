@@ -136,3 +136,15 @@ python3 tools/engine-bench/compare.py --before /evidence/bin/control \
 A completed/dormant API view may report unknown upload counters. Wire-observed
 payload bytes and Unchoke messages must still be zero, and every known API
 counter must be zero. This is independent of prose and optional field presence.
+
+For the shutdown regression on a real Btrfs disk, run three verified 1 GiB/four-peer
+transfers alongside two private direct-I/O writers. The writers reuse 512 MiB in
+total, use private XDG paths, and stop before their isolation is removed. Any
+emergency cleanup fails qualification; `teardown.json` records total shutdown
+milliseconds, in addition to the engine's drain diagnostic:
+
+```sh
+python3 tools/engine-bench/shutdown_test.py --binary /evidence/bin/fbittorrent \
+  --binary-source BUILT_COMMIT --seed /evidence/bin/fbt-bench-seed \
+  --output /evidence/shutdown-pressure --disk-root /path/on/btrfs
+```
