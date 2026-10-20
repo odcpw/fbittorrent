@@ -2,8 +2,8 @@
 //! Dropping an unacknowledged sync never publishes a replacement: callers rename
 //! only after its CQE. The kernel owns its file reference; no borrowed buffers
 //! or application work can outlive cancellation. Regular payload I/O is separate.
-use asupersync::{runtime::reactor::Interest, Cx};
-use io_uring::{opcode, squeue, types, IoUring};
+use asupersync::{Cx, runtime::reactor::Interest};
+use io_uring::{IoUring, opcode, squeue, types};
 use std::{
     fs::File,
     future::poll_fn,
@@ -14,11 +14,36 @@ use std::{
     time::{Duration, Instant},
 };
 
-struct FileSync {
+pub(crate) struct FileSync {
     ring: IoUring,
 }
 impl FileSync {
-    fn start(file: &File) -> io::Result<Self> {
+    #[cfg(test)]
+    pub(crate) fn gated_for_test(
+        file: &File,
+        gate: &std::os::unix::net::UnixStream,
+    ) -> io::Result<Self> {
+        let mut ring = IoUring::new(4)?;
+        ring.submitter()
+            .register_files(&[file.as_raw_fd(), gate.as_raw_fd()])?;
+        let pending = opcode::PollAdd::new(types::Fixed(1), libc::POLLIN as u32)
+            .build()
+            .user_data(2)
+            .flags(squeue::Flags::IO_LINK);
+        let flush = opcode::Fsync::new(types::Fixed(0))
+            .build()
+            .user_data(1)
+            .flags(squeue::Flags::ASYNC);
+        // SAFETY: both entries use owned fixed-file references and neither
+        // operation borrows userspace memory. This gates actual kernel fsync.
+        unsafe {
+            ring.submission().push(&pending).unwrap();
+            ring.submission().push(&flush).unwrap();
+        }
+        ring.submit()?;
+        Ok(Self { ring })
+    }
+    pub(crate) fn start(file: &File) -> io::Result<Self> {
         let mut ring = IoUring::new(2)?;
         ring.submitter().register_files(&[file.as_raw_fd()])?;
         let entry = opcode::Fsync::new(types::Fixed(0))
@@ -36,7 +61,7 @@ impl FileSync {
         ring.submit()?;
         Ok(Self { ring })
     }
-    fn completion(&mut self) -> Option<io::Result<()>> {
+    pub(crate) fn completion(&mut self) -> Option<io::Result<()>> {
         for entry in self.ring.completion() {
             if entry.user_data() != 1 {
                 continue;

@@ -460,6 +460,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         "INFO daemon slot released elapsed_ms={}",
         began.elapsed().as_millis()
     );
+    daemon.watch.lock().unwrap().flush(Instant::now() + Duration::from_secs(1));
     let stats_saved=daemon.stats.lock().unwrap().save(Instant::now(),true);
     let drain_reason = if panicked.load(Ordering::Acquire) {
         StopReason::Panic
