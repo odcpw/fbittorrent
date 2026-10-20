@@ -67,7 +67,9 @@ def secret_free(case, *texts):
 
 
 def torznab_results(binary, systemd):
-    with owned('torznab_results', binary, systemd) as (case, box, h, http, config, secret):
+    # This positive control runs both a local Nova script and a loopback indexer;
+    # the dedicated bound-indexer cases exercise the VPN route separately.
+    with owned('torznab_results', binary, systemd, unbound=True) as (case, box, h, http, config, secret):
         fixture = json.loads((box.root / 'query.json').read_text())
         fixture['xml'] = fixture['xml'].replace('1' * 40, 'a' * 40).replace('value="2"', 'value="7"').replace('262144', '1234')
         (box.root / 'query.json').write_text(json.dumps(fixture))
