@@ -2,6 +2,36 @@ use super::*;
 use crate::engine::tests::review_record;
 
 #[test]
+fn missing_files_discards_live_estimates_on_every_projection() {
+    let record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
+    let mut view = TorrentView::unrestored(&record, None);
+    view.legacy.source = Source::Handle;
+    view.legacy.facts.activity = Activity::Live;
+    view.legacy.facts.receiving = true;
+    view.state = TorrentState::Downloading;
+    view.checked = true;
+    view.progress = Some(0.25);
+    view.completed_bytes = Some(1024);
+    view.dl_bps = Some(4096);
+    view.ul_bps = Some(2048);
+    view.eta_s = Some(3);
+    view.files_missing();
+    let row = crate::api::ops::torrents::torrent(view.clone()).unwrap();
+    let wire = serde_json::to_value(row).unwrap();
+    assert_eq!(wire["state"], "error");
+    assert_eq!(wire["reason"], "missing_files");
+    assert_eq!(wire["checked"], false);
+    for key in ["progress", "completed_bytes", "completed_at", "dl_bps", "ul_bps", "eta_s"] {
+        assert!(wire.get(key).is_none(), "missing payload cannot retain {key}: {wire}");
+    }
+    let cli: serde_json::Value = serde_json::from_str(&view.to_cli_json().unwrap()).unwrap();
+    assert_eq!(cli["state"], "error");
+    assert_eq!(cli["dlspeed"], 0);
+    assert_eq!(cli["upspeed"], 0);
+    assert_eq!(cli["completed"], 0);
+}
+
+#[test]
 fn api_projection_keeps_owned_origin_and_unknown_observations() {
     let mut record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
     record.display_name = Some("My display name".into());

@@ -182,6 +182,10 @@ impl TorrentView {
         self.progress = None;
         self.completed_bytes = None;
         self.completed_at = None;
+        self.dl_bps = None;
+        self.ul_bps = None;
+        self.eta_s = None;
+        self.legacy.facts.activity = Activity::Error;
         self.legacy.progress_known = false;
     }
 
