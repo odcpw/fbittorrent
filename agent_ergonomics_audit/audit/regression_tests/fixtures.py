@@ -47,10 +47,11 @@ def bencode(value):
 
 class Sandbox:
     """One short-lived tree for HOME, all five XDG variables, shims and downloads."""
-    def __init__(self):
+    def __init__(self, *, directory="/tmp"):
         # rch's TMPDIR can exceed AF_UNIX's pathname limit; /tmp is intentionally
         # explicit, like the short socket runner in all.sh.
-        self.temporary = tempfile.TemporaryDirectory(prefix="fbt-d-", dir="/tmp")
+        # Disk benchmarks can choose a short private root on a real filesystem.
+        self.temporary = tempfile.TemporaryDirectory(prefix="fbt-d-", dir=directory)
         self.root = Path(self.temporary.name)
         self.env = dict(os.environ)
         for key in ("FBITTORRENT_NO_START", "NOTIFY_SOCKET", "WATCHDOG_PID", "WATCHDOG_USEC",

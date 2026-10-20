@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "oliver.torrents-quick",
   "name": "Torrent quick add/search",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "author": "Oliver",
   "license": "MIT",
   "description": "Optional keyboard palette using the Torrents shared daemon service.",
