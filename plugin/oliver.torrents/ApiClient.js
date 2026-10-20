@@ -135,10 +135,10 @@ function create(io, options) {
     changed()
     return true
   }
-  c.reset = function(message, recover) {
+  c.reset = function(message, recover, code) {
     io.disconnect(recover===true); c.disconnected()
     if(recover){c.reconnecting=true;c.mode="reconnecting"}
-    c.lastError = { code: recover ? "timeout" : "invalid_message", message: message, retryable: !!recover };changed()
+    c.lastError = { code: code || (recover ? "timeout" : "invalid_message"), message: message, retryable: !!recover };changed()
   }
   function presence() {
     return {interactive:c.dashboardVisible || c.quickVisible,glance:c.popupOpen,overlay_visible:c.quickVisible,dashboard_visible:c.dashboardVisible}
@@ -241,9 +241,12 @@ function create(io, options) {
     c.lastFrame = now()
     if (frame.ev) {
       // A connection accepted before laptop suspension can expire its hello
-      // deadline while the owner is stopped. The owner itself has not exited.
-      if(frame.ev==="bye" && frame.reason==="hello_required") {
-        c.reset("Connection timed out; reconnecting",true);return
+      // deadline while the owner is stopped. Reconnecting may also hit the
+      // connection limit. Neither means the owner exited or the protocol is bad.
+      var admissionBusy=!c.online && c.lastError && c.lastError.code==="busy" &&
+        c.lastError.details && c.lastError.details.limit==="connections"
+      if(frame.ev==="bye" && (frame.reason==="hello_required" || (frame.reason==="invalid_message" && admissionBusy))) {
+        c.reset(admissionBusy ? "Server busy; reconnecting" : "Connection timed out; reconnecting",true,admissionBusy ? "busy" : "timeout");return
       }
       if(frame.ev==="bye" && frame.reason==="shutdown") {
         Object.keys(c.pending).forEach(function(id){

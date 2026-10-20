@@ -16,7 +16,8 @@ from gate_safety import strict_check, strict_rust_test
 class SafetyTests(unittest.TestCase):
     def test_successful_retry_keeps_every_safety_family_red(self):
         for name in ('daemon/zero_upload', 'daemon/delete_files_safety_live',
-                     'tracker_privacy', 'native/q_confirms', 'daemon/idle_exit_glance_pauses'):
+                     'tracker_privacy', 'native/q_confirms', 'daemon/idle_exit_glance_pauses',
+                     'plugin_connection_recovery'):
             with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='fbt-strict-') as directory:
                 root=Path(directory); marker=root/'ran'
                 script=('import json,sys;from pathlib import Path;'
@@ -43,6 +44,7 @@ class SafetyTests(unittest.TestCase):
                             ('engine::dormant_delete::tests::parent_symlinks',True),
                             ('api::trackers::tests::redaction',True),
                             ('native_runtime::shutdown_tests::deadline',True),
+                            ('engine::tests::stop_can_persist_intent_with_both_checksum_workers_blocked',True),
                             ('engine::tests::timing_only',False)]:
             with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='fbt-strict-') as directory:
                 root=Path(directory)

@@ -4,7 +4,7 @@
 The caller's daemon and desktop are never used. The owned daemon is resumed
 before cleanup even when an assertion or interrupt aborts the experiment.
 """
-import argparse, json, os, signal, sys, time, socket
+import argparse, json, os, signal, sys, time, socket, re, math
 from contextlib import contextmanager
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]; sys.path.insert(0,str(ROOT/'agent_ergonomics_audit/audit/regression_tests')); sys.path.insert(0,str(ROOT/'plugin/tests'))
@@ -66,14 +66,14 @@ def run(binary,seconds,log,saturate=False):
    with connection_after_resume(pair.h) as client:
     assert pair.h.wait_for(lambda:((r:=value(client,pair.hash))['completed_bytes']>=before['completed_bytes']+262144 and r.get('dl_bps',0)>0,json.dumps(r)), 'stale peer reconnects and verified payload/rate recover without daemon restart',timeout=90)
     recovered=time.monotonic()-resume
-    assert ui.observe('read resumed TUI','the TUI resumes the actual transfer row',lambda pane:'fixture-download.bin' in pane and 'Connecting' not in pane,timeout=15)
-    try:q.wait(lambda:q.state().get('online') is True and pair.hash in q.ipc('renderedRows'),timeout=20)
+    assert ui.observe('read resumed TUI','the TUI resumes the actual transfer row',lambda pane:any('fixture-download.bin' in line and 'Down' in line and (m:=re.search(r'(\d+)%',line)) and int(m[1])>math.ceil(before['progress']*100) for line in pane.splitlines()),timeout=15)
+    try:q.wait(lambda:q.state().get('online') is True and any(r['hash']==pair.hash and r['progress']>before['progress'] for r in json.loads(q.ipc('renderedRows'))),timeout=20)
     except TimeoutError:
-     case.check(False,'headless shell reconnects after resume',json.dumps(dict(state=q.state(),rows=q.ipc('renderedRows'))));raise
+     case.check(False,'headless shell reconnects after resume',json.dumps(dict(state=q.state(),connection=json.loads(q.ipc('connectionState')),rows=q.ipc('renderedRows'))));raise
     trackers=client.call('torrents.trackers',dict(hash=pair.hash))['result']['trackers']
     assert case.check(any(t.get('last_announce_at',0)>=time.time()-max(20,recovered+5) and t['status']=='ok' for t in trackers),'tracker re-announces after resume',json.dumps(trackers))
     assert case.check(ticks(pid)-cpu < max(5,recovered*.5),'resume does not burn CPU replaying elapsed timer ticks',json.dumps(dict(suspended=seconds,recovered_s=recovered,cpu_s=ticks(pid)-cpu,row=value(client,pair.hash))))
-    ui.observe('capture healthy UI','actual downloading row remains navigable',lambda pane:'fixture-download.bin' in pane)
+    assert ui.press('Enter','recovered row opens real Details',lambda pane:'[Overview]' in pane and 'fixture-download.bin' in pane,literal=False)
     case.path.with_suffix('.result.json').write_text(json.dumps(dict(suspended_s=seconds,recovered_s=recovered,cpu_s=ticks(pid)-cpu,trackers=trackers,row=value(client,pair.hash)),indent=2))
   finally:
    for connection in fillers:connection.close()

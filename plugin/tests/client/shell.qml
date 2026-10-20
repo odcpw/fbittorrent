@@ -98,6 +98,16 @@ ShellRoot {
     s.c.receive(JSON.stringify({ev:"bye",reason:"shutdown"}))
     check("resume_hello",s.c.graceful && !s.c.reconnecting,"explicit shutdown still stops recovery",JSON.stringify(s.c.state()))
     console.log("FBTQS-PASS resume_hello")
+    s=session();s.c.connected()
+    s.c.receive(JSON.stringify({ev:"error",error:{code:"busy",message:"server limit reached",retryable:true,details:{limit:"connections"}}}))
+    s.c.receive(JSON.stringify({ev:"bye",reason:"invalid_message"}))
+    check("resume_busy",!s.c.graceful && s.c.reconnecting && s.recovery[0]===true,
+      "connection admission pressure retries instead of declaring the owner stopped",JSON.stringify(s.c.state()))
+    check("resume_busy",s.c.lastError && s.c.lastError.code==="busy" && s.c.lastError.retryable,"admission rejection keeps its actual busy classification",JSON.stringify(s.c.lastError))
+    s=session();s.c.connected();s.c.receive(JSON.stringify({ev:"bye",reason:"invalid_message"}))
+    check("resume_busy",s.c.graceful && !s.c.reconnecting && !s.recovery.length,
+      "a genuine protocol rejection remains terminal",JSON.stringify(s.c.state()))
+    console.log("FBTQS-PASS resume_busy")
     s=session(); s.c.receive("x".repeat(1048577))
     check("line_cap", s.resets.length===1, "1 MiB + 1 line rejected before JSON parse", s.c.lastError.message)
     s=session(); s.c.receive("[")

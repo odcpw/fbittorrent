@@ -106,7 +106,8 @@ Item {
   readonly property string bin: String(settings.binary || "fbittorrent")
   readonly property bool online: status.ok === true && status.running !== false
   property bool resultUnknown:false
-  property bool reconnecting: false
+  property bool clientReconnecting: false
+  readonly property bool reconnecting: recoveringSocket || clientReconnecting
   property bool recoveringSocket: false
   property int recoveryDelay: 1000
   property string socketIdentity:""
@@ -203,7 +204,7 @@ Item {
       if(!c.online)OfflineState.clear(root)
       status = Model.apiStatus(store,c.online)
     }
-    reconnecting = c.reconnecting; instance = c.instance
+    clientReconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
@@ -433,7 +434,7 @@ Item {
     parser: SplitParser { onRead: function(data) { if (root.client) root.client.receive(data) } }
     onConnectionStateChanged: {
       if (!root.client) return
-      if (connected) {wasOnline=false;intentionalClose=false;socketAppearance.stop();root.client.connected()}
+      if (connected) {wasOnline=false;intentionalClose=false;recoveryRequested=true;socketAppearance.stop();root.client.connected()}
       else {var retry=(wasOnline || recoveryRequested) && !intentionalClose && !root.client.graceful;wasOnline=false;intentionalClose=false;recoveryRequested=false;root.client.disconnected();if(retry){root.recoveringSocket=true;root.checkSocket(true);socketRecovery.restart()}}
     }
     onError: if (root.client && !connected) {root.client.disconnected();if(root.recoveringSocket)socketRecovery.restart()}
