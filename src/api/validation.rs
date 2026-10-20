@@ -234,8 +234,7 @@ impl Validate for Reply {
             Self::AppStats(result)=>{if let Some(history)=&result.history {history.validate()?;} Ok(())},
             Self::AppLog(result) => {
                 require(result.entries.len() <= 1000, "entries", "at most 1000")?;
-                for entry in &result.entries { entry.validate()?; }
-                Ok(())
+                result.entries.iter().try_for_each(Validate::validate)
             }
             Self::TorrentsTrackers(result) => {
                 let mut previous=None;
@@ -247,24 +246,14 @@ impl Validate for Reply {
                 }
                 Ok(())
             }
-            Self::TorrentsList(result) => {
-                for value in &result.torrents {
-                    value.validate()?;
-                }
-                Ok(())
-            }
+            Self::TorrentsList(result) => result.torrents.iter().try_for_each(Validate::validate),
             Self::TorrentsGet(result) => result.torrent.validate(),
-            Self::TorrentsPeers(result) => { for value in &result.peers {value.validate()?;} Ok(()) },
-            Self::TorrentsFiles(result) => {
-                for value in &result.files {
-                    value.validate()?;
-                }
-                Ok(())
-            }
+            Self::TorrentsPeers(result) => result.peers.iter().try_for_each(Validate::validate),
+            Self::TorrentsFiles(result) => result.files.iter().try_for_each(Validate::validate),
             Self::SearchStart(result) if result.search_id == 0 => Err(Violation("search_id: must be positive".into())),
             Self::SearchBrowse(result) => {
                 require(result.items.len() <= 5000, "items", "search result cap is 5000")?;
-                for value in &result.items { value.validate()?; } Ok(())
+                result.items.iter().try_for_each(Validate::validate)
             }
             Self::Subscribe(result) => count(result.topics.len(), MAX_SUBSCRIPTIONS, "topics"),
             _ => Ok(()), // Pending refs are required by their serde variants.
@@ -404,12 +393,7 @@ impl NegotiatedCaps {
             Reply::TorrentsPieces(_) => require(self.pieces,"result","requires the pieces capability"),
             Reply::AppLog(_) => require(self.log, "result", "requires the log capability"),
             Reply::AppStats(result) => {require(self.log,"result","requires the log capability")?;require((result.history.is_none()&&result.session.is_none()&&result.all_time.is_none())||self.history,"history/session/all_time","requires the history capability")},
-            Reply::TorrentsList(result) => {
-                for torrent in &result.torrents {
-                    self.torrent(torrent)?;
-                }
-                Ok(())
-            }
+            Reply::TorrentsList(result) => result.torrents.iter().try_for_each(|t| self.torrent(t)),
             Reply::TorrentsGet(result) => self.torrent(&result.torrent.torrent),
             _ => Ok(()),
         }
