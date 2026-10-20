@@ -11,7 +11,7 @@ ShellRoot {
  Connections {target:mirror;function onModelReset(){resets++} function onDataChanged(){updates++}}
  function check(name,ok,expect,actual){console.log("FBTQS-STEP "+JSON.stringify({case:name,action:"repeat unrelated frames and append log entries",expect:expect,observed:JSON.stringify(actual),ok:ok,ms:0}));console.log("FBTQS-PASS "+name)}
  Component.onCompleted:Qt.callLater(function(){
-  var client={online:false,reconnecting:false,instance:"",actions:{},state:function(){return {pending:[]}},request:function(){return 1},retryDelay:500,tick:function(){},mode:"stopped",caps:[],lastError:null}
+  var client={online:false,reconnecting:false,instance:"",actions:{},state:function(){return {pending:[]}},request:function(){return 1},nextWakeup:function(){return Infinity},tick:function(){},mode:"stopped",caps:[],lastError:null}
   var before=svc.actionRevision
   for(var i=0;i<100;i++)svc.syncClient(client)
   var actions=svc.actionRevision-before
@@ -22,11 +22,11 @@ ShellRoot {
   check("action_confirmation",svc.actionRevision===revision+1 && !svc.pendingAction("a".repeat(40)),"confirmation publishes exactly one removal",svc.actionRevision)
   client.lastError={code:"timeout",message:"old timeout"};svc.syncClient(client);svc.notify("old timeout · Refresh")
   client.lastError=null;svc.syncClient(client)
-  check("error_success",!svc.lastError && !svc.lastMessageText && !svc.toast.text,"successful client recovery clears the stale footer and toast",{error:svc.lastError,message:svc.lastMessageText,toast:svc.toast})
+  check("error_success",!svc.lastError && !svc.lastMessageText && !svc.toast,"successful client recovery clears the stale footer and toast",{error:svc.lastError,message:svc.lastMessageText,toast:svc.toast})
   svc.notify("old timeout");client.instance="new-instance";svc.syncClient(client)
-  check("error_restart",!svc.lastMessageText && !svc.toast.text,"instance reset clears stale toast and footer",svc.lastMessageText)
+  check("error_restart",!svc.lastMessageText && !svc.toast,"instance reset clears stale toast and footer",svc.lastMessageText)
   var a="a".repeat(40),b="b".repeat(40)
-  svc.client=client
+  client.online=true;svc.client=client;svc.syncClient(client)
   svc.applyFrame({id:1,ok:true,result:{torrents:[{hash:a,name:"Selected",state:"downloading",size:4096,checked:true},{hash:b,name:"Other",state:"downloading"}]}},{op:"torrents.list"})
   svc.detailFlow.begin(a);svc.store.subscriptions[1]={rev:0,topics:["torrents"]}
   before=svc.detailRevision

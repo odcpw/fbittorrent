@@ -194,6 +194,7 @@ Item {
 
 
   function syncClient(c) {
+    clock.schedule()
     if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
@@ -436,7 +437,8 @@ Item {
     }
     onError: if (root.client && !connected) root.client.disconnected()
   }
-  Timer { interval: 1000; repeat: true; running: !!root.client && (socket.connected || root.busy || root.startupRequested); onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
+  Timer {id:deadline;property real at:Infinity;onTriggered:clock.wake()}
+  ServiceClock {id:clock;service:root;timer:deadline}
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }

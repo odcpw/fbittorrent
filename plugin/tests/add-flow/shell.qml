@@ -22,7 +22,7 @@ ShellRoot {
     s.files=function(rows){var topic="torrent:"+s.flow.snapshot().hash+".files",keyed={};rows.forEach(function(row){keyed[row.index]=row});s.store.topics[topic]=keyed;s.flow.frame({ev:"snapshot.end",topic:topic})}
     return s
   }
-  function controller(s){s.flow=Flow.create(s,function(){},true);return s.flow}
+  function controller(s){s.flow=Flow.create(s,function(){},true,function(){return s.now});return s.flow}
   Component.onCompleted:{
     var count=0,hash="a".repeat(40),source={magnet:"magnet:?xt=urn:btih:"+hash+"&dn=Review%20me"}
     check("source","hex and base32 normalize to the same hash",Source.parse("magnet:?xt=urn:btih:"+"A".repeat(32)),Source.parse("magnet:?xt=urn:btih:"+"A".repeat(32)).hash==="0".repeat(40) && Source.parse(source.magnet).hash===hash)
@@ -34,11 +34,14 @@ ShellRoot {
     f.open(source)
     check("review","opening a source stages with upload off and preserves destination",f.snapshot(),s.calls.length===1 && s.calls[0].args.stage===true && !f.snapshot().seed && f.snapshot().savePath==="/downloads")
     s.reply("torrents.add",{hash:hash});var reads=s.calls.length
+    check("deadlines","metadata waits once until 90s, without a one-second refresh",f.nextWakeup(),f.nextWakeup()===90000)
     for(var tick=1;tick<=30;tick++){s.now=tick*1000;f.tick()}
     check("review","metadata wait never polls get or files on timer ticks",s.calls,s.calls.length===reads)
     s.metadata({hash:hash,name:"Pushed metadata",staged:true,size:4096})
+    check("deadlines","arriving metadata cancels the metadata timeout",f.nextWakeup(),f.nextWakeup()===Infinity)
     check("review","pushed torrent metadata immediately acquires the file subscription",s.addTopics,s.addTopics[0]==="torrent:"+hash+".files")
     f.cancel();s.reply("torrents.discard",{})
+    check("deadlines","closed sheet has no pending time work",f.nextWakeup(),f.nextWakeup()===Infinity)
     check("review","cancel discards a stage without downloading or deleting files",f.snapshot(),!f.snapshot().visible && s.calls[s.calls.length-1].op==="torrents.discard")
     s=service(["torrents","files","staging"]);f=controller(s);f.open(source)
     check("staging","stage is sent only after negotiation",s.calls[0],s.calls[0].args.stage===true)
@@ -129,7 +132,7 @@ ShellRoot {
     console.log("FBTQS-PASS disconnect_review")
     console.log("FBTQS-PASS early_download")
     console.log("FBTQS-PASS space_refusal")
-    ;["source","review","staging","cancel_race","timeout","duplicate","subscription","pending_commit","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})
+    ;["deadlines","source","review","staging","cancel_race","timeout","duplicate","subscription","pending_commit","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})
     Qt.callLater(function(){Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")])})
   }
 }

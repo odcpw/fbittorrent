@@ -1,6 +1,7 @@
 .pragma library
 .import "SettingsSchema.js" as Schema
-function create(service,changed){
+function create(service,changed,clock){
+ var now=clock || Date.now
  var f={pending:{},errors:{},banner:"",interfaces:[],active:false,loaded:false},lastSeq=0,restartAt=0,restartDone=false
  function equal(a,b){return a===b || (a===undefined && b===null)}
  function reconcile(){
@@ -23,7 +24,7 @@ function create(service,changed){
    if(error){delete f.pending[key];f.errors[key]=error.message}
    else if(f.pending[key]){
     f.pending[key].acked=true
-    if(result.restart){restartAt=service.now;restartDone=false;f.banner="applies after restart; restarting now"}
+    if(result.restart){restartAt=now();restartDone=false;f.banner="applies after restart; restarting now"}
     reconcile()
    }
    changed()
@@ -36,7 +37,8 @@ function create(service,changed){
   else if(frame.ev==="engine.changed"){if(restartAt && frame.state==="running")restartDone=true}
   if(frame.topic==="settings" || (frame.id!==undefined && Object.keys(f.pending).length)){reconcile();changed()}
  }
- f.tick=function(){if(restartAt && restartDone && service.now-restartAt>=1500){restartAt=0;f.banner="Settings applied after restart";changed()}}
+ f.nextWakeup=function(){return restartAt && restartDone ? restartAt+1500 : Infinity}
+ f.tick=function(){if(now()>=f.nextWakeup()){restartAt=0;f.banner="Settings applied after restart";changed()}}
  f.snapshot=function(){return {values:service.store.settings,pending:f.pending,errors:f.errors,banner:f.banner,interfaces:f.interfaces,loaded:f.loaded}}
  return f
 }

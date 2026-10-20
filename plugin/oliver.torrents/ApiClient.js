@@ -220,6 +220,15 @@ function create(io, options) {
     c.subscribeAll(true)
     if (o.resubscribe) o.resubscribe(topic)
   }
+  // Socket traffic and input drive normal work. Wake only for a real timeout
+  // or failed-subscription retry; accepted mutations await their receipt.
+  c.nextWakeup = function() {
+    var at=c.helloSent ? c.lastFrame+45000 : Infinity
+    Object.keys(c.pending).forEach(function(id){at=Math.min(at,c.pending[id].deadline)})
+    Object.keys(c.awaiting).forEach(function(ref){at=Math.min(at,c.awaiting[ref].deadline)})
+    if(c.online && subscriptionWanted && !subscriptionRun)at=Math.min(at,subscriptionRetryAt)
+    return at
+  }
   c.tick = function() {
     if (c.helloSent && now() - c.lastFrame >= 45000) { c.reset("45 seconds without a frame"); return }
     Object.keys(c.pending).forEach(function(id) {
