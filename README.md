@@ -25,7 +25,9 @@ Or put a built `fbittorrent` binary on PATH and install its desktop integration:
 fbittorrent setup --magnet --plugin=copy
 ```
 
-Keep the build checkout available while setup copies the plugin. Setup installs
+The binary includes both plugins; copy installs need no source checkout.
+`--plugin=link` links a checkout found from the working directory or binary
+location, falling back to an embedded copy when neither is in a checkout. Setup installs
 the on-demand user service, magnet/`.torrent` handlers, icon, menu and bar entry.
 Changed plugin installs **restart the Omarchy shell**, recreating open windows
 with the new code. An unchanged repeat is a no-op. Nothing is enabled at login.

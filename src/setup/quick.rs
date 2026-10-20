@@ -143,29 +143,9 @@ pub(super) fn install(
     config: &Path,
     mode: &str,
     selected: &str,
-) -> Result<()> {
+) -> Result<plugins::Source> {
     let before = actions.len();
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("plugin")
-        .join(ID)
-        .canonicalize()?;
-    let target = config.join("omarchy/plugins").join(ID);
-    if mode == "link" {
-        if std::fs::read_link(&target).ok().as_ref() != Some(&source) {
-            remove(actions, target.clone());
-            let mut item = action("link", target);
-            item.args.push(source.display().to_string());
-            actions.push(item);
-        }
-    } else {
-        let linked = target
-            .symlink_metadata()
-            .is_ok_and(|m| m.file_type().is_symlink());
-        if linked {
-            remove(actions, target.clone());
-        }
-        copy_plan(actions, &source, &target, linked)?;
-    }
+    let source = plugins::install(actions, config, &plugins::QUICK, mode)?;
     let changed = actions.len() != before;
     let path = config.join("hypr/bindings.lua");
     let old = if path.exists() {
@@ -178,7 +158,7 @@ pub(super) fn install(
     if changed {
         command(actions, "omarchy-shell", &["-q", "shell", "rescanPlugins"]);
     }
-    Ok(())
+    Ok(source)
 }
 pub(super) fn uninstall(actions: &mut Vec<Action>, config: &Path) -> Result<()> {
     remove(actions, config.join("omarchy/plugins").join(ID));
