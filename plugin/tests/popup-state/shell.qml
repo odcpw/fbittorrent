@@ -43,7 +43,7 @@ ShellRoot {
     var r=State.describe(s);check("states","not running, explicit Start",r,r.message.indexOf("Enter Start")>=0)
     s.client.mode="connecting";s.now=1000;r=State.describe(s);check("states","first two seconds Connecting",r,r.message==="Connecting…")
     s.startupRequested=true;r=State.describe(s);check("states","explicit Starting",r,r.message.indexOf("Starting")===0);s.startupRequested=false
-    s.reconnecting=true;s.client.retryDelay=4000;r=State.describe(s);check("states","last-known rows dim while reconnecting; retry seconds",r,r.dim && r.message.indexOf("4 s")>=0);s.reconnecting=false
+    s.reconnecting=true;r=State.describe(s);check("states","last-known rows dim during an actual reconnect without a fictitious retry timer",r,r.dim && r.message==="Reconnecting…");s.reconnecting=false
     s.stoppedRecently=true;r=State.describe(s);check("states","stopped recently",r,r.message.indexOf("stopped.")>=0)
     s.online=true;s.client.hello={server:{version:"0.2.0"}};s.store.info.installed_version="0.2.1";r=State.describe(s);check("states","current native UI has no version-skew warning",r,r.banner==="");s.store.info={}
     s.backendState="parked";s.store.summary.network={interface:"proton0"};r=State.describe(s);check("states","VPN banner dims rows",r,r.dim && r.urgent && r.banner.indexOf("proton0")>=0)
