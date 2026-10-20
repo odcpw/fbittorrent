@@ -106,6 +106,8 @@ Item {
   readonly property bool online: status.ok === true && status.running !== false
   property bool resultUnknown:false
   property bool reconnecting: false
+  property bool recoveringSocket: false
+  property int recoveryDelay: 1000
   property string socketIdentity:""
   property bool stoppedRecently: false
   property string byeReason: ""
@@ -193,6 +195,7 @@ Item {
 
 
   function syncClient(c) {
+    if(c.online || c.graceful || c.protocolMismatch){recoveringSocket=false;socketRecovery.stop();recoveryDelay=1000}
     if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
@@ -424,15 +427,20 @@ Item {
     id: socket
     property bool wasOnline:false
     property bool intentionalClose:false
+    property bool recoveryRequested:false
     path: root.runtimeDir + "/fbittorrent/api.sock"
     parser: SplitParser { onRead: function(data) { if (root.client) root.client.receive(data) } }
     onConnectionStateChanged: {
       if (!root.client) return
       if (connected) {wasOnline=false;intentionalClose=false;socketAppearance.stop();root.client.connected()}
-      else {var retry=wasOnline && !intentionalClose && !root.client.graceful;wasOnline=false;intentionalClose=false;root.client.disconnected();if(retry)root.checkSocket(true)}
+      else {var retry=(wasOnline || recoveryRequested) && !intentionalClose && !root.client.graceful;wasOnline=false;intentionalClose=false;recoveryRequested=false;root.client.disconnected();if(retry){root.recoveringSocket=true;root.checkSocket(true);socketRecovery.restart()}}
     }
-    onError: if (root.client && !connected) root.client.disconnected()
+    onError: if (root.client && !connected) {root.client.disconnected();if(root.recoveringSocket)socketRecovery.restart()}
   }
+  Timer {id:socketRecovery;interval:root.recoveryDelay;onTriggered:{
+    if(!root.recoveringSocket)return
+    root.checkSocket(true);root.recoveryDelay=Math.min(root.recoveryDelay*2,15000);restart()
+  }}
   Timer { interval: 1000; repeat: true; running: !!root.client && (socket.connected || root.busy || root.startupRequested); onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
@@ -482,7 +490,7 @@ Item {
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
-      disconnect:function() {socket.intentionalClose=true;socket.connected=false}
+      disconnect:function(recover) {root.recoveringSocket=!!recover;if(recover)socketRecovery.restart();else socketRecovery.stop();socket.recoveryRequested=!!recover;socket.intentionalClose=!recover;socket.connected=false}
     }, {version:manifest.version || "0.6.0", changed:syncClient, frame:applyFrame,
       instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
