@@ -29,7 +29,7 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use qbt::{human_bytes, Torrent};
+use qbt::human_bytes;
 use std::process::Command;
 
 fn main() {

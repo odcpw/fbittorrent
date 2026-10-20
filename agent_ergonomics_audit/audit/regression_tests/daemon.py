@@ -818,14 +818,14 @@ def daemon_api_probe(binary, systemd):
                        "real CLI reports a live daemon without inventing an open TUI", f"Status={status!r}.")
             added = harness.cli("add", str(fixture.torrent), "--stopped", "--quiet")
             shown = harness.cli("show", fixture.info_hash)
-            case.check(added.get("hash") == fixture.info_hash and shown.get("hash") == fixture.info_hash
-                       and shown.get("size") == 256 * 1024,
+            case.check(added.get("hash") == fixture.info_hash and shown["torrent"].get("hash") == fixture.info_hash
+                       and shown["torrent"].get("size") == 256 * 1024,
                        "the real current engine parses the private local torrent with its exact hash and payload size",
                        f"Added={added!r}; shown={shown!r}.")
             multi = fixtures.two_file_fixture()
             harness.cli("add", str(multi.torrent), "--stopped", "--quiet")
             shown = harness.cli("show", multi.info_hash)
-            case.check(shown.get("hash") == multi.info_hash and
+            case.check(shown["torrent"].get("hash") == multi.info_hash and
                        [entry.get("size") for entry in shown.get("files", [])] == [16384 + 123, 256 * 1024],
                        "the real current engine accepts the mid-piece two-file torrent and preserves both lengths",
                        f"Shown={shown!r}.")
@@ -2877,8 +2877,8 @@ def add_starts_unit_no_launcher(binary, systemd):
             if not (seed.receive_ready() and seed.wait_engine()):
                 return
             seed.cli("add", str(fixture.torrent), "--upload", "--save", str(fixture.files[0].parent))
-            seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True and row.get("state") == "uploading",
-                                  f"Seed state={row.get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture and starts serving")
+            seed.wait_for(lambda: ((row := seed.cli("show", fixture.info_hash)).get("complete") is True and row["torrent"].get("state") == "seeding",
+                                  f"Seed state={row['torrent'].get('state')}; complete={row.get('complete')}"), "seed verifies the real fixture and starts serving")
             config = Path(seedbox.env["XDG_CONFIG_HOME"]) / "fbittorrent/config.toml"
             port = int(re.search(r"peer_port = (\d+)", config.read_text()).group(1))
             step = case.step("connect real seed peer", "loopback seed accepts a BitTorrent handshake for the fixture hash")

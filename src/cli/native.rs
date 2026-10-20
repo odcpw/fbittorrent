@@ -53,7 +53,7 @@ fn list(client: &ApiClient) -> Result<Vec<api::Torrent>> {
     )?)
 }
 fn selected(rows: &[api::Torrent], selectors: &[String]) -> Result<Vec<String>> {
-    crate::cli_sources::resolve_in(&shapes::legacy(rows)?, selectors)
+    crate::cli_sources::resolve_in(rows, selectors)
 }
 pub(super) fn emit(json_mode: bool, value: Value) {
     crate::emit(json_mode, value.clone(), || {
@@ -126,9 +126,8 @@ pub(super) fn emit(json_mode: bool, value: Value) {
         } else if let Some(rows) = value["torrents"].as_array() {
             for row in rows {
                 let hash = row["hash"].as_str().unwrap_or("");
-                let progress=crate::torrent_format::progress((row["progress_known"]!=false)
-                    .then(||row["progress"].as_f64()).flatten());
-                let key=serde_json::from_value(row["native_state"].clone()).map_or("unknown",|state|
+                let progress=crate::torrent_format::progress(row["progress"].as_f64());
+                let key=serde_json::from_value(row["state"].clone()).map_or("unknown",|state|
                     crate::torrent_format::key(state,row["reason"].as_str(),row["playable"]["ready"]==true));
                 let state=crate::torrent_format::cell(key,row["reason"].as_str()).trim_end();
                 println!(
@@ -139,12 +138,12 @@ pub(super) fn emit(json_mode: bool, value: Value) {
                     row["name"].as_str().unwrap_or("")
                 );
             }
-        } else if value.get("hash").is_some() {
+        } else if let Some(torrent) = value.get("torrent") {
             println!(
                 "{}\n  hash  {}\n  state {}\n  open  {}",
-                value["name"].as_str().unwrap_or("torrent"),
-                value["hash"].as_str().unwrap_or(""),
-                value["state"].as_str().unwrap_or("unknown"),
+                torrent["name"].as_str().unwrap_or("torrent"),
+                torrent["hash"].as_str().unwrap_or(""),
+                torrent["state"].as_str().unwrap_or("unknown"),
                 value["open_target"].as_str().unwrap_or("")
             );
         } else {
@@ -293,7 +292,6 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                                         | api::TorrentState::Stalled
                                 )
                         })
-                        .map(shapes::torrent)
                         .collect();
                     emit(
                         json_mode,
@@ -303,31 +301,29 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 Cmd::Show { selector } => {
                     let hashes = selected(&rows, &[selector.clone()])?;
                     let t = rows.iter().find(|t| t.hash.as_str() == hashes[0]).unwrap();
-                    let mut value = shapes::torrent(t);
-                    value["ok"] = json!(true);
-                    value["running"] = json!(running);
-                    value["open_target"] = json!(t.content_path.as_deref().unwrap_or(&t.save_path));
-                    value["seed_allowed"] = json!(t.seed);
-                    value["complete"] = json!(t.progress.map(|v| v >= 1.0));
-                    value["peers"] = if let Some(c)=&client {if c.hello.caps.iter().any(|cap|cap=="peers"){c.call("torrents.peers",json!({"hash":hashes[0]}))?["peers"].clone()}else{json!([])}}else{json!([])};
-                    value["files"] = if let Some(c) = &client {
-                        c.call("torrents.files", json!({"hash":hashes[0]}))
-                            .map(|v| json!(v["files"].as_array().map(|files|files.iter().map(|f|json!({"index":f["index"],"name":f["path"],"size":f["size"],"progress":f["progress"],"progress_known":t.checked && t.state!=api::TorrentState::WaitingVpn,"priority":if f["included"]==true{1}else{0}})).collect::<Vec<_>>()).unwrap_or_default()))
-                            .unwrap_or(json!([]))
-                    } else {
-                        json!([])
-                    };
+                    // The API objects themselves: torrents.get, files, peers and trackers.
+                    let mut value = json!({"ok":true,"running":running,"torrent":t,
+                        "open_target":t.content_path.as_deref().unwrap_or(&t.save_path),"files":[],"peers":[],"trackers":[]});
+                    if let Some(complete) = t.progress.map(|v| v >= 1.0) { value["complete"] = json!(complete); }
                     if let Some(c)=&client {
-                        let detail=c.call("torrents.get",json!({"hash":hashes[0]}))?;
-                        if let Some(count)=detail["torrent"].get("tracker_count") {value["tracker_count"]=count.clone();}
+                        value["torrent"]=c.call("torrents.get",json!({"hash":hashes[0]}))?["torrent"].take();
+                        if c.hello.caps.iter().any(|cap|cap=="peers") {value["peers"]=c.call("torrents.peers",json!({"hash":hashes[0]}))?["peers"].take();}
+                        // File progress is only measured once the torrent's data is checked.
+                        let measured = t.checked && t.state != api::TorrentState::WaitingVpn;
+                        if let Ok(mut files) = c.call("torrents.files", json!({"hash":hashes[0]})) {
+                            for file in files["files"].as_array_mut().into_iter().flatten() {
+                                if !measured { file.as_object_mut().map(|f| f.remove("progress")); }
+                            }
+                            value["files"] = files["files"].take();
+                        }
                         value["trackers"]=if c.hello.caps.iter().any(|cap|cap=="trackers") {
                             serde_json::to_value(serde_json::from_value::<api::TrackersResult>(c.call("torrents.trackers",json!({"hash":hashes[0]}))?)?.trackers.into_iter().map(api::trackers::public_tracker).collect::<Vec<_>>())?
                         } else {json!([])};
-                    } else { value["trackers"]=json!([]); }
+                    }
                     emit(json_mode, value);
                 }
                 Cmd::Triage => {
-                    let mut value = json!({"ok":true,"running":running,"contract_version":crate::agent::CONTRACT_VERSION,"backend":{"engine":"native","running":running,"connection":if running{"api"}else{"stopped"}},"counts":counts(&rows),"torrents":shapes::rows(&rows),"next_commands":["fbittorrent events --follow","fbittorrent search \"<title>\" --json"],"docs":"fbittorrent robot-docs"});
+                    let mut value = json!({"ok":true,"running":running,"contract_version":crate::agent::CONTRACT_VERSION,"backend":{"engine":"native","running":running,"connection":if running{"api"}else{"stopped"}},"counts":counts(&rows),"torrents":rows,"next_commands":["fbittorrent events --follow","fbittorrent search \"<title>\" --json"],"docs":"fbittorrent robot-docs"});
                     if let Some(c) = &client {
                         let info = c.call("app.info", json!({}))?;
                         value["backend"]["daemon"] = daemon_status(&info);
@@ -355,7 +351,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 let hashes = selected(&rows, selectors)?;
                 emit(
                     json_mode,
-                    json!({"ok":true,"action":"delete","dry_run":true,"files":matches!(cmd,Cmd::Delete{files:true,..}),"running":client.is_some(),"torrents":shapes::rows(&rows.iter().filter(|row|hashes.iter().any(|hash|hash==row.hash.as_str())).cloned().collect::<Vec<_>>())}),
+                    json!({"ok":true,"action":"delete","dry_run":true,"files":matches!(cmd,Cmd::Delete{files:true,..}),"running":client.is_some(),"torrents":rows.iter().filter(|row|hashes.iter().any(|hash|hash==row.hash.as_str())).collect::<Vec<_>>()}),
                 );
                 return Ok(Code::Ok);
             }
@@ -426,7 +422,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                     if *dry_run {
                         emit(
                             json_mode,
-                            json!({"ok":true,"action":"delete","dry_run":true,"files":files,"torrents":shapes::rows(&rows)}),
+                            json!({"ok":true,"action":"delete","dry_run":true,"files":files,"torrents":rows}),
                         );
                         return Ok(Code::Ok);
                     }
@@ -660,7 +656,7 @@ fn wait_for(
             };
             let mut torrents=Vec::new();
             for row in &mine {
-                let mut value=shapes::torrent(row);
+                let mut value=json!(row);
                 if let Some(play)=row.playable.as_ref().filter(|p|p.ready) {
                     let files=c.call("torrents.files",json!({"hash":row.hash}))?;
                     if let Some(file)=files["files"].as_array().and_then(|fs|fs.iter().find(|f|f["index"]==play.file)) {

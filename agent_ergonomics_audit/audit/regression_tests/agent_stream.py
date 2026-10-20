@@ -145,18 +145,7 @@ def api_list_matches(binary,systemd):
         frame=json.loads(cli(case,box,binary,'api','torrents.list','--json'))
         case.check(frame.get('id')==2 and frame.get('ok') is True,'raw API success preserves the exact wire envelope',json.dumps(frame))
         normal=json.loads(cli(case,box,binary,'list','--json'))['torrents']
-        input_=box.root/'normalized.json';output=box.root/'shapes.json'
-        input_.write_text(json.dumps(frame['result']['torrents']))
-        validator=os.environ.get('FBT_API_CONTRACT_VALIDATOR')
-        if not validator:
-            candidates=[p for p in (d.REPO/'target/debug/deps').glob('fbittorrent-*') if p.is_file() and os.access(p,os.X_OK)]
-            validator=str(max(candidates,key=lambda p:p.stat().st_mtime))
-        env=dict(box.env,FBT_TEST_SHAPES_INPUT=str(input_),FBT_TEST_SHAPES_OUTPUT=str(output))
-        step=case.step('apply actual Rust cli::shapes::rows to live API objects','bridge exits 0 and all CLI torrent fields equal its output')
-        child=case.popen([validator,'cli::shapes::tests::live_shape_bridge','--exact','--ignored','--nocapture'],env=env,cwd=box.root,stdout=subprocess.DEVNULL)
-        code=child.wait(timeout=10)
-        expected=json.loads(output.read_text()) if output.exists() else None
-        step.close(code==0 and normal==expected,json.dumps(dict(exit=code,cli=normal,shaped=expected)))
+        case.check(normal==frame['result']['torrents'],'CLI list rows are the API torrent objects, field for field',json.dumps(dict(cli=normal,api=frame['result']['torrents'])))
         hello=json.loads(cli(case,box,binary,'api','hello','--json'))
         case.check(hello.get('ok') is True and hello.get('id')==1,'raw hello uses the real first handshake once',json.dumps(hello))
         error=json.loads(cli(case,box,binary,'api','torrents.get','--arg','hash=bad','--json',code=2))

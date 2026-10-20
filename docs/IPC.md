@@ -913,52 +913,19 @@ can still fail. Native `add --save` uses the same check and exits 2 before
 submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
 covers known, absent and zero space.
 
-### Integrated CLI contract patch history
+### CLI contract 2.0.0: torrents are API objects
 
-The current CLI contract is **1.2.32**. Additive changes from parallel tracks
-may share a patch version. Integration preserves their version numbers and
-change descriptions; patches are not renumbered at merge time.
-API hello still negotiates wire version 1; these CLI patches do not change
-NDJSON framing or the capability arrays in the wire fixtures.
-
-| CLI contract patch | capabilities.changes field |
-|---|---|
-| `1.2.1` | `add.deferred` |
-| `1.2.2` | `settings` |
-| `1.2.3` | `api.torrents.recheck` |
-| `1.2.4` | `api.queue` |
-| `1.2.5` | `api.origin` |
-| `1.2.6` | `log` |
-| `1.2.7` | `restart.server` |
-| `1.2.8` | `events` |
-| `1.2.9` | `api` |
-| `1.2.10` | `api.search` |
-| `1.2.11` | `setup.actions` |
-| `1.2.12` | `trackers` |
-| `1.2.13` | `add.confirmation_required` |
-| `1.2.14` | `limits` |
-| `1.2.15` | `caps.imdb` |
-| `1.2.16` | `app.free_space` |
-| `1.2.17` | `add.disk` |
-| `1.2.18` | `clipboard` |
-| `1.2.19` | `rss` |
-| `1.2.20` | `shows` |
-| `1.2.21` | `api.move` |
-| `1.2.22` | `api.staging` |
-| `1.2.23` | `app.client.dashboard_visible` |
-| `1.2.24` | `search.results[].providers` |
-| `1.2.25` | `playable` |
-| `1.2.26` | `list[].num_seeds` |
-| `1.2.27` | `download_limit_bps` |
-| `1.2.28` | `search.install_torznab` |
-| `1.2.29` | `search.torznab` |
-| `1.2.30` | `shows.quality` |
-| `1.2.30` | `trackers.edit` |
-| `1.2.31` | `status.history` |
-| `1.2.31` | `pieces` |
-| `1.2.31` | `cli.catalogue` |
-| `1.2.32` | `status.session`, `status.all_time` |
-| `1.2.32` | `torrents.rename` |
+The current CLI contract is **2.0.0**. `list`, `triage`, `status`, `wait` and
+`delete --dry-run` print `torrents[]` as the A.9 `Torrent` objects that
+`torrents.list` returns, field for field; `show` prints
+`{torrent, files[], peers[], trackers[], open_target, complete?}` with
+`torrent` from `torrents.get` and the other arrays from their API reads. An
+absent field is unknown: the contract-1.x qBittorrent shapes and their
+sentinels (`stoppedDL`-style states, `eta` 8640000, `num_seeds` 0,
+`progress_known`, `native_state`, `ratio_limit`, `tags`) are gone, as is the
+`capabilities.changes[]` patch history. The upload opt-in verbs are `upload` /
+`noupload` and `add --upload`. API hello still negotiates wire version 1; the
+wire objects are unchanged.
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1083,9 +1050,8 @@ rates coalesce on the detail tick. Rates require two observations at least one
 second apart and are absent initially or after a counter reset. Reads of known
 inactive torrents return an empty peer table. Live torrent `seeds` counts
 connected peers whose entire piece bitfield is set (padding bits excluded);
-inactive/unknown counts remain absent. CLI `show --json` adds `peers[]` and
-`seeds`; contract-1.x `num_seeds` now uses that connected seed count, with its
-historical zero fallback when the optional count is absent. No tracker scrape.
+inactive/unknown counts remain absent. CLI `show --json` carries `peers[]` and
+the torrent's optional `seeds`. No tracker scrape.
 
 ### M1a: visible dashboard presence (contract 1.2.23)
 

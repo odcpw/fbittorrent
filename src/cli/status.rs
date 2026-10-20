@@ -56,7 +56,7 @@ fn collect(client:&Client,cfg:&Config)->Result<Value> {
     value["dl"]=json!(transfer["dl_bps"].as_u64().unwrap_or(0));
     value["up"]=json!(transfer["ul_bps"].as_u64().unwrap_or(0));
     value["daemon"]=summary.as_ref().map(|v|v["daemon"].clone()).unwrap_or_else(||native::daemon_status(&info));
-    value["torrents"]=json!(super::shapes::rows(&rows));
+    value["torrents"]=json!(rows);
     Ok(value)
 }
 fn live(client:&Client,cfg:&Config)->Result<Value> {

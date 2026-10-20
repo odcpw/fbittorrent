@@ -29,7 +29,7 @@ fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
             .is_some_and(|d| d.get("reason").is_some_and(|v| v == "complete_no_seed"))
         {
             let hash = failure.details.as_ref().unwrap()["hash"].as_str().unwrap();
-            failure.hint = Some(format!("fbittorrent seed {hash}"));
+            failure.hint = Some(format!("fbittorrent upload {hash}"));
         }
         failure
     })

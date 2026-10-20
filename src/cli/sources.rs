@@ -2,28 +2,28 @@
 use super::*;
 
 /// Expand selectors (hash prefix, unique name substring, or `all`) to full hashes.
-pub(super) fn resolve_in(ts: &[Torrent], selectors: &[String]) -> Result<Vec<String>> {
+pub(super) fn resolve_in(ts: &[crate::api::Torrent], selectors: &[String]) -> Result<Vec<String>> {
     if selectors.is_empty() {
         return Err(AppError::new(Code::Usage, "no torrent selector given").hint("fbittorrent list --json | jq -r '.torrents[].hash'   # then pass a hash prefix, a unique part of the name, or `all`").into());
     }
     if selectors.len() == 1 && selectors[0] == "all" {
-        return Ok(ts.iter().map(|t| t.hash.clone()).collect());
+        return Ok(ts.iter().map(|t| t.hash.to_string()).collect());
     }
     let mut out: Vec<String> = Vec::new();
     for sel in selectors {
         let s = sel.trim();
         let low = s.to_lowercase();
         let is_hexish = low.len() >= 4 && low.chars().all(|c| c.is_ascii_hexdigit());
-        let by_hash: Vec<&Torrent> = if is_hexish { ts.iter().filter(|t| t.hash.starts_with(&low)).collect() } else { vec![] };
-        let matches: Vec<&Torrent> = if !by_hash.is_empty() { by_hash } else {
+        let by_hash: Vec<_> = if is_hexish { ts.iter().filter(|t| t.hash.as_str().starts_with(&low)).collect() } else { vec![] };
+        let matches: Vec<_> = if !by_hash.is_empty() { by_hash } else {
             ts.iter().filter(|t| t.name.to_lowercase().contains(&low)).collect()
         };
         match matches.len() {
-            1 => { let h = matches[0].hash.clone(); if !out.contains(&h) { out.push(h); } }
+            1 => { let h = matches[0].hash.to_string(); if !out.contains(&h) { out.push(h); } }
             0 => return Err(AppError::new(Code::NotFound, format!("no torrent matches '{s}'"))
                 .hint("fbittorrent list --json | jq -r '.torrents[] | \"\\(.hash[0:8])  \\(.name)\"'").into()),
             n => return Err(AppError::new(Code::Ambiguous, format!("'{s}' matches {n} torrents: {}",
-                    matches.iter().take(6).map(|t| format!("{} ({})", &t.hash[..8], short(&t.name, 40))).collect::<Vec<_>>().join(", ")))
+                    matches.iter().take(6).map(|t| format!("{} ({})", &t.hash.as_str()[..8], short(&t.name, 40))).collect::<Vec<_>>().join(", ")))
                 .hint("use a longer hash prefix, or the exact name").into()),
         }
     }

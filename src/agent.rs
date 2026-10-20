@@ -12,7 +12,7 @@ pub fn warning(code: &str, message: String, stderr: bool) {
 pub fn with_warnings(mut value:serde_json::Value)->serde_json::Value {
     WARNINGS.with(|list| {let list=list.borrow();if !list.is_empty(){value["warnings"]=serde_json::json!(*list);}});value
 }
-pub const CONTRACT_VERSION: &str = "1.2.32";
+pub const CONTRACT_VERSION: &str = "2.0.0";
 
 const NATIVE_LIFETIME: &str = "The daemon (fbittorrent serve) owns the engine independently of windows and its replaceable engine slot; clients connect through api.sock. Reads never start it; writes and a TUI start it on demand. The TUI attaches in the current terminal; q or Ctrl+C closes only that UI, while Q (confirmed when active) or down stops the daemon.";
 const SERVE_LIMITATIONS: &str = "serve stops on owner shutdown or idle_exit_secs (default 300; 0 disables idle exit). Transfers, interactive clients, searches and pending mutations keep it alive; a bar-only client never counts as interactive, a visible dashboard on its shared socket does, and an open glance pauses the countdown. systemd starts it on demand for writes or a TUI. API v1 uses api.sock for the CLI, TUI, subscriptions and settings. Settings use the private config while stopped; replaced binaries restart the daemon when idle; restart switches immediately.";
@@ -206,8 +206,11 @@ pub fn capabilities_json() -> serde_json::Value {
         "version": env!("CARGO_PKG_VERSION"),
         "contract_version": CONTRACT_VERSION,
         "field_notes": {
-            "list[].num_seeds": "connected seeds for live native torrents; read optional seeds to distinguish unknown",
-            "list[].num_leechs": "total connected peers in native mode; not a count of leechers",
+            "torrents[]": "API torrent objects (docs/IPC.md A.9); an absent field is unknown, never a sentinel",
+            "torrents[].seeds": "connected seeds of a live torrent, never a tracker scrape",
+            "torrents[].peers": "connected peers, including seeds",
+            "torrents[].seed": "explicit upload opt-in that continues after completion (fbittorrent upload)",
+            "torrents[].upload_enabled": "effective payload upload permission now, including the global during-download setting",
         },
         "caps": crate::api::ops::app::CAPS,
         "api_operations": crate::api::ops::TABLE,
@@ -325,7 +328,7 @@ DOWNLOAD SOMETHING (the canonical flow)
   fbittorrent search "Sintel 2010" --json         # {"results":[{fileName,fileUrl,seeders,imdb,...}]}
   fbittorrent add "<fileUrl or magnet>" --json    # {"ok":true,"hash":"...","name":"..."}
   fbittorrent wait <hash> --timeout 3600 --json   # blocks; exit 0 complete, 8 timeout
-  fbittorrent show <hash> --json                  # files[], open_target (file or folder)
+  fbittorrent show <hash> --json                  # torrent, files[], open_target (file or folder)
   fbittorrent open <hash>                         # hands it to the desktop
 
   Shortcut: `fbittorrent add "<magnet>" --wait --json` does add + wait.
@@ -348,23 +351,23 @@ OTHER USEFUL CALLS
   fbittorrent capabilities --json                 # this contract, machine readable
   fbittorrent down                                # close the app and stop downloads
 
-JSON SHAPES (stable within contract 1.x)
-  torrent: {hash,name,state,progress(0..1),progress_known,size,completed,dlspeed,upspeed,eta,
-            num_seeds,num_leechs,ratio,seq_dl,f_l_piece_prio,save_path,
-            content_path,category,tags,added_on,completion_on,up_limit,ratio_limit}
+JSON SHAPES (contract {contract_version}; an absent field is unknown, never a sentinel)
+  list/triage torrents[] are the API torrent objects (docs/IPC.md A.9):
+    {hash,name,state,intent,staged,checked,seed,upload_enabled,upload_policy,
+     save_path,added_at,force,origin} plus, when known: reason,error,progress(0..1),
+     size,completed_bytes,uploaded_bytes,dl_bps,ul_bps,eta_s,peers,seeds,ratio,
+     content_path,completed_at,queue_pos,upload_limit_bps,download_limit_bps,playable
+  states: metadata, checking, downloading, stalled, queued, paused, done, seeding,
+          waiting_vpn, error; reason says why (user, queue_full, complete_no_seed,
+          vpn_down, missing_files, disk_full, ...)
+  show: {torrent, files[], peers[], trackers[], open_target, complete?} where torrent
+        is the torrents.get object and files/peers/trackers are the API rows. complete
+        is absent while progress is unknown; file progress is absent until checked.
   search result: {fileName,fileUrl,fileSize,nbSeeders,nbLeechers,siteUrl,
                   descrLink,engineName,imdb,pubDate}
-  states: downloading, metaDL, stalledDL, queuedDL, stoppedDL, uploading,
-          stalledUP, stoppedUP (= done), checkingDL, waitingVPN, error, missingFiles
-  When progress_known=false, do not interpret progress/completed as measured.
-  `show.complete` is null while progress is unknown.
-  Read native_state, reason, checked and origin for the normalized model.
-  eta_s and seeds are absent when unknown; eta/num_seeds keep legacy sentinels.
+  seed is the explicit upload opt-in (`upload`/`noupload`); upload_enabled is the
+  effective permission now. peers/seeds count connected peers, never a scrape.
   API contract: docs/IPC.md. Add agents should pass --origin agent.
-  Native `num_seeds` counts connected seeds when `seeds` is present;
-  `show` adds `peers[]` with connection direction, seed flags and sampled rates.
-  `num_leechs` counts connected peers,
-  not leechers. Seed counts describe connected seeds, never a tracker scrape.
 "#;
 
 #[cfg(test)]
@@ -417,9 +420,9 @@ mod tests {
     }
 
     #[test]
-    fn native_seed_counts_preserve_unknown_and_measured_zero() {
+    fn seed_counts_are_absent_when_unknown_and_kept_when_zero() {
         let capabilities = capabilities_json();
-        for field in ["list[].num_seeds", "list[].num_leechs"] {
+        for field in ["torrents[].seeds", "torrents[].peers"] {
             assert!(!capabilities["field_notes"][field].as_str().unwrap().trim().is_empty());
         }
         let fixture = include_str!("../contracts/ipc/v1/torrents.ndjson");
@@ -430,10 +433,9 @@ mod tests {
         for seeds in [None, Some(0), Some(2)] {
             torrent.seeds = seeds;
             torrent.peers = Some(3);
-            let row = crate::cli::shapes::torrent(&torrent);
+            let row = serde_json::to_value(&torrent).unwrap();
             assert_eq!(row.get("seeds"), seeds.map(serde_json::Value::from).as_ref());
-            assert_eq!(row["num_seeds"], seeds.unwrap_or(0));
-            assert_eq!(row["num_leechs"], 3);
+            assert_eq!(row["peers"], 3);
         }
     }
 
