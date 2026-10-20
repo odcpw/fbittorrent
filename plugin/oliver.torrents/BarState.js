@@ -44,6 +44,9 @@ function describe(svc) {
   } else if (counts.seeding>0) {
     result.state="seeding"; result.glyph=Glyphs.upload; result.tone="normal"
     result.tooltip="↑ " + Model.rate(ul,false) + " · " + counts.seeding + " uploading"; result.rate=Model.rate(ul,true)
+  } else if (summary.daemon && (summary.daemon.busy_reasons || []).indexOf("playback")>=0) {
+    result.state="playback"; result.glyph=Glyphs.ready
+    result.tooltip="Player connected · automatic exit paused"
   } else {
     result.state="idle"
     var remaining=summary.daemon && summary.daemon.idle_exit_in_s

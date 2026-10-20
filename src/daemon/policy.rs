@@ -46,13 +46,14 @@ pub(crate) struct Policy {
     clients: BTreeMap<u64, Presence>,
     searches: usize,
     mutations: usize,
+    playbacks: usize,
 }
 impl Policy {
     pub fn new(configured: u64, override_seconds: Option<u64>, now: Instant) -> Self {
         let seconds = override_seconds.unwrap_or(configured);
         Self { seconds, override_seconds, remaining: Duration::from_secs(seconds), last: now,
             transfers: Transfers { starting: true, ..Transfers::default() },
-            clients: BTreeMap::new(), searches: 0, mutations: 0 }
+            clients: BTreeMap::new(), searches: 0, mutations: 0, playbacks: 0 }
     }
     pub fn seconds(&self) -> u64 { self.seconds }
     pub fn replace_delay(&mut self, seconds: u64, now: Instant) {
@@ -62,7 +63,7 @@ impl Policy {
     pub(super) fn busy(&self) -> bool {
         let t = self.transfers;
         t.downloading || t.seeding || t.parked_waiting || t.restoring || t.starting
-            || self.mutations != 0 || self.searches != 0
+            || self.mutations != 0 || self.searches != 0 || self.playbacks != 0
             || self.clients.values().any(|p| p.interactive)
     }
     fn glance(&self) -> bool { self.clients.values().any(|p| p.glance) }
@@ -109,6 +110,7 @@ impl Policy {
             (t.parked_waiting, "parked_waiting"),
             (self.clients.values().any(|p| p.interactive), "interactive"),
             (self.searches != 0, "search"),
+            (self.playbacks != 0, "playback"),
             (self.mutations != 0 || t.restoring || t.starting, "mutation")] {
             if active { reasons.push(reason); }
         }
@@ -124,6 +126,25 @@ impl Policy {
         if self.seconds == 0 || self.busy() || self.glance() {
             Duration::from_secs(5)
         } else { self.remaining.min(Duration::from_secs(5)) }
+    }
+}
+
+/// A verified media response belongs to the daemon even after its UI detaches.
+/// Count readers rather than targets: an unused Open URL must not inhibit idle.
+pub(crate) struct Playback(Arc<Mutex<Policy>>);
+impl Playback {
+    pub fn start(policy: Arc<Mutex<Policy>>) -> Self {
+        {
+            let mut p = policy.lock().unwrap_or_else(|e| e.into_inner());
+            p.advance(Instant::now()); p.playbacks += 1; p.changed();
+        }
+        Self(policy)
+    }
+}
+impl Drop for Playback {
+    fn drop(&mut self) {
+        let mut p = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        p.advance(Instant::now()); p.playbacks -= 1; p.changed();
     }
 }
 
@@ -198,6 +219,24 @@ mod tests {
         let at=Instant::now(); let mut p=idle(0,at);
         assert_eq!(p.snapshot(at+Duration::from_secs(100000)).idle_exit_in_s,None);
         assert!(!p.expired(at+Duration::from_secs(100000)));
+    }
+    #[test]
+    fn playback_survives_idle_deadline_and_last_reader_releases_presence() {
+        let at = Instant::now();
+        let policy = Arc::new(Mutex::new(idle(300, at)));
+        let first = Playback::start(policy.clone());
+        let second = Playback::start(policy.clone());
+        let after = at + Duration::from_secs(900);
+        assert_eq!(policy.lock().unwrap().snapshot(after).busy_reasons, vec!["playback"]);
+        assert!(!policy.lock().unwrap().expired(after));
+        drop(first);
+        assert!(policy.lock().unwrap().busy());
+        drop(second);
+        let mut p = policy.lock().unwrap();
+        assert!(!p.busy());
+        let disconnected = p.last;
+        assert_eq!(p.snapshot(disconnected).idle_exit_in_s, Some(300));
+        assert!(p.expired(disconnected + Duration::from_secs(300)));
     }
     #[test]
     fn every_busy_reason_and_override() {
