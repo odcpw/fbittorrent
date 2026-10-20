@@ -100,7 +100,13 @@ Item {
   property bool clipboardForSheet:false
   function beginAdd(source,options){if(addFlow)return addFlow.open(source,options);return false}
   function addClipboardSheet(){if(!beginAdd(null))return;clipboardForSheet=true;addFromClipboard()}
-  function finishAdd(hash){if(dashboardOwner && hash)dashboardOwner.selectTorrent(hash)}
+  // An add begun from a result list (Search, RSS, Shows) leaves that list
+  // open so several results can be added in turn; other adds show the torrent.
+  function finishAdd(hash,origin,searchKey){
+    if(searchKey && searchFlow)searchFlow.markAdded(searchKey,hash)
+    if(["search","rss","shows"].indexOf(origin)>=0){if(dashboardOwner && hash)dashboardOwner.preselectTorrent(hash);return}
+    if(dashboardOwner && hash)dashboardOwner.selectTorrent(hash)
+  }
   property string runtimeOverride: ""
   readonly property string runtimeDir: runtimeOverride || Quickshell.env("XDG_RUNTIME_DIR")
   readonly property string bin: String(settings.binary || "fbittorrent")

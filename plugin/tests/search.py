@@ -126,7 +126,10 @@ def run(binary):
                 case.check(row['staged'] and len(client.call('torrents.list',{})['result']['torrents'])==len(before)+1,'Enter stages exactly one torrent before Download',json.dumps(row))
                 press(case,q,['-k','Return'],lambda:not view(q).get('add',{}).get('visible'),'Download confirmation commits through search.grab')
                 row=client.call('torrents.get',dict(hash=sources[0]['fixture'].info_hash))['result']['torrent']
-                case.check(row['origin']=='search' and view(q).get('window',{}).get('view')=='torrents','confirmed real loopback metainfo retains search origin and selects its torrent',json.dumps(row))
+                case.check(row['origin']=='search' and view(q).get('window',{}).get('view')=='search','confirmed real loopback metainfo retains search origin and keeps the results open',json.dumps(dict(row=row,view=view(q))))
+                q.wait(lambda:result_key in view(q).get('added',[]))
+                case.check(len(view(q).get('rows',[]))==3,'the committed result is marked + In your list without rerunning the search',json.dumps(view(q)))
+                press(case,q,['1'],lambda:view(q).get('window',{}).get('view')=='torrents','1 shows the new torrent in Torrents')
                 def rendered():return json.loads(q.ipc('renderedRows'))
                 q.wait(lambda:len(rendered())==len(before)+1 and all(r.get('hash') for r in rendered()) and any(r['hash']==row['hash'] and row['name'] in r['texts'] and 'Reviewing' not in r['texts'] for r in rendered()))
                 case.check(not row['staged'],'Search commit updates the real rendered row name/state without leaving a review delegate',json.dumps(rendered()))

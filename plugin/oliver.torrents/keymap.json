@@ -1357,6 +1357,19 @@
       "scope": "pane:search.results"
     },
     {
+      "id": "search.select",
+      "keys": {
+        "dashboard": [
+          "Space"
+        ],
+        "popup": null,
+        "tui": null
+      },
+      "label": "Select for batch download",
+      "note": "Ctrl/Shift+click also select. Enter downloads the selection; Esc clears it.",
+      "scope": "pane:search.results"
+    },
+    {
       "id": "search.imdb",
       "keys": {
         "dashboard": [

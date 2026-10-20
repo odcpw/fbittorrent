@@ -17,7 +17,9 @@ FocusScope {
   readonly property bool editing:queryInput.activeFocus || (sheet.item && sheet.item.editing===true)
   readonly property bool gridShowing:viewModel.mode==="browse" && viewModel.grid===true
   readonly property bool dialogOpen:!!viewModel.panel
-  function snapshot(){return {grid:gridShowing ? grid.state() : null,query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : 0,added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"}}
+  readonly property var marked:{var keys={};(viewModel.selection || []).forEach(function(key){keys[key]=true});return keys}
+  readonly property int markedCount:viewModel.selectedCount || 0
+  function snapshot(){return {grid:gridShowing ? grid.state() : null,query:queryInput.text,cursor:viewModel.cursor,sort:viewModel.sort,rows:viewModel.rows,search:{id:viewModel.session,frames:viewModel.frames,total:viewModel.total,phase:viewModel.phase,mode:viewModel.mode,label:viewModel.label},panel:viewModel.panel,panelCount:viewModel.panel==="providers" ? flow.providers.length : viewModel.panel==="browse" ? flow.sources.length : viewModel.panel==="batch" ? (viewModel.selectedCount || 0) : 0,selection:viewModel.selection || [],added:viewModel.rows.filter(function(r){return !!r.added}).map(function(r){return r.key}),poster:viewModel.poster,posterLoaded:posterCard.loaded,rating:flow.current() ? flow.rating(flow.current()) : undefined,focus:editing ? "query" : "results"}}
   signal changed()
   signal queryEdited(string query)
   signal dismissRequested()
@@ -32,7 +34,8 @@ FocusScope {
       if(event.key===Qt.Key_Escape || event.key===Qt.Key_Down){focusResults();return true}
       return false
     }
-    if(event.key===Qt.Key_Escape){if(viewModel.phase==="searching"){flow.cancel();return true}focusQuery();return true}
+    if(event.key===Qt.Key_Escape){if(flow.clearSelection())return true;if(viewModel.phase==="searching"){flow.cancel();return true}focusQuery();return true}
+    if(event.key===Qt.Key_Space){var row=flow.current();if(row){flow.toggleSelect(row.key);flow.move(1)}return true}
     if(event.text==="/" || event.text==="e"){focusQuery();return true}
     if(gridShowing && (event.text==="h" || event.key===Qt.Key_Left)){flow.move(-1);return true}
     if(gridShowing && (event.text==="l" || event.key===Qt.Key_Right)){flow.move(1);return true}
@@ -47,7 +50,7 @@ FocusScope {
     if(event.text==="S"){flow.reverseSort();return true}
     if(event.text==="P"){flow.providersOpen();return true}
     if(event.text==="b"){flow.browseOpen();return true}
-    if(event.key===Qt.Key_Return){flow.activate();return true}
+    if(event.key===Qt.Key_Return || event.key===Qt.Key_Enter){flow.activate();return true}
     if(event.text==="y"){flow.copy();return true}
     if(event.text==="O"){flow.link("source");return true}
     if(event.text==="i" || event.text==="w"){flow.link(event.text==="i" ? "imdb" : "wiki");return true}
@@ -85,6 +88,7 @@ FocusScope {
         }
       }
       Ui.Button {text:"Search";enabled:!!queryInput.text.trim();onClicked:{root.flow.start(queryInput.text);root.focusResults()}}
+      Ui.Button {objectName:"search-download-selected";visible:root.markedCount>0;text:"Download "+root.markedCount+" selected";onClicked:root.flow.batchOpen()}
       Ui.Button {text:"Browse (b)";onClicked:root.flow.browseOpen()}
       Ui.Button {text:"Providers (P)";onClicked:root.flow.providersOpen()}
     }
@@ -92,9 +96,11 @@ FocusScope {
       Layout.fillWidth:true;Layout.fillHeight:true;spacing:Commons.Style.spacing.panelGap
       Components.BrowseGrid {
         id:grid;Layout.fillWidth:true;Layout.fillHeight:true;visible:root.gridShowing
-        service:root.service;rows:visible ? root.viewModel.gridRows : [];cursor:root.viewModel.cursor
+        service:root.service;rows:visible ? root.viewModel.gridRows : [];cursor:root.viewModel.cursor;marked:root.marked
         loading:root.viewModel.phase==="searching";message:root.viewModel.message
         onChosen:function(key){root.focusResults();root.flow.choose(key)}
+        onToggled:function(key){root.focusResults();root.flow.toggleSelect(key)}
+        onRanged:function(key){root.focusResults();root.flow.selectRange(key)}
         onActivated:root.flow.activate()
       }
       Components.PaneFrame {
@@ -113,7 +119,7 @@ FocusScope {
             model:root.viewModel.rows
             currentIndex:root.viewModel.rows.findIndex(function(r){return r.key===root.viewModel.cursor})
             onCurrentIndexChanged:if(currentIndex>=0)positionViewAtIndex(currentIndex,ListView.Contain)
-            delegate:Components.SearchRow {required property var modelData;width:list.width;row:modelData;ratingValue:root.revision>=0 ? root.flow.rating(modelData) : undefined;selected:modelData.key===root.viewModel.cursor;onChosen:{root.focusResults();root.flow.choose(modelData.key)} onActivated:root.flow.activate()}
+            delegate:Components.SearchRow {required property var modelData;width:list.width;row:modelData;ratingValue:root.revision>=0 ? root.flow.rating(modelData) : undefined;selected:modelData.key===root.viewModel.cursor;marked:!!root.marked[modelData.key];onChosen:{root.focusResults();root.flow.choose(modelData.key)} onToggled:{root.focusResults();root.flow.toggleSelect(modelData.key)} onRanged:{root.focusResults();root.flow.selectRange(modelData.key)} onActivated:root.flow.activate()}
             Components.EmptyState {anchors.centerIn:parent;width:Math.min(parent.width,Commons.Style.space(420));visible:!root.viewModel.rows.length;title:root.viewModel.phase==="searching" ? "Searching…" : root.viewModel.phase==="idle" ? "Search for a title" : root.viewModel.phase==="stopped" ? "Search stopped" : root.viewModel.phase==="error" ? "Search failed" : "No results for “"+(root.viewModel.label || "")+"”";message:root.viewModel.phase==="error" ? root.viewModel.message : "Enter a title above, or press b to browse lists."}
           }
         }
@@ -125,15 +131,16 @@ FocusScope {
       }
     }
     Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.total>500 ? "Showing 500 of "+root.viewModel.total+" · " : "")+(root.viewModel.phase==="searching" ? (root.viewModel.mode==="browse" ? "Loading browse list… · " : "Providers still searching · ") : "")+"Sort: "+root.viewModel.sort.key+(root.viewModel.sort.reverse ? " reversed" : "")+" · "+(root.viewModel.message || "")}
-    Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.mode==="browse" ? (root.gridShowing ? "v rows · " : "v grid · ") : "")+"Enter review add · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
+    Components.KeyHint {Layout.fillWidth:true;text:root.markedCount>0 ? root.markedCount+" selected · Enter download selected · Space mark · Ctrl/Shift+click · Esc clear" : (root.viewModel.mode==="browse" ? (root.gridShowing ? "v rows · " : "v grid · ") : "")+"Enter review add · Space select · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
   }
   Rectangle {anchors.fill:parent;visible:!!root.viewModel.panel;color:Commons.Util.alpha(Commons.Color.background,0.7);MouseArea {anchors.fill:parent;onClicked:root.flow.closePanel()}}
   Components.PaneFrame {
     visible:!!root.viewModel.panel
     anchors.centerIn:parent;width:Math.min(parent.width-2*Commons.Style.spacing.panelGap,Commons.Style.space(680));height:Math.min(parent.height-2*Commons.Style.spacing.panelGap,Commons.Style.space(600))
     MouseArea {anchors.fill:parent;onClicked:{}}
-    Loader {id:sheet;anchors.fill:parent;active:!!root.viewModel.panel;sourceComponent:root.viewModel.panel==="providers" ? providerComponent : browseComponent}
+    Loader {id:sheet;anchors.fill:parent;active:!!root.viewModel.panel;sourceComponent:root.viewModel.panel==="providers" ? providerComponent : root.viewModel.panel==="batch" ? batchComponent : browseComponent}
   }
   Component {id:providerComponent;SearchProviders {flow:root.flow;revision:root.revision;onCloseRequested:root.flow.closePanel()}}
   Component {id:browseComponent;SearchBrowse {flow:root.flow;revision:root.revision;onCloseRequested:root.flow.closePanel()}}
+  Component {id:batchComponent;SearchBatch {flow:root.flow;service:root.service;revision:root.revision;onCloseRequested:root.flow.closePanel()}}
 }

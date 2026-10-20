@@ -10,7 +10,10 @@ Ui.ConfirmDialog {
   property bool deleteFiles:false
   signal removeRequested(var hashes,bool files)
   selectedIndex:0
-  confirmText:deleteFiles ? "Delete files" : "Remove, keep files"
+  cancelText:"Cancel"
+  // Omarchy's dialog buttons have a fixed width; the message carries the
+  // keep-files detail, so the button label stays short enough to fit.
+  confirmText:deleteFiles ? "Delete files" : "Remove"
   readonly property real bytes:captured.reduce(function(sum,row){return sum+Number(row.size || 0)},0)
   readonly property string subject:captured.length===1 ? "'"+torrent.name+"'" : captured.length+" selected torrents"
   message:!torrent ? "" : deleteFiles

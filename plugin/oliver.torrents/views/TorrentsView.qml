@@ -242,7 +242,7 @@ FocusScope {
   Ui.ConfirmDialog {
     id:recheckConfirm
     property string hash:""
-    anchors.fill:parent;selectedIndex:0;confirmText:"Recheck";message:"Recheck this torrent's files? File selection is locked until checking finishes."
+    anchors.fill:parent;selectedIndex:0;cancelText:"Cancel";confirmText:"Recheck";message:"Recheck this torrent's files? File selection is locked until checking finishes."
     onCanceled:opened=false
     onConfirmed:{root.service.recheck(hash);opened=false}
   }

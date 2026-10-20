@@ -58,7 +58,7 @@ FocusScope {
   }
   Ui.ConfirmDialog {
     id:confirm;anchors.fill:parent;opened:root.mode==="remove";selectedIndex:0
-    confirmText:"Remove tracker";message:root.confirmationText
+    cancelText:"Cancel";confirmText:"Remove";message:root.confirmationText
     onCanceled:root.close();onConfirmed:root.submit()
   }
 }

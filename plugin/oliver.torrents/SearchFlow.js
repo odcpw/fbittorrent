@@ -5,13 +5,26 @@ var SORTS=["seeds","size","uploaded","name","rating"]
 function create(service,changed) {
   var browseRows=[]
   var epoch=0,cards=Object.create(null),installRef=""
+  // Results added from this view stay marked until the daemon's own marking
+  // catches up; batch grabs show as adding until their receipt names a hash.
+  var added=Object.create(null),addedKeys=[],adding=Object.create(null),batchRefs=Object.create(null)
   var s={query:"",label:"",mode:"query",session:0,visible:false,phase:"idle",rows:[],cursor:"",sort:"seeds",reverse:false,
-    frames:0,total:0,grid:true,gridRows:[],card:null,panel:"",providers:[],sources:[],warnings:[],message:"",providerBusy:{}}
+    frames:0,total:0,grid:true,gridRows:[],card:null,panel:"",providers:[],sources:[],warnings:[],message:"",providerBusy:{},selection:{}}
   function publish(){changed()}
   function cap(c){return !!service.client && service.client.caps.indexOf(c)>=0}
   function error(failure){s.phase="error";s.message=failure ? failure.message : "No answer";publish()}
   function stop(id){if(id){if(service.online)service.mutate("search.stop",{search_id:id},"search");service.store.releaseTopics(["search:"+id])}}
+  function remember(key,hash){
+    if(!key || !hash)return
+    if(!added[key]){addedKeys.push(key);if(addedKeys.length>512)delete added[addedKeys.shift()]}
+    added[key]=hash
+  }
+  function marked(row){
+    var hash=row.added || added[row.key],busy=!hash && !!adding[row.key]
+    return hash===row.added && busy===!!row.adding ? row : Object.assign({},row,{added:hash || undefined,adding:busy})
+  }
   function useRows(rows){
+    rows=rows.map(marked)
     s.total=rows.length
     var property={seeds:"seeds",size:"size",uploaded:"uploaded_at",name:"name",rating:"rating"}[s.sort]
     var descending=s.sort!=="name",direction=(descending!==s.reverse) ? -1 : 1
@@ -24,6 +37,7 @@ function create(service,changed) {
     })
     s.rows=sorted.slice(0,500);s.gridRows=s.rows.slice(0,60)
     if(!s.rows.some(function(r){return r.key===s.cursor}))s.cursor=s.rows.length ? s.rows[0].key : ""
+    var kept={};s.rows.forEach(function(r){if(s.selection[r.key] && !r.added && !r.adding)kept[r.key]=true});s.selection=kept
     if(service.browsePosters && s.mode==="browse" && s.grid)service.browsePosters.load(s.gridRows)
     service.scheduleSearchPoster();publish()
   }
@@ -31,14 +45,14 @@ function create(service,changed) {
   s.current=function(){for(var i=0;i<s.rows.length;i++)if(s.rows[i].key===s.cursor)return s.rows[i];return null}
   s.sync=function(){var keyed=service.store.topics["search:"+s.session] || {};useRows(Object.keys(keyed).map(function(k){return keyed[k]}))}
   s.mount=function(){s.visible=true;publish()}
-  s.hide=function(){if(service.browsePosters)service.browsePosters.hide();epoch++;s.visible=false;stop(s.session);service.searchTopics=[];s.session=0;s.panel="";publish()}
+  s.hide=function(){if(service.browsePosters)service.browsePosters.hide();epoch++;s.visible=false;stop(s.session);service.searchTopics=[];s.session=0;s.panel="";s.selection={};publish()}
   s.cancel=function(){epoch++;stop(s.session);service.searchTopics=[];s.session=0;s.phase="stopped";publish()}
   s.start=function(query){
     query=String(query).trim().slice(0,256)
     if(!query)return false
     if(service.browsePosters)service.browsePosters.hide()
     stop(s.session);service.searchTopics=[]
-    var generation=++epoch;s.query=query;s.label=query;s.mode="query";s.session=0;s.phase="searching";s.rows=[];s.gridRows=[];s.cursor="";s.card=null;s.message="";s.frames=0;s.warnings=[]
+    var generation=++epoch;s.query=query;s.label=query;s.mode="query";s.session=0;s.phase="searching";s.rows=[];s.gridRows=[];s.cursor="";s.card=null;s.message="";s.frames=0;s.warnings=[];s.selection={}
     service.mutate("search.start",{query:query,limit:5000},"search",function(result,failure){
       if(generation!==epoch || !s.visible){if(result)stop(result.search_id);return}
       if(failure){error(failure);return}
@@ -67,9 +81,56 @@ function create(service,changed) {
     })
   }
   s.activate=function(){
-    var row=s.current();if(!row)return false
+    if(s.selectedRows().length)return s.batchOpen()
+    var row=s.current();if(!row || row.adding)return false
     if(row.added){service.finishAdd(row.added);return true}
     return service.beginSearchAdd(row,s.mode==="query" ? s.session : 0)
+  }
+  // Re-apply marks to the rows on screen; a stopped search keeps its rows.
+  function remark(){if(s.mode==="query" && s.session)s.sync();else if(s.mode==="query")useRows(s.rows);else useRows(browseRows)}
+  s.markAdded=function(key,hash){if(!key || !hash)return;remember(key,hash);delete adding[key];remark()}
+  function visibleRows(){return s.mode==="browse" && s.grid ? s.gridRows : s.rows}
+  function selectable(row){return !!row && !row.added && !row.adding}
+  s.selectedRows=function(){return s.rows.filter(function(r){return s.selection[r.key] && selectable(r)})}
+  s.toggleSelect=function(key){
+    var row=s.rows.find(function(r){return r.key===key});if(!selectable(row))return false
+    var next=Object.assign({},s.selection);if(next[key])delete next[key];else next[key]=true
+    s.selection=next;publish();return true
+  }
+  s.selectRange=function(key){
+    var rows=visibleRows(),from=rows.findIndex(function(r){return r.key===s.cursor}),to=rows.findIndex(function(r){return r.key===key})
+    if(to<0)return false;if(from<0)from=to
+    var next=Object.assign({},s.selection)
+    rows.slice(Math.min(from,to),Math.max(from,to)+1).forEach(function(r){if(selectable(r))next[r.key]=true})
+    s.selection=next;s.choose(key);publish();return true
+  }
+  s.clearSelection=function(){if(!Object.keys(s.selection).length)return false;s.selection={};publish();return true}
+  var BATCH_LIMIT=50
+  s.batchOpen=function(){
+    var count=s.selectedRows().length;if(!count)return false
+    if(count>BATCH_LIMIT){service.notify("Select up to "+BATCH_LIMIT+" results at a time");return true}
+    s.panel="batch";publish();return true
+  }
+  // A confirmed batch adds every selected result directly: all files, the
+  // default folder and no upload, as one explicit choice for the whole set.
+  s.batchDownload=function(){
+    var rows=s.selectedRows(),session=s.mode==="query" ? s.session : 0
+    s.panel="";s.selection={}
+    if(!rows.length){publish();return 0}
+    var answered=0,accepted=0,failed=[]
+    rows.forEach(function(row){
+      adding[row.key]=true
+      var args=Object.assign(session ? {search_id:session,key:row.key} : {result:row},{seed:false})
+      var ref=service.mutate("search.grab",args,"search",function(result,failure){
+        answered++
+        if(failure){delete adding[row.key];failed.push(row.name+": "+failure.message)}
+        else{accepted++;if(result && result.hash){delete adding[row.key];remember(row.key,result.hash)}}
+        if(answered===rows.length)service.notify((accepted ? "Adding "+accepted+(accepted===1 ? " download" : " downloads") : "No downloads added")+(failed.length ? " · "+failed.length+" failed: "+failed[0] : ""))
+        remark()
+      })
+      if(ref)batchRefs[ref]=row.key
+    })
+    remark();return rows.length
   }
   s.providersOpen=function(){s.panel="providers";s.providersRefresh();publish()}
   s.providersRefresh=function(){service.client.request("search.providers",{}, {callback:function(result,failure){if(failure){s.message=failure.message}else s.providers=result.providers;publish()}})}
@@ -95,7 +156,7 @@ function create(service,changed) {
     if(!source.in_app){service.openUrl(source.url);return}
     if(service.browsePosters)service.browsePosters.hide()
     stop(s.session);service.searchTopics=[];s.session=0
-    var generation=++epoch;s.panel="";s.mode="browse";s.label=(source.provider ? source.provider+" · " : "")+source.label;s.query=s.label;s.phase="searching";s.rows=[];s.gridRows=[];s.card=null;s.message="";publish()
+    var generation=++epoch;s.panel="";s.mode="browse";s.label=(source.provider ? source.provider+" · " : "")+source.label;s.query=s.label;s.phase="searching";s.rows=[];s.gridRows=[];s.card=null;s.message="";s.selection={};publish()
     service.client.request("search.browse",{source:source.id},{callback:function(result,failure){if(generation!==epoch || !s.visible)return;if(failure){error(failure);return}s.phase="done";browseRows=result.items.slice(0,5000);useRows(browseRows)}})
   }
   s.browseDefault=function(){
@@ -113,6 +174,12 @@ function create(service,changed) {
   s.follow=function(){var row=s.current();var imdb=row ? row.imdb_id || (s.card ? s.card.id : "") : "";if(!imdb){service.notify("Choose a result with an IMDb identifier first");return false}return service.mutate("shows.follow",{imdb:imdb},"shows")}
   function event(e){
     if(e.ev==="search.done" && e.search_id===s.session){s.phase="done";s.warnings=e.warnings || [];s.message=s.warnings.map(function(w){return w.provider+": "+w.message}).join("; ");publish()}
+    if(e.ev==="mutation.result" && batchRefs[e.ref]!==undefined && e.outcome!=="pending"){
+      var key=batchRefs[e.ref];delete batchRefs[e.ref];delete adding[key]
+      if(e.outcome==="done" && e.result && e.result.hash)remember(key,e.result.hash)
+      else if(e.outcome!=="done")service.notify("Could not add a search result: "+(e.error ? e.error.message : "result unknown"))
+      remark()
+    }
     if(e.ev==="mutation.result" && e.ref===installRef){if(e.outcome==="done")installed(e.result);else {installRef="";s.message=e.error ? e.error.message : "Installation result unknown";publish()}}
   }
   s.frame=function(frame){
@@ -123,6 +190,6 @@ function create(service,changed) {
       if(frame.ev==="delta")(frame.added || []).forEach(event)
     }
   }
-  s.snapshot=function(){return {grid:s.grid,gridRows:s.gridRows,query:s.query,label:s.label,mode:s.mode,session:s.session,phase:s.phase,rows:s.rows,cursor:s.cursor,sort:{key:s.sort,reverse:s.reverse},frames:s.frames,total:s.total,panel:s.panel,poster:s.card ? s.card.id : null,message:s.message}}
+  s.snapshot=function(){return {grid:s.grid,gridRows:s.gridRows,query:s.query,label:s.label,mode:s.mode,session:s.session,phase:s.phase,rows:s.rows,cursor:s.cursor,sort:{key:s.sort,reverse:s.reverse},frames:s.frames,total:s.total,panel:s.panel,poster:s.card ? s.card.id : null,message:s.message,selection:Object.keys(s.selection),selectedCount:s.selectedRows().length}}
   return s
 }

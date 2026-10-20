@@ -46,6 +46,7 @@ def run(binary):
                 q.wait(lambda:q.ipc('ready')=='true');q.shell('summon',json.dumps(dict(view='torrents',hash=prepared[0][0].info_hash)))
                 q.wait(lambda:view().get('rows')==len(prepared) and view().get('cursor')==prepared[0][0].info_hash)
                 press(['d'],lambda:(view().get('dialog') or {}).get('kind')=='remove')
+                dialog=case.path.with_name(case.path.stem+'-remove-dialog.png');q.ipc('grab',dialog);q.wait(lambda:dialog.exists() and dialog.stat().st_size>0)
                 press(['-k','Return'],lambda:not view().get('dialog'))
                 case.check(hashes()==wanted and intact(),'single Remove defaults to Cancel; records and bytes are unchanged',str(hashes()))
                 press(['d'],lambda:(view().get('dialog') or {}).get('kind')=='remove')

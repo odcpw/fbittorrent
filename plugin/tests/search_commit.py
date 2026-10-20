@@ -72,11 +72,17 @@ def run(binary):
             clean_provider_status('after Discard')
             q.keys(['-k','Return'],lambda:add().get('phase')=='ready')
             clean_provider_status('while reopening review')
-            q.keys(['-k','Return'],lambda:not add().get('visible') and view().get('window',{}).get('view')=='torrents')
+            q.keys(['-k','Return'],lambda:not add().get('visible'))
+            # Download from Search keeps the results open for the next pick and
+            # marks this result in place; Torrents shows it when asked.
+            try:q.wait(lambda:view().get('window',{}).get('view')=='search' and len(view().get('rows',[]))==1 and len(view().get('added',[]))==1,timeout=6);stayed=True
+            except TimeoutError:stayed=False
+            case.check(stayed,'Download from Search stays on the results and marks the row + In your list',json.dumps(view()))
+            q.keys(['1'],lambda:view().get('window',{}).get('view')=='torrents')
             q.wait(lambda:(row:=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent'])['state']=='downloading' and not row['staged'] and row.get('completed_bytes',0)>0,timeout=15)
             def displayed():
                 rendered=json.loads(q.ipc('renderedRows'));state=view()
-                return len(rendered)==1 and rendered[0].get('hash')==torrent.info_hash and payload.name in rendered[0]['texts'] and 'Downloading' in rendered[0]['texts'] and 'Reviewing' not in rendered[0]['texts'] and isinstance(state.get('rowProgress'),(int,float)) and 0<state['rowProgress']<1
+                return len(rendered)==1 and rendered[0].get('hash')==torrent.info_hash and payload.name in rendered[0]['texts'] and 'Downloading' in rendered[0]['texts'] and 'Reviewing' not in rendered[0]['texts'] and isinstance(rendered[0].get('progress'),(int,float)) and 0<rendered[0]['progress']<1
             try:q.wait(displayed,timeout=6);ok=True
             except TimeoutError:ok=False
             row=client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']

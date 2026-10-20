@@ -151,6 +151,9 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
+    action!("search.select",Scope::Pane(Screen::Search,Pane::Results),&[],"Select for batch download",90,
+        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char(' '))]),None,
+        Some("Ctrl/Shift+click also select. Enter downloads the selection; Esc clears it.")),
     action!(
         "search.imdb",
         Scope::Pane(Screen::Search, Pane::Results),

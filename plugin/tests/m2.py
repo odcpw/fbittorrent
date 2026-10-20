@@ -39,7 +39,7 @@ def matrix(binary):
     ui += [('owner_' + case, [*dashboard, '--owner-review', '--binary', binary, '--case', case])
            for case in ('search', 'rows', 'pieces', 'popup', 'review', 'stop')]
     ui += [(name, [python, 'plugin/tests/' + name + '.py', '--binary', binary])
-           for name in ('search_commit', 'search_route')]
+           for name in ('search_commit', 'search_batch', 'search_route')]
     ui += [('offline_socket', [python, 'plugin/tests/offline_socket.py', '--binary', binary, '--seconds', '3'])]
     ui += [('table', [python, 'plugin/tests/dashboard-table.py', '--binary', binary]),
            ('table_fixture', [python, 'plugin/tests/dashboard-table.py', '--binary', binary, '--fixture-cli']),

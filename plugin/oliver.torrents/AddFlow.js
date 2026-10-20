@@ -173,7 +173,8 @@ function create(service,changed,debug,clock) {
       if(s.files.length && !args.files.length){error("Select at least one file");return}
     }
     s.phase="committing"
-    send(op,args,s.owned ? "staging" : s.searchArgs ? "search" : "",function(result){var hash=result.hash || s.hash;service.notify(result.duplicate ? "Already in your list" : "Download added");service.finishAdd(hash);close()})
+    var searchKey=s.searchArgs ? s.searchArgs.key || (s.searchArgs.result && s.searchArgs.result.key) : ""
+    send(op,args,s.owned ? "staging" : s.searchArgs ? "search" : "",function(result){var hash=result.hash || s.hash;service.notify(result.duplicate ? "Already in your list" : "Download added");service.finishAdd(hash,s.origin,searchKey);close()})
     publish()
   }
   f.cancel=function(){

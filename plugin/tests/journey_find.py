@@ -74,9 +74,11 @@ def run(binary):
             case.check(not c.call('torrents.list',{})['result']['torrents'],'Discard leaves no torrent or download','no transfer was started')
             press(['-k','Return'],lambda:add().get('visible'));q.wait(lambda:add().get('phase')=='ready',timeout=15)
             began=time.monotonic()
-            press(['-k','Return'],lambda:not add().get('visible') and view().get('rowProgress',0)>0 and row().get('completed_bytes',0)>0)
+            press(['-k','Return'],lambda:not add().get('visible') and row().get('completed_bytes',0)>0)
             elapsed=time.monotonic()-began
-            case.check(elapsed<=2 and view()['window']['view']=='torrents','Download starts the real loopback transfer and shows progress within two seconds',dict(elapsed_s=elapsed,row=row()))
+            q.wait(lambda:torrent.info_hash in view().get('added',[]))
+            case.check(elapsed<=2 and view()['window']['view']=='search','Download starts the real loopback transfer within two seconds and keeps the results open with the row marked',dict(elapsed_s=elapsed,row=row(),window=view().get('window')))
+            press(['1'],lambda:view().get('window',{}).get('view')=='torrents' and view().get('cursor')==torrent.info_hash and view().get('rowProgress',0)>0)
             press(['-k','Return'],lambda:view().get('focus')=='details')
             press([']'],lambda:(view().get('details') or {}).get('tab')=='files')
             press(['/credits','-k','Escape'],lambda:(view().get('details') or {}).get('files')==[1])
