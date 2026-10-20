@@ -1,5 +1,7 @@
 # Engine measurements
 
+The measured fbittorrent/qBittorrent comparison, including losses and method limits, is in [CLIENT_COMPARISON.md](CLIENT_COMPARISON.md).
+
 `fbt-bench-seed` generates deterministic random-access payloads, torrent metadata,
 and 1/4/16 distinct loopback seed peers. It allocates neither the complete payload
 nor a copy per seed. `run.py` reuses the regression Sandbox, API client and private
