@@ -30,7 +30,7 @@ struct Database {
     feeds: Vec<StoredFeed>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 struct StoredFeed {
     feed: RssFeed,
@@ -41,15 +41,6 @@ struct StoredFeed {
     last_modified: String,
     error: String,
     grabbed_ids: BTreeSet<String>,
-}
-
-impl Default for StoredFeed {
-    fn default() -> Self {
-        Self {
-            feed: RssFeed::default(), read_ids: BTreeSet::new(), last_checked: 0,
-            etag: String::new(), last_modified: String::new(), error: String::new(), grabbed_ids: BTreeSet::new(),
-        }
-    }
 }
 
 struct FileLock(File);
@@ -250,18 +241,14 @@ impl Store {
                 stored.last_checked = now();
                 stored.feed.is_loading = false;
                 stored.error = fetched.as_ref().err().map(|e|crate::public_text::message(&snapshot.feed.url, &format!("{e:#}"))).unwrap_or_default();
-                match &fetched {
-                    Ok(Some(result)) => {
-                        if !result.title.is_empty() { stored.feed.title = result.title.clone(); }
-                        stored.feed.last_build_date = result.last_build_date.clone();
-                        merge_articles(stored, result.articles.clone());
-                        stored.etag = result.etag.clone();
-                        stored.last_modified = result.last_modified.clone();
-                        stored.feed.has_error = false;
-                    }
-                    Ok(None) => stored.feed.has_error = false,
-                    Err(_) => stored.feed.has_error = true,
+                if let Ok(Some(result)) = &fetched {
+                    if !result.title.is_empty() { stored.feed.title = result.title.clone(); }
+                    stored.feed.last_build_date = result.last_build_date.clone();
+                    merge_articles(stored, result.articles.clone());
+                    stored.etag = result.etag.clone();
+                    stored.last_modified = result.last_modified.clone();
                 }
+                stored.feed.has_error = fetched.is_err();
                 Ok(())
             })?;
             if let Err(error) = fetched { failures.push(format!("{}: {}", snapshot.feed.name, crate::public_text::message(&snapshot.feed.url, &format!("{error:#}")))); }

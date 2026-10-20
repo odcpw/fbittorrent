@@ -240,7 +240,7 @@ struct PluginCache {
 }
 static PLUGINS: OnceLock<Mutex<Option<PluginCache>>> = OnceLock::new();
 
-pub fn plugins() -> Result<Vec<SearchPlugin>> {
+pub fn plugins() -> Result<Vec<crate::api::Provider>> {
     let store=ProviderStore::default();
     let mut rows=plugins_in(&store)?;
     let preferences=store.load()?;
@@ -248,7 +248,15 @@ pub fn plugins() -> Result<Vec<SearchPlugin>> {
         enabled:preferences.enabled.get(&i.name).copied().unwrap_or(true),
         full_name:i.name.clone(),name:i.name,url:i.url,version:String::new(),kind:"torznab".into(),
     }));
-    rows.sort_by(|a,b|a.name.cmp(&b.name));Ok(rows)
+    rows.sort_by(|a,b|a.name.cmp(&b.name));
+    Ok(rows.into_iter().map(|p| crate::api::Provider {
+        name: p.name,
+        kind: if p.kind == "torznab" {crate::api::ProviderKind::Torznab} else {crate::api::ProviderKind::Nova},
+        enabled: p.enabled,
+        full_name: (!p.full_name.is_empty()).then_some(p.full_name),
+        url: (!p.url.is_empty()).then_some(p.url),
+        version: (!p.version.is_empty()).then_some(p.version),
+    }).collect())
 }
 
 fn plugins_in(store: &ProviderStore) -> Result<Vec<SearchPlugin>> {

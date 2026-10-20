@@ -168,21 +168,3 @@ pub(super) fn aggregate_with_hashes(
     items.truncate(limit);
     items
 }
-
-pub(crate) fn legacy(item: &SearchItem) -> SearchResult {
-    SearchResult {
-        file_name: item.name.clone(),
-        file_url: item.magnet.clone().or(item.url.clone()).unwrap_or_default(),
-        file_size: item.size.and_then(|v| i64::try_from(v).ok()).unwrap_or(-1),
-        seeders: item.seeds.and_then(|v| i64::try_from(v).ok()).unwrap_or(-1),
-        leechers: item
-            .leechers
-            .and_then(|v| i64::try_from(v).ok())
-            .unwrap_or(-1),
-        engine: item.providers.first().cloned().unwrap_or_default(),
-        site_url: item.provider_url.clone().unwrap_or_default(),
-        descr_link: item.page_url.clone().unwrap_or_default(),
-        pub_date: item.uploaded_at.unwrap_or(0).min(i64::MAX as u64) as i64,
-        imdb: item.imdb_id.clone().unwrap_or_default(),
-    }
-}

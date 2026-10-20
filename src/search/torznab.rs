@@ -102,15 +102,15 @@ pub(super) fn query(indexer: Indexer, query: &str, job: &jobs::SearchJob) {
         }
     }
 }
-pub(crate) fn resolve(result: &SearchResult) -> Result<Option<ResolvedDownload>> {
-    if result.file_url.starts_with("magnet:") {
+pub(crate) fn resolve(url: &str, provider: &str) -> Result<Option<ResolvedDownload>> {
+    if url.starts_with("magnet:") {
         return Ok(None);
     }
     let configured = indexers()?;
-    let endpoint = url::Url::parse(&result.file_url).ok();
+    let endpoint = url::Url::parse(url).ok();
     let selected = configured
         .iter()
-        .find(|i| i.name == result.engine)
+        .find(|i| i.name == provider)
         .or_else(|| {
             endpoint.as_ref().and_then(|target| {
                 configured
@@ -124,7 +124,7 @@ pub(crate) fn resolve(result: &SearchResult) -> Result<Option<ResolvedDownload>>
     let request = worker::Request {
         name: indexer.name.clone(),
         query: None,
-        download: Some(result.file_url.clone()),
+        download: Some(url.into()),
     };
     let reply = exchange(&request, None, 24 * 1024 * 1024)?;
     if let Some(error) = reply.error {

@@ -20,18 +20,7 @@ pub fn dispatch(daemon: &Daemon, owner: u64, call: &Call) -> ApiResult<Reply> {
             })
         }
         Call::SearchProviders { .. } => Reply::SearchProviders(ProvidersResult {
-            providers: search::plugins()
-                .map_err(upstream)?
-                .into_iter()
-                .map(|p| Provider {
-                    name: p.name,
-                    kind: if p.kind=="torznab" {ProviderKind::Torznab}else{ProviderKind::Nova},
-                    enabled: p.enabled,
-                    full_name: (!p.full_name.is_empty()).then_some(p.full_name),
-                    url: (!p.url.is_empty()).then_some(p.url),
-                    version: (!p.version.is_empty()).then_some(p.version),
-                })
-                .collect(),
+            providers: search::plugins().map_err(upstream)?,
         }),
         Call::SearchSetProvider { args } => {
             search::set_enabled(&args.name, args.enabled).map_err(upstream)?;
@@ -167,23 +156,24 @@ fn grab(daemon: &Daemon, args: &SearchGrabArgs) -> ApiResult<Reply> {
             .find(|r| Some(&r.key) == args.key.as_ref())
             .ok_or_else(|| error(ErrorCode::NotFound, "unknown search result", Some("key")))?
     };
-    let legacy = search::normalize::legacy(&result);
+    let url = result.magnet.as_deref().or(result.url.as_deref()).unwrap_or("");
+    let provider = result.providers.first().map(String::as_str).unwrap_or("");
     let cfg = crate::config::Config::load().map_err(super::engine_error)?;
-    let direct = legacy.file_url.starts_with("magnet:")
-        || url::Url::parse(&legacy.file_url).is_ok_and(|u| {
+    let direct = url.starts_with("magnet:")
+        || url::Url::parse(url).is_ok_and(|u| {
             matches!(u.scheme(), "http" | "https")
                 && u.path().to_ascii_lowercase().ends_with(".torrent")
         });
     let known_provider = crate::config::data_dir()
         .join("nova3/engines")
-        .join(format!("{}.py", legacy.engine))
+        .join(format!("{provider}.py"))
         .is_file();
     let http =
-        url::Url::parse(&legacy.file_url).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
-    let native = search::torznab::resolve(&legacy).map_err(upstream)?;
+        url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
+    let native = search::torznab::resolve(url, provider).map_err(upstream)?;
     let resolved = if let Some(download)=native { download } else if cfg.network_interface.is_some() {
         if direct || (!known_provider && http) {
-            search::ResolvedDownload::Url(legacy.file_url)
+            search::ResolvedDownload::Url(url.into())
         } else {
             return Err(error(
                 ErrorCode::Unsupported,
@@ -192,7 +182,7 @@ fn grab(daemon: &Daemon, args: &SearchGrabArgs) -> ApiResult<Reply> {
             ));
         }
     } else {
-        search::resolve_download(&legacy, cfg.timeout_secs).map_err(upstream)?
+        search::resolve_download(url, provider, cfg.timeout_secs).map_err(upstream)?
     };
     struct Temporary(std::path::PathBuf);
     impl Drop for Temporary {

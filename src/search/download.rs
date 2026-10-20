@@ -10,11 +10,12 @@ pub(crate) enum ResolvedDownload {
 /// Resolves only a result that the user has chosen to download. Browsing,
 /// search refreshes and cached results never invoke provider download hooks.
 pub(crate) fn resolve_download(
-    result: &SearchResult,
+    url: &str,
+    provider: &str,
     timeout_secs: u64,
 ) -> Result<ResolvedDownload> {
-    if let Some(download)=torznab::resolve(result)? {return Ok(download);}
-    resolve_download_in(&ProviderStore::default(), result, timeout_secs)
+    if let Some(download)=torznab::resolve(url, provider)? {return Ok(download);}
+    resolve_download_in(&ProviderStore::default(), url, provider, timeout_secs)
 }
 
 fn direct_download(url: &str) -> bool {
@@ -36,10 +37,11 @@ impl Drop for DownloadScratch {
 
 pub(super) fn resolve_download_in(
     store: &ProviderStore,
-    result: &SearchResult,
+    url: &str,
+    provider: &str,
     timeout_secs: u64,
 ) -> Result<ResolvedDownload> {
-    let parameter = result.file_url.trim();
+    let parameter = url.trim();
     if parameter.is_empty() {
         bail!("the selected result has no download link");
     }
@@ -48,7 +50,7 @@ pub(super) fn resolve_download_in(
     }
 
     store.ensure_runtime()?;
-    let provider = result.engine.trim();
+    let provider = provider.trim();
     let known = validate_name(provider).is_ok()
         && store
             .runtime()
