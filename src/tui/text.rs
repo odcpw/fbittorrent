@@ -1,22 +1,22 @@
 //! Existing text behavior.
 use super::*;
+use ftui::text::wrap::graphemes;
 
 /// Display width in terminal cells.
 pub(super) fn dw(s: &str) -> usize { unicode_width::UnicodeWidthStr::width(s) }
 
-/// Drop control and zero-width characters and collapse whitespace so that
-/// measured width matches what the terminal paints.
+/// Drop controls and standalone invisible clusters, keeping accents, variation
+/// selectors and joiners attached to their visible grapheme. Collapse spaces.
 pub(super) fn clean(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_space = false;
-    for c in s.chars() {
-        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if c.is_control() || w == 0 { continue; }
-        if c.is_whitespace() {
+    for cluster in graphemes(s) {
+        if cluster.chars().any(char::is_control) || dw(cluster) == 0 { continue; }
+        if cluster.chars().all(char::is_whitespace) {
             if !last_space { out.push(' '); }
             last_space = true;
         } else {
-            out.push(c);
+            out.push_str(cluster);
             last_space = false;
         }
     }
@@ -32,22 +32,22 @@ pub(super) fn short(s: &str, max: usize) -> String {
     let keep = max - 1;
     let head_w = keep * 2 / 3;
     let tail_w = keep - head_w;
-    let mut head = String::new();
+    let mut head_end = 0;
     let mut w = 0;
-    for c in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    for cluster in graphemes(&s) {
+        let cw = dw(cluster);
         if w + cw > head_w { break; }
-        head.push(c); w += cw;
+        head_end += cluster.len(); w += cw;
     }
-    let mut tail_chars = Vec::new();
-    let mut w = 0;
-    for c in s.chars().rev() {
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if w + cw > tail_w { break; }
-        tail_chars.push(c); w += cw;
+    let tail_column = dw(&s).saturating_sub(tail_w);
+    let mut tail_start = 0;
+    let mut column = 0;
+    for cluster in graphemes(&s) {
+        if column >= tail_column { break; }
+        column += dw(cluster);
+        tail_start += cluster.len();
     }
-    let tail: String = tail_chars.into_iter().rev().collect();
-    let out = format!("{head}…{tail}");
+    let out = format!("{}…{}", &s[..head_end], &s[tail_start..]);
     // Pad if wide chars left us a cell short so columns stay aligned.
     let pad = max.saturating_sub(dw(&out));
     format!("{out}{}", " ".repeat(pad))
@@ -84,12 +84,12 @@ pub(super) fn readable_cell(s: &str, w: usize, hovered_for: Option<Duration>) ->
     let mut out=String::with_capacity(w);
     let mut pos=0;
     let mut used=0;
-    for c in name.chars() {
-        let cw=unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    for cluster in graphemes(&name) {
+        let cw=dw(cluster);
         if pos+cw<=offset { pos+=cw;continue; }
-        if pos<offset { out.push(' ');used+=1;pos+=cw;continue; }
+        if pos<offset { let gap=pos+cw-offset;out.push_str(&" ".repeat(gap));used+=gap;pos+=cw;continue; }
         if used+cw>w { break; }
-        out.push(c);used+=cw;pos+=cw;
+        out.push_str(cluster);used+=cw;pos+=cw;
     }
     out.push_str(&" ".repeat(w.saturating_sub(used)));
     out
@@ -106,4 +106,34 @@ pub(super) fn ago(unix: i64) -> String {
     else if d < 3600 { format!("{}m ago", d / 60) }
     else if d < 86400 { format!("{}h ago", d / 3600) }
     else { format!("{}d ago", d / 86400) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fitting_and_marquee_never_split_visible_graphemes() {
+        let name = "Cafe\u{301}👩🏽‍💻日本語👨‍👩‍👧‍👦.mkv";
+        let clusters: Vec<_> = graphemes(name).collect();
+        assert_eq!(clean(name), name);
+        for width in 1..32 {
+            let fitted = cell(name, width);
+            assert_eq!(dw(&fitted), width);
+            for text in std::iter::once(fitted).chain((0..40).map(|tick|
+                readable_cell(name, width, Some(Duration::from_millis(tick * 300))))) {
+                assert_eq!(dw(&text), width, "{width}: {text:?}");
+                for cluster in graphemes(text.trim()) {
+                    assert!(cluster == "…" || cluster == " " || clusters.contains(&cluster),
+                        "split grapheme at {width} columns: {text:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn visible_accents_do_not_reintroduce_terminal_controls_or_invisible_prefixes() {
+        assert_eq!(clean("\u{301}  Cafe\u{301}\u{200b}\u{202e}\u{2066}\0\x1b\n\t  日本語  "),
+            "Cafe\u{301} 日本語");
+    }
 }
