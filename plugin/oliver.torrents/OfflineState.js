@@ -16,4 +16,5 @@ function clear(service) {
   service.logRevision++
   service.statsRevision++
   if(service.detailFlow)service.detailFlow.hide()
+  if(service.addFlow)service.addFlow.disconnected()
 }

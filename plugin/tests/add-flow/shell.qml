@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import "Plugin/AddFlow.js" as Flow
 import "Plugin/AddSource.js" as Source
+import "Plugin/OfflineState.js" as Offline
 ShellRoot {
   id:root
   FileView {id:fixture;blockLoading:true;blockAllReads:true;preload:false}
@@ -118,6 +119,14 @@ ShellRoot {
     check("cancel_race","canceling a duplicate stage never discards another existing stage",s.calls,!f.snapshot().visible && s.calls.length===1)
     s=service(["torrents","staging"]);s.store.torrents[hash]={hash:hash,name:"Cached stage",staged:true,save_path:"/downloads"};f=controller(s);f.open(source)
     check("early_download","a known cached stage uses the same review ownership path without another add",f.snapshot(),f.snapshot().owned && !f.snapshot().duplicate && s.calls.length===0)
+    s=service(["torrents","staging"]);f=controller(s);f.open(source)
+    var late=s.calls[0].callback,callCount=s.calls.length
+    s.addFlow=f;s.torrentModel={clear:function(){}};s.orderBoundary=function(){};s.logRevision=0;s.statsRevision=0
+    s.online=false;Offline.clear(s)
+    check("disconnect_review","disconnect closes review without issuing a commit or discard",f.snapshot(),!f.snapshot().visible && s.calls.length===callCount)
+    late({hash:hash},null);f.frame({ev:"delta",topic:"torrents"});f.tick()
+    check("disconnect_review","late reply and ticks cannot revive a disconnected review",f.snapshot(),!f.snapshot().visible && s.calls.length===callCount)
+    console.log("FBTQS-PASS disconnect_review")
     console.log("FBTQS-PASS early_download")
     console.log("FBTQS-PASS space_refusal")
     ;["source","review","staging","cancel_race","timeout","duplicate","subscription","pending_commit","destination","search_review"].forEach(function(name){console.log("FBTQS-PASS "+name)})

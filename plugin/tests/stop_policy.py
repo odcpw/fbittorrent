@@ -33,7 +33,7 @@ def stopped(case,q,dashboard,phase):
                and not any(word in texts for word in ('DOWNLOADING','UPLOADING','peers','↓','↑')),
                phase+': popup renders stopped with no live groups, rates, peers or progress',json.dumps(state))
     window=dashboard.wait(lambda:value if (value:=json.loads(dashboard.ipc('stoppedState')))['visible'] and not value['table'] else None)
-    case.check(window['message']=='fbittorrent stopped' and window['model']==0
+    case.check(window['message']=='fbittorrent stopped' and window['model']==0 and not window['review']
                and json.loads(dashboard.ipc('renderedRows'))==[],
                phase+': already-open dashboard renders stopped and unloads its table',json.dumps(window))
     frame=state['pendingFrame'];time.sleep(1)
@@ -78,6 +78,9 @@ def power(binary,plugin_source=None):
             case.check(q.ipc('clickStopChoice','Cancel')=='true','click the actual Cancel button')
             q.wait(lambda:not json.loads(q.ipc('cursor')).get('stopping'))
             assert pair.h.wait_for(lambda:((r:=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent'])['completed_bytes']>before,json.dumps(r)), 'Cancel leaves the real download moving',timeout=5)
+            dashboard.shell('summon',json.dumps(dict(add=dict(source=dict(magnet='magnet:?xt=urn:btih:'+'0'*40+'&dn=Offline%20review')))))
+            review=dashboard.wait(lambda:state if (state:=(dashboard.state().get('view') or {}).get('add',{})).get('visible') else None)
+            case.check(review['visible'],'stop with a real metadata review still open',json.dumps(review))
             case.check(q.ipc('clickPower')=='true','reopen real power confirmation')
             q.wait(lambda:json.loads(q.ipc('cursor')).get('stopping'))
             case.check(q.ipc('clickStopChoice','Stop')=='true','explicit Stop clicks the actual confirmation button')
