@@ -24,7 +24,7 @@ import "BrowsePosters.js" as BrowsePosters
 Item {
   id: root
   property var shell: null
-  property var manifest: ({version: "0.2.0"})
+  property var manifest: ({version: "0.6.0"})
   property var settings: ({})
   property bool popupOpen: false
   property bool quickVisible:false
@@ -483,7 +483,7 @@ Item {
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
       disconnect:function() {socket.intentionalClose=true;socket.connected=false}
-    }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
+    }, {version:manifest.version || "0.6.0", changed:syncClient, frame:applyFrame,
       instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
     if (socket.connected) client.connected()

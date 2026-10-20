@@ -4,27 +4,66 @@ The binary and the bar plugin share one version number. The API protocol and
 the agent CLI contract (`fbittorrent capabilities --json`, `contract_version`)
 are versioned separately.
 
-## v0.2.0 — draft (unreleased)
+## v0.6.0 (2026-10-20)
 
-- A local daemon owns transfers independently of the terminal and dashboard.
-  The API client starts it on demand; closing a view leaves transfers running,
-  while explicit Stop drains the engine. Idle exit and restart retain saved intent.
-- The Omarchy bar popup receives pushed state and opens a dashboard with
-  Torrents, Search, Shows, RSS, Settings and Log. Search and feed results enter
-  a review sheet before downloading. The optional quick palette has its own
-  shortcut and leaves the normal bar toggle intact.
-- Payload upload is **off by default**, during downloads and after completion.
-  Upload requires a per-torrent opt-in. Interface binding pauses network work
-  when the selected tunnel is unavailable; deferred adds retain their records.
-- Torrent details include files, pieces, peers, trackers, readiness to watch,
-  per-torrent download caps, a folder picker for safe moves, and durable display
-  names that leave payload paths unchanged. Keep-files removal offers Undo.
-- Torznab catalogues join the existing search providers, with duplicate results
-  combined and API keys protected from insecure remote HTTP and redirects.
-- Private compositor journeys cover popup keys, palette routing, RSS review,
-  long recheck feedback, and the dashboard's download, Shows and watch workflows.
-  Theme captures and automated contrast checks supplement the owner's final
-  desktop readability check.
+### One app, one daemon
+
+fbittorrent now runs an on-demand daemon with an embedded Rust torrent engine.
+The Omarchy bar, popup, dashboard, TUI and CLI share one local API and see the
+same transfers. Windows attach and detach independently; saved downloads survive
+restarts and resume when a required network interface returns.
+
+### Notable features
+
+- Review magnets, torrent URLs and local `.torrent` files in a staged add sheet;
+  choose the destination and files, then explicitly Download or Discard.
+- Search, RSS and Shows run in the daemon, with shared results, read markers,
+  a Shows inbox, quality preferences and Torznab catalogues. Checking a feed or
+  show never starts a download automatically.
+- Ready-to-watch feedback uses verified video bytes and a smoothed rate estimate
+  to distinguish readiness from playback that may stall. MP4/MOV also require
+  the complete `moov` metadata, including when it sits at the end of the file.
+  ([Playback checks](https://github.com/odcpw/fbittorrent/commit/bc9ccdf2b877884bb7aec8540df682114db3b129))
+- Turtle limits, per-torrent download caps, queue controls and asynchronous recheck.
+  Details expose Files, Peers, Trackers, Pieces and Log; trackers can be edited.
+- Move downloads with a folder picker, rename their display titles without
+  renaming files, and Undo a keep-files removal within ten seconds.
+- A quick palette opens add/search directly. Opt-in clipboard watching offers
+  magnets for review; it never commits a download by itself.
+
+### Defaults and controls
+
+- **Zero payload upload by default**, during downloading and after completion.
+  Upload needs explicit permission; completed torrents require per-torrent opt-in.
+- **Stop rule:** the bar icon is lit exactly while the daemon runs. Closing a UI
+  leaves transfers running; explicit Stop, `down` or uppercase Q drains the daemon
+  and transfers. Idle exit stops an unused daemon after five minutes by default.
+- No backwards compatibility: this release uses today's native data format and
+  API throughout. Existing current-format configuration, RSS, Shows and torrent
+  records continue to load.
+
+### Security hardening
+
+- Private local sockets and stores, bounded API frames and provider processes,
+  redacted feed/tracker credentials, protected Torznab keys, and safe handling of
+  payload paths, file deletion, terminal text and links. Configured interface
+  binding also governs app HTTP requests.
+  ([Input and credential hardening](https://github.com/odcpw/fbittorrent/commit/f5d17cd42a9a5bcd7c2e08d694630ce447f59ba6),
+  [bound outbound traffic](https://github.com/odcpw/fbittorrent/commit/d5f2c4ecaf16eba24263ac803ad5083259dbd0a9))
+
+### Performance
+
+- Pushed state and socket wakeups replace idle UI polling. Subscribers share
+  sampled summaries, paused tables stay quiet, and one typed torrent model reaches
+  the API and TUI without a JSON conversion round trip. Startup and shutdown do
+  less background work.
+  ([Shared summaries](https://github.com/odcpw/fbittorrent/commit/b534ab6aa449f5d2d0a14a9591f496bc7722ed76),
+  [socket wakeups](https://github.com/odcpw/fbittorrent/commit/7bfd93c5a4537a8539d018739bae6d132ec348c0))
+
+### Removed
+
+- qBittorrent WebUI mode, the legacy socket adapter, and the qBittorrent-shaped
+  model and compatibility layer. The daemon owns every native transfer.
 
 ## v0.1.1 (2026-10-18)
 
