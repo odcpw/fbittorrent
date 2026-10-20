@@ -418,10 +418,13 @@ pub fn set_enabled(name: &str, enabled: bool) -> Result<()> {
 pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
     let store = ProviderStore::default();
     store.ensure_runtime()?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    // Python source runs later: https only, including every redirect, and
+    // VPN-bound when network_interface is set (see `crate::outbound`).
+    let http = crate::outbound::Http::new(ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_secs.max(1))))
-        .build()
-        .into();
+        .https_only(true)
+        .build(), "provider install")?;
+    let agent = http.agent();
     let mut failures = Vec::new();
     for source in sources {
         let result = (|| -> Result<()> {

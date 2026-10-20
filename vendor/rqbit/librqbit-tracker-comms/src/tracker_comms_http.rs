@@ -262,4 +262,27 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn deeply_nested_tracker_body_is_refused_without_overflowing_the_stack() {
+        // HTTP tracker bodies may be up to 32 MiB; nest an ignored key deeply.
+        let depth = 1_000_000;
+        let mut body = b"d8:intervali1800e7:ignored".to_vec();
+        body.extend(std::iter::repeat_n(b'l', depth));
+        body.extend(std::iter::repeat_n(b'e', depth));
+        body.extend_from_slice(b"5:peers0:e");
+        let outcome = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let failure = bencode::from_bytes_with_rest::<TrackerError>(&body).map(|_| ()).map_err(|e| e.to_string());
+                let response = bencode::from_bytes_with_rest::<TrackerResponse>(&body).map(|_| ()).map_err(|e| e.to_string());
+                (failure, response)
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(outcome.0.is_err());
+        let error = outcome.1.unwrap_err();
+        assert!(error.contains("nesting exceeds"), "{error}");
+    }
 }

@@ -19,14 +19,46 @@ use crate::storage::{StorageFactory, TorrentStorage};
 
 use super::opened_file::OpenedFile;
 
+/// Open the storage root. A torrent-derived root (the session folder plus the
+/// torrent's name) is torrent-controlled in its last component: open that
+/// component through its parent without following a pre-existing symlink.
+/// A user-selected output folder may itself be a symlink and is followed.
+#[cfg(unix)]
+fn open_root(root: &Path, derived: bool, create: bool) -> anyhow::Result<std::os::fd::OwnedFd> {
+    use nix::{
+        fcntl::{OFlag, open, openat},
+        sys::stat::{Mode, mkdirat},
+    };
+    let directory = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC;
+    let (Some(parent), Some(name), true) = (root.parent(), root.file_name(), derived) else {
+        if create {
+            std::fs::create_dir_all(root)?;
+        }
+        return Ok(open(root, directory, Mode::empty())?);
+    };
+    if create {
+        std::fs::create_dir_all(parent)?;
+    }
+    let parent = open(parent, directory, Mode::empty())?;
+    if create {
+        match mkdirat(&parent, name, Mode::from_bits_truncate(0o777)) {
+            Ok(()) | Err(nix::errno::Errno::EEXIST) => {}
+            Err(error) => return Err(error).context("creating torrent output directory"),
+        }
+    }
+    openat(&parent, name, directory | OFlag::O_NOFOLLOW, Mode::empty())
+        .context("opening torrent output directory without following symlinks")
+}
+
 #[cfg(unix)]
 fn open_parent_directory(
     root: &Path,
+    derived: bool,
     relative: &Path,
     create: bool,
 ) -> anyhow::Result<(std::os::fd::OwnedFd, std::ffi::OsString)> {
     use nix::{
-        fcntl::{OFlag, open, openat},
+        fcntl::{OFlag, openat},
         sys::stat::{Mode, mkdirat},
     };
     use std::path::Component;
@@ -39,16 +71,9 @@ fn open_parent_directory(
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let (filename, parents) = names.split_last().context("torrent file has no filename")?;
-    if create {
-        std::fs::create_dir_all(root)?;
-    }
     // The chosen output folder is the anchor. Torrent-controlled children are
     // opened through directory descriptors and never follow a symlink.
-    let mut directory = open(
-        root,
-        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    )?;
+    let mut directory = open_root(root, derived, create)?;
     for name in parents {
         if create {
             match mkdirat(&directory, *name, Mode::from_bits_truncate(0o777)) {
@@ -68,12 +93,17 @@ fn open_parent_directory(
 }
 
 #[cfg(unix)]
-fn open_download_file(root: &Path, relative: &Path, overwrite: bool) -> anyhow::Result<File> {
+fn open_download_file(
+    root: &Path,
+    derived: bool,
+    relative: &Path,
+    overwrite: bool,
+) -> anyhow::Result<File> {
     use nix::{
         fcntl::{OFlag, openat},
         sys::stat::Mode,
     };
-    let (directory, filename) = open_parent_directory(root, relative, true)?;
+    let (directory, filename) = open_parent_directory(root, derived, relative, true)?;
     let mut flags = OFlag::O_RDWR | OFlag::O_CREAT | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
     if !overwrite {
         flags |= OFlag::O_EXCL;
@@ -89,7 +119,12 @@ fn open_download_file(root: &Path, relative: &Path, overwrite: bool) -> anyhow::
 }
 
 #[cfg(not(unix))]
-fn open_download_file(root: &Path, relative: &Path, overwrite: bool) -> anyhow::Result<File> {
+fn open_download_file(
+    root: &Path,
+    _derived: bool,
+    relative: &Path,
+    overwrite: bool,
+) -> anyhow::Result<File> {
     let path = root.join(relative);
     std::fs::create_dir_all(path.parent().context("torrent file has no parent")?)?;
     Ok(OpenOptions::new()
@@ -113,6 +148,7 @@ impl StorageFactory for FilesystemStorageFactory {
     ) -> anyhow::Result<FilesystemStorage> {
         Ok(FilesystemStorage {
             output_folder: shared.options.output_folder.clone(),
+            derived_root: shared.options.derived_output_folder,
             opened_files: Default::default(),
         })
     }
@@ -124,6 +160,8 @@ impl StorageFactory for FilesystemStorageFactory {
 
 pub struct FilesystemStorage {
     pub(crate) output_folder: PathBuf,
+    /// The output folder is the session folder joined with the torrent name.
+    pub(crate) derived_root: bool,
     pub(crate) opened_files: Vec<OpenedFile>,
 }
 
@@ -137,6 +175,7 @@ impl FilesystemStorage {
                 .map(|f| f.take_clone())
                 .collect::<anyhow::Result<Vec<_>>>()?,
             output_folder: self.output_folder.clone(),
+            derived_root: self.derived_root,
         })
     }
 }
@@ -175,7 +214,7 @@ impl TorrentStorage for FilesystemStorage {
         #[cfg(unix)]
         {
             let (directory, filename) =
-                open_parent_directory(&self.output_folder, filename, false)?;
+                open_parent_directory(&self.output_folder, self.derived_root, filename, false)?;
             nix::unistd::unlinkat(
                 &directory,
                 filename.as_os_str(),
@@ -202,6 +241,7 @@ impl TorrentStorage for FilesystemStorage {
                 .map(|f| f.take_clone())
                 .collect::<anyhow::Result<Vec<_>>>()?,
             output_folder: self.output_folder.clone(),
+            derived_root: self.derived_root,
         }))
     }
 
@@ -209,7 +249,31 @@ impl TorrentStorage for FilesystemStorage {
         #[cfg(unix)]
         {
             if path.as_os_str().is_empty() {
-                return match std::fs::remove_dir(&self.output_folder) {
+                // Only the torrent-named folder this session created is ours;
+                // a user-selected output folder is never removed. Remove it by
+                // name in its parent, so a planted symlink is never followed.
+                if !self.derived_root {
+                    return Ok(());
+                }
+                let (Some(parent), Some(name)) =
+                    (self.output_folder.parent(), self.output_folder.file_name())
+                else {
+                    return Ok(());
+                };
+                let parent = nix::fcntl::open(
+                    parent,
+                    nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )?;
+                return match nix::unistd::unlinkat(
+                    &parent,
+                    name,
+                    nix::unistd::UnlinkatFlags::RemoveDir,
+                )
+                .map_err(std::io::Error::from)
+                {
                     Ok(()) => Ok(()),
                     Err(error) if matches!(error.raw_os_error(), Some(code) if code == nix::errno::Errno::ENOTEMPTY as i32 || code == nix::errno::Errno::EEXIST as i32) =>
                     {
@@ -222,7 +286,8 @@ impl TorrentStorage for FilesystemStorage {
                     Err(error) => Err(error).context("removing empty torrent output directory"),
                 };
             }
-            let (directory, filename) = open_parent_directory(&self.output_folder, path, false)?;
+            let (directory, filename) =
+                open_parent_directory(&self.output_folder, self.derived_root, path, false)?;
             return match nix::unistd::unlinkat(
                 &directory,
                 filename.as_os_str(),
@@ -270,6 +335,7 @@ impl TorrentStorage for FilesystemStorage {
             };
             let f = open_download_file(
                 &self.output_folder,
+                self.derived_root,
                 relative_path,
                 shared.options.allow_overwrite,
             )?;
@@ -297,15 +363,19 @@ mod tests {
         std::fs::write(&sentinel, b"original outside data").unwrap();
         symlink(&sentinel, root.join("file-link")).unwrap();
         symlink(&outside, root.join("directory-link")).unwrap();
-        assert!(open_download_file(&root, Path::new("file-link"), true).is_err());
-        assert!(open_download_file(&root, Path::new("directory-link/sentinel"), true).is_err());
+        assert!(open_download_file(&root, false, Path::new("file-link"), true).is_err());
         assert!(
-            open_download_file(&root, Path::new("directory-link/new-dir/payload"), true).is_err()
+            open_download_file(&root, false, Path::new("directory-link/sentinel"), true).is_err()
+        );
+        assert!(
+            open_download_file(&root, false, Path::new("directory-link/new-dir/payload"), true)
+                .is_err()
         );
         assert!(!outside.join("new-dir").exists());
 
         let storage = FilesystemStorage {
             output_folder: root.clone(),
+            derived_root: false,
             opened_files: Vec::new(),
         };
         assert!(
@@ -319,7 +389,7 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read(&sentinel).unwrap(), b"original outside data");
-        assert!(open_download_file(&root, Path::new("../outside/sentinel"), true).is_err());
+        assert!(open_download_file(&root, false, Path::new("../outside/sentinel"), true).is_err());
     }
 
     #[test]
@@ -330,12 +400,13 @@ mod tests {
         let selected = directory.path().join("selected-downloads");
         symlink(&root, &selected).unwrap();
         let relative = Path::new("nested/payload");
-        let file = open_download_file(&selected, relative, true).unwrap();
+        let file = open_download_file(&selected, false, relative, true).unwrap();
         file.pwrite_all(0, b"hello").unwrap();
         assert_eq!(std::fs::read(root.join(relative)).unwrap(), b"hello");
-        assert!(open_download_file(&selected, relative, false).is_err());
+        assert!(open_download_file(&selected, false, relative, false).is_err());
         let storage = FilesystemStorage {
-            output_folder: selected,
+            output_folder: selected.clone(),
+            derived_root: false,
             opened_files: Vec::new(),
         };
         storage.remove_file(0, relative).unwrap();
@@ -343,5 +414,45 @@ mod tests {
             .remove_directory_if_empty(Path::new("nested"))
             .unwrap();
         assert!(!root.join("nested").exists());
+        // The selected folder is the user's, even once empty.
+        storage.remove_directory_if_empty(Path::new("")).unwrap();
+        assert!(root.is_dir() && selected.is_dir());
+    }
+
+    #[test]
+    fn derived_torrent_folder_never_follows_a_planted_symlink_and_is_removed_only_when_ours() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let session = directory.path().join("downloads");
+        let outside = directory.path().join("outside");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        // A symlink named like the torrent, planted in the session folder.
+        let planted = session.join("Some.Torrent");
+        symlink(&outside, &planted).unwrap();
+        assert!(open_download_file(&planted, true, Path::new("payload.bin"), true).is_err());
+        assert!(!outside.join("payload.bin").exists());
+        // Without a symlink the derived folder is created and, once empty, removed.
+        let derived = session.join("Other.Torrent");
+        let file = open_download_file(&derived, true, Path::new("disc/payload.bin"), true).unwrap();
+        file.pwrite_all(0, b"x").unwrap();
+        let storage = FilesystemStorage {
+            output_folder: derived.clone(),
+            derived_root: true,
+            opened_files: Vec::new(),
+        };
+        storage.remove_file(0, Path::new("disc/payload.bin")).unwrap();
+        storage.remove_directory_if_empty(Path::new("disc")).unwrap();
+        storage.remove_directory_if_empty(Path::new("")).unwrap();
+        assert!(!derived.exists() && session.is_dir());
+        // Root removal unlinks by name in the parent: a planted symlink is
+        // neither followed nor removed.
+        let storage = FilesystemStorage {
+            output_folder: planted.clone(),
+            derived_root: true,
+            opened_files: Vec::new(),
+        };
+        assert!(storage.remove_directory_if_empty(Path::new("")).is_err());
+        assert!(outside.is_dir());
+        assert!(std::fs::symlink_metadata(&planted).unwrap().file_type().is_symlink());
     }
 }

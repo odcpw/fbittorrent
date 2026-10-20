@@ -36,7 +36,7 @@ impl Title {
 }
 
 pub fn cache_dir() -> PathBuf {
-    dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("fbittorrent")
+    crate::config::require_home(dirs::cache_dir(), "the IMDb cache").join("fbittorrent")
 }
 
 fn private_cache_dir(root: &Path, directory: &Path) -> Result<()> {
@@ -86,13 +86,13 @@ fn write_cache_file(root: &Path, path: &Path, bytes: &[u8], reused: Option<&Path
     result.with_context(|| format!("saving private cache {}", path.display()))
 }
 
-fn agent(timeout: u64) -> ureq::Agent {
-    ureq::Agent::config_builder()
+/// VPN-bound when network_interface is set (see `crate::outbound`).
+fn agent(timeout: u64) -> Result<crate::outbound::Http> {
+    crate::outbound::Http::new(ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout)))
         .user_agent(UA)
         .http_status_as_error(false)
-        .build()
-        .into()
+        .build(), "IMDb lookup")
 }
 
 // ---------- suggestion endpoint ----------
@@ -162,7 +162,8 @@ fn fetch_poster_in(root: &Path, url: &str, width: u32) -> Result<PathBuf> {
         return Ok(path);
     }
     let sized = poster_url_sized(url, width);
-    let mut resp = agent(10).get(&sized).call().context("poster download")?;
+    let http = agent(10)?;
+    let mut resp = http.agent().get(&sized).call().context("poster download")?;
     if resp.status().as_u16() != 200 { return Err(anyhow!("poster HTTP {}", resp.status())); }
     let bytes = resp.body_mut().with_config().limit(8 * 1024 * 1024).read_to_vec()?;
     write_cache_file(root, &path, &bytes, None)?;

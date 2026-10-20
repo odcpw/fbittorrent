@@ -767,4 +767,26 @@ mod tests {
         bencode_serialize_to_writer(Want::None, &mut w).unwrap();
         assert_eq!(&w, b"le")
     }
+
+    #[test]
+    fn deeply_nested_datagram_is_refused_without_overflowing_the_reader_stack() {
+        // The DHT reader accepts up to 16 KiB datagrams; fill one with lists
+        // nested inside the ignored `a` arguments of an otherwise valid ping.
+        let depth = (16384 - 64) / 2;
+        let mut datagram = b"d1:a".to_vec();
+        datagram.extend(std::iter::repeat_n(b'l', depth));
+        datagram.extend(std::iter::repeat_n(b'e', depth));
+        datagram.extend_from_slice(b"1:q4:ping1:t2:aa1:y1:qe");
+        assert!(datagram.len() <= 16384);
+        let outcome = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || bprotocol::deserialize_message::<bencode::ByteBufOwned>(&datagram).map(|_| ()).map_err(|e| format!("{e:#}")))
+            .unwrap()
+            .join()
+            .unwrap();
+        let error = outcome.unwrap_err();
+        assert!(error.contains("nesting exceeds"), "{error}");
+        // A normal ping still parses.
+        bprotocol::deserialize_message::<bencode::ByteBufOwned>(b"d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t2:aa1:y1:qe").unwrap();
+    }
 }

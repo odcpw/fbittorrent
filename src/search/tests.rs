@@ -452,3 +452,101 @@ os._exit(0)
         println!("retained raw={} bytes, normalized={:?}, error={}",state.raw.len(),items,state.error);
         drop(state); delete(id).unwrap();
     }
+
+    #[test]
+    fn provider_python_address_space_is_capped() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        let mut ok = python(&store.runtime());
+        ok.args(["-c", "import resource; b = bytearray(64 << 20); print(resource.getrlimit(resource.RLIMIT_AS)[0], len(b))"]);
+        let printed = String::from_utf8(capture(ok, Duration::from_secs(10)).unwrap()).unwrap();
+        assert_eq!(printed.trim(), format!("{} {}", PYTHON_ADDRESS_SPACE, 64 << 20));
+        let mut bomb = python(&store.runtime());
+        bomb.args(["-c", "bytearray(3 << 30)"]);
+        let error = format!("{:#}", capture(bomb, Duration::from_secs(10)).unwrap_err());
+        assert!(error.contains("MemoryError"), "{error}");
+        println!("Python address space capped at {PYTHON_ADDRESS_SPACE} bytes: {error}");
+    }
+
+    #[test]
+    fn nova_helpers_bound_bodies_decompression_and_stalls() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        let mut command = python(&store.runtime());
+        command.args(["-c", r#"import gzip, http.server, socket, threading, time
+import helpers
+assert socket.getdefaulttimeout() == helpers._TIMEOUT_SECS
+helpers._TIMEOUT_SECS = 1
+bomb = gzip.compress(b'\0' * (helpers._MAX_DECOMPRESSED + 1))
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
+    def do_GET(self):
+        if self.path == '/stall':
+            time.sleep(5); return
+        body = {'/bomb': bomb, '/huge': b'x' * (helpers._MAX_BODY + 1), '/ok': gzip.compress(b'fine')}[self.path]
+        self.send_response(200); self.send_header('Content-Length', str(len(body))); self.end_headers()
+        try: self.wfile.write(body)
+        except OSError: pass
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+server.daemon_threads = True
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = 'http://127.0.0.1:%d' % server.server_address[1]
+assert helpers.retrieve_url(base + '/ok') == 'fine'
+assert helpers.retrieve_url(base + '/bomb') == ''
+assert helpers.retrieve_url(base + '/huge') == ''
+began = time.monotonic()
+assert helpers.retrieve_url(base + '/stall') == ''
+assert time.monotonic() - began < 4, 'urlopen ignored its timeout'
+for path in ('/bomb', '/huge'):
+    try: helpers.download_file(base + path); raise SystemExit('unbounded download_file ' + path)
+    except ValueError: pass
+print('bounded')
+"#]);
+        let output = capture(command, Duration::from_secs(20)).unwrap();
+        assert_eq!(output, b"bounded\n");
+    }
+
+    #[test]
+    fn nova_search_deadline_stops_a_stalled_provider_group() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        std::fs::write(store.runtime().join("engines/example.py"), "class example:\n name='Example'\n url='https://example.org'\n def search(self,query):\n  import time\n  from novaprinter import prettyPrinter\n  prettyPrinter({'link':'magnet:?xt=urn:btih:abc','name':'Before stall','size':1,'seeds':1,'leech':1,'engine_url':self.url})\n  time.sleep(60)\n").unwrap();
+        jobs::TEST_NOVA_DEADLINE_MS.store(1500, Ordering::Release);
+        struct Restore;
+        impl Drop for Restore { fn drop(&mut self) { jobs::TEST_NOVA_DEADLINE_MS.store(120_000, Ordering::Release); } }
+        let _restore = Restore;
+        let id = start_in(&store, "fixture").unwrap();
+        let group = job(id).unwrap().pid.load(Ordering::Acquire);
+        let began = Instant::now();
+        while !job(id).unwrap().done.load(Ordering::Acquire) {
+            assert!(began.elapsed() < Duration::from_secs(10), "stalled provider outlived the search deadline");
+            thread::sleep(Duration::from_millis(20));
+        }
+        let response = results(id, 100, 0).unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert!(response.error.as_deref().is_some_and(|e| e.contains("timed out")), "{:?}", response.error);
+        assert!(live_processes(group).is_empty(), "provider group survived the deadline");
+        delete(id).unwrap();
+    }
+
+    #[test]
+    fn vpn_binding_refuses_unbound_nova_and_result_urls_are_never_prefetched() {
+        let _session = session();
+        let (_scratch, store) = scratch();
+        store.ensure_runtime().unwrap();
+        std::fs::write(store.runtime().join("engines/example.py"), "class example:\n name='Example'\n url='https://example.org'\n def search(self,query):\n  open('provider-ran','w').write('yes')\n").unwrap();
+        let refused = crate::outbound::with_interface(Some("fbmissing0"), || start_in(&store, "fixture"));
+        assert!(format!("{:#}", refused.unwrap_err()).contains("VPN binding"));
+        thread::sleep(Duration::from_millis(200));
+        assert!(!store.runtime().join("provider-ran").exists(), "a Nova provider ran outside the VPN binding");
+        // Listing results never contacts a provider-supplied .torrent URL.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/result.torrent", listener.local_addr().unwrap());
+        assert_eq!(normalize::torrent_hash(&url), None);
+        thread::sleep(Duration::from_millis(100));
+        assert!(listener.accept().is_err(), "result URL was fetched while listing results");
+    }

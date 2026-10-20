@@ -31,7 +31,8 @@ fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl 
         Call::RssAdd { args }=> {
             let url=url::Url::parse(&args.url).map_err(|_|error(ErrorCode::InvalidArgs,"invalid feed URL",Some("url")))?;
             if !matches!(url.scheme(),"http"|"https") || url.host_str().is_none() {return Err(error(ErrorCode::InvalidArgs,"feed URL must use HTTP(S)",Some("url")));}
-            if service.feeds().map_err(failure)?.iter().any(|f|f.url==args.url){return Err(error(ErrorCode::InvalidState,"feed already followed",Some("url")));}
+            // Public feed URLs are redacted; compare the stored originals.
+            if store.list().map_err(failure)?.iter().any(|f|f.url==args.url){return Err(error(ErrorCode::InvalidState,"feed already followed",Some("url")));}
             let cfg=crate::config::Config::load().map_err(failure)?;
             store.add(&args.url,args.name.as_deref(),cfg.timeout_secs.min(10)).map_err(failure)?;
             Reply::RssAdd(FeedResult { feed:feed_in(service,&crate::rss::stable_id(&args.url))? })
@@ -51,7 +52,10 @@ fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl 
         Call::RssSetRead { args }=> { let f=feed_in(service,&args.feed)?; require_item(service,&args.feed,&args.item)?; store.set_read(&f.name,Some(&args.item),args.read).map_err(failure)?; Reply::RssSetRead(EmptyResult {}) },
         Call::RssMarkFeedRead { args }=> { let f=feed_in(service,&args.feed)?; store.mark_read(&f.name,None).map_err(failure)?; Reply::RssMarkFeedRead(CountResult {count:f.unread}) },
         Call::RssGrab { args }=> {
-            let f=feed_in(service,&args.feed)?; let item=require_item(service,&args.feed,&args.item)?;
+            let f=feed_in(service,&args.feed)?; require_item(service,&args.feed,&args.item)?;
+            // The public item is redacted; the owner adds from the stored source.
+            let item=service.snapshot().map_err(failure)?.sources.get(&args.feed).into_iter().flatten().find(|a|a.id==args.item).cloned()
+                .ok_or_else(||error(ErrorCode::NotFound,"unknown feed item",None))?;
             let source=if let Some(magnet)=item.magnet {AddSource::Magnet(magnet)}else if let Some(url)=item.torrent_url {AddSource::Url(url)}else {return Err(error(ErrorCode::InvalidState,"item has no downloadable source",Some("item")));};
             let add=serde_json::from_value(json!({"source":source,"stopped":args.stopped,"seed":args.seed,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"rss","stage":args.stage})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
             let added=add_torrent(add,&f.id,&args.item)?;

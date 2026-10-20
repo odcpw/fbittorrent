@@ -5016,6 +5016,8 @@ from daemon_shows_notify import CASES as SHOWS_NOTIFY_CASES
 CASES.update((function.__name__,function) for function in SHOWS_NOTIFY_CASES)
 from daemon_robust import CASES as ROBUST_CASES
 CASES.update((function.__name__,function) for function in ROBUST_CASES)
+from daemon_rss import CASES as RSS_PRIVACY_CASES
+CASES.update((function.__name__,function) for function in RSS_PRIVACY_CASES)
 SYSTEMD_CASES = {"systemd_without_bus_address", "unit_is_static", "add_starts_unit_no_launcher",
                  "status_never_starts", "down_stops", "kill9_restarts", "killmode_mixed",
                  "start_limit_not_hit", "start_while_deactivating", "down_cancels_restart",

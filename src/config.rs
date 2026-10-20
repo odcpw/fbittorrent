@@ -82,9 +82,21 @@ impl Default for Config {
 pub fn upload_off() -> String { "off".into() }
 
 pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
-        .join("fbittorrent")
+    require_home(dirs::config_dir(), "configuration").join("fbittorrent")
+}
+
+/// Without a home directory there is no private place for configuration,
+/// passkeys or caches. A literal "~/.config" (relative to the working
+/// directory) or a shared "/tmp" fallback would put them somewhere other
+/// users or processes control, so refuse to run instead.
+pub fn require_home(directory: Option<PathBuf>, what: &str) -> PathBuf {
+    match directory.filter(|path| path.is_absolute()) {
+        Some(path) => path,
+        None => {
+            ::std::eprintln!("fbittorrent: error: no home directory for {what} (set HOME); refusing a relative or shared fallback");
+            std::process::exit(78)
+        }
+    }
 }
 
 pub fn config_path() -> PathBuf {
