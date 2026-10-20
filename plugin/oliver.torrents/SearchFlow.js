@@ -104,6 +104,13 @@ function create(service,changed) {
     rows.slice(Math.min(from,to),Math.max(from,to)+1).forEach(function(r){if(selectable(r))next[r.key]=true})
     s.selection=next;s.choose(key);publish();return true
   }
+  // Shift+arrows: mark from the cursor through the row moved to.
+  s.extend=function(delta){
+    var rows=visibleRows(),from=rows.findIndex(function(r){return r.key===s.cursor});if(from<0)return false
+    var to=Math.max(0,Math.min(rows.length-1,from+delta)),next=Object.assign({},s.selection)
+    rows.slice(Math.min(from,to),Math.max(from,to)+1).forEach(function(r){if(selectable(r))next[r.key]=true})
+    s.selection=next;s.choose(rows[to].key);publish();return true
+  }
   s.clearSelection=function(){if(!Object.keys(s.selection).length)return false;s.selection={};publish();return true}
   var BATCH_LIMIT=50
   s.batchOpen=function(){

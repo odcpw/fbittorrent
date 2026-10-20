@@ -220,37 +220,66 @@ impl TuiApp {
             .iter()
             .find(|row| row.name == result.file_name && source(row) == result.file_url)
     }
-    pub(in crate::tui) fn native_search_grab(&self, result: &SearchResult) -> Cmd<Msg> {
-        let Some(row) = self.wire_result(result).cloned() else {
-            return Cmd::none();
-        };
+    /// Grabs daemon results with at most four requests in flight on this
+    /// connection, then reports which displayed identities were added.
+    pub(in crate::tui) fn native_search_grab(&self, rows: Vec<api::SearchItem>) -> Cmd<Msg> {
         let connection = self.presence.clone();
+        let identity = connection.as_ref().map(|c| c.id);
         let options = self.add_opts();
-        let mut args = json!({"seed":options.seed,"stopped":options.stopped});
-        if let Some(session) = &self.native_search {
-            args["search_id"] = json!(session.id);
-            args["key"] = json!(row.key);
-        } else {
-            args["result"] = json!(row);
-        }
-        if let Some(path) = options.save_path {
-            args["save_path"] = json!(path);
-        }
-        if let Some(category) = options.category {
-            args["category"] = json!(category);
-        }
+        let session = self.native_search.as_ref().map(|s| s.id);
+        let jobs: Vec<(String, String, serde_json::Value)> = rows
+            .into_iter()
+            .map(|row| {
+                let mut args = json!({"seed":options.seed,"stopped":options.stopped});
+                if let Some(id) = session {
+                    args["search_id"] = json!(id);
+                    args["key"] = json!(row.key);
+                } else {
+                    args["result"] = json!(row);
+                }
+                if let Some(path) = &options.save_path {
+                    args["save_path"] = json!(path);
+                }
+                if let Some(category) = &options.category {
+                    args["category"] = json!(category);
+                }
+                let shown = display(&row);
+                (search_identity(&shown), row.name.clone(), args)
+            })
+            .collect();
         Cmd::task(move || {
-            Msg::ActionDone(
-                connection
-                    .ok_or_else(|| anyhow::anyhow!("fbittorrent stopped"))
-                    .and_then(|c| c.request_confirmed("search.grab", args))
-                    .map(|_| "added search result".into())
-                    .map_err(|e| e.to_string()),
-            )
+            let mut added = Vec::new();
+            let mut failed = Vec::new();
+            for chunk in jobs.chunks(4) {
+                let outcomes: Vec<_> = std::thread::scope(|scope| {
+                    let handles: Vec<_> = chunk
+                        .iter()
+                        .map(|(_, _, args)| {
+                            let connection = connection.clone();
+                            let args = args.clone();
+                            scope.spawn(move || {
+                                connection
+                                    .ok_or_else(|| anyhow::anyhow!("fbittorrent stopped"))
+                                    .and_then(|c| c.request_confirmed("search.grab", args))
+                                    .map_err(|e| e.to_string())
+                            })
+                        })
+                        .collect();
+                    handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("grab worker failed".into()))).collect()
+                });
+                for ((id, name, _), outcome) in chunk.iter().zip(outcomes) {
+                    match outcome {
+                        Ok(_) => added.push(id.clone()),
+                        Err(error) => failed.push((id.clone(), name.clone(), error)),
+                    }
+                }
+            }
+            Msg::SearchGrabbed { connection: identity, added, failed }
         })
     }
     pub(in crate::tui) fn native_browse(&mut self, entry: browse::Entry) -> Cmd<Msg> {
         let retired = self.native_search.take();
+        self.search_marked.clear();
         self.search_sub = None;
         self.search_running = false;
         self.search_seq += 1;

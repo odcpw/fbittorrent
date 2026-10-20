@@ -31,6 +31,12 @@ impl KeyChord {
             mods: Modifiers::CTRL,
         }
     }
+    pub const fn shift(code: KeyCode) -> Self {
+        Self {
+            code,
+            mods: Modifiers::SHIFT,
+        }
+    }
     pub fn matches(self, event: KeyEvent) -> bool {
         // Terminals report an uppercase printable code with or without SHIFT.
         let mods = if matches!(event.code, KeyCode::Char(_) | KeyCode::BackTab) {
@@ -62,6 +68,8 @@ impl KeyChord {
         };
         if self.mods.contains(Modifiers::CTRL) {
             format!("Ctrl+{}", key.to_uppercase())
+        } else if self.mods.contains(Modifiers::SHIFT) && !matches!(self.code, KeyCode::Char(_) | KeyCode::BackTab) {
+            format!("Shift+{key}")
         } else {
             key
         }

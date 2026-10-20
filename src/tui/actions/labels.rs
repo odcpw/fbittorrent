@@ -100,7 +100,9 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
             "shows.refresh" => "Check all",
             "shows.reload" => "Check show",
             "prompt.confirm" if app.prompt.as_ref().is_some_and(|p|p.kind==PromptKind::Shutdown) => "Stop fbittorrent",
+            "prompt.confirm" if app.prompt.as_ref().is_some_and(|p|matches!(p.kind,PromptKind::ConfirmSearchBatch{..})) => "Download",
         "prompt.submit" => match app.prompt.as_ref()?.kind {
+                PromptKind::ConfirmSearchBatch { .. } => "Download",
                 PromptKind::FollowShow => "Follow",
                 PromptKind::AddFeed => "Add feed",
                 _ => "Add",

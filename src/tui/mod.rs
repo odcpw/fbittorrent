@@ -115,6 +115,9 @@ mod service_tests;
 #[path="tests/shows_selection.rs"]
 mod shows_selection_tests;
 #[cfg(test)]
+#[path="tests/search_select.rs"]
+mod search_select_tests;
+#[cfg(test)]
 #[path="tests/disk.rs"]
 mod disk_tests;
 #[cfg(test)]
@@ -265,6 +268,18 @@ impl Model for TuiApp {
                 match r { Ok(s) => self.set_success(s), Err(e) => self.set_status(e, true) }
                 self.poll()
             }
+            Msg::SearchGrabbed{connection,added,failed} => {
+                if self.presence.as_ref().map(|c|c.id)!=connection {return Cmd::none();}
+                for (id,_,_) in &failed { self.search_adding.remove(id); }
+                for id in added.iter() { self.search_adding.remove(id); self.search_added.insert(id.clone()); }
+                let ok=match added.len() { 0=>String::new(), 1=>"added search result".into(), n=>format!("added {n} search results") };
+                if let Some((_,name,error))=failed.first() {
+                    let more=if failed.len()>1 {format!(" (+{} more)",failed.len()-1)} else {String::new()};
+                    let lead=if ok.is_empty() {String::new()} else {format!("{ok} · ")};
+                    self.set_status(format!("{lead}could not add {name}: {error}{more}"),true);
+                } else if !ok.is_empty() { self.set_success(ok); }
+                self.poll()
+            }
             Msg::Imdb(key, r) => {
                 self.remember_imdb(key,r);
                 Cmd::none()
@@ -390,7 +405,7 @@ impl Model for TuiApp {
             let inner = block.inner(root[2]);
             block.render(root[2], frame);
             if p.yes_no {
-                Paragraph::new(if matches!(p.kind,PromptKind::ConfirmRemoveTracker{..}) {"[Cancel] · (y) Remove tracker"}else{"y / N (default: No)"}).style(th.accented()).render(inner, frame);
+                Paragraph::new(if matches!(p.kind,PromptKind::ConfirmRemoveTracker{..}) {"[Cancel] · (y) Remove tracker"}else if matches!(p.kind,PromptKind::ConfirmSearchBatch{..}) {"Enter / y Download · Esc Cancel"}else{"y / N (default: No)"}).style(th.accented()).render(inner, frame);
             } else {
                 p.input.render(inner, frame);
             }

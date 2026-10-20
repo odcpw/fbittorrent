@@ -151,9 +151,13 @@ pub(super) const ACTIONS: &[Action] = &[
         None,
         None
     ),
-    action!("search.select",Scope::Pane(Screen::Search,Pane::Results),&[],"Select for batch download",90,
-        |_|true,None,D,Some(&[KeyChord::plain(KeyCode::Char(' '))]),None,
-        Some("Ctrl/Shift+click also select. Enter downloads the selection; Esc clears it.")),
+    action!("search.select",Scope::Pane(Screen::Search,Pane::Results),&[KeyChord::plain(KeyCode::Char(' '))],"Select for batch download",90,
+        |a|a.selected_result().is_some(),Some(|a|a.toggle_search_mark()),TD,None,None,
+        Some("Enter downloads the selection; Esc clears it. The dashboard also takes Ctrl/Shift+click.")),
+    action!("search.select_down",Scope::Pane(Screen::Search,Pane::Results),&[KeyChord::shift(KeyCode::Down)],"Extend selection down",90,
+        |a|a.selected_result().is_some(),Some(|a|a.extend_search_marks(true)),TD,None,None,None),
+    action!("search.select_up",Scope::Pane(Screen::Search,Pane::Results),&[KeyChord::shift(KeyCode::Up)],"Extend selection up",90,
+        |a|a.selected_result().is_some(),Some(|a|a.extend_search_marks(false)),TD,None,None,None),
     action!(
         "search.imdb",
         Scope::Pane(Screen::Search, Pane::Results),

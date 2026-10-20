@@ -32,7 +32,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::Enter)],
         "Submit",
         10,
-        |a| a.prompt.as_ref().is_some_and(|p| !p.yes_no),
+        |a| a.prompt.as_ref().is_some_and(|p| !p.yes_no || matches!(p.kind, PromptKind::ConfirmSearchBatch { .. })),
         Some(|a| a.on_prompt_action(Intent::Primary)),
         TD,
         None,

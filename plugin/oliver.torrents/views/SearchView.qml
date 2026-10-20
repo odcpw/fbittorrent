@@ -36,6 +36,7 @@ FocusScope {
     }
     if(event.key===Qt.Key_Escape){if(flow.clearSelection())return true;if(viewModel.phase==="searching"){flow.cancel();return true}focusQuery();return true}
     if(event.key===Qt.Key_Space){var row=flow.current();if(row){flow.toggleSelect(row.key);flow.move(1)}return true}
+    if((event.key===Qt.Key_Down || event.key===Qt.Key_Up) && (event.modifiers & Qt.ShiftModifier)){var step=gridShowing ? grid.columns : 1;flow.extend(event.key===Qt.Key_Down ? step : -step);return true}
     if(event.text==="/" || event.text==="e"){focusQuery();return true}
     if(gridShowing && (event.text==="h" || event.key===Qt.Key_Left)){flow.move(-1);return true}
     if(gridShowing && (event.text==="l" || event.key===Qt.Key_Right)){flow.move(1);return true}
@@ -131,7 +132,7 @@ FocusScope {
       }
     }
     Components.KeyHint {Layout.fillWidth:true;text:(root.viewModel.total>500 ? "Showing 500 of "+root.viewModel.total+" · " : "")+(root.viewModel.phase==="searching" ? (root.viewModel.mode==="browse" ? "Loading browse list… · " : "Providers still searching · ") : "")+"Sort: "+root.viewModel.sort.key+(root.viewModel.sort.reverse ? " reversed" : "")+" · "+(root.viewModel.message || "")}
-    Components.KeyHint {Layout.fillWidth:true;text:root.markedCount>0 ? root.markedCount+" selected · Enter download selected · Space mark · Ctrl/Shift+click · Esc clear" : (root.viewModel.mode==="browse" ? (root.gridShowing ? "v rows · " : "v grid · ") : "")+"Enter review add · Space select · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
+    Components.KeyHint {Layout.fillWidth:true;text:root.markedCount>0 ? root.markedCount+" selected · Enter download selected · Space mark · Shift+↑/↓ extend · Ctrl/Shift+click · Esc clear" : (root.viewModel.mode==="browse" ? (root.gridShowing ? "v rows · " : "v grid · ") : "")+"Enter review add · Space/Shift+↓ select · s sort · S reverse · f follow · i IMDb · O source · y magnet · b browse · P providers · / query"}
   }
   Rectangle {anchors.fill:parent;visible:!!root.viewModel.panel;color:Commons.Util.alpha(Commons.Color.background,0.7);MouseArea {anchors.fill:parent;onClicked:root.flow.closePanel()}}
   Components.PaneFrame {

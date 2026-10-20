@@ -196,7 +196,9 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:search` | Edit query | `/`, `e` | `/`, `e` | — |  |
 | `screen:search` | Stop search | `Esc` | `Esc` | — |  |
 | `pane:search.results` | Download | `Enter` | `Enter` | — |  |
-| `pane:search.results` | Select for batch download | — | `Space` | — | Ctrl/Shift+click also select. Enter downloads the selection; Esc clears it. |
+| `pane:search.results` | Select for batch download | `Space` | `Space` | — | Enter downloads the selection; Esc clears it. The dashboard also takes Ctrl/Shift+click. |
+| `pane:search.results` | Extend selection down | `Shift+↓` | `Shift+↓` | — |  |
+| `pane:search.results` | Extend selection up | `Shift+↑` | `Shift+↑` | — |  |
 | `pane:search.results` | IMDb | `i` | `i` | — |  |
 | `pane:search.results` | Wikipedia | `w` | `w` | — |  |
 | `pane:search.results` | Source page | `O` | `O` | — |  |

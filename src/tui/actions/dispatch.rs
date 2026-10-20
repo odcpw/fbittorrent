@@ -79,8 +79,12 @@ pub(in crate::tui) fn dispatch_scope(app: &mut TuiApp, requested: Scope, key: Ke
     };
     if scope == Scope::Prompt && app.prompt.as_ref().is_some_and(|p| p.yes_no) {
         let confirm = all().find(|a| a.id == "prompt.confirm").unwrap();
+        // A search batch is a download, not a destructive choice: Enter confirms it.
+        let batch = app.prompt.as_ref().is_some_and(|p| matches!(p.kind, PromptKind::ConfirmSearchBatch { .. }));
         let intent = if confirm.keys.iter().any(|chord| chord.matches(key)) {
             Intent::Confirm
+        } else if batch && KeyChord::plain(KeyCode::Enter).matches(key) {
+            Intent::Primary
         } else {
             Intent::Cancel
         };

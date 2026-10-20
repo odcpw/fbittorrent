@@ -30,6 +30,7 @@ pub(super) enum PromptKind {
     ShowFilters,
     Shutdown,
     ConfirmUnfollow { imdb: String, title: String },
+    ConfirmSearchBatch { count: usize },
 }
 
 impl TuiApp {
@@ -74,8 +75,11 @@ impl TuiApp {
         let Some(p) = self.prompt.as_mut() else { return Cmd::none() };
         if p.yes_no {
             let kind = p.kind.clone();
+            // A batch download is not destructive: Enter confirms it as y does.
+            let confirm = matches!(intent, actions::Intent::Confirm)
+                || (matches!(intent, actions::Intent::Primary) && matches!(kind, PromptKind::ConfirmSearchBatch { .. }));
             match intent {
-                actions::Intent::Confirm => {
+                _ if confirm => {
                     self.close_prompt();
                     return match kind {
                         PromptKind::Shutdown => self.shutdown_daemon(),
@@ -86,6 +90,7 @@ impl TuiApp {
                             self.native_feed_action("rss.remove",&name,None,None,format!("removed feed {name}"))
                         }
                         PromptKind::ConfirmUnfollow { imdb, title } => self.service_action("shows.unfollow",serde_json::json!({"imdb":imdb}),format!("unfollowed {title}")),
+                        PromptKind::ConfirmSearchBatch { .. } => self.grab_marked_results(),
                         _ => Cmd::none(),
                     };
                 }

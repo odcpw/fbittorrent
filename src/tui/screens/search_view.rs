@@ -121,14 +121,15 @@ impl TuiApp {
                         &self.search_results[i],
                         self.rating_for(&self.search_results[i]),
                         self.wire_result(&self.search_results[i]),
+                        self.search_mark_state(&self.search_results[i]),
                         extended,
                     ))
                 },
                 |i| {
                     let mut result = self.search_results[i].clone();
-                    if self.wire_result(&result).is_some_and(|r| r.added.is_some()) {
-                        result.file_name = format!("+ In list · {}", result.file_name);
-                    }
+                    let (marked, adding, added) = self.search_mark_state(&result);
+                    let state = if added { "+ In list · " } else if adding { "Adding… · " } else { "" };
+                    result.file_name = format!("{}{state}{}", if marked { "✓ " } else { "" }, result.file_name);
                     search_line(
                         &result,
                         self.rating_for(&self.search_results[i]),
@@ -184,8 +185,13 @@ impl TuiApp {
             if !peers.is_empty() {
                 lines.push(kv("peers", peers));
             }
-            if self.wire_result(r).is_some_and(|row| row.added.is_some()) {
-                lines.push(Line::styled("+ In your list", th.ok()));
+            match self.search_mark_state(r) {
+                (_, _, true) => lines.push(Line::styled("+ In your list", th.ok())),
+                (_, true, _) => lines.push(Line::styled("Adding…", th.dimmed())),
+                _ => {}
+            }
+            if !self.search_marked.is_empty() {
+                lines.push(Line::styled(format!("{} selected · Enter downloads · Esc clears", self.search_marked.len()), th.accented()));
             }
             lines.extend([
                 kv(

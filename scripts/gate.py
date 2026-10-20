@@ -197,7 +197,9 @@ def cases(mode, binary, env, registry):
         result += [python_check('plugin_glance_policy','plugin/tests/stop_policy.py',
                                 '--binary',str(binary),'--case','glance','--log-root','{logs}'),
                    python_check('plugin_default_idle','plugin/tests/stop_policy.py',
-                                '--binary',str(binary),'--case','default_delay','--log-root','{logs}')]
+                                '--binary',str(binary),'--case','default_delay','--log-root','{logs}'),
+                   python_check('tui_search_batch','agent_ergonomics_audit/audit/regression_tests/tui_search_batch.py',
+                                str(binary),'--log-root','{logs}')]
     return result
 
 

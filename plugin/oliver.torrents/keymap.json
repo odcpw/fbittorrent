@@ -1363,10 +1363,40 @@
           "Space"
         ],
         "popup": null,
-        "tui": null
+        "tui": [
+          "Space"
+        ]
       },
       "label": "Select for batch download",
-      "note": "Ctrl/Shift+click also select. Enter downloads the selection; Esc clears it.",
+      "note": "Enter downloads the selection; Esc clears it. The dashboard also takes Ctrl/Shift+click.",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.select_down",
+      "keys": {
+        "dashboard": [
+          "Shift+↓"
+        ],
+        "popup": null,
+        "tui": [
+          "Shift+↓"
+        ]
+      },
+      "label": "Extend selection down",
+      "scope": "pane:search.results"
+    },
+    {
+      "id": "search.select_up",
+      "keys": {
+        "dashboard": [
+          "Shift+↑"
+        ],
+        "popup": null,
+        "tui": [
+          "Shift+↑"
+        ]
+      },
+      "label": "Extend selection up",
       "scope": "pane:search.results"
     },
     {

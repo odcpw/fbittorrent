@@ -49,6 +49,11 @@ pub struct TuiApp {
     pub(super) search_running: bool,
     pub(super) native_search: Option<super::remote::search::Session>,
     pub(super) search_wire: Vec<crate::api::SearchItem>,
+    /// Results marked for one batch download, keyed by their displayed
+    /// identity; grabs in flight and grabs already added this session.
+    pub(super) search_marked: std::collections::BTreeSet<String>,
+    pub(super) search_adding: std::collections::BTreeSet<String>,
+    pub(super) search_added: std::collections::BTreeSet<String>,
     pub(super) search_seq: u64,
     pub(super) search_browse: bool,
     pub(super) poster_open: bool,
@@ -152,6 +157,8 @@ pub enum Msg {
     ApiFiles {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     FilesSaved {connection:Option<u64>,hash:String,result:Result<Vec<TorrentFile>,String>},
     Plugins(Result<Vec<SearchPlugin>, String>),
+    /// Search grabs finished: identities added, and (identity, name, error) failures.
+    SearchGrabbed{connection:Option<u64>,added:Vec<String>,failed:Vec<(String,String,String)>},
 
 }
 
@@ -208,6 +215,9 @@ impl TuiApp {
             search_running: false,
             native_search: None,
             search_wire: vec![],
+            search_marked: Default::default(),
+            search_adding: Default::default(),
+            search_added: Default::default(),
             search_seq: 0,
             search_browse: false,
             poster_open: false,

@@ -52,7 +52,8 @@ def run(binary):
             q.keys(['-k','space'],lambda:sorted(view().get('selection',[]))==sorted(keys))
             q.keys(['-k','Escape'],lambda:view().get('selection')==[])
             case.check(view().get('focus')=='results','Esc clears the selection before leaving the results',json.dumps(view()))
-            q.keys(['g','-k','space','-k','space'],lambda:sorted(view().get('selection',[]))==sorted(keys))
+            # Shift+Down marks from the cursor through the row moved to.
+            q.keys(['g','-M','shift','-k','Down','-m','shift'],lambda:sorted(view().get('selection',[]))==sorted(keys) and view().get('cursor')==keys[1])
             case.check(not client.call('torrents.list',{})['result']['torrents'],'marking results adds nothing by itself',json.dumps(view()))
             q.keys(['-k','Return'],lambda:view().get('panel')=='batch' and view().get('panelCount')==2)
             panel=case.path.with_name(case.path.stem+'-panel.png');q.ipc('grab',panel);q.wait(lambda:panel.exists() and panel.stat().st_size>0)
