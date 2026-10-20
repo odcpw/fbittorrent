@@ -105,6 +105,26 @@ pub(super) fn parse_rate(value: &str) -> Result<Option<u32>> {
     Ok((n != 0).then_some(n))
 }
 impl TuiApp {
+    /// Follow confirmed changes without overwriting the user's unsaved fields.
+    pub(in crate::tui) fn sync_settings_snapshot(&mut self, settings: &crate::api::Settings) -> Result<()> {
+        let mut confirmed = self.cfg.clone();
+        native_settings(&mut confirmed, settings)?;
+        if let Some(modal) = self.settings.as_mut() {
+            let edits = settings_patch(&modal.original, &modal.cfg);
+            let mut draft = serde_json::to_value(&confirmed)?;
+            for (key, value) in edits.as_object().unwrap() {
+                draft[key] = value.clone();
+            }
+            modal.cfg = serde_json::from_value(draft)?;
+            modal.original = confirmed.clone();
+            if !modal.connections.contains(&confirmed.network_interface) {
+                modal.connections.push(confirmed.network_interface.clone());
+            }
+        }
+        self.cfg = confirmed;
+        Ok(())
+    }
+
     pub(super) fn edit_peer_port(&mut self) -> Cmd<Msg> {
         let port = self.settings.as_ref().unwrap().cfg.peer_port;
         self.open_prompt(
