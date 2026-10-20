@@ -15,7 +15,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
         api::Peer {addr:"127.0.0.1:42001".into(),client:Some("rqbit 9.0.1".into()),conn:api::PeerConnection::TcpMse,incoming:false,state:"live".into(),downloaded:524288,uploaded:16384,dl_bps:Some(65536),ul_bps:Some(8192),seed:Some(true)},
         api::Peer {addr:"127.0.0.1:42002".into(),client:None,conn:api::PeerConnection::Tcp,incoming:true,state:"live".into(),downloaded:32768,uploaded:0,dl_bps:None,ul_bps:Some(0),seed:Some(false)},
     ];
-    app.store.peers.insert(api::Hash::new(t.hash).unwrap(),peers.into_iter().map(|p|(p.addr.clone(),p)).collect());
+    app.store.peers.insert(t.hash,peers.into_iter().map(|p|(p.addr.clone(),p)).collect());
 }
 #[test]
 fn peers_tab_is_capability_gated_and_topic_exists_only_while_visible() {
@@ -44,11 +44,11 @@ fn overview_and_table_show_known_seeds_over_total_and_keep_unknowns_absent() {
     let mut app=fixture::app("torrents");
     let frame:serde_json::Value=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().map(|l|serde_json::from_str::<serde_json::Value>(l).unwrap()).find(|v|v["frame"]["result"]["torrents"].is_array()).unwrap();
     let mut row:api::Torrent=serde_json::from_value(frame["frame"]["result"]["torrents"][0].clone()).unwrap();
-    row.peers=Some(41);row.seeds=Some(1);let t=format::torrent(&row);
-    assert_eq!(format::Columns::of(&t,Some(&row)).peers,"1/41");
-    assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(),"1 seeds / 41 peers connected");
-    row.seeds=None;assert_eq!(format::Columns::of(&t,Some(&row)).peers,"41");
-    row.peers=None;assert_eq!((format::Metrics{legacy:&t,api:Some(&row)}).peers(),"unknown");
+    row.peers=Some(41);row.seeds=Some(1);
+    assert_eq!(format::Columns::of(&row).peers,"1/41");
+    assert_eq!(format::Metrics(&row).peers(),"1 seeds / 41 peers connected");
+    row.seeds=None;assert_eq!(format::Columns::of(&row).peers,"41");
+    row.peers=None;assert_eq!(format::Metrics(&row).peers(),"unknown");
     app.store.torrents.insert(row.hash.to_string(),row);
 }
 

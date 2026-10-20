@@ -154,6 +154,22 @@ pub struct Torrent {
     pub playable: Option<Playable>,
 }
 
+#[cfg(test)]
+impl Torrent {
+    /// A checked row whose transfer values are all unknown, for tests.
+    pub fn fixture(hash: &str, name: &str, state: TorrentState) -> Self {
+        Self {
+            hash: Hash::new(hash).expect("fixture hash"), name: name.into(), state, intent: Intent::Run,
+            staged: false, checked: true, seed: false, upload_enabled: false, upload_policy: UploadPolicy::Off,
+            save_path: "/fixture/downloads".into(), added_at: 0, force: false, reason: None, error: None,
+            progress: None, size: None, completed_bytes: None, uploaded_bytes: None, dl_bps: None, ul_bps: None,
+            eta_s: None, peers: None, seeds: None, upload_limit_bps: None, download_limit_bps: None,
+            effective_download_limit_bps: None, ratio: None, content_path: None, completed_at: None,
+            origin: None, imdb_id: None, queue_pos: None, playable: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct File {
     pub index: u64,

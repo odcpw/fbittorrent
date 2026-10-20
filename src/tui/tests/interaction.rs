@@ -4,7 +4,7 @@
     fn destructive_keys(open: fn(&mut TuiApp), unfollow: bool) {
         for code in [KeyCode::Enter, KeyCode::Escape, KeyCode::Char('n'), KeyCode::Char(' '), KeyCode::Char('q'), KeyCode::Char('y'), KeyCode::Char('Y'), KeyCode::Char('Q'), KeyCode::Char('?'), KeyCode::Char('1'), KeyCode::Tab] {
             let mut app = inbox_app();
-            app.torrents = vec![Torrent { hash: "fixture-hash".into(), name: "Fixture".into(), ..Default::default() }];
+            app.torrents = vec![Torrent::fixture(&"f".repeat(40), "Fixture", crate::api::TorrentState::Paused)];
             app.tor_list.borrow_mut().select(Some(0));
             app.feeds = vec![feed(vec![])];
             app.feed_list.borrow_mut().select(Some(0));
@@ -118,14 +118,15 @@
     #[test]
     fn torrent_details_label_the_native_total_as_connected_peers() {
         let mut app = app();
-        app.torrents.push(Torrent { name: "Peer label fixture".into(), num_seeds: 0,
-            num_leechs: 7, progress_known: true, ..Default::default() });
+        let mut row = Torrent::fixture(&"7".repeat(40), "Peer label fixture", crate::api::TorrentState::Stalled);
+        row.peers = Some(7);
+        app.torrents.push(row);
         app.tor_list.borrow_mut().select(Some(0));
         let native = render(&app, 160, 45);
         assert!(native.contains("7 peers connected"));
         assert!(!native.contains("0 seeds") && !native.contains("leechers"));
-        app.torrents[0].num_seeds = 3;
-        assert!(render(&app, 160, 45).contains("7 peers connected"));
+        app.torrents[0].seeds = Some(3);
+        assert!(render(&app, 160, 45).contains("3 seeds / 7 peers connected"));
     }
 
     #[test]
@@ -152,8 +153,9 @@
     #[test]
     fn torrent_restore_error_is_visible_in_details() {
         let mut app = app();
-        app.torrents = vec![Torrent { hash: "a".repeat(40), name: "failed fixture".into(),
-            state: "error".into(), error_message: Some("could not restore: corrupt cache".into()), ..Default::default() }];
+        let mut row = Torrent::fixture(&"a".repeat(40), "failed fixture", crate::api::TorrentState::Error);
+        row.error = Some("could not restore: corrupt cache".into());
+        app.torrents = vec![row];
         app.tor_list.borrow_mut().select(Some(0));
         let text = render(&app, 160, 40);
         assert!(text.contains("could not restore: corrupt cache"), "{text}");
@@ -162,7 +164,7 @@
     #[test]
     fn reconnect_keeps_confirmed_rows_visible_without_retrying_mutations() {
         let mut app=app();
-        app.torrents=vec![Torrent {hash:"a".repeat(40),name:"confirmed before disconnect".into(),state:"downloading".into(),..Default::default()}];
+        app.torrents=vec![Torrent::fixture(&"a".repeat(40),"confirmed before disconnect",crate::api::TorrentState::Downloading)];
         app.tor_list.borrow_mut().select(Some(0));
         let reference=crate::api::MutationRef::new("remove-before-disconnect").unwrap();
         app.store.begin_mutation(reference.clone(),"torrents.remove".into(),vec![crate::api::Hash::new("a".repeat(40)).unwrap()]).unwrap();
@@ -349,7 +351,7 @@
     #[test]
     fn reduce_motion_no_scroll() {
         let mut app=app();
-        app.torrents=vec![Torrent { name:"Selected".into(),..Default::default() },Torrent { name:"Long hovered name, including the entire tail".into(),..Default::default() }];
+        app.torrents=vec![Torrent::fixture(&"1".repeat(40),"Selected",crate::api::TorrentState::Paused),Torrent::fixture(&"2".repeat(40),"Long hovered name, including the entire tail",crate::api::TorrentState::Paused)];
         app.tor_list.borrow_mut().select(Some(0));
         app.tor_list.borrow_mut().hovered=Some(1);
         app.cfg.reduce_motion=true;
@@ -367,7 +369,7 @@
     #[test]
     fn selected_long_name_is_static_even_under_pointer() {
         let mut app=app();
-        app.torrents=vec![Torrent { hash:"static".into(),name:"A selected long name whose complete tail remains in the footer".into(),state:"stoppedDL".into(),..Default::default() }];
+        app.torrents=vec![Torrent::fixture(&"5".repeat(40),"A selected long name whose complete tail remains in the footer",crate::api::TorrentState::Paused)];
         app.tor_list.borrow_mut().select(Some(0));
         app.tor_list.borrow_mut().hovered=Some(0);
         app.sync_marquee();
@@ -383,7 +385,7 @@
     #[test]
     fn hover_identity_change_rearms_the_one_pass_clock() {
         let mut app=app();
-        app.torrents=vec![Torrent { name:"Selected".into(),..Default::default() },Torrent { hash:"hovered".into(),name:"Another long name".into(),..Default::default() }];
+        app.torrents=vec![Torrent::fixture(&"1".repeat(40),"Selected",crate::api::TorrentState::Paused),Torrent::fixture(&"6".repeat(40),"Another long name",crate::api::TorrentState::Paused)];
         app.tor_list.borrow_mut().select(Some(0));app.tor_list.borrow_mut().hovered=Some(1);
         app.sync_marquee();let previous=app.marquee_key;
         app.marquee_since=std::time::Instant::now()-Duration::from_secs(20);
@@ -408,7 +410,7 @@
             let mut app = app();
             app.online = true;
             app.torrents = ["Short.txt", "Episode.S01E02.1080p.mkv"].into_iter().enumerate()
-                .map(|(i, name)| Torrent { hash: format!("fixture-{i}"), name: name.into(), state: "stoppedDL".into(), progress_known: true, up_limit: 32768, ..Default::default() }).collect();
+                .map(|(i, name)| { let mut row = Torrent::fixture(&format!("{i:040x}"), name, crate::api::TorrentState::Paused); row.progress = Some(0.0); row.upload_limit_bps = Some(32768); row }).collect();
             app.tor_list.borrow_mut().select(Some(0));
             let text = render(&app, width, 24);
             assert_eq!(text.contains("╭ Details "), width >= 140, "width {width}: {text}");
@@ -576,12 +578,13 @@
     #[test]
     fn queued_and_vpn_waiting_rows_do_not_claim_running_downloads() {
         let mut app = app();
-        app.torrents = vec![Torrent { name: "Next episode".into(), state: "queuedDL".into(), progress_known: true, ..Default::default() }, Torrent { name: "Saved episode".into(), state: "waitingVPN".into(), progress_known: false, ..Default::default() }];
+        let mut next = Torrent::fixture(&"3".repeat(40), "Next episode", crate::api::TorrentState::Queued);
+        next.progress = Some(0.0);
+        app.torrents = vec![next, Torrent::fixture(&"4".repeat(40), "Saved episode", crate::api::TorrentState::WaitingVpn)];
         let text = render(&app, 120, 30);
         assert!(text.contains("… Queue  "), "queued state must occupy its contract state cell: {text}");
         assert!(text.contains("⏚ VPN    "), "VPN state must occupy its contract state cell: {text}");
-        assert!(!app.torrents[0].is_active());
-        assert!(!app.torrents[1].is_active());
+        assert!(app.torrents.iter().all(|row| !format::transferring(row.state)));
     }
 
 
@@ -626,7 +629,7 @@
     #[test]
     fn screens_and_scrollable_help_keep_names_visible_at_supported_sizes() {
         let mut app = app();
-        app.torrents = vec![Torrent { name: "TorrentAlpha.1080p.mkv".into(), hash: "hash".into(), ..Default::default() }];
+        app.torrents = vec![Torrent::fixture(&"9".repeat(40), "TorrentAlpha.1080p.mkv", crate::api::TorrentState::Paused)];
         app.tor_list.borrow_mut().select(Some(0));
         app.search_results = vec![SearchResult { file_name: "SearchAlpha.1080p.mkv".into(), ..Default::default() }];
         app.search_focus_input = false;

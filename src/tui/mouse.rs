@@ -114,7 +114,7 @@ impl TuiApp {
     /// A double click must activate the same object, even if a refresh replaced its row.
     pub(super) fn mouse_item_identity(&self, list: MouseList, index: usize) -> Option<String> {
         match list {
-            MouseList::Torrents => self.torrents.get(index).map(|torrent| torrent.hash.clone()),
+            MouseList::Torrents => self.torrents.get(index).map(|torrent| torrent.hash.to_string()),
             MouseList::Results => self.search_results.get(index).map(|result| result.file_url.clone()),
             MouseList::Browse => self.browse_entries.get(index).map(|entry| format!("{:?}", entry.source)),
             MouseList::Feeds => self.feeds.get(index).map(|feed| if feed.uid.is_empty() { feed.name.clone() } else { feed.uid.clone() }),
@@ -211,7 +211,7 @@ impl TuiApp {
         let state = self.mouse_list_state(list);
         let index=if list==MouseList::Torrents&&self.rects.borrow().table.is_some(){
             self.rects.borrow().rows.iter().find(|(_,rect)|rect.contains(m.x,m.y))
-                .and_then(|(hash,_)|self.torrents.iter().position(|t|&t.hash==hash))
+                .and_then(|(hash,_)|self.torrents.iter().position(|t|t.hash.as_str()==hash))
         }else{mouse_row_index(area,m.x,m.y,state.borrow().offset,self.mouse_list_len(list))};
         let Some(index)=index else{return Cmd::none()};
         if m.kind == MouseEventKind::Moved {

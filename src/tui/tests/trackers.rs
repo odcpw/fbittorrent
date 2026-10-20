@@ -9,7 +9,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
     let torrent=app.torrents[0].clone();app.open_details(&torrent);
     app.details.as_mut().unwrap().tab=DetailsTab::Trackers;
     let row=|url: &str,status,message|api::Tracker{url:url.into(),status,tier:None,last_announce_at:Some(crate::shows::now().max(0) as u64),next_announce_at:None,peers:None,message};
-    app.trackers_loaded(None,torrent.hash,0,false,Ok(vec![
+    app.trackers_loaded(None,torrent.hash.to_string(),0,false,Ok(vec![
         row("http://127.0.0.1:42001/announce?passkey=private-token",api::TrackerStatus::Error,Some("fixture: not yet http://127.0.0.1:42001/announce?passkey=private-token".into())),
         api::Tracker{peers:Some(1),..row("https://long-tracker.invalid/a-very-long-tracker-path/announce",api::TrackerStatus::Ok,None)},
         row("udp://unsupported.invalid/announce",api::TrackerStatus::NotContacted,None),

@@ -26,12 +26,10 @@ impl TuiApp {
                 .store
                 .sorted_torrents(field, self.torrent_descending)
                 .into_iter()
-                .map(format::torrent)
+                .cloned()
                 .collect();
         } else {
-            self.torrents.sort_by(|left, right| {
-                store::display_order(left, right, field, self.torrent_descending)
-            });
+            self.torrents.sort_by(|left, right| store::torrent_order(left, right, field, self.torrent_descending));
         }
         self.tor_list
             .borrow_mut()

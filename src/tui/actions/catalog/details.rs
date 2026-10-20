@@ -13,7 +13,7 @@ macro_rules! detail {
                 Intent::Pause | Intent::Remove | Intent::DeleteFiles
             ) || a
                 .store
-                .pending_for_key(&t.hash)
+                .pending_for_key(t.hash.as_str())
                 .is_none()),
             Some(|a| a.on_torrents_action(Intent::$intent)),
             T,

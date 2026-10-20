@@ -54,7 +54,7 @@ impl TuiApp {
         let active = self
             .torrents
             .iter()
-            .filter(|torrent| torrent.is_active() || torrent.is_queued() || torrent.is_seeding())
+            .filter(|torrent| format::transferring(torrent.state) || torrent.state == crate::api::TorrentState::Queued)
             .count();
         if active > 0 {
             self.open_prompt(

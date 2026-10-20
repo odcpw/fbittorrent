@@ -71,7 +71,7 @@ fn settings_destination_idle_and_clipboard_are_cancelable_drafts() {
 fn removal_undo_requires_confirmed_keep_files_receipt_and_expires() {
     let mut app=fixture::app("torrents");
     assert!(!app.can_undo_removal());
-    let hash=app.torrents[0].hash.clone();
+    let hash=app.torrents[0].hash.to_string();
     let until=crate::shows::now() as u64+60;
     app.service_done(None,"torrents.remove",serde_json::json!({"hashes":[hash],"delete_files":false}),"Removed".into(),Ok(serde_json::json!({"state":"done","undo_until":until})));
     assert!(app.can_undo_removal());
@@ -193,7 +193,7 @@ fn copy_handles_missing_provider_magnet_without_claiming_success() {
 #[test]
 fn removal_undo_is_granted_by_confirmation_never_by_delete_or_failure() {
     let mut app = fixture::app("torrents");
-    let hash = app.selected_torrent().unwrap().hash.clone();
+    let hash = app.selected_torrent().unwrap().hash.to_string();
     key(&mut app, 'd');
     assert!(app.removal_undo.is_none());
     app.on_key(KeyEvent::new(KeyCode::Enter));

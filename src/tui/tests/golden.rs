@@ -115,13 +115,15 @@ fn done_row_opens_upload_details_instead_of_resuming() {
 
 #[test]
 fn resume_unknown_completion_timestamp_keeps_incomplete_controls() {
-    for completion_on in [-1, 0] {
+    // A saved unknown (-1) or zero completion date is absent on the API row.
+    {
         let mut app = fixture::app("torrents");
-        app.torrents[0].state = "stoppedDL".into();
-        app.torrents[0].completion_on = completion_on;
+        app.torrents[0].state = crate::api::TorrentState::Paused;
+        app.torrents[0].intent = crate::api::Intent::Pause;
+        app.torrents[0].completed_at = None;
         let text = render(&app, 80, 24);
         let footer = text.lines().find(|line| line.contains("[Torrents]")).unwrap();
-        println!("completion_on={completion_on}, asserted footer: {footer}");
+        println!("unknown completion, asserted footer: {footer}");
         assert!(footer.contains("(p) Resume"));
         assert!(matches!(app.on_torrents_key(KeyEvent::new(KeyCode::Char('p'))), Cmd::Task(..)));
     }
@@ -174,9 +176,8 @@ fn watch_ready_and_may_stall_goldens() {
     for (name,stall,buffer,finish) in [("watch-ready",true,240,42),("watch-may-stall",false,30,1080)] {
         let mut app=fixture::app("torrents");
         let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
-        let legacy=super::format::torrent(&row);
-        app.torrents[0]=legacy.clone();app.store.torrents.insert(row.hash.to_string(),row);
-        let _=app.open_details(&legacy);
+        app.torrents[0]=row.clone();app.store.torrents.insert(row.hash.to_string(),row.clone());
+        let _=app.open_details(&row);
         let actual=render(&app,80,24);let path=format!("src/tui/tests/golden/{name}-80x24.txt");
         assert!(actual.contains(if stall {"Ready to watch"}else{"may stall"}));
         assert!(actual.contains(if stall {"4m00s buffered"}else{"30s buffered"}));

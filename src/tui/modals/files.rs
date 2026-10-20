@@ -13,8 +13,8 @@ pub(super) struct FilesModal {
 
 impl TuiApp {
     pub(super) fn open_files(&mut self, t: &Torrent) -> Cmd<Msg> {
-        self.files = Some(FilesModal { hash: t.hash.clone(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, saving:false,error: String::new() });
-        self.reload_files(t.hash.clone())
+        self.files = Some(FilesModal { hash: t.hash.to_string(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, saving:false,error: String::new() });
+        self.reload_files(t.hash.to_string())
     }
 
     pub(super) fn reload_files(&self, hash: String) -> Cmd<Msg> {

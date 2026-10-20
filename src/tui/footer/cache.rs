@@ -36,14 +36,14 @@ impl TuiApp {
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
         if let Some(torrent) = self.selected_torrent() {
-            self.store.pending_for_key(&torrent.hash).hash(&mut hash);
+            self.store.pending_for_key(torrent.hash.as_str()).hash(&mut hash);
             torrent.name.hash(&mut hash);
             self.followable_title(&torrent.name).hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
-            self.seed_allowed(torrent).hash(&mut hash);
-            self.store.torrents.get(&torrent.hash).map(|row|row.upload_enabled).hash(&mut hash);
+            torrent.seed.hash(&mut hash);
+            torrent.upload_enabled.hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);

@@ -53,7 +53,7 @@ impl TuiApp {
 
     pub(super) fn rename_prompt(&mut self)->Cmd<Msg> {
         if let Some(t)=self.selected_torrent() {
-            let (hash,name)=(t.hash.clone(),t.name.clone());
+            let (hash,name)=(t.hash.to_string(),t.name.clone());
             self.open_prompt(PromptKind::RenameTorrent {hash},"Rename to: (empty restores original)",false);
             self.prompt.as_mut().unwrap().input.set_value(name);
         }

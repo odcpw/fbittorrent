@@ -268,12 +268,12 @@ impl TuiApp {
         app
     }
 
-    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,false,hash);}
+    pub(super) fn set_success(&mut self,message:impl Into<String>){self.set_status(message,false);self.status_success=true;let hash=self.selected_torrent().map(|t|t.hash.clone());self.feedback.push(&self.status,false,hash);}
 
     pub(super) fn set_status(&mut self, s: impl Into<String>, err: bool) {
         self.status = s.into();
         self.status_is_error = err;
-        if err {let hash=self.selected_torrent().and_then(|t|crate::api::Hash::new(t.hash.clone()).ok());self.feedback.push(&self.status,true,hash);}
+        if err {let hash=self.selected_torrent().map(|t|t.hash.clone());self.feedback.push(&self.status,true,hash);}
         self.status_success=false;
         self.status_at = std::time::Instant::now();
     }
