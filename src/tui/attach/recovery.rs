@@ -3,7 +3,7 @@ use super::*;
 use std::{borrow::Cow, time::Instant};
 
 #[derive(Debug)]
-pub(in crate::tui) struct Failure {
+pub(crate) struct Failure {
     pub message: String,
     pub permanent: bool,
     pub absent: bool,

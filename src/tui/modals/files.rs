@@ -13,8 +13,8 @@ pub(super) struct FilesModal {
 
 impl TuiApp {
     pub(super) fn open_files(&mut self, t: &Torrent) -> Cmd<Msg> {
-        self.files = Some(FilesModal { hash: t.hash.clone(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, saving:false,error: String::new() });
-        self.reload_files(t.hash.clone())
+        self.files = Some(FilesModal { hash: t.hash.to_string(), name: t.name.clone(), files: vec![], list: RefCell::new(ListState::default()), loading: true, saving:false,error: String::new() });
+        self.reload_files(t.hash.to_string())
     }
 
     pub(super) fn reload_files(&self, hash: String) -> Cmd<Msg> {
@@ -111,7 +111,7 @@ impl TuiApp {
         Paragraph::new(Text::from_line(header)).wrap(WrapMode::None).render(rows[0], frame);
         let elapsed = self.marquee_elapsed();
         self.view_rows(MouseList::Files,rows[1],m.files.len(),
-            |i|layout::fingerprint(&(&m.files[i],self.cfg.native())),
+            |i|layout::fingerprint(&m.files[i]),
             |i|{let f=&m.files[i];
             let (mark, prio, pst) = match f.priority {
                 0 => ("[ ]", "skip", bg.fg(th.dim)),

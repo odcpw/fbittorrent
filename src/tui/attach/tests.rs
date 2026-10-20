@@ -26,10 +26,7 @@ fn uppercase_quit_requires_only_lowercase_y_when_busy() {
         KeyCode::Escape,
     ] {
         let mut app = app();
-        app.torrents = vec![Torrent {
-            state: "downloading".into(),
-            ..Default::default()
-        }];
+        app.torrents = vec![Torrent::fixture(&"d".repeat(40), "Active", crate::api::TorrentState::Downloading)];
         assert!(matches!(
             app.on_key(KeyEvent::new(KeyCode::Char('Q'))),
             Cmd::None

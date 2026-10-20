@@ -64,7 +64,7 @@ impl EngineDispatcher {
         if let EngineOp::Move{hashes,save_path}=op {
             return Ok(EngineResult::Move(self.inner.begin_move(cx,hashes,save_path).await?));
         }
-        let read=matches!(&op,EngineOp::Version|EngineOp::Shutdown|EngineOp::Restart|EngineOp::Network|EngineOp::Settings|EngineOp::Queue|EngineOp::TransferInfo|EngineOp::Info|EngineOp::Get{..}|EngineOp::Files{..}|EngineOp::Trackers{..});
+        let read=matches!(&op,EngineOp::TransferInfo|EngineOp::Info|EngineOp::Get{..}|EngineOp::Files{..}|EngineOp::Trackers{..});
         if !read && self.inner.moves.any() {return Err(moving::Busy.into());}
         let _serial=if read {None}else{Some(OwnedMutexGuard::lock(self.inner.operations.clone(),cx).await?)};
         if matches!(&op, EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..}) {
@@ -88,59 +88,10 @@ impl EngineDispatcher {
         if let EngineOp::QueueMove { hash, to } = &op {
             return self.move_queue(cx,hash,*to).await;
         }
-        if let EngineOp::Recheck {hash}=&op {self.inner.invalidate_resume(hash)?;}
         if let Some(result) = self.execute_dormant(cx, &op).await {
             return result;
         }
-        if matches!(
-            op,
-            EngineOp::Network | EngineOp::Settings | EngineOp::Restart | EngineOp::Shutdown
-        ) {
-            let snapshot = self
-                .lifecycle
-                .expected_network()
-                .unwrap_or_else(|| crate::network_app::state(&Config::default()));
-            return op
-                .control(&snapshot, &self.lifecycle)
-                .expect("control operation");
-        }
         match &op {
-            EngineOp::Version => {
-                return Ok(EngineResult::Version(format!(
-                    "native librqbit {}",
-                    librqbit::version()
-                )));
-            }
-            EngineOp::Queue => {
-                let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
-                let (mut active, mut queued) = (0, 0);
-                for record in &ledger.records {
-                    if self.inner.rechecks.active(&record.hash) { continue; }
-                    if let Ok(handle) = self.inner.handle(&record.hash) {
-                        let stats = handle.stats();
-                        if !stats.finished && !matches!(stats.state, TorrentStatsState::Error) {
-                            if !handle.is_paused() {
-                                active += 1;
-                            } else if !record.paused {
-                                queued += 1;
-                            }
-                        }
-                    }
-                }
-                return Ok(EngineResult::Queue(QueueInfo {
-                    max_active_downloads: self.inner.max_active_downloads.load(Ordering::Acquire),
-                    active_downloads: active,
-                    queued_downloads: queued,
-                    network_blocked: self.inner.network_blocked.load(Ordering::Acquire),
-                }));
-            }
-            EngineOp::SetQueue { limit } => {
-                self.inner.set_download_limit(cx, *limit).await?;
-                return Ok(EngineResult::Acknowledged);
-            }
-            EngineOp::SetPreferences => bail!(
-                "qBittorrent preferences do not apply to the native engine; edit fbittorrent configuration"
-            ),
             EngineOp::TransferInfo => {
                 let stats = self.inner.session.stats_snapshot();
                 return Ok(EngineResult::Transfer(TransferInfo {
@@ -242,12 +193,12 @@ impl EngineDispatcher {
                 }
                 let only_files = magnet.get_select_only();
                 let record = Record {
-                    upload: None, display_name:None,
+                    upload: options.seed.then_some(true), display_name:None,
                     hash: hash.clone(), name: magnet.name.unwrap_or_else(|| hash.clone()),
                     source: source.clone(), output_folder: options.save_path.clone()
                         .unwrap_or_else(|| self.inner.default_folder.to_string_lossy().into()),
                     only_files, trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit,
-                    ratio_limit: options.ratio_limit, category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
+                    category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
                     added_on: now(), completion_on: 0, paused: options.stopped, resume_after_migration: false, deferred: false, staged: false, force: false,
                 };
                 ledger.records.push(record.clone());
@@ -256,94 +207,9 @@ impl EngineDispatcher {
                 self.inner.reconcile_queue(cx, &mut ledger, &HashSet::new()).await?;
                 return Ok(EngineResult::Added(vec![AddedTorrent { hash, name: record.name, duplicate: false, deferred: false }]));
             }
-            EngineOp::ToggleSequentialDownload => bail!(
-                "the native engine always downloads each file sequentially; this setting cannot be disabled"
-            ),
-            EngineOp::ToggleFirstLastPiecePrio => bail!(
-                "the native engine always prioritizes the first and last piece of each file; this setting cannot be disabled"
-            ),
             _ => {}
         }
         let mut ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
-        if let EngineOp::FilePriority {
-            hash,
-            ids,
-            priority,
-        } = &op
-        {
-            if self.inner.handle(hash).is_err()
-                && self.inner.dormant(hash)
-                && *priority != 0
-                && !ids.is_empty()
-            {
-                let index = ledger
-                    .records
-                    .iter()
-                    .position(|r| &r.hash == hash)
-                    .context("torrent record not found")?;
-                let mut changed = ledger.records[index].clone();
-                let files = self.inner.saved_files(&changed)?;
-                if ids.iter().any(|index| *index >= files.len()) {
-                    bail!("file index is out of range");
-                }
-                let mut selected = changed
-                    .only_files
-                    .clone()
-                    .unwrap_or_else(|| (0..files.len()).collect());
-                selected.extend(ids);
-                selected.sort_unstable();
-                selected.dedup();
-                changed.only_files = Some(selected);
-                self.inner
-                    .activate_record(cx, &mut ledger, index, changed)
-                    .await?;
-                self.inner
-                    .reconcile_queue(cx, &mut ledger, &HashSet::new())
-                    .await?;
-                return Ok(EngineResult::Acknowledged);
-            }
-            let handle = self.inner.handle(hash)?;
-            let metadata = handle
-                .metadata
-                .load_full()
-                .context("torrent metadata is still loading")?;
-            let mut selected: HashSet<usize> = handle
-                .only_files()
-                .unwrap_or_else(|| (0..metadata.file_infos.len()).collect())
-                .into_iter()
-                .collect();
-            for &index in ids {
-                if index >= metadata.file_infos.len() {
-                    bail!("file index {index} is out of range");
-                }
-                if *priority == 0 {
-                    selected.remove(&index);
-                } else {
-                    selected.insert(index);
-                }
-            }
-            if !handle.is_paused() && !matches!(handle.stats().state, TorrentStatsState::Error) {
-                self.inner.pause_handle(cx, &handle).await?;
-            }
-            self.inner
-                .session
-                .update_only_files(cx, &handle, &selected)
-                .await?;
-            let record = ledger
-                .records
-                .iter_mut()
-                .find(|record| &record.hash == hash)
-                .context("torrent record not found")?;
-            let mut selected: Vec<_> = selected.into_iter().collect();
-            selected.sort_unstable();
-            record.only_files = Some(selected);
-            record.completion_on = 0;
-            self.inner.save(cx, &ledger).await?;
-            self.inner
-                .reconcile_queue(cx, &mut ledger, &HashSet::new())
-                .await?;
-            return Ok(EngineResult::Acknowledged);
-        }
         let (hashes, start_result) = mutation_hashes(&op, &ledger)?;
         // Caps are durable record settings. A completed, queued or unresolved
         // torrent need not own an rqbit handle to accept its next live limits.
@@ -439,34 +305,6 @@ impl EngineDispatcher {
                     record.upload_limit = *limit;
                     record.options(record.paused)?;
                 }
-                EngineOp::SetShareLimits { ratio, .. } => {
-                    record.ratio_limit = *ratio;
-                    record.upload = Some(*ratio != 0.0);
-                    if let Some(handle) = &handle {
-                        if *ratio == 0.0 && handle.stats().finished && !handle.is_paused() {
-                            self.inner.pause_handle(cx, handle).await?;
-                        }
-                    }
-                }
-                EngineOp::AddTags { tags, .. } | EngineOp::RemoveTags { tags, .. } => {
-                    let mut saved: HashSet<String> = record
-                        .tags
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|tag| !tag.is_empty())
-                        .map(str::to_owned)
-                        .collect();
-                    for tag in tags {
-                        if matches!(op, EngineOp::AddTags { .. }) {
-                            saved.insert(tag.clone());
-                        } else {
-                            saved.remove(tag);
-                        }
-                    }
-                    let mut tags: Vec<_> = saved.into_iter().collect();
-                    tags.sort();
-                    record.tags = tags.join(",");
-                }
                 _ => bail!("operation is not a torrent mutation"),
             }
             ledger.records[index] = record;
@@ -474,9 +312,6 @@ impl EngineDispatcher {
                 ledger.records[index] = old;
                 let _ = self.inner.save(cx, &ledger).await;
                 return Err(error).context("saving torrent intent; previous intent restored");
-            }
-            if matches!(op, EngineOp::SetShareLimits {..}) {
-                if let Some(handle) = &handle { handle.set_upload_enabled(ledger.records[index].upload); }
             }
             if matches!(op,EngineOp::SetDownloadLimit{..}) {
                 if let Some(handle) = &handle {
@@ -512,14 +347,6 @@ impl EngineDispatcher {
             None => EngineResult::Acknowledged,
         })
     }
-    #[cfg(test)]
-    pub(super) async fn add(&self, cx: &Cx, request: &Request) -> Result<String> {
-        let Some(EngineOp::Add(options)) = EngineOp::parse(Route::Add.name(), request)? else {
-            unreachable!()
-        };
-        self.add_typed(cx, &options, None).await?;
-        EngineResult::Acknowledged.to_cli_json()
-    }
     async fn add_typed(
         &self,
         cx: &Cx,
@@ -535,7 +362,7 @@ impl EngineDispatcher {
         }
         let paused = options.stopped;
         let mut record = Record {
-            upload: None, display_name:None,
+            upload: options.seed.then_some(true), display_name:None,
             hash: String::new(),
             name: options
                 .torrent
@@ -550,7 +377,6 @@ impl EngineDispatcher {
             only_files: files,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
             upload_limit: options.upload_limit,
-            ratio_limit: options.ratio_limit,
             category: options.category.clone(),
             tags: options.tags.clone(),
             origin: options.origin.clone().unwrap_or_else(||ledger::origin_from_tags(&options.tags)),
@@ -660,14 +486,6 @@ impl EngineDispatcher {
         Ok(added)
     }
 }
-#[cfg(test)]
-pub(super) fn required<'a>(request: &'a Request, key: &str) -> Result<&'a str> {
-    request
-        .arg(key)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("missing {key}"))
-}
-
 pub(super) fn mutation_hashes(
     op: &EngineOp,
     ledger: &Ledger,
@@ -686,7 +504,7 @@ pub(super) fn mutation_hashes(
     let EngineOp::Start { skip_complete, .. } = op else {
         return Ok((hashes, None));
     };
-    let bulk = matches!(selection, HashSelection::All) || *skip_complete;
+    let bulk = *skip_complete;
     let mut result = crate::qbt::StartResult::default();
     for hash in hashes {
         let record = ledger
@@ -698,9 +516,9 @@ pub(super) fn mutation_hashes(
             if !bulk {
                 return Err(crate::agent::AppError::new(
                     crate::agent::Code::Failure,
-                    "already complete; seeding is off for this torrent",
+                    "already complete; upload is off for this torrent",
                 )
-                .hint(format!("fbittorrent seed {hash}"))
+                .hint(format!("fbittorrent upload {hash}"))
                 .into());
             }
             result.skipped.push(crate::qbt::StartSkipped {
@@ -712,9 +530,6 @@ pub(super) fn mutation_hashes(
         }
     }
     Ok((result.started.clone(), Some(result)))
-}
-pub(super) fn json(value: &impl Serialize) -> Result<String> {
-    Ok(serde_json::to_string(value)?)
 }
 pub(super) fn now() -> i64 {
     SystemTime::now()
@@ -741,11 +556,7 @@ pub(crate) fn parked_get(
         .into_iter()
         .find(|row| row.hash == hash)
         .context("torrent record not found")?;
-    let legacy: serde_json::Value = serde_json::from_str(&torrent.to_cli_json()?)?;
-    torrent.name = legacy["name"]
-        .as_str()
-        .context("saved name is unavailable")?
-        .to_owned();
+    torrent.name = torrent.original_name().to_owned();
     let bytes = match std::fs::read(directory.join(format!("{hash}.torrent"))) {
         Ok(bytes) => {
             if librqbit::torrent_from_bytes(&bytes)?.info_hash.as_string() != hash {

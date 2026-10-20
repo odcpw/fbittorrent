@@ -19,7 +19,8 @@ pub enum ReadMetainfoResult<Rx> {
     Found {
         info: TorrentMetaV1Info<ByteBufOwned>,
         info_bytes: ByteBufOwned,
-        rx: Rx,
+        // Retain discovery ownership until the caller consumes the result.
+        _rx: Rx,
         seen: HashSet<SocketAddr>,
     },
     ChannelClosed {
@@ -113,7 +114,7 @@ pub async fn read_metainfo_from_peer_receiver<A: Stream<Item = SocketAddr> + Unp
                     info,
                     info_bytes,
                     seen,
-                    rx: addrs,
+                    _rx: addrs,
                 };
             }
             Next::Done(Some(Err(e))) => debug!("{e:#}"),

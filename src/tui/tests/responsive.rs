@@ -14,12 +14,10 @@ fn click_hits_rows_at_each_size() {
     for (width, height) in [(80, 24), (120, 30), (160, 45)] {
         let mut app = fixture::app("torrents");
         app.torrents = (0..100)
-            .map(|i| Torrent {
-                hash: format!("{i:040x}"),
-                name: format!("Episode.S01E{i:03}.1080p.mkv"),
-                state: "downloading".into(),
-                progress_known: true,
-                ..Default::default()
+            .map(|i| {
+                let mut row = Torrent::fixture(&format!("{i:040x}"), &format!("Episode.S01E{i:03}.1080p.mkv"), crate::api::TorrentState::Downloading);
+                row.progress = Some(0.0);
+                row
             })
             .collect();
         app.tor_list.borrow_mut().select(Some(0));
@@ -35,7 +33,7 @@ fn click_hits_rows_at_each_size() {
                 y,
             ));
             assert_eq!(
-                app.selected_torrent().unwrap().hash,
+                app.selected_torrent().unwrap().hash.as_str(),
                 hash,
                 "{width}x{height} at {x},{y}"
             );
@@ -55,18 +53,16 @@ fn recorded_hash_survives_a_model_reorder_before_the_next_frame() {
         rect.x + 12,
         rect.y,
     ));
-    assert_eq!(app.selected_torrent().unwrap().hash, hash);
+    assert_eq!(app.selected_torrent().unwrap().hash.as_str(), hash);
 }
 #[test]
 fn unchanged_frames_format_only_one_visible_window() {
     let mut app = fixture::app("torrents");
     app.torrents = (0..5000)
-        .map(|i| Torrent {
-            hash: format!("{i:040x}"),
-            name: format!("Episode.{i:05}.mkv"),
-            state: "downloading".into(),
-            progress_known: true,
-            ..Default::default()
+        .map(|i| {
+            let mut row = Torrent::fixture(&format!("{i:040x}"), &format!("Episode.{i:05}.mkv"), crate::api::TorrentState::Downloading);
+            row.progress = Some(0.0);
+            row
         })
         .collect();
     app.tor_list.borrow_mut().select(Some(0));
@@ -82,7 +78,7 @@ fn unchanged_frames_format_only_one_visible_window() {
         1,
         "off-screen changes need no row formatting"
     );
-    app.torrents[0].progress = 0.43;
+    app.torrents[0].progress = Some(0.43);
     draw(&app, 120, 30);
     assert_eq!(app.torrent_table.borrow().builds, 2);
     app.theme.fg = ftui::PackedRgba::rgb(1, 2, 3);
@@ -118,14 +114,9 @@ fn header_clicks_sort_bytes_numerically_and_keep_unknown_last() {
         .store
         .sorted_torrents(store::TorrentSort::Added, true)
         .into_iter()
-        .map(format::torrent)
+        .cloned()
         .collect();
-    let sizes = |app: &TuiApp| {
-        app.torrents
-            .iter()
-            .map(|t| app.store.torrents[&t.hash].size)
-            .collect::<Vec<_>>()
-    };
+    let sizes = |app: &TuiApp| app.torrents.iter().map(|t| t.size).collect::<Vec<_>>();
     draw(&app, 120, 30);
     let header = app
         .rects
@@ -202,10 +193,10 @@ fn enter_opens_overview_and_brackets_stop_at_tab_ends_at_each_size() {
 fn details_keeps_its_hash_and_never_retargets_a_removed_torrent() {
     let mut app = fixture::app("torrents");
     app.on_key(KeyEvent::new(KeyCode::Enter));
-    let hash = app.selected_torrent().unwrap().hash.clone();
+    let hash = app.selected_torrent().unwrap().hash.to_string();
     app.torrents.swap(0, 1);
-    assert_eq!(app.selected_torrent().unwrap().hash, hash);
-    app.torrents.retain(|t| t.hash != hash);
+    assert_eq!(app.selected_torrent().unwrap().hash.as_str(), hash);
+    app.torrents.retain(|t| t.hash.as_str() != hash);
     assert!(app.selected_torrent().is_none());
     assert!(matches!(
         app.on_key(KeyEvent::new(KeyCode::Char('p'))),

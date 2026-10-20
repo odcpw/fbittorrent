@@ -1,10 +1,6 @@
 //! Local render state only: never init/update the model or start subscriptions.
 use super::*;
 
-pub(super) const SURFACES: [&str; 12] = [
-    "torrents", "search", "shows", "rss", "files", "providers", "settings", "prompt", "help", "confirm", "done", "clipboard",
-];
-
 pub(super) fn app(surface: &str) -> TuiApp {
     let mut shows = Shows::default();
     shows.shows = [
@@ -27,21 +23,22 @@ pub(super) fn app(surface: &str) -> TuiApp {
     app.search_focus_input = false;
     app.search_input.set_value("Sintel");
     app.search_input.set_focused(false);
+    use crate::api::TorrentState::{Done, Downloading, Metadata};
     app.torrents = [
-        ("The Diplomat S04E01 1080p WEB-DL H264-GROUP", "downloading", 0.42),
-        ("Sintel.2010.1080p", "stoppedUP", 1.0),
-        ("Other.Movie.2026.1080p", "metaDL", 0.0),
-    ].into_iter().enumerate().map(|(i, (name, state, progress))| Torrent {
-        hash: format!("{:040x}", i + 1), name: name.into(), state: state.into(), progress,
-        progress_known: i != 2, size: if i == 2 { 0 } else { 1_073_741_824 },
-        completed: (progress * 1_073_741_824.0) as i64,
-        dlspeed: if i == 0 { 2_097_152 } else { 0 }, upspeed: if i == 0 { 1024 } else { 0 },
-        eta: if i == 0 { 297 } else { 0 }, num_seeds: 0, num_leechs: 3,
-        seq_dl: true, f_l_piece_prio: true,
-        save_path: "/fixture/downloads".into(), up_limit: crate::qbt::NO_UPLOAD_LIMIT,
-        completion_on: if i == 1 { 1_792_281_600 } else { 0 }, ratio_limit: 0.0,
+        ("The Diplomat S04E01 1080p WEB-DL H264-GROUP", Downloading, Some(0.42)),
+        ("Sintel.2010.1080p", Done, Some(1.0)),
+        ("Other.Movie.2026.1080p", Metadata, None),
+    ].into_iter().enumerate().map(|(i, (name, state, progress))| {
+        let mut row = Torrent::fixture(&format!("{:040x}", i + 1), name, state);
+        row.checked = progress.is_some();
+        row.progress = progress;
+        row.size = progress.map(|_| 1_073_741_824);
+        row.completed_bytes = progress.map(|p| (p * 1_073_741_824.0) as u64);
+        if i == 0 { (row.dl_bps, row.ul_bps, row.eta_s, row.peers) = (Some(2_097_152), Some(1024), Some(297), Some(3)); }
+        if i == 1 { row.completed_at = Some(1_792_281_600); }
         // Render immediately after construction, keeping the relative label "just now".
-        added_on: crate::shows::now(), ..Default::default()
+        row.added_at = crate::shows::now() as u64;
+        row
     }).collect();
     app.transfer = TransferInfo { dl_info_speed: 2_097_152, up_info_speed: 1024, ..Default::default() };
     app.search_results = [
@@ -82,7 +79,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
             let hello:serde_json::Value=serde_json::from_str(lines[1]).unwrap();
             app.store.hello(serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
             let data:crate::api::Pieces=serde_json::from_str(include_str!("../../../agent_ergonomics_audit/audit/regression_tests/fixtures/states/pieces-1000.json")).unwrap();
-            let hash=crate::api::Hash::new(app.torrents[0].hash.clone()).unwrap();
+            let hash=app.torrents[0].hash.clone();
             let t=app.torrents[0].clone();let _=app.open_details(&t);app.details.as_mut().unwrap().tab=DetailsTab::Pieces;
             app.store.pieces.insert(hash,(data.clone(),data.decode().unwrap()));
         },
@@ -93,7 +90,7 @@ pub(super) fn app(surface: &str) -> TuiApp {
         "shows" => { let _ = app.set_screen(Screen::Shows); },
         "rss" => { let _ = app.set_screen(Screen::Rss); app.rss_focus_items = true; },
         "files" => app.files = Some(FilesModal {
-            hash: app.torrents[0].hash.clone(), name: app.torrents[0].name.clone(),
+            hash: app.torrents[0].hash.to_string(), name: app.torrents[0].name.clone(),
             files: ["The.Diplomat.S04E01.mkv", "Subtitles/English.srt", "sample.mkv"]
                 .into_iter().enumerate().map(|(i, name)| TorrentFile {
                     index: i as i64, name: name.into(), size: 268_435_456,

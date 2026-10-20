@@ -1,4 +1,4 @@
-//! Configure native app storage and desktop handlers, and desktop handlers.
+//! Configure native app storage and desktop integration; `desktop` plans every write.
 
 pub mod desktop;
 mod jsonc;
@@ -6,7 +6,6 @@ mod menu;
 
 use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
-use std::process::Command;
 
 pub fn daemon_unit(exe: &std::path::Path) -> Result<String> {
     let path = exe.to_str().context("executable path is not UTF-8")?;
@@ -42,14 +41,6 @@ fn reload_manager() -> Result<()> {
     if !crate::api::client::manager_status(&["daemon-reload"], std::time::Duration::from_secs(10))? {
         bail!("systemctl --user daemon-reload failed");
     }
-    Ok(())
-}
-
-fn install_unit() -> Result<()> {
-    let unit = crate::api::client::unit_path()?;
-    std::fs::create_dir_all(unit.parent().unwrap())?;
-    replace_unit(&unit, daemon_unit(&std::env::current_exe()?)?.as_bytes(), reload_manager)?;
-    eprintln!("wrote {} (static, not enabled)", unit.display());
     Ok(())
 }
 
@@ -114,39 +105,6 @@ fn replace_unit(unit: &std::path::Path, body: &[u8], reload: impl FnOnce() -> Re
         }
         return Err(error);
     }
-    Ok(())
-}
-
-pub fn uninstall() -> Result<()> {
-    let unit = crate::api::client::unit_path()?;
-    match std::fs::remove_file(&unit) {
-        Ok(()) => {},
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-        Err(error) => return Err(error.into()),
-    }
-    reload_manager()?;
-    eprintln!("removed {}; saved data is kept", unit.display());
-    Ok(())
-}
-
-/// Register fbittorrent as the magnet: link handler via a .desktop file + xdg-mime.
-pub fn register_magnet_handler() -> Result<()> {
-    install_icon()?;
-    let exe = std::env::current_exe()?;
-    let command = desktop_executable(&exe.to_string_lossy())?;
-    let apps = dirs::data_local_dir().context("no data directory")?.join("applications");
-    std::fs::create_dir_all(&apps)?;
-    std::fs::write(apps.join("fbittorrent.desktop"), format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={command} dashboard\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n"))?;
-    let desktop = apps.join("fbittorrent-magnet.desktop");
-    std::fs::write(&desktop, format!(
-        "[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open fbittorrent and add a torrent\nExec={command} add --origin handler %u\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"))?;
-    for mime in ["x-scheme-handler/magnet", "application/x-bittorrent"] {
-        let st = Command::new("xdg-mime").args(["default", "fbittorrent-magnet.desktop", mime]).status()?;
-        if !st.success() { bail!("xdg-mime default failed for {mime}"); }
-    }
-    let _ = Command::new("update-desktop-database").arg(&apps).status();
-    eprintln!("magnet: and .torrent links now open with {}", exe.display());
     Ok(())
 }
 
@@ -245,11 +203,4 @@ NoNewPrivileges=yes
         assert_eq!(super::desktop_executable("/tmp/percent%/fbittorrent").unwrap(),
             "\"/tmp/percent%%/fbittorrent\"");
     }
-}
-
-fn install_icon() -> Result<()> {
-    let directory = dirs::data_local_dir().context("no data directory")?.join("icons/hicolor/scalable/apps");
-    std::fs::create_dir_all(&directory)?;
-    std::fs::write(directory.join("fbittorrent.svg"), include_str!("../assets/fbittorrent.svg"))?;
-    Ok(())
 }

@@ -1,6 +1,5 @@
 //! Torznab RSS -> the common search model. Unknown measurements stay unknown.
 use super::*;
-use crate::api::validation::Validate;
 use quick_xml::{events::Event, Reader};
 #[derive(Default)]
 struct Item {

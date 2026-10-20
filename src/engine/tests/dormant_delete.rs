@@ -5,7 +5,7 @@ fn dormant_delete_files_needs_no_session_handle() {
     let hash = records[0].hash.clone();
     dispatcher
         .execute(EngineOp::Delete {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             files: true,
         })
         .unwrap();
@@ -32,7 +32,7 @@ fn dormant_delete_failed_save_keeps_payloads() {
     std::fs::create_dir(directory.join("torrents.json.tmp")).unwrap();
     assert!(dispatcher
         .execute(EngineOp::Delete {
-            hashes: HashSelection::Hashes(vec![records[0].hash.clone()]),
+            hashes: HashSelection(vec![records[0].hash.clone()]),
             files: true
         })
         .is_err());

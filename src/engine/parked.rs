@@ -1,10 +1,9 @@
 //! Typed saved-history and durable-intent operations without a native session.
 use super::*;
-use ops::{AddedTorrent, EngineOp, EngineResult, QueueInfo};
+use ops::{AddedTorrent, EngineOp, EngineResult};
 use view::TorrentView;
 
-// Preserve cross-request serialization for the legacy compatibility function as
-// well as owned parked ledgers. The daemon can retain one ParkedLedger handle.
+// Serialize saved-record changes across owned parked ledgers.
 static PARKED_LEDGER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A transfer action that needs the network the owner is waiting for. The
@@ -52,24 +51,28 @@ fn parked_view(record: &Record, directory: &Path, saved: &saved::SavedCache) -> 
 
 pub struct ParkedLedger {
     directory: PathBuf,
-    lifecycle: Lifecycle,
     generation: Arc<LedgerGeneration>,
     undo: Arc<undo::History>,
     /// Saved records by torrents.json identity, and parsed metainfo: the
     /// sampler's parked Info reads no file whose identity is unchanged.
     records: std::sync::Mutex<Option<(saved::Stamp, Arc<Vec<Record>>)>>,
     saved: saved::SavedCache,
+    network: Option<crate::network_app::NetworkState>,
 }
 impl ParkedLedger {
-    pub fn new(directory: PathBuf, lifecycle: Lifecycle) -> Self {
+    pub fn new(directory: PathBuf) -> Self {
         Self {
             directory,
-            lifecycle,
             generation: Arc::default(),
             undo: Arc::default(),
             records: Default::default(),
             saved: Default::default(),
+            network: None,
         }
+    }
+    pub fn with_network(mut self, network: crate::network_app::NetworkState) -> Self {
+        self.network = Some(network);
+        self
     }
     pub fn with_undo(mut self, history: Arc<undo::History>) -> Self { self.undo=history; self }
     pub fn ledger_generation(&self) -> Arc<LedgerGeneration> {
@@ -96,7 +99,7 @@ impl ParkedLedger {
     /// record edit.
     fn edit_record(&self, ledger: &mut Ledger, op: &EngineOp, network: &str) -> Option<Result<()>> {
         if !matches!(op, EngineOp::SetUploadLimit { .. } | EngineOp::SetDownloadLimit { .. }
-            | EngineOp::SetShareLimits { .. } | EngineOp::SetSeed { .. } | EngineOp::SetFiles { .. }) {
+            | EngineOp::SetSeed { .. } | EngineOp::SetFiles { .. }) {
             return None;
         }
         Some((|| {
@@ -137,23 +140,12 @@ impl ParkedLedger {
                         record.download_limit = *bps;
                         record.options(record.paused)?;
                     }
-                    EngineOp::SetShareLimits { ratio, .. } => {
-                        record.ratio_limit = *ratio;
-                        record.upload = Some(*ratio != 0.0);
-                    }
                     EngineOp::SetSeed { on, .. } => {
                         if record.staged {
                             return Err(InvalidTorrentState { hash, reason: "staged" }.into());
                         }
                         // The same saved fields a live SetSeed writes.
                         record.upload = Some(*on);
-                        record.ratio_limit = if *on { -2.0 } else { 0.0 };
-                        let mut tags: Vec<_> = record.tags.split(',')
-                            .filter(|tag| !tag.is_empty() && *tag != SEED_TAG).map(str::to_owned).collect();
-                        if *on { tags.push(SEED_TAG.into()); }
-                        tags.sort();
-                        tags.dedup();
-                        record.tags = tags.join(",");
                         if *on && record.completion_on > 0 {
                             record.paused = false;
                         }
@@ -171,37 +163,16 @@ impl ParkedLedger {
         let _guard = PARKED_LEDGER_LOCK
             .lock()
             .map_err(|_| anyhow!("saved torrent lock is unavailable"))?;
-        let snapshot = self
-            .lifecycle
-            .expected_network()
-            .unwrap_or_else(|| crate::network_app::state(&Config::default()));
-        if let Some(result) = op.control(&snapshot, &self.lifecycle) {
-            return result;
-        }
-        let network = waiting_for(&snapshot);
+        let network = self.network.as_ref().map(waiting_for)
+            .unwrap_or_else(|| "the configured network".into());
         match &op {
-            EngineOp::Version => {
-                return Ok(EngineResult::Version(format!(
-                    "native librqbit {} (waiting for {network})",
-                    librqbit::version()
-                )));
-            }
             EngineOp::TransferInfo => {
                 return Ok(EngineResult::Transfer(TransferInfo {
                     connection_status: "vpn_waiting".into(),
                     ..Default::default()
                 }));
             }
-            EngineOp::SetQueue { limit } => {
-                if *limit == 0 {
-                    bail!("max_active_downloads must be at least 1");
-                }
-                let mut cfg = Config::load()?;
-                cfg.max_active_downloads = *limit;
-                cfg.save()?;
-                return Ok(EngineResult::Acknowledged);
-            }
-            EngineOp::Rename {..} | EngineOp::Queue
+            EngineOp::Rename {..}
             | EngineOp::Info
             | EngineOp::Files { .. }
             | EngineOp::Trackers { .. }
@@ -212,7 +183,7 @@ impl ParkedLedger {
             // Typed API additions save intent without constructing a session.
             EngineOp::Stage {..} | EngineOp::Commit {..} | EngineOp::Discard {..} | EngineOp::AddMagnet(_) | EngineOp::AddSelected { .. } | EngineOp::RemoveKeep { .. } | EngineOp::RestoreUndo { .. } => {}
             // Record edits are durable now and applied by the next engine.
-            EngineOp::SetUploadLimit { .. } | EngineOp::SetDownloadLimit { .. } | EngineOp::SetShareLimits { .. }
+            EngineOp::SetUploadLimit { .. } | EngineOp::SetDownloadLimit { .. }
             | EngineOp::SetSeed { .. } | EngineOp::SetFiles { .. } => {}
             _ => return Err(ParkedRefusal(format!(
                 "connect {network} before changing downloads; saved downloads and settings remain available"
@@ -286,21 +257,6 @@ impl ParkedLedger {
             EngineOp::Trackers {hash} => {
                 let record=ledger.records.iter().find(|r|&r.hash==hash).context("torrent record not found")?;
                 return Ok(EngineResult::Trackers(trackers::saved(record,&self.directory)?));
-            }
-            EngineOp::Queue => {
-                return Ok(EngineResult::Queue(QueueInfo {
-                    max_active_downloads: Config::load()?.max_active_downloads,
-                    active_downloads: 0,
-                    queued_downloads: ledger
-                        .records
-                        .iter()
-                        .filter(|record| {
-                            !record.paused
-                                && !(record.stop_on_complete() && record.completion_on > 0)
-                        })
-                        .count(),
-                    network_blocked: true,
-                }));
             }
             EngineOp::Peers{hash}=>{
                 anyhow::ensure!(ledger.records.iter().any(|r|&r.hash==hash),"torrent record not found");

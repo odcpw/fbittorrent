@@ -98,8 +98,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
             .as_string();
         std::fs::write(directory.join(format!("{hash}.torrent")), bytes).unwrap();
         let mut record = review_record(&hash, &downloads);
-        record.ratio_limit = -2.0;
-        record.tags = SEED_TAG.into();
+        record.upload = Some(true);
         record.paused = false;
         let app = test_app(
             &directory,
@@ -197,7 +196,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
         std::fs::create_dir_all(&client_files).unwrap();
         let payload: Vec<u8> = (0..256 * 1024).map(|index| (index % 251) as u8).collect();
         std::fs::write(seed_files.join("fixture.bin"), &payload).unwrap();
-        let mut seed = test_app(&seed_store, &seed_files, Ledger::default(), Some(0));
+        let seed = test_app(&seed_store, &seed_files, Ledger::default(), Some(0));
         let bytes = seed.dispatcher.runtime.block_on(async {
             create_torrent(
                 &test_cx(),
@@ -213,12 +212,9 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
             .as_bytes()
             .unwrap()
         });
-        let mut add = request("torrents/add", &[("tags", SEED_TAG)]);
-        add.file = Some(crate::engine::tests::fixture::Upload {
-            name: "fixture.torrent".into(),
-            bytes: bytes.to_vec(),
-        });
-        seed.dispatcher.dispatch(&add).unwrap().unwrap();
+        let mut add = add_request(vec![String::new()], Some(bytes.to_vec()));
+        add.seed = true;
+        seed.dispatcher.execute(ops::EngineOp::Add(add)).unwrap();
         let hash = seed.dispatcher.runtime.block_on(async {
             let record = OwnedMutexGuard::lock(seed.dispatcher.inner.ledger.clone(), &test_cx())
                 .await
@@ -237,13 +233,11 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
             assert!(handle.stats().finished);
             record.hash
         });
-        let cap = TEST_UPLOAD_CAP.to_string();
         seed.dispatcher
-            .dispatch(&request(
-                "torrents/setUploadLimit",
-                &[("hashes", &hash), ("limit", &cap)],
-            ))
-            .unwrap()
+            .execute(ops::EngineOp::SetUploadLimit {
+                hashes: crate::engine::tests::hashes(&[&hash]),
+                limit: TEST_UPLOAD_CAP as i64,
+            })
             .unwrap();
         let effective_upload_limit = seed.dispatcher.runtime.block_on(async {
             OwnedMutexGuard::lock(seed.dispatcher.inner.ledger.clone(), &test_cx())
@@ -470,7 +464,6 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
 
     #[test]
     fn pending_metadata_keeps_reads_responsive_and_cancels_on_close() {
-        use std::io::Write;
         use std::net::TcpListener;
         use std::sync::mpsc;
         use std::time::Instant;
@@ -483,7 +476,7 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
                 .unwrap()
                 .as_nanos()
         ));
-        let mut app = test_app(
+        let app = test_app(
             &directory,
             &directory.join("downloads"),
             Ledger::default(),
@@ -505,17 +498,12 @@ const TEST_UPLOAD_CAP: i64 = 32768; // Explicit fixture throttle, not the produc
         // The API dispatch pool now owns the caller; exercise the same typed
         // operation while its real HTTP metadata fetch remains blocked.
         let pending = std::thread::spawn(move || {
-            let result = dispatcher.dispatch(&request("torrents/add", &[("urls", &url)])).unwrap();
+            let result = dispatcher.execute(ops::EngineOp::Add(add_request(vec![url], None)));
             handled_tx.send(result.map(|_| ()).map_err(|e| e.to_string())).unwrap();
         });
         connected_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let began = Instant::now();
-        let info = app
-            .dispatcher
-            .dispatch(&request("torrents/info", &[]))
-            .unwrap()
-            .unwrap();
-        assert_eq!(info, "[]");
+        assert!(rows(&app.dispatcher).is_empty());
         assert!(
             began.elapsed() < Duration::from_secs(1),
             "metadata lookup must not hold the ledger lock"

@@ -10,7 +10,7 @@ mod sort;
 mod search_sort;
 pub(super) use search_sort::{SearchSort,search_order,display_search_order};
 use snapshot::Snapshot;
-pub(super) use sort::{TorrentSort,display_order};
+pub(super) use sort::{TorrentSort,torrent_order};
 #[cfg(test)]
 mod tests;
 

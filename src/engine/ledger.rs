@@ -13,6 +13,10 @@ pub(super) struct Record {
     pub(super) output_folder: String,
     pub(super) only_files: Option<Vec<usize>>,
     pub(super) upload_limit: i64,
+    /// Explicit per-torrent upload choice. `true` uploads and keeps seeding
+    /// after completion; `false` never uploads, overriding the global
+    /// during-download setting; absent follows that setting and stops when
+    /// complete. Nothing else (no ratio or tag) grants upload.
     #[serde(default, skip_serializing_if="Option::is_none")]
     pub(super) upload: Option<bool>,
     #[serde(default, skip_serializing_if="Vec::is_empty")]
@@ -21,7 +25,6 @@ pub(super) struct Record {
     pub(super) removed_trackers: Vec<String>,
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub(super) download_limit: Option<u64>,
-    pub(super) ratio_limit: f64,
     pub(super) category: String,
     pub(super) tags: String,
     #[serde(default = "manual_origin")]
@@ -71,9 +74,9 @@ impl Record {
 
     fn deferred_intent(options: &ops::AddRequest, folder: &Path, hash: String, name: String, source: String, files: Option<Vec<usize>>) -> Result<Self> {
         let record = Self {
-            upload: None, display_name:None, hash, name, source, only_files: files,
+            upload: options.seed.then_some(true), display_name:None, hash, name, source, only_files: files,
             output_folder: options.save_path.clone().unwrap_or_else(|| folder.to_string_lossy().into()),
-            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit, ratio_limit: options.ratio_limit,
+            trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None, upload_limit: options.upload_limit,
             category: options.category.clone(), tags: options.tags.clone(), origin: options.origin.clone().unwrap_or_else(||origin_from_tags(&options.tags)),
             added_on: now(), completion_on: 0, paused: options.stopped,
             resume_after_migration: false, deferred: true, staged: false, force: false,
@@ -107,7 +110,7 @@ impl Record {
             Ok::<_,anyhow::Error>(NonZeroU32::new(u32::try_from(bps).context("download cap exceeds the native engine maximum")?).unwrap())
         }).transpose()?;
         Ok(AddTorrentOptions {
-            upload_enabled: self.upload.or_else(|| (!self.stop_on_complete()).then_some(true)),
+            upload_enabled: self.upload,
             paused,
             overwrite: true,
             output_folder: Some(self.output_folder.clone()),
@@ -131,8 +134,9 @@ impl Record {
         for url in &self.removed_trackers {urls.remove(url);}
         Ok(urls.len() as u64)
     }
+    /// Completion stops transfer unless upload was explicitly enabled.
     pub(super) fn stop_on_complete(&self) -> bool {
-        self.ratio_limit == 0.0
+        self.upload != Some(true)
     }
     pub(super) fn dormant_on_restore(&self) -> bool {
         // -1 is the legacy unknown-completion sentinel, never proof of completion.
@@ -180,13 +184,6 @@ pub(super) fn read_ledger(path: &Path) -> Result<Ledger> {
         let fields:OriginFields=serde_json::from_slice(&bytes)?;
         for (record, field) in ledger.records.iter_mut().zip(fields.records) {
             if field.origin.is_none() {record.origin=origin_from_tags(&record.tags);}
-        }
-    }
-    // The former default was a payload cap, never an explicit upload opt-in.
-    for record in &mut ledger.records {
-        if record.upload.is_none() && record.upload_limit == 32768 && record.stop_on_complete() {
-            record.upload = Some(false);
-            record.upload_limit = 0;
         }
     }
     let mut hashes = HashSet::new();
@@ -359,7 +356,7 @@ mod tracker_edit_tests {
     use super::*;
     #[test]
     fn tracker_record_preserves_edits_and_loads_today_fields() {
-        let mut record=Record::deferred_intent(&ops::AddRequest{sources:Vec::new(),torrent:None,save_path:None,upload_limit:32768,ratio_limit:0.0,stopped:true,category:String::new(),tags:String::new(),origin:None},Path::new("/tmp"),"56".repeat(20),"fixture".into(),String::new(),None).unwrap();
+        let mut record=Record::deferred_intent(&ops::AddRequest{sources:Vec::new(),torrent:None,save_path:None,upload_limit:32768,seed:false,stopped:true,category:String::new(),tags:String::new(),origin:None},Path::new("/tmp"),"56".repeat(20),"fixture".into(),String::new(),None).unwrap();
         let today=serde_json::to_value(&record).unwrap();
         assert!(today.get("trackers").is_none());assert!(today.get("removed_trackers").is_none());
         assert!(serde_json::from_value::<Record>(today).unwrap().trackers.is_empty());

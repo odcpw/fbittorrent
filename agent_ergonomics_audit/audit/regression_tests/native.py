@@ -96,8 +96,7 @@ CASES = (
 def launcher_never_called(binary):
     """Probe the widget's closed-app paths with autostart enabled."""
     with Case("native", "launcher_never_called") as case, \
-            private_directory(prefix="fbt-no-start-") as temporary, \
-            socket.socket() as legacy_endpoint:
+            private_directory(prefix="fbt-no-start-") as temporary:
         root = Path(temporary)
         env = dict(os.environ)
         env.pop("FBITTORRENT_NO_START", None)
@@ -141,8 +140,8 @@ def launcher_never_called(binary):
             (("--no-start", "start", "all"), 4, {}, "closed"),
             (("--no-start", "delete", "all"), 0, {}, "offline"),
             (("--no-start", "open", "deadbeef"), 4, {}, "closed"),
-            (("--no-start", "seed", "all"), 4, {}, "closed"),
-            (("--no-start", "noseed", "all"), 4, {}, "closed"),
+            (("--no-start", "upload", "all"), 4, {}, "closed"),
+            (("--no-start", "noupload", "all"), 4, {}, "closed"),
             (("--no-start", "add-clipboard"), 4, {}, "closed"),
             (("--no-start", "add", "magnet:?xt=urn:btih:" + "1" * 40), 4, {}, "closed"),
         )
@@ -230,24 +229,6 @@ def launcher_never_called(binary):
                    "Invocation flags leave the stored autostart setting enabled.")
         case.check(not (Path(env["XDG_RUNTIME_DIR"]) / "fbittorrent/api.sock").exists(),
                    "No probe has started a native engine socket.")
-        legacy_endpoint.bind(("127.0.0.1", 0))
-        legacy_endpoint.listen(4)
-        legacy_endpoint.setblocking(False)
-        legacy_config = ('engine = "qbittorrent"\nautostart = true\nnotify = false\ntimeout_secs = 1\n'
-                         f'url = "http://127.0.0.1:{legacy_endpoint.getsockname()[1]}"\n')
-        config.write_text(legacy_config)
-        for args in [("--no-start","setup"),("setup",),("status",)]:
-            argv=[binary,*args,"--json"]
-            step=case.step("Removed backend " + shlex.join(argv),"Exit 2 for a non-native engine, with no launch, network or settings writes")
-            child=case.popen(argv,env=env,stdout=subprocess.PIPE,text=True)
-            stdout,_=child.communicate(timeout=5);value=json.loads(stdout)
-            try:
-                connection,_=legacy_endpoint.accept();connection.close();contacted=True
-            except BlockingIOError:contacted=False
-            step.close(child.returncode==2 and value.get("code_name")=="usage" and "engine must be native" in value.get("error","")
-                       and not contacted and not calls.read_text() and config.read_text()==legacy_config
-                       and not (Path(env["XDG_RUNTIME_DIR"])/"fbittorrent/api.sock").exists(),
-                       f"exit={child.returncode}; envelope={value}; contacted={contacted}; calls={calls.read_text()!r}",[calls])
 
 
 def terminal_close_is_graceful(binary):
@@ -334,7 +315,7 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             torrent.write_bytes(bencode({"info": info}))
             code, added = cli("add", str(torrent), "--quiet")
             case.check(code == 0 and added.get("ok") is True, "A real unfinished torrent is admitted before terminal close.", json.dumps(added))
-            owner.wait_for(lambda: owner.cli("show", added["hash"])["state"] in ("stalledDL", "downloading"),
+            owner.wait_for(lambda: owner.cli("show", added["hash"])["torrent"]["state"] in ("stalled", "downloading"),
                            "unfinished fixture is active before terminal close")
             step = case.step("check the daemon owns engine.lock before closing the TUI terminal", "flock -n refuses the held instance lock.")
             probe = case.popen(["flock", "-n", str(lock_path), "true"], env=env)
@@ -355,10 +336,10 @@ with open(sys.argv[4], "ab", buffering=0) as err:
             status = json.loads(status_path.read_text()) if status_path.exists() else {}
             trace.write_text(source_trace.read_text() if source_trace.exists() else "<no signal trace>\n")
             diagnostics = stderr.read_text()
-            download = cli("show", added["hash"])[1]
+            download = cli("show", added["hash"])[1]["torrent"]
             step.close(kill_code == 0 and elapsed <= 6 and not acquired and socket_path.exists() and
                        status.get("returncode") == 129 and "engine drained in " not in diagnostics and
-                       download["state"] in ("stalledDL", "downloading"),
+                       download["state"] in ("stalled", "downloading"),
                        f"elapsed={elapsed:.3f}s; status={status}; download={download}; polls={samples}; tui.stderr tail={diagnostics[-2000:]!r}; "
                        f"signals={trace.read_text()!r}", [stderr, trace])
         finally:
@@ -566,10 +547,10 @@ class NativeHarness:
                     show = show if isinstance(show, dict) else {}
                     present = socket_path.exists()
                     ready = show_exit == 0 and show.get("ok") is True and present
-                    observed += (f"; show exit {show_exit}, ok={show.get('ok')}, state={show.get('state')}; "
+                    observed += (f"; show exit {show_exit}, ok={show.get('ok')}, state={show.get('torrent', {}).get('state')}; "
                                  f"socket={present} after show")
                     if ready:
-                        restored = show
+                        restored = show["torrent"]
                         break
             except subprocess.TimeoutExpired:
                 observed += "; CLI probe timed out at the readiness deadline."
@@ -662,8 +643,8 @@ def resume_done_refused(harness, root):
     harness.cli("add", str(torrent), "--quiet")
 
     def completed():
-        value = harness.cli("show", hash_)
-        return value if value.get("completion_on", 0) > 0 and value.get("state") == "stoppedUP" else None
+        value = harness.cli("show", hash_)["torrent"]
+        return value if value.get("completed_at", 0) > 0 and value.get("state") == "done" else None
 
     harness.wait_for(completed, "local bytes verify and stop on completion")
     code, envelope = harness.cli_result("start", hash_, code=1)
@@ -671,7 +652,7 @@ def resume_done_refused(harness, root):
                    "exit 1; failure envelope with explanatory text and the selected torrent's seed command",
                    json.dumps(envelope), code == 1 and envelope.get("ok") is False
                    and envelope.get("code") == 1 and bool(envelope.get("error"))
-                   and envelope.get("hint") == f"fbittorrent seed {hash_}")
+                   and envelope.get("hint") == f"fbittorrent upload {hash_}")
     code, result = harness.cli_result("start", "all")
     record_bulk_start(harness, code, result, hash_)
     code, result = harness.cli_result("delete", hash_)
@@ -768,23 +749,23 @@ def no_fake_seed_counts(case, root, cli, tmux, keys, capture, wait_for, session)
     step = case.step("Read capabilities --json",
                      "Native counts describe connected seeds when live; optional seeds distinguishes unknown.")
     capabilities = cli("capabilities")
-    note = capabilities.get("field_notes", {}).get("list[].num_seeds")
+    note = capabilities.get("field_notes", {}).get("torrents[].seeds")
     (step.ok if isinstance(note, str) and note.strip() else step.fail)(f"Field note: {note}.")
     # Unknown and a measured zero are different observations. This local fixture
     # has no tracker or peer source, so its live count is independently zero.
     info_hash = next(row["hash"] for row in cli("list")["torrents"]
                      if row["name"].startswith("Fixture.with.a.long.filename."))
     cli("stop", info_hash)
-    stopped = cli("show", info_hash)
-    case.check(stopped.get("native_state") == "paused" and "seeds" not in stopped,
+    stopped = cli("show", info_hash)["torrent"]
+    case.check(stopped.get("state") == "paused" and "seeds" not in stopped,
                "A stopped native torrent omits unknown seeds rather than claiming a measured zero.",
                json.dumps(stopped))
     cli("start", info_hash)
     live = [{}]
     def known_zero():
         live[0] = cli("show", info_hash)
-        return (live[0].get("native_state") == "stalled" and live[0].get("seeds") == 0
-                and live[0].get("num_seeds") == 0 and live[0].get("peers") == [])
+        return (live[0]["torrent"].get("state") == "stalled" and live[0]["torrent"].get("seeds") == 0
+                and live[0].get("peers") == [])
     wait_for(known_zero, "the trackerless local torrent reports a measured zero connected seeds")
     case.check(known_zero(), "A live zero seed count agrees with the actual empty peer list.", json.dumps(live[0]))
     cli("stop", info_hash)
@@ -827,7 +808,7 @@ def store_modes(case, root, env, cli, base, fixture):
         for path in [by_name, by_id, ratings]:
             path.chmod(0o644)
         result = cli("imdb", "Private cache fixture")
-        poster = Path(result.get("poster_path") or root / "missing-poster")
+        poster = Path(result.get("card", {}).get("poster_path") or root / "missing-poster")
         expected_poster = cache / "posters/tt1234567.jpg"
         case.check(result.get("found") is True and poster == expected_poster and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
                    "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
@@ -836,7 +817,7 @@ def store_modes(case, root, env, cli, base, fixture):
             poster.chmod(0o644)
             poster.parent.chmod(0o777)
         second = cli("imdb", "Private cache fixture")
-        case.check(second.get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+        case.check(second.get("card", {}).get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
                    "The second IMDb CLI call repairs the existing poster without another HTTP request.",
                    f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
     finally:
@@ -914,7 +895,7 @@ def startup_survives_bad_record(binary):
         bad, repaired_bytes = cached("P0-09.corrupt.txt")
         magnet = "a" * 40
         records = [dict(hash=hash_, name=name, source=source, output_folder=str(downloads),
-                        only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                        only_files=None, upload_limit=32768, upload=False, category="", tags="",
                         added_on=100-index, completion_on=0, paused=False, resume_after_migration=False)
                    for index, (hash_, name, source) in enumerate([
                        (magnet, "P0-09.magnet", f"magnet:?xt=urn:btih:{magnet}&tr=http%3A%2F%2F127.0.0.1%3A{tracker.server_port}%2Fannounce"),
@@ -957,13 +938,13 @@ def startup_survives_bad_record(binary):
                        f"Socket {'present' if socket_path.exists() else 'absent'} after {opened:.3f} seconds.")
             initial = rows()
             case.check(set(initial) == {valid, bad, magnet}, "All three ledger records are listed.", json.dumps(initial))
-            case.check(initial[magnet]["state"] == "metaDL" and "error_message" not in initial[magnet],
+            case.check(initial[magnet]["state"] == "metadata" and "error" not in initial[magnet],
                        "Unresolved magnet is metadata in progress without a premature error.", json.dumps(initial[magnet]))
             harness.wait_for(lambda: rows()[bad]["state"] == "error", "corrupt cache fails independently")
-            failed = harness.cli("show", bad)
-            case.check(bool(failed["error_message"]) and "could not restore" in failed["error_message"],
+            failed = harness.cli("show", bad)["torrent"]
+            case.check(bool(failed["error"]) and "could not restore" in failed["error"],
                        "show --json preserves the corrupt-cache restore failure message.", json.dumps(failed))
-            harness.wait_for(lambda: rows()[valid]["completion_on"] > 0, "valid cache verifies despite unresolved magnet")
+            harness.wait_for(lambda: rows()[valid].get("completed_at", 0) > 0, "valid cache verifies despite unresolved magnet")
             # The details column appears at 140+ columns; inspect its real UI.
             tmux("resize-window", "-t", session, "-x", "160", "-y", "40")
             tmux("send-keys", "-t", session, "Home", "Down")
@@ -971,46 +952,46 @@ def startup_survives_bad_record(binary):
                              "TUI details display the selected restore failure")
             pane = tmux("capture-pane", "-t", session, "-p").stdout
             case.check("could not restore" in pane, "The wide TUI details show the restore error in text.", pane)
-            original_error = failed["error_message"]
+            original_error = failed["error"]
             bad_cache.unlink()
             harness.cli("start", bad)
-            pending_retry = harness.cli("show", bad)
-            case.check(pending_retry["state"] == "metaDL" and pending_retry["error_message"] == original_error,
+            pending_retry = harness.cli("show", bad)["torrent"]
+            case.check(pending_retry["state"] == "metadata" and pending_retry["error"] == original_error,
                        "An unresolved retry retains the previous corruption diagnostic.", json.dumps(pending_retry))
             harness.cli("stop", bad)
             bad_cache.write_bytes(valid_bytes)  # Valid metainfo for the wrong saved hash.
             harness.cli("start", bad)
             harness.wait_for(lambda: rows()[bad]["state"] == "error", "retry with mismatched cache fails again")
-            failed_again = harness.cli("show", bad)
-            case.check("does not match saved record" in failed_again["error_message"],
+            failed_again = harness.cli("show", bad)["torrent"]
+            case.check("does not match saved record" in failed_again["error"],
                        "A retry that fails again replaces the diagnostic with its new failure.", json.dumps(failed_again))
             bad_cache.write_bytes(repaired_bytes)
             harness.cli("start", bad)
-            harness.wait_for(lambda: rows()[bad]["completion_on"] > 0 and
-                             "error_message" not in rows()[bad], "start retries the repaired cache successfully")
+            harness.wait_for(lambda: rows()[bad].get("completed_at", 0) > 0 and
+                             "error" not in rows()[bad], "start retries the repaired cache successfully")
             # Keep the production 90-second bound: prove timeout becomes error,
             # rather than declaring an unresolved magnet failed at startup.
             seen = []
 
             def magnet_failed():
-                row = harness.cli("show", magnet)
-                seen.append((row["state"], row.get("error_message")))
+                row = harness.cli("show", magnet)["torrent"]
+                seen.append((row["state"], row.get("error")))
                 if row["state"] != "error":
                     time.sleep(.9)
                 return row if row["state"] == "error" else None
 
             failure = harness.wait_for(magnet_failed, "unresolved local magnet reaches its real 90-second timeout", seconds=100)
-            case.check(bool(failure) and "timed out" in failure["error_message"] and
-                       all(state == "metaDL" and message is None for state, message in seen[:-1]),
-                       "Magnet stays metadata until the real timeout, then shows error_message.", json.dumps(seen))
+            case.check(bool(failure) and "timed out" in failure["error"] and
+                       all(state == "metadata" and message is None for state, message in seen[:-1]),
+                       "Magnet stays metadata until the real timeout, then shows its error.", json.dumps(seen))
             case.check(bool(tracker_requests), "The real engine queried the local tracker fixture.",
                        f"Local tracker received {len(tracker_requests)} requests; engine is bound to lo.")
             harness.cli("start", magnet)
-            retry = harness.cli("show", magnet)
-            case.check(retry["state"] == "metaDL" and retry["error_message"] == failure["error_message"],
+            retry = harness.cli("show", magnet)["torrent"]
+            case.check(retry["state"] == "metadata" and retry["error"] == failure["error"],
                        "Start retries a timed-out magnet while retaining the last failure until success.", json.dumps(retry))
             harness.cli("stop", magnet)
-            case.check(harness.cli("show", magnet)["state"] == "stoppedDL", "Stop cancels metadata resolution.")
+            case.check(harness.cli("show", magnet)["torrent"]["state"] == "paused", "Stop cancels metadata resolution.")
             harness.cli("start", magnet)
             harness.cli("delete", magnet)
             case.check(magnet not in rows(), "Delete removes an unresolved record without needing a handle.")
@@ -1068,7 +1049,7 @@ def stop_during_hashing(binary):
         store = root / "data/fbittorrent/engine"
         store.mkdir(parents=True)
         record = dict(hash=hash_, name=name, source="", output_folder=str(downloads),
-                      only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                      only_files=None, upload_limit=32768, upload=False, category="", tags="",
                       added_on=100, completion_on=0, paused=True, resume_after_migration=False)
         ledger = store / "torrents.json"
         ledger.write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
@@ -1099,19 +1080,19 @@ def stop_during_hashing(binary):
             harness.wait_for(lambda: socket_path.exists(), "hashing fixture opens its isolated socket")
 
             def active_hashing():
-                row = harness.cli("show", hash_)
-                return row if row["state"] == "checkingDL" and 0 < row["completed"] < length else None
+                row = harness.cli("show", hash_)["torrent"]
+                return row if row["state"] == "checking" and 0 < row.get("completed_bytes", 0) < length else None
 
             initial = harness.wait_for(active_hashing, "saved-paused startup verification is actively hashing")
             case.check(bool(initial) and json.loads(ledger.read_text())["records"][0]["paused"] is True,
-                       "A saved-paused record lists checkingDL while real verification is active.", json.dumps(initial))
+                       "A saved-paused record lists checking while real verification is active.", json.dumps(initial))
 
             def finished_paused():
-                row = harness.cli("show", hash_)
-                return row if row["state"] == "stoppedDL" else None
+                row = harness.cli("show", hash_)["torrent"]
+                return row if row["state"] == "paused" else None
 
-            finished = harness.wait_for(finished_paused, "saved-paused verification completes before listing stoppedDL", seconds=15)
-            case.check(bool(finished) and finished["completed"] == length-piece_length and
+            finished = harness.wait_for(finished_paused, "saved-paused verification completes before listing paused", seconds=15)
+            case.check(bool(finished) and finished.get("completed_bytes") == length-piece_length and
                        json.loads(ledger.read_text())["records"][0]["paused"] is True,
                        "The stopped state follows completed verification and preserves saved paused intent.", json.dumps(finished))
             harness.cli("down")
@@ -1137,8 +1118,8 @@ def stop_during_hashing(binary):
             hashing = harness.wait_for(active_hashing, "real file hashing is active before Stop")
             case.check(bool(hashing), "Stop is issued while the real 1 GiB payload is being hashed.", json.dumps(hashing))
             harness.cli("stop", hash_)
-            stopped = harness.cli("show", hash_)
-            case.check(stopped["state"] == "stoppedDL" and json.loads(ledger.read_text())["records"][0]["paused"] is True,
+            stopped = harness.cli("show", hash_)["torrent"]
+            case.check(stopped["state"] == "paused" and json.loads(ledger.read_text())["records"][0]["paused"] is True,
                        "Stop during hashing lists a paused row and durably saves paused intent.", json.dumps(stopped))
             harness.wait_for(lambda: "(p) Resume" in capture(), "the paused hash-check row offers Resume in the TUI")
             pane = capture()
@@ -1148,8 +1129,8 @@ def stop_during_hashing(binary):
                              "TUI Resume starts the saved torrent")
 
             def resumed():
-                row = harness.cli("show", hash_)
-                return row if row["state"] == "stalledDL" and 0 < row["completed"] < length else None
+                row = harness.cli("show", hash_)["torrent"]
+                return row if row["state"] == "stalled" and 0 < row.get("completed_bytes", 0) < length else None
 
             restored = harness.wait_for(resumed, "resumed hash check finishes and admits the incomplete download", seconds=15)
             case.check(bool(restored), "Resume completes the real recheck and admits the torrent.", json.dumps(restored))
@@ -1257,13 +1238,13 @@ def local_download(case, binary, leech):
             payload = seedbox.downloads / "daemon-fixture.bin"
             payload.write_bytes(os.urandom(8 * 1024 * 1024))
             torrent = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + "/announce")
-            seedh.cli("add", str(torrent.torrent), "--seed", "--quiet")
+            seedh.cli("add", str(torrent.torrent), "--upload", "--quiet")
             seedh.wait_for(lambda: ((row := seedh.api("torrents.list")["torrents"][0])["state"] == "seeding", str(row)), "verified local seed")
             reply = seedh.api("torrents.set_upload_limit",dict(hashes=[torrent.info_hash],bps=32768))
             case.check(reply.get("state") == "done", "seed upload is capped so the download remains active", str(reply))
             leech.cli("add", str(torrent.torrent), "--quiet")
-            leech.wait_for(lambda: ((row := leech.cli("show", torrent.info_hash))["completed"] >= 32768 and
-                                   row["progress"] < 1, str(row)), "real local payload begins", timeout=20)
+            leech.wait_for(lambda: ((row := leech.cli("show", torrent.info_hash)["torrent"]).get("completed_bytes", 0) >= 32768 and
+                                   row.get("progress", 0) < 1, str(row)), "real local payload begins", timeout=20)
             try:
                 yield torrent.info_hash
             finally:
@@ -1293,10 +1274,10 @@ def attachment_case(name, binary):
                 with local_download(case, binary, h) as hash_:
                     ui.assert_pane(target, "daemon-fixture.bin")
                     if name == "q_detaches":
-                        before = h.cli("show", hash_)["completed"]
+                        before = h.cli("show", hash_)["torrent"].get("completed_bytes", 0)
                         ui.keys(target, "q")
                         h.wait_for(lambda: (done.exists(), ui.capture(target)), "q closes only the TUI")
-                        h.wait_for(lambda: ((row := h.cli("show", hash_))["completed"] > before and row["progress"] < 1,
+                        h.wait_for(lambda: ((row := h.cli("show", hash_)["torrent"]).get("completed_bytes", 0) > before and row.get("progress", 0) < 1,
                                            str(row)), "download gains payload after q", timeout=8)
                         case.check(unit.pid() == pid, "same daemon continues the real local download", json.dumps(ui.status()))
                     else:
@@ -1566,7 +1547,7 @@ def run_cases():
                 time.sleep(.2)
                 case.check(fixture["torrent_requests"] == 0, 'A single RSS click selects without downloading.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
                 keys("Enter")
-                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["isRead"],
+                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["read"],
                          "one Enter marks article read after add")
                 wait_for(lambda: "added Fixture episode 2" in capture(), "add result reaches the TUI")
                 case.check(fixture["torrent_requests"] == 1, 'Only the explicit RSS Enter action downloads a torrent once.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
@@ -1581,24 +1562,24 @@ def run_cases():
                 wait_for(lambda: "Fixture episode 3" in capture(), "one refresh updates view")
                 case.check(fixture["feed_requests"] == 3, 'Pressing refresh requests the feed exactly once more.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
                 items = cli("rss", "items", "Local feed")["items"]
-                case.check(next(item for item in items if item["id"] == "episode-2")["isRead"], 'Refresh preserves the read marker for episode two.')
-                case.check(not next(item for item in items if item["id"] == "episode-3")["isRead"], 'The new third episode is unread.')
+                case.check(next(item for item in items if item["id"] == "episode-2")["read"], 'Refresh preserves the read marker for episode two.')
+                case.check(not next(item for item in items if item["id"] == "episode-3")["read"], 'The new third episode is unread.')
             if options.case == "refresh_preserves_read_history":
                 return suite_status("native")
             with Case("native", "rss_mouse_and_scoped_shortcuts", enabled=options.case in (None, "rss_mouse_and_scoped_shortcuts")) as case:
                 fixture["phase"] = "rss-new-first-row-click"
                 click_text("Fixture episode 3")
                 keys("m")
-                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["isRead"], "single item marked read")
+                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["read"], "single item marked read")
                 wait_for(lambda: "(m) Mark unread" in capture(), "read change reaches the visible TUI")
                 keys("m")
-                wait_for(lambda: not cli("rss", "items", "Local feed")["items"][0]["isRead"], "same item marked unread")
+                wait_for(lambda: not cli("rss", "items", "Local feed")["items"][0]["read"], "same item marked unread")
                 wait_for(lambda: "(m) Mark read" in capture(), "unread change reaches the visible TUI")
                 keys("Left", "m")
                 time.sleep(.2)
-                case.check(not cli("rss", "items", "Local feed")["items"][0]["isRead"], 'Lowercase m in the parent pane leaves the feed unread.')
+                case.check(not cli("rss", "items", "Local feed")["items"][0]["read"], 'Lowercase m in the parent pane leaves the feed unread.')
                 keys("M")
-                wait_for(lambda: all(item["isRead"] for item in cli("rss", "items", "Local feed")["items"]), "Shift+M marks this feed read")
+                wait_for(lambda: all(item["read"] for item in cli("rss", "items", "Local feed")["items"]), "Shift+M marks this feed read")
                 wait_for(lambda: "marked Local feed as read" in capture(), "batch read change reaches the visible TUI")
             if options.case == "rss_mouse_and_scoped_shortcuts":
                 return suite_status("native")
@@ -1618,25 +1599,25 @@ def run_cases():
                 click_text("Fixture episode 6")
                 keys("m")
                 wait_for(lambda: next(item for item in cli("rss", "items", "Local feed")["items"]
-                                      if item["id"] == "episode-6")["isRead"],
+                                      if item["id"] == "episode-6")["read"],
                          "mouse uses the scrolled row's item")
                 wait_for(lambda: "(m) Mark unread" in capture(), "scrolled read change reaches the visible TUI")
                 mouse_text("Fixture episode 5", 35)
                 keys("m")
                 wait_for(lambda: not next(item for item in cli("rss", "items", "Local feed")["items"]
-                                          if item["id"] == "episode-6")["isRead"],
+                                          if item["id"] == "episode-6")["read"],
                          "hover retains the clicked keyboard target")
                 case.check(not next(item for item in cli("rss", "items", "Local feed")["items"]
-                                if item["id"] == "episode-5")["isRead"], 'Hovering episode five does not change its read marker.')
+                                if item["id"] == "episode-5")["read"], 'Hovering episode five does not change its read marker.')
                 case.check(fixture["torrent_requests"] == 1, 'Only the explicit RSS Enter action downloads a torrent once.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
             if options.case == "mouse_selection_at_scroll_offset":
                 return suite_status("native")
             with Case("native", "native_cli_fields_and_deletion_safety", enabled=options.case in (None, "native_cli_fields_and_deletion_safety")) as case:
                 cli("stop", expected_hash)
                 details = cli("show", expected_hash)
-                case.check(details["files"][0]["name"] == name, 'The native file list preserves the full fixture filename.')
-                case.check(details.get("upload_enabled") is False, 'Default upload permission is off independently of the rate limit.')
-                case.check(details["state"] == "stoppedDL", 'The explicitly stopped torrent remains stopped.')
+                case.check(details["files"][0]["path"] == name, 'The native file list preserves the full fixture filename.')
+                case.check(details["torrent"].get("upload_enabled") is False, 'Default upload permission is off independently of the rate limit.')
+                case.check(details["torrent"]["state"] == "paused", 'The explicitly stopped torrent remains stopped.')
                 cli("delete", expected_hash, "--files", code=3)
             if options.case == "native_cli_fields_and_deletion_safety":
                 return suite_status("native")
@@ -1762,11 +1743,11 @@ def run_cases():
                 cli("settings", "--vpn", "fbmissing0")
                 wait_for(lambda: cli("status").get("daemon", {}).get("state") == "parked", "required VPN blocks networking")
                 wait_for(lambda: "Waiting for fbmissing0" in capture(), "VPN waiting is visible")
-                case.check(cli("show", expected_hash).get("progress_known") is False, 'Progress is unknown while the required VPN is absent.')
+                case.check("progress" not in cli("show", expected_hash)["torrent"], 'Progress is unknown while the required VPN is absent.')
                 cli("stop", expected_hash)
                 cli("settings", "--vpn", "off", "--encryption", "require")
                 restored = harness.wait_for_reopen(socket_path, expected_hash)
-                case.check(restored.get("state") == "stoppedDL", 'Engine reopening preserves the manual pause.',
+                case.check(restored.get("state") == "paused", 'Engine reopening preserves the manual pause.',
                            f"Reopened torrent response: {restored}")
                 case.check(cli("settings").get("peer_encryption") == "require", 'Required peer encryption persists after engine reopening.')
             if options.case == "settings_queue_vpn_restart":
@@ -1797,10 +1778,10 @@ def run_cases():
                 case.check(not show_episodes("tt1234002")["S01E02"]["read"], 'The other Beta Show release remains unread.')
                 wait_for(lambda: "3 Shows (1)" in capture(), "reopened TUI restores unread Shows badge")
                 case.check("3 Shows (1)" in capture(), 'The current screen displays a Shows badge with one unread release.')
-                restored = cli("show", expected_hash)
-                case.check(restored["state"] == "stoppedDL" and restored.get("upload_enabled") is False, 'Restart preserves the manual pause and upload off.')
+                restored = cli("show", expected_hash)["torrent"]
+                case.check(restored["state"] == "paused" and restored.get("upload_enabled") is False, 'Restart preserves the manual pause and upload off.')
                 case.check(next(item for item in cli("rss", "items", "Local feed")["items"]
-                            if item["id"] == "episode-2")["isRead"], 'Restart preserves the RSS episode-two read marker.')
+                            if item["id"] == "episode-2")["read"], 'Restart preserves the RSS episode-two read marker.')
                 cli("down")
                 wait_for(lambda: not socket_path.exists(), "CLI down closes app", seconds=6)
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
@@ -1823,7 +1804,7 @@ def run_cases():
                 parked_cli = parked_harness.cli
                 records = [dict(hash=f"{index:040x}", name=f"P0-10.timestamp.{stamp}.fixture",
                                 source=f"magnet:?xt=urn:btih:{index:040x}", output_folder=str(parked_root / "downloads"),
-                                only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                                only_files=None, upload_limit=32768, upload=False, category="", tags="",
                                 added_on=checked-index, completion_on=stamp, paused=True, resume_after_migration=False)
                            for index, stamp in [(1, -1), (2, 0), (3, 123)]]
                 ledger = parked_root / "data/fbittorrent/engine/torrents.json"
@@ -1857,10 +1838,8 @@ def run_cases():
                            "completed_at" not in normalized[unknown] and "progress" not in normalized[unknown] and
                            normalized[done]["completed_at"] == 123,
                            "API preserves pause intent, omits unknown completion, and keeps the known date", json.dumps(normalized))
-                # API omits an unknown date; contract-1.x shapes it as zero.
-                # The legacy adapter retains the disk sentinel. Both must stay incomplete.
-                expected_cli_unknown = 0 if "native_state" in listed[unknown] else -1
-                case.check(listed[unknown]["completion_on"] == expected_cli_unknown and listed[unknown]["state"] == "stoppedDL",
+                # The CLI row is the API row: the unknown -1 date is absent there too.
+                case.check(listed[unknown] == normalized[unknown] and "completed_at" not in listed[unknown],
                            "A saved -1 record remains incomplete.", json.dumps(listed[unknown]))
                 keys("1")
                 wait_for(lambda: "P0-10.timestamp.-1.fixture" in capture(), "unknown-date fixture reaches the TUI")
@@ -1885,7 +1864,7 @@ def run_cases():
                            "Bulk start accepts -1 and zero dates and skips only the positive date.", json.dumps(result))
                 result = parked_cli("start", done, code=1)
                 case.check(result.get("ok") is False and result.get("code") == 1
-                           and result.get("error") and result.get("hint") == f"fbittorrent seed {done}",
+                           and result.get("error") and result.get("hint") == f"fbittorrent upload {done}",
                            "A positive completion date still refuses explicit start with the seed hint.", json.dumps(result))
                 case.check(json.loads(ledger.read_text())["records"][0]["completion_on"] == -1,
                            "Starting an unknown-date record does not invent a completion timestamp.")

@@ -1,73 +1,10 @@
-//! Current CLI 1.x output shapes and shared display helpers.
+//! Search/RSS catalogue rows, file rows and shared display helpers.
+//! Torrents use the API model (`crate::api::Torrent`) everywhere.
 
 use serde::{Deserialize, Serialize};
 
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Torrent {
-    pub hash: String,
-    pub name: String,
-    pub state: String,
-    #[serde(skip_serializing_if="is_false")]
-    pub staged: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_message: Option<String>,
-    pub progress: f64,
-    #[serde(default = "known_progress")]
-    pub progress_known: bool,
-    pub size: i64,
-    pub completed: i64,
-    pub dlspeed: i64,
-    pub upspeed: i64,
-    pub eta: i64,
-    pub num_seeds: i64,
-    pub num_leechs: i64,
-    pub ratio: f64,
-    pub seq_dl: bool,
-    pub f_l_piece_prio: bool,
-    pub save_path: String,
-    pub content_path: String,
-    pub category: String,
-    pub added_on: i64,
-    pub completion_on: i64,
-    pub up_limit: i64,
-    pub ratio_limit: f64,
-    pub tags: String,
-}
-
-fn is_false(value: &bool) -> bool { !value }
-
 fn known_progress() -> bool { true }
 
-/// Unlimited rate representation. Actual payload permission is gated separately.
-pub const NO_UPLOAD_LIMIT: i64 = 0;
-pub const SEED_TAG: &str = "seed";
-
-impl Torrent {
-    pub fn is_active(&self) -> bool {
-        matches!(
-            self.state.as_str(),
-            "downloading" | "metaDL" | "forcedDL" | "stalledDL" | "checkingDL"
-                | "allocating" | "forcedMetaDL"
-        )
-    }
-    pub fn is_stopped(&self) -> bool {
-        matches!(self.state.as_str(), "stoppedDL" | "stoppedUP" | "pausedDL" | "pausedUP")
-    }
-    pub fn is_queued(&self) -> bool { self.state == "queuedDL" }
-    pub fn complete_no_seed(&self) -> bool { self.completion_on > 0 && self.ratio_limit == 0.0 }
-    /// Explicit permission to continue uploading after completion.
-    pub fn seed_allowed(&self) -> bool {
-        self.has_tag(SEED_TAG) || self.ratio_limit != 0.0
-    }
-    pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags.split(',').any(|t| t.trim() == tag)
-    }
-    pub fn is_seeding(&self) -> bool {
-        matches!(self.state.as_str(), "uploading" | "stalledUP" | "forcedUP" | "queuedUP" | "checkingUP")
-    }
-}
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct StartResult {
@@ -149,6 +86,7 @@ pub struct TorrentFile {
     pub priority: i64,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SearchResponse {
@@ -221,21 +159,11 @@ pub const COMMUNITY_SEARCH_PLUGINS: &[&str] = &[
 ];
 
 pub struct AddOptions {
-    pub origin: Option<String>,
-    pub sequential: bool,
-    pub first_last: bool,
     /// Explicitly permit upload, including after completion; false inherits the global download-time policy and stops when complete.
     pub seed: bool,
     pub stopped: bool,
     pub save_path: Option<String>,
     pub category: Option<String>,
-}
-
-pub fn encode_query(q: &[(&str, &str)]) -> String {
-    q.iter()
-        .map(|(k, v)| format!("{}={}", urlencode(k), urlencode(v)))
-        .collect::<Vec<_>>()
-        .join("&")
 }
 
 pub fn urlencode(s: &str) -> String {
@@ -247,14 +175,6 @@ pub fn urlencode(s: &str) -> String {
         }
     }
     out
-}
-
-/// What `open` should launch for a torrent: the file itself for single-file
-/// torrents, the folder otherwise. Falls back to the save path.
-pub fn open_target(t: &Torrent) -> String {
-    let p = std::path::Path::new(&t.content_path);
-    if !t.content_path.is_empty() && p.exists() { return t.content_path.clone(); }
-    t.save_path.clone()
 }
 
 pub fn human_bytes(n: i64) -> String {
@@ -274,30 +194,4 @@ pub fn human_eta(secs: i64) -> String {
     if secs < 0 || secs >= 8640000 { return "∞".into(); }
     let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
     if h > 0 { format!("{h}h{m:02}m") } else if m > 0 { format!("{m}m{s:02}s") } else { format!("{s}s") }
-}
-
-#[cfg(test)]
-mod completion_tests {
-    #[test]
-    fn restore_error_message_is_optional_and_round_trips() {
-        let old: super::Torrent = serde_json::from_value(serde_json::json!({"hash":"old"})).unwrap();
-        assert!(old.error_message.is_none());
-        assert!(serde_json::to_value(old).unwrap().get("error_message").is_none());
-        let failed: super::Torrent = serde_json::from_value(serde_json::json!({
-            "hash":"failed", "state":"error", "error_message":"could not restore: corrupt cache"
-        })).unwrap();
-        assert_eq!(serde_json::to_value(failed).unwrap()["error_message"], "could not restore: corrupt cache");
-    }
-
-    use super::*;
-
-    #[test]
-    fn resume_completion_requires_a_positive_timestamp() {
-        for completion_on in [-1, 0, 123] {
-            let torrent: Torrent = serde_json::from_value(serde_json::json!({
-                "completion_on": completion_on, "ratio_limit": 0.0,
-            })).unwrap();
-            assert_eq!(torrent.complete_no_seed(), completion_on > 0);
-        }
-    }
 }

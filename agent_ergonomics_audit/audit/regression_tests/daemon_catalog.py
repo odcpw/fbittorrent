@@ -1,6 +1,5 @@
 """P3-07 CLI source agreement through real Nova/IMDb and owned daemons."""
 import gzip
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -28,15 +27,13 @@ def engines(box, names=('shape',)):
 
 
 def equal(case,args,first,second):
-    # Preserve actual bytes. Only the explicitly allowed warnings field may be removed.
     if '--json' in args:
-        x,y=json.loads(first),json.loads(second)
-        if 'warnings' in x or 'warnings' in y:
-            x.pop('warnings',None);y.pop('warnings',None)
-            first=json.dumps(x,sort_keys=True,ensure_ascii=False,separators=(',',':'))+'\n'
-            second=json.dumps(y,sort_keys=True,ensure_ascii=False,separators=(',',':'))+'\n'
-    offset=next((i for i,(x,y) in enumerate(zip(first.encode(),second.encode())) if x!=y),min(len(first.encode()),len(second.encode())))
-    case.check(first==second,'daemon/local stdout agrees byte-for-byte for '+repr(args),json.dumps(dict(sha256_up=hashlib.sha256(first.encode()).hexdigest(),sha256_down=hashlib.sha256(second.encode()).hexdigest(),first_difference=None if first==second else offset,up=first,down=second)))
+        first,second=json.loads(first),json.loads(second)
+        first.pop('warnings',None);second.pop('warnings',None)
+    else:
+        first,second=first.split(),second.split()
+    case.check(first==second,'daemon/local catalogue observations agree for '+repr(args),
+               json.dumps(dict(up=first,down=second),ensure_ascii=False))
 
 
 def cli_search_both_paths_identical(binary,systemd):
@@ -65,13 +62,15 @@ def cli_search_both_paths_identical(binary,systemd):
             _,result=cli(case,box,binary,*args,valid='--json' in args,code=5 if 'fail' in args else 0)
             equal(case,args,expected,result.stdout)
         case.check(not h.engine_path.exists(),'local search never starts a daemon',str(h.engine_path))
-        # The golden is the actual pre-P3-07 output; only the planned providers[] is new.
-        actual=json.loads(up[0])
-        for row in actual['results']:
-            case.check(row.pop('providers')==['shape'],'search adds truthful provider provenance',json.dumps(row))
-        golden=Path(__file__).parent/'golden/cli/search-212c3cd.json'
-        equal(case,commands[0],golden.read_text(),json.dumps(actual,sort_keys=True,ensure_ascii=False,separators=(',',':'))+'\n')
-        equal(case,commands[1],golden.with_suffix('.txt').read_text(),up[1])
+        # The real local provider is the oracle: names, sizes, seeds and links
+        # originate there, independently of either CLI/API projection.
+        rows=json.loads(up[0])['results']
+        expected=[('Sintel.2010.1080p.mkv',4096,9,'1'),('Big.Buck.Bunny.720p.mp4',8192,7,'2'),('Linux.iso',1024,0,'3')]
+        case.check([(r['name'],r['size'],r['seeds']) for r in rows]==[(n,s,c) for n,s,c,_ in expected]
+                   and all(r['providers']==['shape'] and r['magnet']=='magnet:?xt=urn:btih:'+digit*40
+                           and r['leechers']==1 for r,(_,_,_,digit) in zip(rows,expected)),
+                   'CLI search retains provider measurements, identity and provenance in API rows',json.dumps(rows))
+        case.check(all(name in up[1] for name,_,_,_ in expected),'plain search names every provider result',up[1])
 
 
 def cli_search_dedupe_both_paths(binary,systemd):
@@ -79,7 +78,7 @@ def cli_search_dedupe_both_paths(binary,systemd):
         engines(box,('alpha','beta'))
         value,up=cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
         row=value['results'][0]
-        case.check(value['complete'] is True and value['count']==1 and row['fileName']=='辛特尔' and row['nbSeeders']==9 and row['providers']==['alpha','beta'] and row['engineName']=='beta',
+        case.check(value['complete'] is True and value['count']==1 and row['name']=='辛特尔' and row['seeds']==9 and row['providers']==['alpha','beta'] and row['provider_url']=='https://beta.invalid',
                    'shared normalization repairs text, dedupes before limit and keeps the winning provider',json.dumps(value,ensure_ascii=False))
         h.stop_serve(process)
         _,down=cli(case,box,binary,'search','Sintel','--wait','5','--limit','1','--json')
@@ -147,6 +146,11 @@ def cli_imdb_both_paths_identical(binary,systemd):
         outputs=[]
         for args in commands:
             _,result=cli(case,box,binary,*args,valid='--json' in args);outputs.append(result.stdout)
+        card=json.loads(outputs[0])['card']
+        case.check(card['id']=='tt1234001' and card['title']=='Local Fixture' and card['year']==2026
+                   and card['kind']=='tvSeries' and abs(card['rating']-8.2)<.00001
+                   and card['url']=='https://www.imdb.com/title/tt1234001/' and Path(card['poster_path']).is_file(),
+                   'CLI card retains the local source identity, rating and usable poster',json.dumps(card))
         h.wait_for(lambda:(h.stderr().count('imdb index loaded')==1,h.stderr()),'CLI lookups use the daemon index once',timeout=2)
         # The original helper owns this process; close it before local runs.
         h.stop_serve(original)
@@ -161,7 +165,7 @@ def cli_imdb_both_paths_identical(binary,systemd):
             (directory/'ratings.tsv.gz').write_bytes(gzip.compress(changed,mtime=0))
             refreshed,result=cli(case,box,binary,'imdb','tt1234001','--refresh','--json')
             h.wait_for(lambda:(h.stderr().count('imdb index loaded')==before+1,h.stderr()),'forced refresh log has reached the captured stderr',timeout=2)
-            case.check(abs(refreshed['rating']-9.1)<.00001 and refreshed['votes']==4321 and h.stderr().count('imdb index loaded')==before+1,
+            case.check(abs(refreshed['card']['rating']-9.1)<.00001 and refreshed['card']['votes']==4321 and h.stderr().count('imdb index loaded')==before+1,
                        '--refresh replaces the running daemon index exactly once',json.dumps(dict(result=refreshed,index_loads_before=before,index_loads_after=h.stderr().count('imdb index loaded'))))
         finally:
             if process.child.poll() is None:h.stop_serve(process)

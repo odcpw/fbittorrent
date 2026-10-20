@@ -5,7 +5,7 @@ mod fixture;
 #[test]
 fn overview_prompts_capture_hash_and_validate_without_editing_the_row() {
     let mut app=fixture::app("torrents");
-    let hash=app.torrents[0].hash.clone();
+    let hash=app.torrents[0].hash.to_string();
     app.overview_prompt(false);
     assert_eq!(app.prompt.as_ref().unwrap().kind,PromptKind::MoveTorrent{hash:hash.clone()});
     assert_eq!(app.prompt.as_ref().unwrap().input.value(),"/fixture/downloads");

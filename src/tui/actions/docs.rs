@@ -59,7 +59,7 @@ pub(crate) fn markdown(filter: &str) -> String {
     out
 }
 
-pub(in crate::tui) fn help_text(_native: bool) -> &'static str {
+pub(in crate::tui) fn help_text() -> &'static str {
     use std::sync::OnceLock;
     static NATIVE: OnceLock<String> = OnceLock::new();
     NATIVE.get_or_init(|| {

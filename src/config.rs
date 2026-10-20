@@ -7,8 +7,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Torrent engine: native (embedded Rust, daemon lifetime).
-    pub engine: String,
     /// Incoming peer port for the embedded engine.
     pub peer_port: u16,
     /// Maximum simultaneously downloading torrents; additional downloads wait.
@@ -17,9 +15,6 @@ pub struct Config {
     pub peer_encryption: String,
     /// Require this interface, or "proton" for automatic ProtonVPN discovery.
     pub network_interface: Option<String>,
-    /// Intrinsic streaming defaults.
-    pub sequential: bool,
-    pub first_last: bool,
     /// Payload upload permission, independent of speed limits.
     pub upload: String,
     /// Optional save path override for new torrents.
@@ -51,13 +46,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            engine: "native".into(),
             peer_port: 6882,
             max_active_downloads: 3,
             peer_encryption: "prefer".into(),
             network_interface: None,
-            sequential: true,
-            first_last: true,
             upload: "off".into(),
             save_path: None,
             category: None,
@@ -113,7 +105,6 @@ impl Config {
             .arg("fbittorrent-open").arg(target).spawn()?)
     }
 
-    pub fn native(&self) -> bool { self.engine == "native" }
     pub fn load() -> Result<Self> {
         let path = config_path();
         if !path.exists() {
@@ -129,7 +120,6 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.idle_exit_secs == 0 || self.idle_exit_secs >= 30,
                         "idle_exit_secs must be 0 or at least 30 seconds");
-        anyhow::ensure!(self.engine == "native", crate::agent::AppError::new(crate::agent::Code::Usage, "engine must be native"));
         anyhow::ensure!(self.max_active_downloads > 0, "max_active_downloads: must be at least 1");
         anyhow::ensure!(matches!(self.peer_encryption.as_str(), "off" | "prefer" | "require"), "peer_encryption: must be off, prefer, or require");
         if let Some(name) = &self.network_interface {
@@ -173,19 +163,6 @@ impl Config {
         })();
         if result.is_err() { let _ = std::fs::remove_file(&staged); }
         result.with_context(|| format!("saving {}", path.display()))
-    }
-
-    pub fn write_default_if_missing() -> Result<PathBuf> {
-        let path = config_path();
-        Self::write_default_to_if_missing(&path)?;
-        Ok(path)
-    }
-
-    fn write_default_to_if_missing(path: &std::path::Path) -> Result<()> {
-        if !path.exists() {
-            Self::default().save_to(path)?;
-        }
-        Ok(())
     }
 }
 
@@ -231,21 +208,20 @@ mod tests {
     }
 
     #[test]
-    fn config_save_and_default_creation_are_private() {
+    fn config_save_is_private() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("fbittorrent-config-private-{}", std::process::id()));
         let path = dir.join("config.toml");
-        Config::write_default_to_if_missing(&path).unwrap();
+        Config::default().save_to(&path).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let mut cfg = Config::default();
         cfg.max_active_downloads = 7;
         cfg.save_to(&path).unwrap();
-        Config::write_default_to_if_missing(&path).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved.max_active_downloads, 7, "default creation must preserve an existing config");
+        assert_eq!(saved.max_active_downloads, 7);
         println!("{}: {mode:o} after config save", path.display());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -292,15 +268,8 @@ mod tests {
 }
 
 #[cfg(test)]
-mod native_backend_tests {
+mod saved_settings_tests {
     use super::*;
-    #[test]
-    fn removed_backend_fails_before_startup() {
-        let cfg=Config {engine:"qbittorrent".into(),..Default::default()};
-        let error=cfg.validate().unwrap_err();
-        assert!(error.to_string().contains("engine must be native"));
-        println!("removed backend: {error}");
-    }
     #[test]
     fn current_settings_keep_their_values() {
         let input=r#"engine="native"
@@ -314,6 +283,6 @@ first_last=false
 "#;
         let cfg:Config=toml::from_str(input).unwrap();cfg.validate().unwrap();
         assert_eq!(cfg.peer_port,16882);assert_eq!(cfg.save_path.as_deref(),Some("/tmp/private-fixture/downloads"));
-        assert_eq!(cfg.engine,"native");
+        assert!(!toml::to_string(&cfg).unwrap().contains("engine"),"retired keys are dropped on the next save");
     }
 }

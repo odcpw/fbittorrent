@@ -168,33 +168,26 @@ fn upload_permission_blocks_payload_in_both_phases_and_allows_explicit_opt_in() 
 }
 
 #[test]
-fn old_default_cap_is_upload_off_without_losing_current_data() {
-    let directory = review_directory("upload-migration");
+fn upload_permission_is_independent_of_payload_cap_on_reload() {
+    let directory = review_directory("upload-permission");
     std::fs::create_dir_all(&directory).unwrap();
-    let mut record = review_record(
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        &directory.join("downloads"),
-    );
-    record.upload_limit = 32768;
-    record.only_files = Some(vec![0, 2]);
     let path = directory.join("torrents.json");
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&Ledger {
-            records: vec![record],
-            ..Default::default()
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    let ledger = read_ledger(&path).unwrap();
-    assert_eq!(ledger.records[0].upload, Some(false));
-    assert_eq!(ledger.records[0].only_files, Some(vec![0, 2]));
-    assert_eq!(
-        ledger.records[0].options(false).unwrap().upload_enabled,
-        Some(false)
-    );
-    std::fs::write(&path, serde_json::to_vec(&ledger).unwrap()).unwrap();
-    assert_eq!(read_ledger(&path).unwrap().records[0].upload, Some(false));
+    for upload in [None, Some(false), Some(true)] {
+        for cap in [0, 32768, 65536] {
+            let mut record = review_record(&"a".repeat(40), &directory.join("downloads"));
+            record.upload = upload;
+            record.upload_limit = cap;
+            record.only_files = Some(vec![0, 2]);
+            let ledger = Ledger {records: vec![record], ..Default::default()};
+            save_parked_ledger(&directory, &ledger).unwrap();
+            let saved = read_ledger(&path).unwrap();
+            let row = &saved.records[0];
+            assert_eq!(row.upload, upload);
+            assert_eq!(row.options(false).unwrap().upload_enabled, upload);
+            assert_eq!(row.upload_limit, cap);
+            assert_eq!(row.only_files, Some(vec![0, 2]));
+            assert_eq!(row.stop_on_complete(), upload != Some(true));
+        }
+    }
     std::fs::remove_dir_all(directory).unwrap();
 }

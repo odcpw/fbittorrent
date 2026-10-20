@@ -81,24 +81,6 @@ pub fn path() -> PathBuf {
         .join("fbittorrent/rss.json")
 }
 
-pub fn list() -> Result<Vec<RssFeed>> { Store::default().list() }
-pub fn add(url: &str, name: Option<&str>, timeout_secs: u64) -> Result<()> {
-    Store::default().add(url, name, timeout_secs)
-}
-pub fn remove(path: &str) -> Result<()> { Store::default().remove(path) }
-pub fn refresh(path: &str, timeout_secs: u64) -> Result<()> {
-    Store::default().refresh(path, timeout_secs)
-}
-pub fn mark_read(path: &str, article_id: Option<&str>) -> Result<()> {
-    Store::default().mark_read(path, article_id)
-}
-pub fn set_read(path: &str, article_id: &str, read: bool) -> Result<()> {
-    Store::default().set_read(path, Some(article_id), read)
-}
-/// Merge qBittorrent's subscriptions/cache once during migration. Read states
-/// are combined, so retrying an import never makes a read item new again.
-pub fn import(feeds: &[RssFeed]) -> Result<usize> { Store::default().import(feeds) }
-
 impl Store {
     pub fn new(path: impl Into<PathBuf>) -> Self { Self { path: path.into() } }
 
@@ -162,6 +144,7 @@ impl Store {
         Ok(result)
     }
 
+    #[cfg(test)]
     pub fn list(&self) -> Result<Vec<RssFeed>> {
         // An atomic rename makes unlocked reads safe, including during refresh.
         Ok(self.load()?.feeds.into_iter().map(|stored| stored.feed).collect())
@@ -205,15 +188,6 @@ impl Store {
         self.refresh(&chosen, timeout_secs)
     }
 
-    pub fn remove(&self, path: &str) -> Result<()> {
-        if path.is_empty() { bail!("choose an RSS feed or folder to remove"); }
-        self.mutate(|data| {
-            let before = data.feeds.len();
-            data.feeds.retain(|stored| !matches_path(&stored.feed.name, path));
-            if data.feeds.len() == before { bail!("RSS feed not found: {path}"); }
-            Ok(())
-        })
-    }
     pub(crate) fn remove_id(&self, id:&str)->Result<()> {
         self.mutate(|data| {
             let before=data.feeds.len();
@@ -296,6 +270,8 @@ impl Store {
         Ok(())
     }
 
+    /// Test fixtures seed subscriptions and cached articles directly.
+    #[cfg(test)]
     pub fn import(&self, feeds: &[RssFeed]) -> Result<usize> {
         self.mutate(|data| {
             let mut added = 0;
@@ -637,21 +613,6 @@ mod tests {
         assert!(snapshot.grabbed.contains("episode-1"));
         assert!(!snapshot.feed.articles.iter().find(|a|a.id=="episode-1").unwrap().is_read);
         assert_eq!(MAX_BODY,4*1024*1024);
-    }
-
-    #[test]
-    fn imported_history_is_local_and_idempotent() {
-        let (_scratch, store) = Scratch::store();
-        let parsed = parse_feed(RSS.as_bytes(), "https://example.org/rss").unwrap();
-        let original = RssFeed { name: "TV\\Example".into(), uid: "original-uid".into(), url: "http://127.0.0.1:1/offline".into(), articles: parsed.articles, ..RssFeed::default() };
-        assert_eq!(store.import(std::slice::from_ref(&original)).unwrap(), 1);
-        store.mark_read(&original.name, Some("episode-1")).unwrap();
-        assert_eq!(store.import(&[original]).unwrap(), 0);
-        // Opening a new Store never connects to the saved feed URL.
-        let reopened = Store::new(&store.path).list().unwrap();
-        assert_eq!(reopened[0].uid, "original-uid");
-        assert!(reopened[0].articles.iter().find(|row| row.id == "episode-1").unwrap().is_read);
-        assert!(!reopened[0].articles.iter().find(|row| row.id == "episode-2").unwrap().is_read);
     }
 
     #[test]

@@ -89,7 +89,7 @@ def run(name,binary,systemd):
             again=c.call('rss.mark_feed_read',dict(feed=identity))['result']
             case.check(first==dict(count=2) and again==dict(count=0),'mark-feed-read is idempotent and counts changed unread rows',json.dumps([first,again]))
             cli=h.cli('rss','items','Local')
-            case.check(all(r['isRead'] for r in cli['items']),'in-process CLI reads the API-committed read history',json.dumps(cli))
+            case.check(all(r['read'] for r in cli['items']),'in-process CLI reads the API-committed read history',json.dumps(cli))
             (box.root/'child.xml').write_bytes(source.read_bytes())
             child=c.call('rss.add',dict(url=http.base+'/child.xml',name='Local/Child'))['result']['feed']
             c.call('rss.remove',dict(feed=identity))

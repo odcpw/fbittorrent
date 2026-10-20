@@ -47,7 +47,7 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
                 let item = app
                     .selected_feed()
                     .and_then(|feed| app.item_list.borrow().selected().and_then(|i| feed.articles.get(i)))?;
-                if app.cfg.native() && item.is_read {
+                if item.is_read {
                     "Mark unread"
                 } else {
                     "Mark read"

@@ -50,10 +50,10 @@ def dormant_operations(binary, systemd):
             c.call('torrents.remove_tracker',dict(hash=hash_,url=url))
             trackers=c.call('torrents.trackers',dict(hash=hash_))['result']['trackers']
             case.check(not trackers and row('trackers')['checked'] is False,'tracker remove retains dormancy',json.dumps(trackers))
-            hash_=dormant('upload');h.cli('seed',hash_)
+            hash_=dormant('upload');h.cli('upload',hash_)
             assert h.wait_for(lambda:((r:=row('upload'))['state']=='seeding' and r['checked'] and r['upload_enabled'],json.dumps(r)),
                               'explicit torrent upload activates its own dormant data')
-            h.cli('noseed',hash_)
+            h.cli('noupload',hash_)
             assert h.wait_for(lambda:((r:=row('upload'))['state']=='done' and r['upload_enabled'] is False,json.dumps(r)),
                               'turning upload off returns this torrent to done')
             hash_=dormant('recheck');event,_=d.recheck_reply(c,hash_,'dormant-operations-recheck')

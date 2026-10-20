@@ -3,7 +3,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::ffi::CString;
 
-use crate::{config::Config, daemon::lifecycle::{Lifecycle, RestartReason}};
+use crate::config::Config;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct NetworkState {
@@ -48,17 +48,6 @@ pub fn interfaces() -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn check_transition(cfg: &Config, lifecycle: &Lifecycle) -> bool {
-    if lifecycle.pending_request().is_some() { return true; }
-    if let Some(expected) = lifecycle.expected_network() {
-        if expected.selection.is_some() && expected != state(cfg) {
-            lifecycle.request_restart(RestartReason::Network);
-            return true;
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,25 +65,5 @@ mod tests {
         let mut cfg = Config::default();
         cfg.network_interface = Some("proton".into());
         assert_eq!(state(&cfg).interface.as_deref(), Some("proton0"));
-    }
-
-    #[test]
-    fn network_expectations_and_restart_requests_are_per_lifecycle() {
-        use crate::daemon::lifecycle::Request as LifecycleRequest;
-        let cfg = Config::default();
-        let first = Lifecycle::default();
-        let second = Lifecycle::default();
-        assert_eq!(first.expected_network(), None);
-        let missing = Config { network_interface: Some("fbmissing0".into()), ..Default::default() };
-        first.set_expected_network(Some(state(&missing)));
-        second.set_expected_network(Some(state(&cfg)));
-        assert!(check_transition(&cfg, &first));
-        assert!(!check_transition(&cfg, &second));
-        assert_eq!(first.wait(std::time::Duration::ZERO), Some(LifecycleRequest::Restart(RestartReason::Network)));
-        assert_eq!(second.pending_request(), None);
-        assert_eq!(first.expected_network(), Some(state(&missing)));
-        first.set_expected_network(None);
-        assert!(!check_transition(&cfg, &first));
-        assert_eq!(second.expected_network(), Some(state(&cfg)));
     }
 }

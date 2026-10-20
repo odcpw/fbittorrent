@@ -23,6 +23,7 @@ pub enum Direction {
 pub(super) fn positioned(r: &Record) -> bool {
     !r.paused && r.completion_on <= 0 && !r.force && !r.staged
 }
+#[cfg(test)]
 pub(super) fn position(records: &[Record], hash: &str) -> Option<u64> {
     records
         .iter()

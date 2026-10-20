@@ -306,8 +306,6 @@ fn assert_checked_running(dispatcher: &EngineDispatcher, hash: &str) {
     assert_eq!(r.completed_bytes, Some(PIECE as u64));
     assert_eq!(r.size, Some(2 * PIECE as u64));
     assert!(r.completed_at.is_none());
-    let legacy: Torrent = serde_json::from_str(&r.to_cli_json().unwrap()).unwrap();
-    assert_eq!(legacy.state, "stalledDL");
 }
 
 #[test]
@@ -331,59 +329,13 @@ fn incomplete_restore_reconciliation_checks_once() {
     assert_eq!(counts.snapshot(), (1, 2, 2 * PIECE));
     diagnostic("incomplete_restore", "release verification and apply post-check running intent",
         "One storage creation and one full two-piece check; incomplete verified data runs without a second check.",
-        serde_json::json!({"creates_reads_bytes":counts.snapshot(),"row":row(&dispatcher)}));
+        serde_json::json!({"creates_reads_bytes":counts.snapshot(),"row":wire(&row(&dispatcher))}));
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
-fn explicit_recheck_reconciliation_checks_once() {
-    let (app, directory, hash, counts, gate) = gated_fixture();
-    let _release = ReleaseOnDrop(gate.clone());
-    let dispatcher = app.dispatcher();
-    reconcile_during_check(
-        "explicit_recheck",
-        &dispatcher,
-        &hash,
-        &counts,
-        &gate,
-        (1, 1, PIECE),
-    );
-    assert_checked_running(&dispatcher, &hash);
-    assert_eq!(counts.snapshot(), (1, 2, 2 * PIECE));
-    let previous = dispatcher.inner.handle(&hash).unwrap();
-    gate.arm();
-    let actor = dispatcher.clone();
-    let target = hash.clone();
-    let recheck = std::thread::spawn(move || actor.execute(EngineOp::Recheck { hash: target }));
-    let handle = reconcile_during_check(
-        "explicit_recheck",
-        &dispatcher,
-        &hash,
-        &counts,
-        &gate,
-        (2, 3, 3 * PIECE),
-    );
-    recheck.join().unwrap().unwrap();
-    assert!(
-        !Arc::ptr_eq(&previous, &handle),
-        "the explicit recheck admits one fresh handle"
-    );
-    assert_checked_running(&dispatcher, &hash);
-    assert!(Arc::ptr_eq(
-        &handle,
-        &dispatcher.inner.handle(&hash).unwrap()
-    ));
-    assert_eq!(counts.snapshot(), (2, 4, 4 * PIECE));
-    diagnostic("explicit_recheck", "finish the explicit recheck under concurrent reconciliation",
-        "Exactly one new admission and one two-piece check for the requested recheck; no additional storage recreation or verification.",
-        serde_json::json!({"initial_creates_reads_bytes":[1,2,2*PIECE],"final_creates_reads_bytes":counts.snapshot(),"recheck_delta":[1,2,2*PIECE],"row":row(&dispatcher)}));
-    drop(app);
-    std::fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-fn async_recheck_shares_outcome_without_blocking_ledger_or_queue() {
+fn async_recheck_shares_outcome_without_blocking_ledger() {
     let (app, directory, hash, counts, gate) = gated_fixture();
     let _release = ReleaseOnDrop(gate.clone());
     let dispatcher = app.dispatcher();
@@ -413,9 +365,6 @@ fn async_recheck_shares_outcome_without_blocking_ledger_or_queue() {
         dispatcher.runtime.block_on(dispatcher.inner.maintain(dispatcher.runtime.cx())).unwrap();
         assert_eq!(counts.snapshot(),expected);
     }
-    let EngineResult::Queue(queue) = dispatcher.execute(EngineOp::Queue).unwrap() else { panic!("queue"); };
-    assert_eq!(queue.active_downloads,0);
-    assert_eq!(queue.queued_downloads,0);
     gate.release();
     let began = std::time::Instant::now();
     while first.result().is_none() || second.result().is_none() {
@@ -426,7 +375,7 @@ fn async_recheck_shares_outcome_without_blocking_ledger_or_queue() {
     assert_eq!(first.result().unwrap().have_bytes[&hash],PIECE as u64);
     let after=counts.snapshot();
     assert_eq!((after.0-before.0,after.1-before.1,after.2-before.2),(1,2,2*PIECE));
-    println!("two pending requests share one real check; ledger reads/reconciliation stay responsive; check uses no queue slot");
+    println!("two pending requests share one real check; ledger reads/reconciliation stay responsive");
     drop(dispatcher);drop(app);std::fs::remove_dir_all(directory).unwrap();
 }
 
@@ -435,7 +384,7 @@ fn undo_restored_incomplete_record_checks_before_admission() {
     let (app,directory,hash,counts,gate)=gated_fixture();
     let _release=ReleaseOnDrop(gate.clone());let dispatcher=app.dispatcher();
     gate.wait_blocked();gate.release();wait_for_check(&dispatcher,&hash);
-    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}).unwrap();
+    dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection(vec![hash.clone()])}).unwrap();
     gate.arm();
     dispatcher.execute(EngineOp::RestoreUndo {hash:hash.clone()}).unwrap();
     gate.wait_blocked();
@@ -463,7 +412,7 @@ fn remove_during_recheck_does_not_poison_undo_restore() {
     let EngineResult::Recheck(batch)=dispatcher.execute(EngineOp::RecheckBatch {hashes:vec![hash.clone()]}).unwrap() else {panic!("recheck")};
     gate.wait_blocked();
     std::thread::scope(|scope| {
-        let worker=scope.spawn(||dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection::Hashes(vec![hash.clone()])}));
+        let worker=scope.spawn(||dispatcher.execute(EngineOp::RemoveKeep {hashes:HashSelection(vec![hash.clone()])}));
         let deadline=std::time::Instant::now()+Duration::from_secs(5);
         while !dispatcher.inner.rechecks.removal_cancelled(&hash) {
             assert!(std::time::Instant::now()<deadline);std::thread::sleep(Duration::from_millis(2));

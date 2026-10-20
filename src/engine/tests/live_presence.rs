@@ -4,7 +4,7 @@ fn live_handle_listing_reports_deleted_payload_as_files_missing() {
     let dispatcher = app.dispatcher();
     let hash = &records[0].hash;
     dispatcher
-        .execute(EngineOp::SetSeed { hashes: HashSelection::Hashes(vec![hash.clone()]), on: true })
+        .execute(EngineOp::SetSeed { hashes: HashSelection(vec![hash.clone()]), on: true })
         .unwrap();
     wait_for_check(&dispatcher, hash);
     let row = |dispatcher: &EngineDispatcher| dormant_rows(dispatcher).into_iter().find(|r| &r.hash == hash).unwrap();

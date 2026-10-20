@@ -4,7 +4,7 @@ use super::*;
 impl TuiApp {
     pub(super) fn selected_torrent(&self) -> Option<&Torrent> {
         if let Some(details) = &self.details {
-            self.torrents.iter().find(|t| t.hash == details.hash)
+            self.torrents.iter().find(|t| t.hash.as_str() == details.hash)
         } else { self.tor_list.borrow().selected().and_then(|i| self.torrents.get(i)) }
     }
 
@@ -15,8 +15,8 @@ impl TuiApp {
 
     pub(super) fn on_torrents_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let n = self.torrents.len();
-        if matches!(intent,actions::Intent::Pause|actions::Intent::Seed|actions::Intent::Remove|actions::Intent::DeleteFiles)
-            &&self.selected_torrent().is_some_and(|torrent|self.store.pending_for_key(&torrent.hash).is_some()) {
+        if matches!(intent,actions::Intent::Pause|actions::Intent::Remove|actions::Intent::DeleteFiles)
+            &&self.selected_torrent().is_some_and(|torrent|self.store.pending_for_key(torrent.hash.as_str()).is_some()) {
             self.set_status("Waiting for confirmation",false);return Cmd::none();
         }
         match intent {
@@ -27,20 +27,15 @@ impl TuiApp {
             actions::Intent::Pause => {
                 if let Some(t) = self.selected_torrent().cloned() {
                     let stopped = self.torrent_paused(&t);
-                    return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash]) } else { c.stop(&[t.hash]) });
+                    return self.action(if stopped { "started" } else { "stopped" }, move |c| if stopped { c.start(&[t.hash.to_string()]) } else { c.stop(&[t.hash.to_string()]) });
                 }
             }
-            actions::Intent::Seed => if let Some(t) = self.selected_torrent().cloned() {
-                let allow = !self.store.torrents.get(&t.hash).map_or_else(||self.seed_allowed(&t), |row|row.upload_enabled);
-                return self.action(if allow { "Upload: on" } else { "Upload: off" },
-                    move |c| if allow { c.allow_seeding(&[t.hash]) } else { c.deny_seeding(&[t.hash]) });
-            },
             actions::Intent::Remove => if let Some(t) = self.selected_torrent().cloned() {
-                self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: false },
+                self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.to_string(), files: false },
                     &format!("Remove '{}' (keep files)? y/N", short(&t.name, 50)), true);
             },
             actions::Intent::DeleteFiles => if let Some(t) = self.selected_torrent().cloned() {
-                self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.clone(), files: true },
+                self.open_prompt(PromptKind::ConfirmDeleteTorrent { hash: t.hash.to_string(), files: true },
                     &format!("DELETE '{}' AND ITS FILES? y/N", short(&t.name, 50)), true);
             },
             actions::Intent::Open => if let Some(t) = self.selected_torrent().cloned() {
@@ -69,9 +64,9 @@ impl TuiApp {
     pub(super) fn view_torrents(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
         let cols = torrent_columns(area);
-        let queued = self.torrents.iter().filter(|t| t.state == "queuedDL").count();
+        let queued = self.torrents.iter().filter(|t| t.state == crate::api::TorrentState::Queued).count();
         let (network_ready,network_message) = self.network_banner();
-        let title = if self.cfg.native() && !network_ready { format!(" {} ", network_message) }
+        let title = if !network_ready { format!(" {} ", network_message) }
             else if queued > 0 { format!(" Torrents ({}) · {queued} queued ", self.torrents.len()) }
             else { format!(" Torrents ({}) ", self.torrents.len()) };
         let block = Block::bordered().padding(Sides::all(0)).border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title);
@@ -102,22 +97,22 @@ impl TuiApp {
         let th = &self.theme;
         let kv = |k: &str, v: String| Line::from_spans([Span::styled(format!("{k:<10}"), th.dimmed()), Span::styled(v, th.text())]);
         let flags = "streaming priority automatic".to_string();
-        let metrics = format::Metrics {legacy:t,api:self.store.torrents.get(&t.hash)};
+        let metrics = format::Metrics(t);
         let mut lines = vec![
             Line::styled(t.name.clone(), th.title()),
             Line::raw(""),
-            kv("state", self.store.pending_for_key(&t.hash).map_or_else(||format!("{} · {}",format::state_cell(t,self.store.torrents.get(&t.hash)).trim_end(),format::state_word(t,self.store.torrents.get(&t.hash)).to_lowercase()),|op|format!("{}…",remote::mutation_verb(op)))),
+            kv("state", self.store.pending_for_key(t.hash.as_str()).map_or_else(||format!("{} · {}",format::state_cell(t).trim_end(),format::state_word(t).to_lowercase()),|op|format!("{}…",remote::mutation_verb(op)))),
             kv("progress", metrics.progress()),
             kv("speed", metrics.speed()),
             kv("eta", metrics.eta()),
-            kv("peers", metrics.peers(self.cfg.native())),
+            kv("peers", metrics.peers()),
             kv("ratio", metrics.ratio()),
             kv("flags", flags),
             kv("upload", metrics.upload()),
             kv("path", t.save_path.clone()),
-            kv("added", ago(t.added_on)),
+            kv("added", ago(t.added_at.min(i64::MAX as u64) as i64)),
         ];
-        if let Some(message) = &t.error_message {
+        if let Some(message) = &t.error {
             lines.insert(3, Line::styled(format!("error     {message}"), th.err()));
         }
         let head_h = lines.len() as u16;

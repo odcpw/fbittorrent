@@ -95,9 +95,6 @@ impl Daemon {
         if self.is_stopping() {
             return Err(Self::unavailable(State::Stopping));
         }
-        if let Some(result) = op.control(&self.network(), &self.lifecycle) {
-            return result;
-        }
         let began = Instant::now();
         loop {
             let slot = self.slot.read().unwrap_or_else(|error| error.into_inner());
@@ -227,13 +224,11 @@ fn network_state(cfg: &Config) -> network_app::NetworkState {
 fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Result<()> {
     let network = network_state(cfg);
     *daemon.network.write().unwrap() = network.clone();
-    daemon.lifecycle.set_expected_network(Some(network.clone()));
     if !network.ready {
         eprintln!("INFO network {}", network.message);
         daemon.replace(Slot::Parked(engine::ParkedLedger::new(
             crate::config::data_dir().join("engine"),
-            daemon.lifecycle.clone(),
-        ).with_undo(daemon.undo.clone())))?;
+        ).with_network(network.clone()).with_undo(daemon.undo.clone())))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface.clone();

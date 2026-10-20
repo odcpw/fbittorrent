@@ -23,10 +23,10 @@ fn parked_batch_restore_appends_and_preserves_policy() {
     save_parked_ledger(&directory, &ledger).unwrap();
     let history = Arc::new(History::start(&directory).unwrap());
     let owner =
-        ParkedLedger::new(directory.clone(), Lifecycle::default()).with_undo(history.clone());
+        ParkedLedger::new(directory.clone()).with_undo(history.clone());
     let EngineResult::RemovedUndo { undo_until } = owner
         .execute(EngineOp::RemoveKeep {
-            hashes: ops::HashSelection::Hashes(vec![a.hash.clone(), b.hash.clone()]),
+            hashes: ops::HashSelection(vec![a.hash.clone(), b.hash.clone()]),
         })
         .unwrap()
     else {
@@ -54,7 +54,7 @@ fn parked_batch_restore_appends_and_preserves_policy() {
     // Replacing a parked slot retains the daemon's authorization.
     drop(owner);
     let owner =
-        ParkedLedger::new(directory.clone(), Lifecycle::default()).with_undo(history.clone());
+        ParkedLedger::new(directory.clone()).with_undo(history.clone());
     owner
         .execute(EngineOp::RestoreUndo {
             hash: a.hash.clone(),
@@ -155,10 +155,10 @@ fn failed_restore_save_retains_authorization_for_retry() {
     .unwrap();
     let history = Arc::new(History::default());
     let owner =
-        ParkedLedger::new(directory.clone(), Lifecycle::default()).with_undo(history.clone());
+        ParkedLedger::new(directory.clone()).with_undo(history.clone());
     owner
         .execute(EngineOp::RemoveKeep {
-            hashes: ops::HashSelection::Hashes(vec![record.hash.clone()]),
+            hashes: ops::HashSelection(vec![record.hash.clone()]),
         })
         .unwrap();
     std::fs::create_dir(directory.join("torrents.json.tmp")).unwrap();

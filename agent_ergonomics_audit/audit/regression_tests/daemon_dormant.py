@@ -94,7 +94,7 @@ def lazy_restore_no_checks(binary,systemd):
 def dormant_seed_checks(binary,systemd):
     with restored('dormant_seed_checks',binary,systemd) as (case,box,h,p,client,items,offset,stream,frames):
         item,_=items[0]
-        h.cli('seed',item.info_hash)
+        h.cli('upload',item.info_hash)
         def seeding():
             rows=client.call('torrents.list',{})['result']['torrents']
             selected=next(row for row in rows if row['hash']==item.info_hash)
