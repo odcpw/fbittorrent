@@ -62,3 +62,17 @@ read/write calls with four/sixteen seeds; they do not establish a throughput or
 CPU gain. This is an unqualified candidate: strict shutdown/workflow failures
 remain red. See `tools/engine-bench/RESULTS.md` at the repository root for the
 before/after measurements, behaviour proofs and retained failures.
+
+# Receiving state notifications (shell responsiveness, 2026-10-20)
+
+`librqbit-core::SpeedEstimator::activity_changed` wakes only when its measured
+rate crosses zero, retaining a transition between future construction and first
+poll. fbittorrent's engine observer combines it with lifecycle notifications so
+the first receiving payload updates the row without waiting for the next API
+sampling tick. Rate magnitudes remain coalesced; no polling timer was added.
+
+Tests: `cargo test --locked -p librqbit-core speed_estimator` checks real waker
+activity, both crossings, silent magnitude changes and the arming race;
+`cargo test --locked -p fbittorrent receiving_payload_wakes_observer` uses a
+barrier on actual loopback peer storage to rule out completion or periodic
+sampling as a substitute for the event.

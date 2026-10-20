@@ -37,6 +37,8 @@ pub(crate) mod rename;
 pub(crate) mod staging;
 pub(crate) mod pieces;
 mod bus;
+#[cfg(test)]
+mod bus_receiving_tests;
 mod watch;
 pub(crate) mod peers;
 mod tracker_edit;
