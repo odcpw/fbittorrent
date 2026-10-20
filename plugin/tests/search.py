@@ -7,7 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from dashboard import Session,ROOT
+from dashboard import ROOT
+from journey_support import JourneySession
 import daemon
 import fixtures
 from fbtlog import Case,suite_status
@@ -53,7 +54,8 @@ def run(binary):
         if not {'search','subscribe'}.issubset(hello['caps']):raise RuntimeError('real Search acceptance requires the daemon search service')
         hash='a'*40
         client.call('torrents.add',dict(source=dict(magnet='magnet:?xt=urn:btih:'+hash),stopped=True))
-        q=Session(setup,sandbox)
+        # Keep the private virtual seat attached across Search/Torrents switches.
+        q=JourneySession(setup,sandbox)
         try:
             q.compositor.ipc('output * mode 1920x1080')
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"search","query":"Sintel"}')
