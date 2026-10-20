@@ -204,6 +204,7 @@ pub mod evidence_sink;
 pub mod gen_server;
 pub mod http;
 pub mod io;
+#[cfg(any(test, feature = "lab-runtime"))]
 pub mod lab;
 pub mod link;
 pub mod migration;
@@ -425,6 +426,7 @@ pub use error::{
     AcquireError, BackoffHint, Error, ErrorCategory, ErrorKind, Recoverability, RecoveryAction,
     RecvError, Result, ResultExt, SendError,
 };
+#[cfg(any(test, feature = "lab-runtime"))]
 pub use lab::{LabConfig, LabRuntime};
 pub use remote::{
     CancelRequest, CompensationResult, ComputationName,

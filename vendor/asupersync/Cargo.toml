@@ -224,9 +224,9 @@ deterministic-mode = []
 # Measurement-only fixed epoch-kind counters; deliberately absent from defaults.
 epoch-diagnostics = []
 # ATP, native QUIC and HTTP/3 are not used by fbittorrent's native profile.
-extended-network = []
+extended-network = ["lab-runtime"]
 # Upstream service frameworks and tooling, absent from the app's native profile.
-extended-services = []
+extended-services = ["lab-runtime"]
 distributed-hash-snapshot-recovery-e2e = ["test-internals"]
 fuzz = [
     "dep:arbitrary",
@@ -236,6 +236,8 @@ h3-websocket-e2e = []
 http3 = ["quic"]
 io-uring = ["dep:io-uring"]
 kafka = ["dep:rdkafka"]
+# Deterministic runtime used by rqbit-runtime's cancellation/resource test.
+lab-runtime = []
 lab-stack-traces = [
     "dep:backtrace",
     "dep:rustc-demangle",
@@ -281,6 +283,7 @@ sqlite = [
 ]
 tailscale-path-provider = []
 test-internals = [
+    "lab-runtime",
     "dep:tracing",
     "dep:tracing-log",
     "dep:tracing-subscriber",

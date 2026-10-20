@@ -23,9 +23,14 @@ their existing conditional dead-code allowances also cover profiles without
 ATP consumers. Native runtime,
 cancellation, TCP/UDP, TLS and the HTTP client retain their implementations.
 
-Lab remains available because rqbit-runtime's existing
-`lab_pause_drains_a_channel_waiter_and_releases_its_resources` test exercises
-region cancellation and resource release through it.
+Lab is behind `lab-runtime`, enabled by a dev dependency for rqbit-runtime's existing
+`lab_pause_drains_a_channel_waiter_and_releases_its_resources` test. That test
+exercises region cancellation and resource release through Lab. The release profile omits
+Lab, its reactor, chaos channels and RaptorQ regression harness. Their source
+and the cancellation test remain available; the test bodies are unchanged.
+Lab-only exact-dispatch and state-command wrappers follow that boundary too.
+The native checkpoint acknowledgement keeps its fields and computation; its
+two Lab-only observations have conditional dead-code allowances when Lab is off.
 
 The unused gRPC, messaging and process APIs, adapter certification, agent-swarm
 and audit tooling, plan/conformance/session modules, and Lab's swarm-replay and
