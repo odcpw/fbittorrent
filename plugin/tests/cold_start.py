@@ -70,6 +70,10 @@ def run(binary):
                 measurements.append(dict(sheet_ms=elapsed, online_ms=ready_ms))
                 q.compositor.ipc('[title="^fbittorrent$"] focus')
                 q.keys(['-k', 'Escape'], lambda: not ((q.state().get('view') or {}).get('add') or {}).get('visible'))
+                with daemon.ApiConn(h) as client:
+                    client.hello()
+                    rows = client.call('torrents.list', {})['result']['torrents']
+                    case.check(not rows, 'discard leaves neither a transfer nor an orphaned stage before down', json.dumps(rows))
                 h.cli('down')
                 q.wait(lambda: not q.state()['online'])
                 case.check(unit.pid() == 0 and h.lock_free(), 'down fully stops the owned unit before the next cold click', unit.state())
