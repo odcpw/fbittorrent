@@ -7,7 +7,6 @@ import math
 import os
 from pathlib import Path
 import platform
-import shutil
 import socket
 import statistics
 import subprocess

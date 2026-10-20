@@ -63,12 +63,13 @@ def run(args,count):
             found=json.loads(q.ipc('samples'))[old:]
             assert found,name
             for row in found:
+                row['gui_ms']=row['ms']
+                if external:row['ms']=row['frame_at']-began
+                encoded=json.dumps(dict(row,record_count=count))
                 if args.check_only:
                     samples.append(dict(name=row['name'],observed=True))
                     continue
-                row['gui_ms']=row['ms']
-                if external:row['ms']=row['frame_at']-began
-                samples.append(row);print(json.dumps(dict(rows=count,**row)),flush=True)
+                samples.append(row);print(encoded,flush=True)
         try:
             q.wait(lambda:q.ipc('state'))
             # Desktop dispatch and shell summon are real; only user-manager
