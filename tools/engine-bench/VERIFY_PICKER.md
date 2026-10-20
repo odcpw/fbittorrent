@@ -72,3 +72,29 @@ symbol (control 97.05%, candidate 99.45%, no lost samples). They are not timing
 comparisons: the control diagnostic used Btrfs and the candidate used tmpfs.
 A 1 GiB loopback wire run also verified first/last and sequential-middle order,
 byte-identical output and clean drain (`wire/download1-1/`, 565 ms shutdown).
+
+## Picker isomorphism and measurement
+
+The reference test compares the original per-file first/last/sequential traversal,
+including file priorities, shared boundary pieces, unavailable peer pieces and
+failed-piece requeueing. The steal policy and first acceptable queued-piece rule
+remain unchanged. Acquisition now stops at the first acceptable piece without
+materializing a Vec; the sequential middle traverses bitmap set bits. No new
+floating-point, RNG operations or hot-loop allocations are introduced.
+
+Three alternating process pairs each run three warmup and ten measured trials
+per state, 512 acquire/requeue ticks per trial, on a 16,384-piece bitmap (4 GiB
+at 256 KiB). Median [min, max] microseconds per tick:
+
+| Completed prefix | Original traversal | Lazy bitmap traversal |
+|---|---:|---:|
+| 0 | 84.939 [70.944, 92.134] | 0.092 [0.089, 0.105] |
+| 8,192 | 57.268 [49.666, 65.749] | 0.652 [0.602, 0.916] |
+| 16,256 | 31.333 [28.754, 35.603] | 1.159 [1.093, 1.661] |
+
+Keep: the reference decisions are identical and selection avoids full-queue
+allocation/scanning. This is a picker microbenchmark, not a download-throughput
+claim. Evidence: `picker-summary.json` and `picker-paired-*.log` beside the
+verification evidence. Reproduce with the opt-in `picker_tick_benchmark` test
+under `--profile release-perf -- --ignored --nocapture`, using the release lock
+and memory scope. No timing assertion is added to normal shared-machine tests.
