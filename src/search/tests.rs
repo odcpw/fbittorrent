@@ -596,7 +596,11 @@ print('bounded')
         let (_scratch, store) = scratch();
         store.ensure_runtime().unwrap();
         std::fs::write(store.runtime().join("engines/example.py"), "class example:\n name='Example'\n url='https://example.org'\n def search(self,query):\n  import time\n  from novaprinter import prettyPrinter\n  prettyPrinter({'link':'magnet:?xt=urn:btih:abc','name':'Before stall','size':1,'seeds':1,'leech':1,'engine_url':self.url})\n  time.sleep(60)\n").unwrap();
-        jobs::TEST_NOVA_DEADLINE_MS.store(1500, Ordering::Release);
+        // Include Python's cold interpreter/import/process-pool startup under
+        // parallel test load. The provider still stalls for 60 seconds, well
+        // beyond this real watchdog deadline and its proportional outer bound.
+        const DEADLINE: Duration = Duration::from_secs(5);
+        jobs::TEST_NOVA_DEADLINE_MS.store(DEADLINE.as_millis() as u64, Ordering::Release);
         struct Restore;
         impl Drop for Restore { fn drop(&mut self) { jobs::TEST_NOVA_DEADLINE_MS.store(120_000, Ordering::Release); } }
         let _restore = Restore;
@@ -604,11 +608,12 @@ print('bounded')
         let group = job(id).unwrap().pid.load(Ordering::Acquire);
         let began = Instant::now();
         while !job(id).unwrap().done.load(Ordering::Acquire) {
-            assert!(began.elapsed() < Duration::from_secs(10), "stalled provider outlived the search deadline");
+            assert!(began.elapsed() < DEADLINE * 3, "stalled provider outlived the search deadline");
             thread::sleep(Duration::from_millis(20));
         }
         let response = results(id, 100, 0).unwrap();
         assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].file_name, "Before stall");
         assert!(response.error.as_deref().is_some_and(|e| e.contains("timed out")), "{:?}", response.error);
         assert!(live_processes(group).is_empty(), "provider group survived the deadline");
         delete(id).unwrap();
