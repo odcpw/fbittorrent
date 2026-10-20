@@ -267,7 +267,7 @@ pub const ROBOT_GUIDE: RobotGuide = RobotGuide;
 
 impl fmt::Display for RobotGuide {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&ROBOT_GUIDE_TEXT.replace("{upload_policy}", &upload_cap_text()).replace("{contract_version}", CONTRACT_VERSION)
+        f.write_str(&ROBOT_GUIDE_TEXT.replace("{version}", env!("CARGO_PKG_VERSION")).replace("{upload_policy}", &upload_cap_text()).replace("{contract_version}", CONTRACT_VERSION)
             .replace("{native_lifetime}", NATIVE_LIFETIME)
             .replace("{serve_limitations}", SERVE_LIMITATIONS)
             .replace("{json_convention}", JSON_CONVENTION)
@@ -275,7 +275,7 @@ impl fmt::Display for RobotGuide {
     }
 }
 
-const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent — agent handbook (contract {contract_version})
+const ROBOT_GUIDE_TEXT: &str = r#"fbittorrent {version} — agent handbook (contract {contract_version})
 
 WHAT IT IS
   A native Rust torrent app. {native_lifetime}

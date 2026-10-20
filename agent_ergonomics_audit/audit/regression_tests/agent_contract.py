@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import tomllib
 
 from fbtlog import Case, suite_status
 from daemon import ApiConn, Harness, Sandbox, select_replay_interface
@@ -31,6 +32,22 @@ def cli(case, sandbox, binary, *args, code=0, valid=True, extra=None):
 
 def reads_never_start(binary,systemd):
     with Case('agent_contract','reads_never_start') as case,Sandbox() as sandbox:
+        root=Path(__file__).resolve().parents[3]
+        version=tomllib.loads((root/'Cargo.toml').read_text())['package']['version']
+        caps,_=cli(case,sandbox,binary,'capabilities','--json')
+        _,printed=cli(case,sandbox,binary,'--version',valid=False)
+        guide,_=cli(case,sandbox,binary,'robot-docs','--json')
+        _,handbook=cli(case,sandbox,binary,'robot-docs',valid=False)
+        heading=f'fbittorrent {version} — agent handbook (contract {caps.get("contract_version")})'
+        case.check(well_formed_version(version) and caps.get('version')==version
+                   and printed.stdout.strip()==f'fbittorrent {version}'
+                   and guide.get('text','').splitlines()[:1]==[heading]
+                   and handbook.stdout.splitlines()[:1]==[heading],
+                   'application version is well formed and CLI, capabilities and robot docs match Cargo',
+                   json.dumps(dict(cargo=version,capabilities=caps.get('version'),cli=printed.stdout,guide=guide.get('text','').splitlines()[:1])))
+        for plugin in ('oliver.torrents','oliver.torrents-quick'):
+            manifest=json.loads((root/'plugin'/plugin/'manifest.json').read_text())
+            case.check(manifest.get('version')==version,'plugin version matches Cargo: '+plugin,json.dumps(manifest.get('version')))
         for flag in ([],['--no-start']):
             for verb in ('list','triage','status'):
                 value,_=cli(case,sandbox,binary,verb,'--json',*flag)

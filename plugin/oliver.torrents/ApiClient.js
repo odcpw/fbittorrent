@@ -98,7 +98,7 @@ function create(io, options) {
     if (c.helloSent) return
     c.helloSent = true; c.connecting = true; c.graceful = false; c.lastFrame = now()
     write({ op: "hello", internal:true, args: { proto: 1, client: { name: "oliver.torrents",
-      version: o.version || "0.2.0", kind: "bar" }, interactive: c.dashboardVisible || c.quickVisible } }, false)
+      version: o.version || "0.6.0", kind: "bar" }, interactive: c.dashboardVisible || c.quickVisible } }, false)
     changed()
   }
   c.disconnected = function() {

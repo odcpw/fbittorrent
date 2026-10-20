@@ -1,6 +1,6 @@
 [package]
 name = "fbittorrent"
-version = "0.1.0"
+version = "0.6.0"
 edition = "2021"
 description = "Rust torrent app for Omarchy: CLI, magnet handler, TUI and local show feeds"
 license = "MIT"
