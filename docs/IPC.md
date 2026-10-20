@@ -210,7 +210,7 @@ unlimited; a numeric limit must be at least 16384 bytes/second.
 | `torrents.remove_tracker` | `hash: hash`, `url: str` (http(s) or udp) | `{state: "done"}` | yes | P7-04 |
 | `torrents.set_download_limit` | `hashes: [hash]`, `bps?: bps\|null` (16384..4294967295; omission retains) | `{state: "done"}` | yes | P7-06 |
 | `torrents.set_upload_limit` | `hashes: [hash]`, `bps: bps?` (≥ 16384, or `null` for unlimited) | `{state: enum(done\|pending)}` (pending until P6-07) | yes | P1-06 |
-| `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder)}` | no | P1-06 |
+| `torrents.open_target` | `hash: hash`, `file: u64?` | `{path: str, kind: enum(file\|folder), stream_url: str?}` | no | P1-06 |
 | `subscribe` | `topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the "on change" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7) | `{sub: u64, topics: [str]}` | no | P1-08 |
 | `unsubscribe` | `sub: u64` | `{}` | no | P1-08 |
 
@@ -1100,6 +1100,16 @@ via a glance acknowledges existing ready rows; completion acknowledges too.
 reconnect fallback; a timeout or an unmet paused condition exits 8.
 The default stays completion. Contract 1.2.25 adds readiness fields/conditions to
 the CLI; API field types and event meaning stay those defined in A.8/A.9.
+
+For an incomplete selected video, `torrents.open_target` also returns an optional
+`stream_url`. Open actions play that URL; `path` remains the actual payload path
+for revealing/moving content and completed-file opening. The URL is an ephemeral
+capability on a loopback-only listener, restricted to that video and engine
+generation. HTTP byte ranges wait for verified pieces and prioritise the
+player's read/seek position; they never serve sparse, unverified file bytes.
+No remote host, arbitrary filesystem path or upload permission is granted.
+The listener and blocked readers stop with the daemon; reopen after an engine
+restart to get a current target. Clients must not persist the URL.
 
 ### P7-06: per-torrent download cap (contract 1.2.27)
 

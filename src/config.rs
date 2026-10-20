@@ -102,7 +102,12 @@ impl Config {
         self.validate()?;
         Ok(std::process::Command::new("sh")
             .arg("-c").arg(format!("exec {} \"$1\"", self.open_command))
-            .arg("fbittorrent-open").arg(target).spawn()?)
+            .arg("fbittorrent-open").arg(target)
+            // A player outlives the CLI/TUI. Inheriting their pipes delays EOF
+            // for JSON callers and lets player output corrupt the TUI frame.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null()).spawn()?)
     }
 
     pub fn load() -> Result<Self> {

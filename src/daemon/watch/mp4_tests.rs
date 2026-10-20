@@ -112,3 +112,31 @@ fn verified_ranges_clip_shared_pieces_and_reject_overflow() {
     }
     assert!(!iso_movie(Path::new("movie.mkv")));
 }
+
+#[test]
+fn tail_header_demands_the_whole_moov_even_when_the_last_piece_is_present() {
+    use std::{cell::RefCell, collections::BTreeSet};
+    const PIECE: u64 = 16_384;
+    let media = atom(b"mdat", &vec![7; 8 * PIECE as usize]);
+    let moov = atom(b"moov", &[movie()[8..].to_vec(), atom(b"free", &vec![0; 3 * PIECE as usize])].concat());
+    let range = media.len() as u64..(media.len() + moov.len()) as u64;
+    let bytes = [media, moov].concat();
+    inspect(&bytes, |path| {
+        let mut movie = Movie::default();
+        let mut have = BTreeSet::from([0, (bytes.len() as u64 - 1) / PIECE]);
+        for expected in [range.start..range.start + 8, range.clone()] {
+            let missing = RefCell::new(None);
+            assert!(!movie.inspect(path, bytes.len() as u64, |r| {
+                let verified = (r.start / PIECE..=(r.end - 1) / PIECE).all(|i| have.contains(&i));
+                if !verified && missing.borrow().is_none() { *missing.borrow_mut() = Some(r); }
+                verified
+            }));
+            assert_eq!(*missing.borrow(), Some(expected.clone()));
+            have.extend(expected.start / PIECE..=(expected.end - 1) / PIECE);
+        }
+        assert!(movie.inspect(path, bytes.len() as u64, |r|
+            (r.start / PIECE..=(r.end - 1) / PIECE).all(|i| have.contains(&i))));
+        assert!(!have.contains(&4), "readiness does not require downloading the intervening media");
+        assert_eq!(movie.duration(), Some(64.));
+    });
+}
