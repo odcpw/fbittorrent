@@ -3,6 +3,8 @@
 import argparse
 import json
 import select
+import os
+import signal
 from pathlib import Path
 import sys
 from contextlib import ExitStack
@@ -75,7 +77,37 @@ def run(binary):
             holders.close()
             if shell:
                 shell.close()
+    queued_hello(binary)
     return fbtlog.suite_status('qs_lifecycle')
+
+
+def queued_hello(binary):
+    with fbtlog.Case('qs_lifecycle', 'queued_hello') as case, fixtures.daemon_pair(case, binary, False, 65536) as pair:
+        shell = Session(case, pair.box)
+        stopped = False
+        pid = pair.h.daemon_pid()
+        try:
+            shell.wait(lambda: shell.state()['online'])
+            shell.shell('summon', '{"view":"torrents"}')
+            shell.wait(lambda: pair.hash in shell.ipc('renderedRows'))
+            before = pair.client.call('torrents.get', dict(hash=pair.hash))['result']['torrent']['progress']
+            instance = shell.state()['instance']
+            generation = json.loads(shell.ipc('connectionState'))['generation']
+            os.kill(pid, signal.SIGSTOP)
+            stopped = True
+            assert shell.ipc('disconnectForRecovery') == 'true'
+            # The actual daemon cannot answer. Require retirement of the new
+            # unanswered hello, not only the deliberately closed old socket.
+            shell.wait(lambda: json.loads(shell.ipc('connectionState'))['generation'] >= generation + 2, timeout=10)
+            assert case.check(not shell.state()['online'], 'an unanswered native hello is retired within its five-second deadline', shell.ipc('connectionState'))
+            os.kill(pid, signal.SIGCONT)
+            stopped = False
+            shell.wait(lambda: shell.state()['online'] and any(row['hash']==pair.hash and row['progress']>before for row in json.loads(shell.ipc('renderedRows'))), timeout=20)
+            assert case.check(shell.state()['instance']==instance, 'the same real shell reconnects to the resumed owner and renders newer payload progress', shell.ipc('connectionState'))
+        finally:
+            if stopped:
+                os.kill(pid, signal.SIGCONT)
+            shell.close()
 
 
 if __name__ == '__main__':

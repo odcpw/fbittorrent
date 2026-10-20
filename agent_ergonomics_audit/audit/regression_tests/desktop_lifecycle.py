@@ -70,11 +70,12 @@ def run(binary,seconds,log,saturate=False):
     try:q.wait(lambda:q.state().get('online') is True and any(r['hash']==pair.hash and r['progress']>before['progress'] for r in json.loads(q.ipc('renderedRows'))),timeout=20)
     except TimeoutError:
      case.check(False,'headless shell reconnects after resume',json.dumps(dict(state=q.state(),connection=json.loads(q.ipc('connectionState')),rows=q.ipc('renderedRows'))));raise
+    shell_recovery=time.monotonic()-resume
     trackers=client.call('torrents.trackers',dict(hash=pair.hash))['result']['trackers']
     assert case.check(any(t.get('last_announce_at',0)>=time.time()-max(20,recovered+5) and t['status']=='ok' for t in trackers),'tracker re-announces after resume',json.dumps(trackers))
     assert case.check(ticks(pid)-cpu < max(5,recovered*.5),'resume does not burn CPU replaying elapsed timer ticks',json.dumps(dict(suspended=seconds,recovered_s=recovered,cpu_s=ticks(pid)-cpu,row=value(client,pair.hash))))
     assert ui.press('Enter','recovered row opens real Details',lambda pane:'[Overview]' in pane and 'fixture-download.bin' in pane,literal=False)
-    case.path.with_suffix('.result.json').write_text(json.dumps(dict(suspended_s=seconds,recovered_s=recovered,cpu_s=ticks(pid)-cpu,trackers=trackers,row=value(client,pair.hash)),indent=2))
+    case.path.with_suffix('.result.json').write_text(json.dumps(dict(suspended_s=seconds,recovered_s=recovered,shell_recovered_s=shell_recovery,cpu_s=ticks(pid)-cpu,trackers=trackers,row=value(client,pair.hash)),indent=2))
   finally:
    for connection in fillers:connection.close()
    if stopped:os.kill(pid,signal.SIGCONT)

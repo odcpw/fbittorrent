@@ -178,7 +178,8 @@ ShellRoot {
     function scroll(dy:real):bool{if(!dashboard.item)return false;dashboard.item.scroll(dy);return true}
     function grab(path:string):bool{if(!dashboard.item)return false;return dashboard.item.grab(path)}
     function state():string{return service.stateJson()}
-    function connectionState():string{return JSON.stringify({recovering:service.recoveringSocket,reconnecting:service.reconnecting,delay:service.recoveryDelay,mode:service.backendState,bye:service.byeReason,error:service.lastError,connecting:service.client.connecting,helloSent:service.client.helloSent,graceful:service.client.graceful})}
+    function disconnectForRecovery():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;service.client.reset("owned recovery probe",true);return true}
+    function connectionState():string{return JSON.stringify({generation:(root.find(service,"api-owner-socket") || {}).generation || 0,recovering:service.recoveringSocket,reconnecting:service.reconnecting,delay:service.recoveryDelay,mode:service.backendState,bye:service.byeReason,error:service.lastError,connecting:service.client.connecting,helloSent:service.client.helloSent,graceful:service.client.graceful})}
     function focusCommand(address:string,lua:bool):string{return Focus.command(address,lua) || "refused"}
     function ready():bool{return service.online && registry.isEnabled("oliver.torrents")}
     function visibility():string{return JSON.stringify({service:service.dashboardVisible,client:service.client ? service.client.dashboardVisible : false})}
