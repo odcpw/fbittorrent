@@ -130,13 +130,13 @@ class Qbittorrent:
             # wire counter must prove zero payload upload. Exempt LAN protocol
             # traffic so a 1 KiB/s cap does not turn into a download bottleneck.
             up_limit=1024, limit_lan_peers=public, dl_limit=4*1024**2 if public else 0,
-            max_connec=200, max_connec_per_torrent=100, encryption=2,
+            max_connec=200, max_connec_per_torrent=100, encryption=2,bittorrent_protocol=1,
             enable_multi_connections_from_same_ip=True,
             current_network_interface='' if public else 'lo',
             current_interface_address='' if public else '127.0.0.1')
         self.call('app/setPreferences', {'json':json.dumps(settings)})
         prefs = self.call('app/preferences')
-        for key in ('up_limit','limit_lan_peers','dht','pex','lsd','upnp','current_network_interface','enable_multi_connections_from_same_ip'):
+        for key in ('up_limit','limit_lan_peers','dht','pex','lsd','upnp','current_network_interface','enable_multi_connections_from_same_ip','encryption','bittorrent_protocol'):
             assert prefs[key] == settings[key], (key,prefs[key],settings[key])
         self.build = self.call('app/buildInfo')
         (run.output/'qbt-preferences.json').write_text(json.dumps(prefs,indent=2))

@@ -156,7 +156,7 @@ qBittorrent-nox 5.2 client using private HOME/XDG paths and a new qBittorrent
 profile. Its WebUI binds localhost, and listener PID ownership is checked before
 any settings mutation. The local matrix is 1/4 GiB single-file and 2 GiB across
 1,000 files, each with 1/4/16 distinct seed endpoints. Both use first/last plus
-sequential selection; the qBittorrent private profile permits multiple peers
+sequential selection over plaintext TCP; the qBittorrent private profile permits multiple peers
 from one IP and configures upload at 1 KiB/s. Its limiter also counts request
 messages: local trials exempt LAN traffic and require the independent seed
 wire counters to prove zero payload upload from both clients. The public check
