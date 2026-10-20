@@ -23,6 +23,31 @@ fn options(folder: &Path) -> ops::AddRequest {
 }
 
 #[test]
+fn durable_staged_changes_remain_visible_while_a_writer_holds_the_ledger() {
+    let directory = review_directory("staged-observation");
+    let folder = directory.join("data");
+    let app = test_app(&directory, &folder, Ledger::default(), None);
+    let dispatcher = app.dispatcher();
+    let EngineResult::Added(rows) = dispatcher.execute(EngineOp::Stage {
+        options: options(&folder), files: Some(vec![0]),
+    }).unwrap() else { panic!() };
+    let hash = rows[0].hash.clone();
+    let observe = || dispatcher.runtime.block_on(async {
+        let _writer = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), dispatcher.runtime.cx())
+            .await.unwrap();
+        let read = dispatcher.observation_ledger().await.unwrap();
+        assert!(matches!(read, crate::engine::ledger::ReadLedger::Committed(_)));
+        read.records.iter().find(|record| record.hash == hash).map(|record| record.staged)
+    });
+    assert_eq!(observe(), Some(true), "a successful stage is already durable");
+    dispatcher.execute(EngineOp::Discard { hash: hash.clone() }).unwrap();
+    assert_eq!(observe(), None, "a successful discard is already durable");
+    drop(dispatcher);
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn staged_has_no_handle_or_payload_access_until_commit() {
     let directory = review_directory("staged-commit");
     let folder = directory.join("data");
