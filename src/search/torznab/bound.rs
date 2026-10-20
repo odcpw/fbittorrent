@@ -5,6 +5,11 @@ use crate::native_runtime::{Handle, NativeRuntime};
 use anyhow::Context as _;
 use rqbit_runtime::net::{BoundTcpStream, InterfaceBinding};
 use std::{fmt, io, net::TcpStream};
+use std::{
+    future::Future,
+    sync::atomic::{AtomicBool, Ordering},
+    task::Poll,
+};
 use ureq::{
     config::Config,
     http::Uri,
@@ -22,6 +27,31 @@ pub(crate) struct Context {
     binding: InterfaceBinding,
 }
 impl Context {
+    pub(crate) fn check_ready(&self) -> io::Result<()> {
+        self.binding.check_ready()
+    }
+
+    /// Nova's local proxy uses exactly the HTTP transport's bound DNS/connect
+    /// path. Keep the returned owner alive for the lifetime of its blocking fd.
+    pub(crate) fn connect(
+        &self,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+        stopped: &AtomicBool,
+    ) -> io::Result<(TcpStream, BoundTcpStream)> {
+        let socket = self.socket();
+        let deadline = Instant::now() + timeout;
+        let addresses = socket.addresses(host, port, timeout, Some(stopped))?;
+        socket.connect_addresses(addresses, deadline, Some(stopped))
+    }
+
+    fn socket(&self) -> Bound {
+        Bound {
+            runtime: self.runtime.handle(),
+            binding: self.binding.clone(),
+        }
+    }
     pub(super) fn configured() -> Result<Option<Self>> {
         Self::for_config(&crate::config::Config::load()?, "Torznab")
     }
@@ -32,7 +62,11 @@ impl Context {
             return Ok(None);
         }
         let network = crate::network_app::state(cfg);
-        anyhow::ensure!(network.ready, "{what} interface unavailable");
+        anyhow::ensure!(
+            network.ready,
+            "{what} interface unavailable: {}",
+            network.message
+        );
         let binding = InterfaceBinding::new(
             network
                 .interface
@@ -48,10 +82,7 @@ impl Context {
         self.runtime.shutdown_timeout(Duration::from_secs(2))
     }
     pub(crate) fn agent(&self, config: Config) -> ureq::Agent {
-        let socket = Bound {
-            runtime: self.runtime.handle(),
-            binding: self.binding.clone(),
-        };
+        let socket = self.socket();
         let resolver = socket.clone();
         ureq::Agent::with_parts(
             config,
@@ -64,6 +95,114 @@ impl Context {
 struct Bound {
     runtime: Handle,
     binding: InterfaceBinding,
+}
+impl Bound {
+    fn wait<T>(
+        &self,
+        timeout: Duration,
+        future: impl Future<Output = io::Result<T>>,
+        stopped: Option<&AtomicBool>,
+    ) -> io::Result<T> {
+        let cx = self.runtime.cx();
+        self.runtime.block_on(async {
+            let mut operation = std::pin::pin!(rqbit_runtime::time::timeout(cx, timeout, future));
+            loop {
+                let mut tick =
+                    std::pin::pin!(rqbit_runtime::time::sleep(cx, Duration::from_millis(50)));
+                let result = std::future::poll_fn(|task| {
+                    if stopped.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                        return Poll::Ready(Some(Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "Nova proxy stopped",
+                        ))));
+                    }
+                    if let Poll::Ready(result) = operation.as_mut().poll(task) {
+                        return Poll::Ready(Some(
+                            result
+                                .map_err(|_| {
+                                    io::Error::new(
+                                        io::ErrorKind::TimedOut,
+                                        "bound request timed out",
+                                    )
+                                })
+                                .and_then(|result| result),
+                        ));
+                    }
+                    if stopped.is_some() && tick.as_mut().poll(task).is_ready() {
+                        return Poll::Ready(None);
+                    }
+                    Poll::Pending
+                })
+                .await;
+                if let Some(result) = result {
+                    return result;
+                }
+            }
+        })
+    }
+
+    fn addresses(
+        &self,
+        host: &str,
+        port: u16,
+        timeout: Duration,
+        stopped: Option<&AtomicBool>,
+    ) -> io::Result<Vec<std::net::SocketAddr>> {
+        self.binding.check_ready()?;
+        if host.eq_ignore_ascii_case("localhost") {
+            return Ok(vec![
+                (std::net::Ipv4Addr::LOCALHOST, port).into(),
+                (std::net::Ipv6Addr::LOCALHOST, port).into(),
+            ]);
+        }
+        let cx = self.runtime.cx();
+        self.wait(
+            timeout,
+            rqbit_runtime::net::resolve_host(cx, host, port, Some(&self.binding)),
+            stopped,
+        )
+    }
+
+    fn connect_addresses(
+        &self,
+        addresses: impl IntoIterator<Item = std::net::SocketAddr>,
+        deadline: Instant,
+        stopped: Option<&AtomicBool>,
+    ) -> io::Result<(TcpStream, BoundTcpStream)> {
+        let mut last = io::Error::new(io::ErrorKind::NotConnected, "bound connect failed");
+        for address in addresses.into_iter().take(16) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "bound connect timed out",
+                ));
+            }
+            let cx = self.runtime.cx();
+            match self.wait(
+                remaining,
+                BoundTcpStream::connect(cx, address, Some(&self.binding), None),
+                stopped,
+            ) {
+                Ok(owner) => {
+                    let stream = owner.try_as_std().try_clone()?;
+                    stream.set_nonblocking(false)?;
+                    stream.set_nodelay(true)?;
+                    return Ok((stream, owner));
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    return Err(error)
+                }
+                Err(error) => last = error,
+            }
+        }
+        Err(last)
+    }
 }
 impl fmt::Debug for Bound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -91,28 +230,9 @@ impl Resolver for Bound {
             } else {
                 80
             });
-        if host.eq_ignore_ascii_case("localhost") {
-            self.binding.check_ready()?;
-            let mut addresses = self.empty();
-            addresses.push(std::net::SocketAddr::new(
-                std::net::Ipv4Addr::LOCALHOST.into(),
-                port,
-            ));
-            addresses.push(std::net::SocketAddr::new(
-                std::net::Ipv6Addr::LOCALHOST.into(),
-                port,
-            ));
-            return Ok(addresses);
-        }
-        let cx = self.runtime.cx();
         let addresses = self
-            .runtime
-            .block_on(rqbit_runtime::time::timeout(
-                cx,
-                budget(timeout),
-                rqbit_runtime::net::resolve_host(cx, host, port, Some(&self.binding)),
-            ))
-            .map_err(|_| ureq::Error::Timeout(timeout.reason))??;
+            .addresses(host, port, budget(timeout), None)
+            .map_err(|error| failure(error, timeout))?;
         let mut result = self.empty();
         for address in addresses.into_iter().take(16) {
             result.push(address);
@@ -130,40 +250,22 @@ impl Connector for Bound {
         details: &ConnectionDetails,
         _chained: Option<()>,
     ) -> std::result::Result<Option<Self::Out>, ureq::Error> {
-        let deadline = Instant::now() + budget(details.timeout);
-        let mut last = io::Error::new(io::ErrorKind::NotConnected, "Torznab connect failed");
-        for address in &details.addrs {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(ureq::Error::Timeout(details.timeout.reason));
-            }
-            let cx = self.runtime.cx();
-            match self.runtime.block_on(rqbit_runtime::time::timeout(
-                cx,
-                remaining,
-                BoundTcpStream::connect(cx, *address, Some(&self.binding), None),
-            )) {
-                Ok(Ok(owner)) => {
-                    // Keep the bound owner alive: dropping it shuts both halves.
-                    // The blocking clone is used only by this worker's HTTP stack.
-                    let stream = owner.try_as_std().try_clone()?;
-                    stream.set_nonblocking(false)?;
-                    stream.set_nodelay(true)?;
-                    return Ok(Some(Socket {
-                        stream,
-                        _owner: owner,
-                        binding: self.binding.clone(),
-                        buffers: LazyBuffers::new(
-                            details.config.input_buffer_size(),
-                            details.config.output_buffer_size(),
-                        ),
-                    }));
-                }
-                Ok(Err(error)) => last = error,
-                Err(_) => return Err(ureq::Error::Timeout(details.timeout.reason)),
-            }
-        }
-        Err(last.into())
+        let (stream, owner) = self
+            .connect_addresses(
+                details.addrs.iter().copied(),
+                Instant::now() + budget(details.timeout),
+                None,
+            )
+            .map_err(|error| failure(error, details.timeout))?;
+        Ok(Some(Socket {
+            stream,
+            _owner: owner,
+            binding: self.binding.clone(),
+            buffers: LazyBuffers::new(
+                details.config.input_buffer_size(),
+                details.config.output_buffer_size(),
+            ),
+        }))
     }
 }
 struct Socket {
@@ -227,5 +329,43 @@ impl Transport for Socket {
                 Ok(_) => true,
                 Err(e) => e.kind() == io::ErrorKind::WouldBlock,
             }
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    #[test]
+    fn cancelling_a_pending_bound_operation_does_not_wait_for_its_dns_budget() {
+        let config = crate::config::Config {
+            network_interface: Some("lo".into()),
+            ..Default::default()
+        };
+        let context = Context::for_config(&config, "Nova VPN").unwrap().unwrap();
+        let connector = context.socket();
+        let stopped = std::sync::Arc::new(AtomicBool::new(false));
+        let closing = stopped.clone();
+        let (entered, ready) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            connector.wait(
+                Duration::from_secs(20),
+                std::future::poll_fn(|_| {
+                    let _ = entered.send(());
+                    Poll::<io::Result<()>>::Pending
+                }),
+                Some(&closing),
+            )
+        });
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        let began = Instant::now();
+        stopped.store(true, Ordering::Release);
+        assert_eq!(
+            worker.join().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "job cancellation waited for DNS timeout"
+        );
     }
 }
