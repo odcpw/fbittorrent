@@ -46,6 +46,8 @@ impl Handle {
         })))
     }
 }
+pub(crate) const MAX_BLOCKING_THREADS: usize = 3;
+
 pub struct NativeRuntime {
     handle: Handle,
     region: Option<ChildRegion>,
@@ -60,7 +62,7 @@ impl NativeRuntime {
             // Initial validation admits one torrent with at most two checksum
             // workers. Keep control I/O (notably durable Stop intent) runnable
             // while both workers are occupied, so it can cancel that check.
-            .blocking_threads(1, 3)
+            .blocking_threads(1, MAX_BLOCKING_THREADS)
             .enable_time()
             .build()?;
         let root = runtime.request_cx_with_budget(Budget::INFINITE);
