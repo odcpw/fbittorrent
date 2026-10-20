@@ -13,7 +13,8 @@ type Wake = Arc<dyn Fn()+Send+Sync>;
 pub(crate) struct Snapshot { pub feeds:Vec<Feed>, pub items:BTreeMap<String,Vec<FeedItem>> }
 type Stamp = (u64, u64, i64, i64);
 #[derive(Default)]
-struct Cache { stamp:Option<Stamp>, snapshot:Arc<Snapshot>, loaded:bool }
+// Failed loads are cached by stamp, like successful ones; see shows::Cache.
+struct Cache { stamp:Option<Stamp>, snapshot:Arc<Snapshot>, loaded:bool, failure:Option<(Option<Stamp>,String)> }
 #[derive(Default)]
 struct State { stopped:bool, requested:bool, clients:BTreeSet<u64>, loading:BTreeSet<String> }
 #[derive(Default)]
@@ -72,8 +73,17 @@ impl Service {
         // Load between two metadata observations; an atomic CLI rename that
         // crosses the read will be observed on the next sample, never cached
         // under the newer inode's stamp with older contents.
+        if let Some((failed,message))=&cache.failure { if *failed==next { anyhow::bail!("{message}"); } }
         if next != cache.stamp || !cache.loaded {
-            let rows=Store::default().snapshot()?;
+            let rows=match Store::default().snapshot() {
+                Ok(rows)=>rows,
+                Err(error)=>{
+                    let message=format!("{error:#}");
+                    eprintln!("WARN rss store unreadable message={message:?}");
+                    cache.failure=Some((next,message)); return Err(error);
+                }
+            };
+            cache.failure=None;
             let mut snapshot=Snapshot::default();
             for row in rows {
                 let f=row.feed; let id=if f.uid.is_empty() {crate::rss::stable_id(&f.url)}else{f.uid};
@@ -108,6 +118,11 @@ impl Service {
         if !errors.is_empty(){anyhow::bail!("{}",errors.join("; "));} Ok(())
     }
     pub fn stamp(&self)->Option<Stamp> { stamp() }
+    /// The recorded load failure while the same broken file remains in place.
+    pub fn problem(&self)->Option<String> {
+        let cache=self.cache.lock().unwrap();
+        cache.failure.as_ref().filter(|(failed,_)|*failed==stamp()).map(|(_,message)|message.clone())
+    }
     pub fn stop(&self) {
         self.shared.state.lock().unwrap().stopped=true; self.shared.changed.notify_one();
         if let Some(worker)=self.worker.lock().unwrap().take(){let _=worker.join();}

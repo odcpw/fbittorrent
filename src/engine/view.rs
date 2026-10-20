@@ -533,13 +533,14 @@ impl TorrentView {
 }
 
 impl Inner {
-    pub(super) fn unrestored_view(&self, record: &Record) -> TorrentView {
+    /// `fresh` is an explicit read; the shared sampler reuses bounded presence.
+    pub(super) fn unrestored_view(&self, record: &Record, fresh: bool) -> TorrentView {
         let mut view = TorrentView::unrestored(record, self.restores.lock().unwrap().get(&record.hash));
         if record.staged {
-            if let Ok(saved)=self.saved_torrent(record) {view.size=Some(saved.files.iter().map(|f|f.size.max(0) as u64).sum());}
+            if let Ok(saved)=self.saved_torrent_observed(record, fresh) {view.size=Some(saved.files.iter().map(|f|f.size.max(0) as u64).sum());}
         }
         if matches!(view.legacy.source, Source::Dormant) {
-            if let Ok(saved) = self.saved_torrent(record) {
+            if let Ok(saved) = self.saved_torrent_observed(record, fresh) {
                 view.size = Some(saved.selected_bytes);
                 view.completed_bytes = Some(saved.selected_bytes);
                 let mut path = PathBuf::from(&record.output_folder);
@@ -555,7 +556,7 @@ impl Inner {
     }
     #[cfg(test)]
     pub(super) fn unrestored_snapshot(&self, record: &Record) -> Torrent {
-        serde_json::from_str(&self.unrestored_view(record).to_cli_json().unwrap()).unwrap()
+        serde_json::from_str(&self.unrestored_view(record, true).to_cli_json().unwrap()).unwrap()
     }
 }
 impl EngineDispatcher {
@@ -563,17 +564,22 @@ impl EngineDispatcher {
         let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
         Ok(self.info_locked(&ledger))
     }
+    /// Explicit reads stat payload presence now.
     pub(super) fn info_locked(&self, ledger: &Ledger) -> Vec<TorrentView> {
-        let mut torrents = Vec::new();
+        self.info_observed(ledger, true)
+    }
+    pub(super) fn info_observed(&self, ledger: &Ledger, fresh: bool) -> Vec<TorrentView> {
+        let mut torrents = Vec::with_capacity(ledger.records.len());
         let mut queue_position=0;
         for record in &ledger.records {
-            let mut view = match self.inner.handle(&record.hash) {
-                Ok(handle) => TorrentView::handle(
+            let handle = self.inner.handle(&record.hash).ok();
+            let mut view = match &handle {
+                Some(handle) => TorrentView::handle(
                     record,
-                    &handle,
-                    self.inner.check_cancelled(&record.hash, &handle),
+                    handle,
+                    self.inner.check_cancelled(&record.hash, handle),
                 ),
-                Err(_) => self.inner.unrestored_view(record),
+                None => self.inner.unrestored_view(record, fresh),
             };
             if let Some(value)=self.inner.resume_prepared.pending(&record.hash) {
                 if view.state==TorrentState::Checking || view.state==TorrentState::Metadata {
@@ -604,6 +610,18 @@ impl EngineDispatcher {
                 else if record.upload_limit > 0 { UploadPolicy::Custom } else { UploadPolicy::Unlimited };
             view.origin=Some(record.origin.clone());
             view.queue_pos=if queue_policy::positioned(record) {queue_position+=1;Some(queue_position)} else {None};
+            // A handle whose downloaded payload was deleted is 'Files missing'
+            // (dormant rows are checked by unrestored_view). Checks and moves
+            // own their files; an engine error already explains itself.
+            if let Some(handle) = &handle {
+                if !matches!(view.state, TorrentState::Checking | TorrentState::Metadata | TorrentState::Error)
+                    && !self.inner.rechecks.active(&record.hash)
+                    && !self.inner.moves.active(&record.hash)
+                    && self.inner.saved.live_missing(&record.hash, handle, fresh)
+                {
+                    view.files_missing();
+                }
+            }
             view.retain_restore_reason();
             torrents.push(view);
         }
