@@ -27,7 +27,7 @@ function create(io, options) {
   var c = { online: false, instance: "", caps: [], hello: null, pending: Object.create(null), actions: Object.create(null),
     queue: [], awaiting: Object.create(null), subs: Object.create(null), topicRevs: Object.create(null), nextId: 1, nextRef: 1, started: now(),
     lastFrame: now(), helloSent: false, connecting: false, reconnecting: false,
-    retryIndex: 0, retryDelay: 500, graceful: false, popupOpen: false,
+    graceful: false, popupOpen: false,
     dashboardVisible: false, quickVisible:false, protocolMismatch: false, details: [], mode: "connecting", lastError: null }
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
@@ -102,11 +102,10 @@ function create(io, options) {
     changed()
   }
   c.disconnected = function() {
-    var wasOnline = c.online
     c.lastError=null
     subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null;subscriptionForced=false; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
-    if (!c.graceful && wasOnline) c.reconnecting = true
-    c.mode = c.protocolMismatch ? "protocol_mismatch" : c.reconnecting ? "reconnecting" : "stopped"
+    c.reconnecting = false
+    c.mode = c.protocolMismatch ? "protocol_mismatch" : "stopped"
     // Unsent actions have no unknown outcome and are never replayed.
     while (c.queue.length) fail(c.queue.shift(), { code: "engine_unavailable", message: "connection closed before send", retryable: true })
     Object.keys(c.pending).forEach(function(id) {
@@ -127,12 +126,14 @@ function create(io, options) {
     changed()
   }
   c.attempt = function() {
-    var ladder = [500, 1000, 2000, 4000, 8000, 10000]
-    c.retryDelay = ladder[Math.min(c.retryIndex++, ladder.length - 1)]
-    if (c.retryDelay === 10000) c.reconnecting = false
-    if (!io.isConnected()) io.connect()
+    // The service wakes this session on socket appearance or explicit input.
+    // Never schedule retries here, or duplicate an in-flight connection.
+    if (c.connecting || io.isConnected() || c.protocolMismatch) return false
+    c.connecting = true; c.reconnecting = !!c.instance
+    c.mode = c.reconnecting ? "reconnecting" : "connecting"
+    io.connect()
     changed()
-    return c.retryDelay
+    return true
   }
   c.reset = function(message) {
     io.disconnect(); c.disconnected()
@@ -286,7 +287,7 @@ function create(io, options) {
       c.protocolMismatch = false; c.lastError=null
       var previous = c.instance
       c.instance = frame.result.instance; c.caps = frame.result.caps || []; c.hello = frame.result
-      c.online = true; c.connecting = false; c.reconnecting = false; c.retryIndex = 0; c.mode = "subscribe"
+      c.online = true; c.connecting = false; c.reconnecting = false; c.mode = "subscribe"
       var retry = Object.keys(c.pending).map(function(id) { return c.pending[id] })
         .concat(Object.keys(c.awaiting).map(function(ref) { return c.awaiting[ref] }))
       c.pending = Object.create(null); c.awaiting = Object.create(null)

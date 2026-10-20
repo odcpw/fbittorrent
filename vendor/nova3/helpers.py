@@ -62,7 +62,28 @@ def _getBrowserUserAgent() -> str:
 
 
 _headers: dict[str, str] = {'User-Agent': _getBrowserUserAgent()}
+
+# fbittorrent: bound every provider request. A stalled site must not hold a
+# search open, and a huge body or gzip bomb must not exhaust memory. The
+# default timeout also covers providers that open sockets themselves.
+_TIMEOUT_SECS = 20
+_MAX_BODY = 16 * 1024 * 1024
+_MAX_DECOMPRESSED = 64 * 1024 * 1024
+socket.setdefaulttimeout(_TIMEOUT_SECS)
 _original_socket = socket.socket
+
+
+def _read_bounded(response: Any) -> bytes:
+    """ Read at most _MAX_BODY bytes, and gunzip at most _MAX_DECOMPRESSED """
+    data: bytes = response.read(_MAX_BODY + 1)
+    if len(data) > _MAX_BODY:
+        raise ValueError("response exceeds the provider body limit")
+    if data[:2] == b'\x1f\x8b':
+        with io.BytesIO(data) as compressedStream, gzip.GzipFile(fileobj=compressedStream) as gzipper:
+            data = gzipper.read(_MAX_DECOMPRESSED + 1)
+        if len(data) > _MAX_DECOMPRESSED:
+            raise ValueError("decompressed response exceeds the provider limit")
+    return data
 
 
 def enable_socks_proxy(enable: bool) -> None:
@@ -99,17 +120,18 @@ def retrieve_url(url: str, custom_headers: Mapping[str, str] = {}, request_data:
 
     request = urllib.request.Request(url, request_data, {**_headers, **custom_headers})
     try:
-        response = urllib.request.urlopen(request, context=ssl_context)
+        response = urllib.request.urlopen(request, context=ssl_context, timeout=_TIMEOUT_SECS)
     except urllib.error.URLError as errno:
         print(f"Connection error: {errno.reason}", file=sys.stderr)
         return ""
-    data: bytes = response.read()
-
-    # Check if it is gzipped
-    if data[:2] == b'\x1f\x8b':
-        # Data is gzip encoded, decode it
-        with io.BytesIO(data) as compressedStream, gzip.GzipFile(fileobj=compressedStream) as gzipper:
-            data = gzipper.read()
+    except OSError as error:
+        print(f"Connection error: {error}", file=sys.stderr)
+        return ""
+    try:
+        data = _read_bounded(response)
+    except (OSError, EOFError, ValueError) as error:
+        print(f"Connection error: {error}", file=sys.stderr)
+        return ""
 
     charset = 'utf-8'
     try:
@@ -132,14 +154,8 @@ def download_file(url: str, referer: Optional[str] = None, ssl_context: Optional
     request = urllib.request.Request(url, headers=_headers)
     if referer is not None:
         request.add_header('referer', referer)
-    response = urllib.request.urlopen(request, context=ssl_context)
-    data = response.read()
-
-    # Check if it is gzipped
-    if data[:2] == b'\x1f\x8b':
-        # Data is gzip encoded, decode it
-        with io.BytesIO(data) as compressedStream, gzip.GzipFile(fileobj=compressedStream) as gzipper:
-            data = gzipper.read()
+    response = urllib.request.urlopen(request, context=ssl_context, timeout=_TIMEOUT_SECS)
+    data = _read_bounded(response)
 
     # Write it to a file
     fileHandle, path = tempfile.mkstemp()

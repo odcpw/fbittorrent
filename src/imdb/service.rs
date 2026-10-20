@@ -12,18 +12,19 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn endpoint(url: &str) -> Result<String> {
-    let Some(base) = std::env::var_os("FBT_IMDB_BASE_URL") else {
+    let Some(mut target) = crate::outbound::fixture_base("FBT_IMDB_BASE_URL") else {
         return Ok(url.into());
     };
     let parsed = url::Url::parse(url)?;
-    let mut target = url::Url::parse(&base.to_string_lossy())?;
     target.set_path(parsed.path());
     target.set_query(parsed.query());
     Ok(target.into())
 }
 
 pub(super) fn read_http(url: &str, timeout: u64, cap: u64) -> Result<Vec<u8>> {
-    let mut response = agent(timeout)
+    let http = agent(timeout)?;
+    let mut response = http
+        .agent()
         .get(endpoint(url)?)
         .call()
         .context("IMDb upstream request")?;

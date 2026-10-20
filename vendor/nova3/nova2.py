@@ -56,7 +56,11 @@ def _terminate_process_group(_signal: int, _frame: object) -> None:
     os.killpg(os.getpgrp(), signal.SIGKILL)
 
 
-signal.signal(signal.SIGTERM, _terminate_process_group)
+# Spawn imports this file as __mp_main__ before the worker initializer runs.
+# An idle worker may be retired during that import; it must never install the
+# parent's group-killing handler, even for that short startup window.
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _terminate_process_group)
 
 # qbt tend to run this script in 'isolate mode' so append the current path manually
 current_path = str(pathlib.Path(__file__).parent.resolve())
@@ -186,9 +190,8 @@ def _worker_parent_cleanup() -> None:
     import ctypes
     import os
     import signal
-    # Spawn imports this module, including Nova's group-killing TERM handler.
-    # Pool.__exit__ terminates idle workers with TERM: only the Nova parent
-    # may kill the group. A worker must retire without killing its parent.
+    # Pool.__exit__ terminates idle workers with TERM. Keep workers on the
+    # default handler; only the Nova parent may kill the entire group.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     parent = os.getppid()
     ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL, 0, 0, 0)

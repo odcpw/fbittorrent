@@ -1,6 +1,7 @@
 //! Once-per-second verified video readiness. Ownership survives engine-slot swaps.
 mod duration;
 mod estimate;
+mod mp4;
 #[cfg(test)]
 mod tests;
 use crate::api::{self, Playable};
@@ -30,6 +31,35 @@ pub(crate) struct Sample {
     pub active: bool,
     pub dl_bps: Option<u64>,
     pub download_limit: Option<u64>,
+    pub verified: Option<VerifiedPieces>,
+}
+/// Owned snapshot; file inspection never holds the engine's tracker guards.
+pub(crate) struct VerifiedPieces {
+    pub bits: Box<dyn librqbit::BitV>,
+    pub offset: u64,
+    pub piece: u64,
+}
+impl VerifiedPieces {
+    fn contains(&self, range: std::ops::Range<u64>) -> bool {
+        verified_range(self.offset, self.piece, range, |i| {
+            self.bits.as_slice().get(i).is_some_and(|b| *b)
+        })
+    }
+}
+fn verified_range(
+    offset: u64, piece: u64, range: std::ops::Range<u64>, have: impl Fn(usize) -> bool,
+) -> bool {
+    if piece == 0 || range.is_empty() {
+        return false;
+    }
+    let Some(start) = offset.checked_add(range.start) else { return false; };
+    let Some(end) = offset.checked_add(range.end - 1) else { return false; };
+    (start / piece..=end / piece).all(|i| usize::try_from(i).ok().is_some_and(&have))
+}
+pub(crate) fn iso_movie(path: &Path) -> bool {
+    path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+        ["mp4", "mov", "m4v"].iter().any(|ext| s.eq_ignore_ascii_case(ext))
+    })
 }
 pub(crate) fn video(path: &Path) -> bool {
     path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
@@ -103,6 +133,7 @@ struct Row {
     path: PathBuf,
     size: u64,
     estimate: estimate::Estimate,
+    movie: mp4::Movie,
 }
 pub(crate) struct Watch {
     path: PathBuf,
@@ -197,8 +228,15 @@ impl Watch {
                 .get(&s.hash)
                 .filter(|r| r.path == s.path && r.size == s.size && r.value.file == s.file);
             let mut estimate = cached.map(|r| r.estimate.clone()).unwrap_or_default();
+            let mut movie = cached.map(|r| r.movie.clone()).unwrap_or_default();
             let inspected = s.prefix.min(MIB);
-            let seconds = if let Some(cached) =
+            let iso = iso_movie(&s.path);
+            let container_ready = !iso || s.verified.as_ref().is_some_and(|verified| {
+                movie.inspect(&s.path, s.size, |range| verified.contains(range))
+            });
+            let seconds = if iso {
+                if container_ready { movie.duration() } else { None }
+            } else if let Some(cached) =
                 cached.filter(|r| r.duration.is_some() || r.inspected >= inspected)
             {
                 cached.duration
@@ -209,6 +247,7 @@ impl Watch {
             };
             let previous = self.saved.get(&s.hash).cloned().unwrap_or_default();
             let mut p = value(&s, seconds, previous.acked);
+            p.ready &= container_ready;
             estimate.apply(&s, seconds, now, &mut p);
             if !p.ready {
                 p.acked = false;
@@ -237,6 +276,7 @@ impl Watch {
                     path: s.path,
                     size: s.size,
                     estimate,
+                    movie,
                 },
             );
         }

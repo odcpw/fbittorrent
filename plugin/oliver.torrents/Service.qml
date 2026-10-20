@@ -106,6 +106,7 @@ Item {
   readonly property bool online: status.ok === true && status.running !== false
   property bool resultUnknown:false
   property bool reconnecting: false
+  property string socketIdentity:""
   property bool stoppedRecently: false
   property string byeReason: ""
   property bool startupRequested: false
@@ -192,6 +193,7 @@ Item {
 
 
   function syncClient(c) {
+    if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
     if (status.ok !== c.online) {
       var connectionStatus = Object.assign({}, status)
@@ -240,7 +242,7 @@ Item {
     if (!client) return false
     return client.request(op, args, {mutating:true, callback:callback})
   }
-  function refresh() { if (client) client.subscribeAll(true) }
+  function refresh() { if (client) {checkSocket(true);client.subscribeAll(true)} }
   function pause(hash) { return mutate("torrents.stop", {hashes:[hash]}) }
   function resume(hash) { return mutate("torrents.start", {hashes:[hash]}) }
   function toggleSeed(hash) {
@@ -319,6 +321,7 @@ Item {
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
     Quickshell.execDetached([bin,"up"])
+    checkSocket(true)
   }
   function openDashboardFilter(filter) { if(shell)shell.summon("oliver.torrents",JSON.stringify({view:"torrents",filter:filter})) }
   function openDashboard(view) {
@@ -338,8 +341,9 @@ Item {
     if (Quickshell.env("FBT_TEST_HOOKS") !== "1") return "refused: FBT_TEST_HOOKS=1 required"
     socket.connected = false
     runtimeOverride = path
+    socketIdentity=""
     client.disconnected()
-    Qt.callLater(function() { reconnect.restart() })
+    Qt.callLater(root.checkSocket)
     return "ok"
   }
   function stateJson() { if(testHooks && dashboardOwner)dashboardOwner.publishNow(true);var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
@@ -356,10 +360,10 @@ Item {
     if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
     return source
   }
-  onQuickVisibleChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onQuickVisibleChanged:if(client){if(quickVisible)checkSocket(true);client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}
   onQuickTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
-  onPopupOpenChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
-  onDashboardVisibleChanged: if (client) client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
+  onPopupOpenChanged: if (client) {if(popupOpen)checkSocket(true);client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}
+  onDashboardVisibleChanged: if (client) {if(dashboardVisible)checkSocket(true);client.visibility(popupOpen, dashboardVisible, detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}
   onAddTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
   onSearchTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
   onLogTopicsChanged:if(client)client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
@@ -385,27 +389,51 @@ Item {
   Timer {id:savePreferences;interval:500;onTriggered:preferences.setText(JSON.stringify(Object.assign({},root.savedPreferences,{details_width:root.detailsWidth,sort:{key:root.sortKey,reverse:root.sortReverse}}))+"\n")}
   Timer {id:toastTimer;interval:5000;onTriggered:root.toast=null}
   Timer {interval:125;repeat:true;running:(root.dashboardVisible || root.popupOpen) && root.busy && !Commons.Style.reduceMotion;onTriggered:root.pendingFrame=(root.pendingFrame+1)%8}
+  // FileView follows the existing parent when the runtime directory is absent.
+  // Probe only on filesystem/input edges. Stat checks socket type/identity
+  // without connecting; an unchanged stale socket is attempted just once.
+  function checkSocket(force){
+    if(force)socketIdentity=""
+    if(!client || socket.connected || client.connecting || client.protocolMismatch)return
+    if(socketProbe.running){socketProbe.again=true;return}
+    socketAppearance.restart()
+  }
+  FileView {path:root.runtimeDir+"/fbittorrent";watchChanges:true;preload:false;printErrors:false;onFileChanged:root.checkSocket()}
+  Timer {id:socketAppearance;interval:50;onTriggered:{
+    if(!root.client || socket.connected || root.client.connecting || root.client.protocolMismatch)return
+    socketProbe.probedPath=socket.path;socketProbe.running=true
+  }}
+  Process {
+    id:socketProbe
+    property string probedPath:""
+    property bool again:false
+    command:["stat","-L","--printf=%d:%i:%f:%z","--",probedPath]
+    stdout:StdioCollector {id:socketInfo}
+    stderr:StdioCollector {}
+    onExited:function(code){
+      if(root.client && probedPath===socket.path && !socket.connected){
+        var identity=socketInfo.text,parts=identity.split(":")
+        if(code===0 && parts.length>=4 && (parseInt(parts[2],16)&0xf000)===0xc000){
+          if(identity!==root.socketIdentity){root.socketIdentity=identity;root.client.attempt()}
+        }else{root.socketIdentity="";root.client.disconnected()}
+      }
+      if(again){again=false;root.checkSocket()}
+    }
+  }
   Socket {
     id: socket
+    property bool wasOnline:false
+    property bool intentionalClose:false
     path: root.runtimeDir + "/fbittorrent/api.sock"
     parser: SplitParser { onRead: function(data) { if (root.client) root.client.receive(data) } }
     onConnectionStateChanged: {
       if (!root.client) return
-      if (connected) { reconnect.stop(); root.client.connected() }
-      else { root.client.disconnected(); reconnect.restart() }
+      if (connected) {wasOnline=false;intentionalClose=false;socketAppearance.stop();root.client.connected()}
+      else {var retry=wasOnline && !intentionalClose && !root.client.graceful;wasOnline=false;intentionalClose=false;root.client.disconnected();if(retry)root.checkSocket(true)}
     }
-    onError: if (root.client && !connected) reconnect.restart()
+    onError: if (root.client && !connected) root.client.disconnected()
   }
-  Timer {
-    id: reconnect
-    interval: root.client ? root.client.retryDelay : 500
-    onTriggered: {
-      if (!root.client || socket.connected) return
-      root.client.attempt()
-      if (!socket.connected) restart()
-    }
-  }
-  Timer { interval: 1000; repeat: true; running: !!root.client; onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
+  Timer { interval: 1000; repeat: true; running: !!root.client && (socket.connected || root.busy || root.startupRequested); onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
@@ -454,12 +482,11 @@ Item {
     client = ApiClient.create({
       write:function(text) { socket.write(text) }, flush:function() { socket.flush() },
       isConnected:function() { return socket.connected }, connect:function() { socket.connected = true },
-      disconnect:function() { socket.connected = false }
+      disconnect:function() {socket.intentionalClose=true;socket.connected=false}
     }, {version:manifest.version || "0.2.0", changed:syncClient, frame:applyFrame,
       instance:function() { if(root.cleanupFlow)root.cleanupFlow.reset();if(root.overviewFlow)root.overviewFlow.instanceChanged();if(root.clipboardFlow)root.clipboardFlow.reset();root.store = Store.create(); root.torrents = []; if(root.detailFlow)root.detailFlow.reset() }})
     client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)
     if (socket.connected) client.connected()
-    else { client.attempt(); if (socket.connected) client.connected() }
-    if (!socket.connected) reconnect.start()
+    else checkSocket()
   }
 }

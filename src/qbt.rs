@@ -130,39 +130,6 @@ pub struct RssArticle {
     pub ts: i64,
 }
 
-/// Parse the RFC 2822-ish dates qBittorrent emits ("02 Sep 2026 03:58:00 +0000").
-pub fn parse_rfc2822(s: &str) -> i64 {
-    let s = s.trim();
-    let s = s.split_once(", ").map(|(_, r)| r).unwrap_or(s); // drop weekday
-    let mut it = s.split_whitespace();
-    let (Some(d), Some(mon), Some(y), Some(hms)) = (it.next(), it.next(), it.next(), it.next()) else { return 0 };
-    let zone = it.next().unwrap_or("+0000");
-    let months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
-    let Some(m) = months.iter().position(|m| mon.to_ascii_lowercase().starts_with(m)) else { return 0 };
-    let (Ok(d), Ok(y)) = (d.parse::<i64>(), y.parse::<i64>()) else { return 0 };
-    let mut t = hms.split(':').map(|p| p.parse::<i64>().unwrap_or(0));
-    let (h, mi, se) = (t.next().unwrap_or(0), t.next().unwrap_or(0), t.next().unwrap_or(0));
-    // days from civil (Howard Hinnant)
-    let m = m as i64 + 1;
-    let y2 = if m <= 2 { y - 1 } else { y };
-    let era = y2.div_euclid(400);
-    let yoe = y2 - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146097 + doe - 719468;
-    let mut ts = days * 86400 + h * 3600 + mi * 60 + se;
-    if let Some(sign) = zone.chars().next() {
-        if (sign == '+' || sign == '-') && zone.len() >= 5 {
-            let zh: i64 = zone[1..3].parse().unwrap_or(0);
-            let zm: i64 = zone[3..5].parse().unwrap_or(0);
-            let off = zh * 3600 + zm * 60;
-            ts = if sign == '+' { ts - off } else { ts + off };
-        }
-    }
-    ts
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RssFeed {
     pub name: String,

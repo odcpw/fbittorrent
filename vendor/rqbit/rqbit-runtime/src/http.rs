@@ -5,6 +5,21 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use std::time::Duration;
 
+/// Errors may be logged or shown: name the origin only. Paths and queries of
+/// tracker and .torrent URLs routinely carry passkeys.
+fn public_origin(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(url) => match url.host_str() {
+            Some(host) => match url.port() {
+                Some(port) => format!("{}://{host}:{port}/…", url.scheme()),
+                None => format!("{}://{host}/…", url.scheme()),
+            },
+            None => "an unsupported URL".into(),
+        },
+        Err(_) => "an invalid URL".into(),
+    }
+}
+
 #[derive(Clone)]
 pub struct Client {
     ordinary: asupersync::http::Client,
@@ -15,6 +30,35 @@ pub struct Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn status_errors_name_only_the_origin() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+        });
+        let runtime = crate::RuntimeBuilder::current_thread().build().unwrap();
+        let cx = runtime.request_cx_with_budget(crate::Budget::INFINITE);
+        let client = Client::new("status redaction");
+        let url = format!("http://127.0.0.1:{port}/0123456789abcdef0123456789abcdef/announce?passkey=SECRET");
+        let error = runtime.block_on(client.get(&cx, &url)).unwrap_err();
+        server.join().unwrap();
+        let text = format!("{error:#}");
+        assert!(text.contains("HTTP status 403"), "{text}");
+        assert!(text.contains(&format!("http://127.0.0.1:{port}/…")), "{text}");
+        for secret in ["SECRET", "passkey", "0123456789abcdef", "announce"] {
+            assert!(!text.contains(secret), "{text}");
+        }
+        assert_eq!(public_origin("https://user:pw@tracker.invalid/x?y"), "https://tracker.invalid/…");
+        assert_eq!(public_origin("not a url"), "an invalid URL");
+    }
+
     #[test]
     fn request_future_stays_small() {
         let runtime = crate::RuntimeBuilder::current_thread().build().unwrap();
@@ -136,7 +180,11 @@ impl Client {
         }
         let response = self.ordinary.send_get(cx, url.as_ref()).await?;
         if !(200..300).contains(&response.status) {
-            bail!("HTTP status {} for {}", response.status, url.as_ref());
+            bail!(
+                "HTTP status {} for {}",
+                response.status,
+                public_origin(url.as_ref())
+            );
         }
         cx.checkpoint()?;
         Ok(response.body)
@@ -248,7 +296,7 @@ impl Client {
                 (200..300).contains(&response.status),
                 "HTTP status {} for {}",
                 response.status,
-                url
+                public_origin(url.as_str())
             );
             return Ok(response.body);
         }

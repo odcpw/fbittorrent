@@ -7,9 +7,38 @@ pub(super) fn python(directory: &Path) -> Command {
         .current_dir(directory)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        // Few malloc arenas keep idle address-space reservations far below the cap.
+        .env("MALLOC_ARENA_MAX", "2")
         .stdin(Stdio::null());
     isolated(&mut command);
+    limit_address_space(&mut command);
     command
+}
+
+/// Provider code is third-party and parses remote pages: each Python process
+/// (Nova, its pool workers, provider subprocesses) gets a bounded address
+/// space, so a huge body or decompression bomb fails with MemoryError instead
+/// of exhausting the desktop session.
+pub(super) const PYTHON_ADDRESS_SPACE: libc::rlim_t = 2 << 30;
+
+fn limit_address_space(command: &mut Command) {
+    unsafe {
+        command.pre_exec(|| {
+            // Only lower limits: an already smaller hard limit stays in force.
+            let mut current: libc::rlimit = std::mem::zeroed();
+            if libc::getrlimit(libc::RLIMIT_AS, &mut current) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let limit = libc::rlimit {
+                rlim_cur: PYTHON_ADDRESS_SPACE.min(current.rlim_max),
+                rlim_max: PYTHON_ADDRESS_SPACE.min(current.rlim_max),
+            };
+            if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 pub(super) fn isolated(command:&mut Command) {
@@ -83,7 +112,10 @@ impl Drop for ProcessGroup {
 }
 
 pub(super) fn capture(command: Command, budget: Duration) -> Result<Vec<u8>> {
-    let mut process = ProcessGroup::spawn(command)?;
+    capture_process(ProcessGroup::spawn(command)?, budget)
+}
+
+pub(super) fn capture_process(mut process: ProcessGroup, budget: Duration) -> Result<Vec<u8>> {
     let mut stdout = process.child.stdout.take().unwrap();
     let mut stderr = process.child.stderr.take().unwrap();
     let output = thread::spawn(move || drain_bounded(&mut stdout, MAX_CAPTURE_BYTES));

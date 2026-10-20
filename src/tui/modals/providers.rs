@@ -46,7 +46,8 @@ impl TuiApp {
             actions::Intent::Toggle => if let Some(p) = cur { return self.set_plugins(vec![p.name], !p.enabled); },
             actions::Intent::All => return self.set_plugins(all, true),
             actions::Intent::None => return self.set_plugins(all, false),
-            actions::Intent::Open => if let Some(p) = cur { if !p.url.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&p.url).spawn(); } },
+            // A provider's own (third-party) URL: web pages only.
+            actions::Intent::Open => if let Some(p) = cur { if !p.url.is_empty() { crate::public_text::open_web(&p.url); } },
             actions::Intent::Reload => return self.load_plugins(),
             _ => {}
         }

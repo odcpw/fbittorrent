@@ -53,9 +53,10 @@ pub(crate) fn run(cfg:&Config,sub:&RssCmd,json_mode:bool,no_start:bool)->Result<
             });
         },
         RssCmd::Add{url,name}=>{
-            let name=name.clone().or_else(||crate::host_of(url)).unwrap_or_else(||url.clone());
+            let name=name.clone().or_else(||crate::host_of(url)).unwrap_or_else(||crate::public_text::feed_label(url));
             source.call(api::Call::RssAdd{args:api::FeedAddArgs{url:url.clone(),name:Some(name.clone())}})?;
-            crate::emit(json_mode,json!({"ok":true,"action":"rss-add","name":name,"url":url}),||println!("added feed {name}"));
+            // The raw URL (with any passkey) stays in the private store only.
+            crate::emit(json_mode,json!({"ok":true,"action":"rss-add","name":name,"url":crate::public_text::url(url)}),||println!("added feed {}",crate::public_text::terminal(&name)));
         },
         RssCmd::Remove{name}=>{
             let feeds=source.feeds()?;let feed=select(&feeds,name)?;

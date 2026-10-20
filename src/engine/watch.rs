@@ -53,11 +53,15 @@ impl EngineDispatcher {
                     .filter(|v| v.is_finite() && *v >= 0.0)
                     .map(|v| v as u64);
                 let active = !handle.is_paused();
+                let path = handle.output_folder().join(&file.relative_filename);
+                let verified = watch::iso_movie(&path).then_some(watch::VerifiedPieces {
+                    bits, offset: file.offset_in_torrent, piece,
+                });
                 result.push(Sample {
                     hash: record.hash.clone(),
                     name: record.name.clone(),
                     file: index as u64,
-                    path: handle.output_folder().join(&file.relative_filename),
+                    path,
                     size: file.len,
                     prefix,
                     verified_bytes: stats.progress_bytes,
@@ -66,6 +70,7 @@ impl EngineDispatcher {
                     downloading: active && rate.is_some_and(|v| v > 0),
                     active,
                     download_limit: handle.effective_download_bps(),
+                    verified,
                 });
             }
             Ok(result)

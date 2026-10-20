@@ -169,8 +169,7 @@ pub struct Shows {
 }
 
 pub fn path() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+    crate::config::require_home(dirs::data_dir(), "followed shows")
         .join("fbittorrent")
         .join("shows.json")
 }
@@ -426,15 +425,16 @@ pub(crate) fn fetch_updates_cancelled(show:&Show, quality:&str, cancelled:&std::
     fetch_eztv_inner(&show.imdb,show.quality.as_deref().unwrap_or(quality),boundary,show.catalogue_complete,Some(cancelled))
 }
 pub(crate) fn eztv_endpoint(query:&str)->String {
-    let base=std::env::var("FBT_EZTV_BASE_URL").unwrap_or_else(|_|"https://eztv.re".into());
+    let base=crate::outbound::fixture_base("FBT_EZTV_BASE_URL").map(|u|u.to_string()).unwrap_or_else(||"https://eztv.re".into());
     format!("{}/api/get-torrents?{query}",base.trim_end_matches('/'))
 }
 fn fetch_eztv_inner(imdb:&str,quality:&str,boundary:Option<i64>,complete_before:bool,cancelled:Option<&std::sync::atomic::AtomicBool>)->Result<EpisodeCheck> {
     let digits = imdb.trim_start_matches("tt");
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    // VPN-bound when network_interface is set (see `crate::outbound`).
+    let http = crate::outbound::Http::new(ureq::Agent::config_builder()
         .user_agent("fbittorrent/0.1 (show feed)")
-        .build()
-        .into();
+        .build(), "EZTV show check")?;
+    let agent = http.agent();
     fetch_pages(quality, boundary, complete_before, |page, remaining| {
         anyhow::ensure!(!cancelled.is_some_and(|c|c.load(Ordering::Acquire)),"show check cancelled");
         let url = eztv_endpoint(&format!("imdb_id={digits}&limit=100&page={page}"));

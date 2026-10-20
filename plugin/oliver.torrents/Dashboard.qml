@@ -88,11 +88,11 @@ Item {
       try {payload=JSON.parse(String(payloadJson))}catch(error){routeError="Window request is not valid JSON";return false}
       if(!payload || typeof payload!=="object" || Array.isArray(payload)){routeError="Window request must be an object";return false}
     }
-    if(payload.view!==undefined) {
-      if(views.indexOf(payload.view)<0){routeError="Unknown view";return false}
-      currentView=payload.view
-    }
+    if(payload.view!==undefined && views.indexOf(payload.view)<0){routeError="Unknown view";return false}
+    // Changing views can create Search synchronously while the window is open.
+    // Give its initialQuery the new payload before activating that Loader.
     if(typeof payload.query==="string")query=payload.query.slice(0,200)
+    if(payload.view!==undefined)currentView=payload.view
     if(typeof payload.filter==="string")filter=payload.filter.slice(0,80)
     if(typeof payload.hash==="string" && /^[0-9a-f]{40}$/.test(payload.hash)){selectedHash=payload.hash;if(torrents)torrents.cursorHash=payload.hash}
     if(svc)svc.closePopups()

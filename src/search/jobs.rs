@@ -62,12 +62,22 @@ fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:
     {
         bail!("the app is closing; search providers cannot start");
     }
-    let providers: Vec<_> = plugins_in(store)?
+    let mut providers: Vec<_> = plugins_in(store)?
         .into_iter()
         .filter(|plugin| plugin.enabled && selected.is_none_or(|names| names.contains(&plugin.name)))
         .collect();
     if providers.is_empty() && native.is_empty() {
         bail!("no enabled search providers; install providers with fbittorrent search --install");
+    }
+    // Python providers open their own, unbound sockets: under a VPN binding
+    // they are skipped (Torznab indexers still run bound) or refused.
+    let mut warnings = Vec::new();
+    if !providers.is_empty() {
+        if let Err(error) = crate::outbound::unbound_helpers_allowed("Nova search providers") {
+            if native.is_empty() { return Err(error); }
+            warnings.push(crate::api::ProviderWarning { provider: "nova".into(), message: format!("{error:#}").chars().take(200).collect() });
+            providers.clear();
+        }
     }
     let process=if providers.is_empty(){None}else {
         let names=providers.iter().map(|p|p.name.as_str()).collect::<Vec<_>>().join(",");
@@ -84,7 +94,7 @@ fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:
             raw: vec![],
             hashes: BTreeMap::new(),
             error: String::new(),
-            warnings:Vec::new(),
+            warnings,
         }),
         worker: Mutex::new(None),
     });
@@ -117,8 +127,27 @@ fn start_with(store:&ProviderStore,query:&str,selected:Option<&[String]>,native:
     Ok(id)
 }
 
+/// A whole Nova search (every provider) must finish within this time; a
+/// stalled provider would otherwise hold its process group and session open.
+#[cfg(not(test))]
+fn nova_deadline() -> Duration { Duration::from_secs(120) }
+#[cfg(test)]
+pub(super) static TEST_NOVA_DEADLINE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(120_000);
+#[cfg(test)]
+fn nova_deadline() -> Duration { Duration::from_millis(TEST_NOVA_DEADLINE_MS.load(Ordering::Acquire)) }
+
 fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob) {
     let stdout=process.child.stdout.take().unwrap();let stderr=process.child.stderr.take().unwrap();
+    // The reader below blocks on provider output; a watchdog enforces the
+    // deadline by stopping the whole group, which closes that output.
+    let (finished, watched) = std::sync::mpsc::channel::<()>();
+    let group = process.pid;
+    let deadline = nova_deadline();
+    let watchdog = thread::spawn(move || {
+        let expired = matches!(watched.recv_timeout(deadline), Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        if expired { unsafe { libc::kill(-group, libc::SIGKILL); } }
+        expired
+    });
             let errors = thread::spawn(move || {
                 drain_bounded(&mut BufReader::new(stderr), 16 * 1024)
                     .map(|(bytes,_)| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default()
@@ -147,10 +176,18 @@ fn run_nova(mut process:ProcessGroup,providers:Vec<SearchPlugin>,job:&SearchJob)
                     }
                 }
             }
+            // Stop the watchdog while the group leader is still unreaped.
+            drop(finished);
+            let expired = watchdog.join().unwrap_or(false);
             let status = process.child.wait();
             process.kill();
             job.pid.store(0, Ordering::Release);
             let errors = errors.join().unwrap_or_default();
+            if expired && !job.cancelled.load(Ordering::Acquire) {
+                if let Ok(mut state) = job.state.lock() {
+                    if state.error.is_empty() { state.error = format!("search providers timed out after {} seconds", deadline.as_secs()); }
+                }
+            }
             if !job.cancelled.load(Ordering::Acquire)
                 && !status.as_ref().is_ok_and(|status| status.success())
             {

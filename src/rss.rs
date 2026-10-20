@@ -16,10 +16,12 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
-use crate::qbt::{parse_rfc2822, RssArticle, RssFeed};
+use crate::feed_date::parse_feed_date as parse_date;
+use crate::qbt::{RssArticle, RssFeed};
 
 const MAX_BODY: u64 = 4 * 1024 * 1024;
 const MAX_CACHED_ARTICLES: usize = 500;
+const MAX_DEPTH: usize = 64;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -75,7 +77,7 @@ impl Default for Store {
 }
 
 pub fn path() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".local/share"))
+    crate::config::require_home(dirs::data_dir(), "RSS subscriptions")
         .join("fbittorrent/rss.json")
 }
 
@@ -164,7 +166,7 @@ impl Store {
         validate_url(url)?;
         let chosen = self.mutate(|data| {
             if data.feeds.iter().any(|stored| stored.feed.url == url) {
-                bail!("RSS feed is already followed: {url}");
+                bail!("RSS feed is already followed: {}", crate::public_text::feed_label(url));
             }
             let mut chosen = name.map(str::trim).filter(|name| !name.is_empty())
                 .map(str::to_owned).unwrap_or_else(|| host_name(url));
@@ -226,21 +228,28 @@ impl Store {
         let snapshots: Vec<StoredFeed> = self.load()?.feeds.into_iter()
             .filter(|stored| matches_path(&stored.feed.name, path)).collect();
         if snapshots.is_empty() && !path.is_empty() { bail!("RSS feed not found: {path}"); }
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+        // VPN-bound when network_interface is set; refused, never unbound, without it.
+        let http = crate::outbound::Http::new(ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(timeout_secs.max(1))))
-            .http_status_as_error(false).build().into();
+            .http_status_as_error(false).build(), "RSS refresh");
         let mut failures = Vec::new();
         for snapshot in snapshots {
             // Fetch outside the write lock. Mark-as-read calls during a slow
             // response are folded into the result rather than overwritten.
-            let fetched = fetch(&agent, &snapshot);
+            // Any failure, even an unexpected panic in a parser, is recorded
+            // with last_checked below so the feed is not refetched in a loop.
+            let fetched = match &http {
+                Ok(http) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fetch(http.agent(), &snapshot)))
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("feed could not be parsed"))),
+                Err(error) => Err(anyhow::anyhow!("{error:#}")),
+            };
             self.mutate(|data| {
                 let Some(stored) = data.feeds.iter_mut().find(|stored|
                     stored.feed.uid == snapshot.feed.uid && stored.feed.url == snapshot.feed.url)
                 else { return Ok(()); }; // subscription removed during fetch
                 stored.last_checked = now();
                 stored.feed.is_loading = false;
-                stored.error = fetched.as_ref().err().map(|e|format!("{e:#}")).unwrap_or_default();
+                stored.error = fetched.as_ref().err().map(|e|crate::public_text::message(&snapshot.feed.url, &format!("{e:#}"))).unwrap_or_default();
                 match &fetched {
                     Ok(Some(result)) => {
                         if !result.title.is_empty() { stored.feed.title = result.title.clone(); }
@@ -255,7 +264,7 @@ impl Store {
                 }
                 Ok(())
             })?;
-            if let Err(error) = fetched { failures.push(format!("{}: {error:#}", snapshot.feed.name)); }
+            if let Err(error) = fetched { failures.push(format!("{}: {}", snapshot.feed.name, crate::public_text::message(&snapshot.feed.url, &format!("{error:#}")))); }
         }
         if !failures.is_empty() { bail!("RSS refresh failed: {}", failures.join("; ")); }
         Ok(())
@@ -327,9 +336,9 @@ fn validate_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// The default feed name: the host only, never userinfo, port or query.
 fn host_name(url: &str) -> String {
-    url.split_once("://").map(|(_, rest)| rest.split('/').next().unwrap_or("").to_string())
-        .unwrap_or_default()
+    url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default()
 }
 
 pub(crate) fn stable_id(value: &str) -> String {
@@ -387,6 +396,8 @@ fn parse_feed(bytes: &[u8], base: &str) -> Result<Fetched> {
     loop {
         match reader.read_event().context("parsing RSS/Atom XML")? {
             Event::Start(start) => {
+                // Nested text is copied into every ancestor: bound the depth like Torznab.
+                if stack.len() >= MAX_DEPTH { bail!("feed XML exceeds the nesting limit"); }
                 let name = local_name(start.local_name().as_ref());
                 if stack.is_empty() { known_root = matches!(name.as_str(), "rss" | "feed" | "rdf"); }
                 if name == "item" || name == "entry" {
@@ -504,21 +515,6 @@ fn resolve_url(base: &str, value: &str) -> String {
     format!("{directory}/{value}")
 }
 
-/// RSS dates and Atom's RFC 3339 timestamps, without a second date dependency.
-fn parse_date(value: &str) -> i64 {
-    let value = value.trim();
-    if value.len() < 19 || value.as_bytes().get(4) != Some(&b'-') { return parse_rfc2822(value); }
-    let parse = |from: usize, to: usize| value.get(from..to).and_then(|v| v.parse::<i64>().ok());
-    let (Some(y), Some(m), Some(d), Some(h), Some(mi), Some(s)) =
-        (parse(0, 4), parse(5, 7), parse(8, 10), parse(11, 13), parse(14, 16), parse(17, 19)) else { return 0; };
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || h > 23 || mi > 59 || s > 60 { return 0; }
-    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let tail = value.get(19..).unwrap_or("");
-    let zone_start = tail.find(['+', '-']);
-    let zone = zone_start.map(|index| tail[index..].replace(':', "")).unwrap_or_else(|| "+0000".into());
-    parse_rfc2822(&format!("{d:02} {} {y:04} {h:02}:{mi:02}:{s:02} {zone}", months[(m - 1) as usize]))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,7 +580,7 @@ mod tests {
         let feed = parse_feed(xml.as_bytes(), "https://example.org/feed").unwrap();
         assert_eq!(feed.title, "Atom releases");
         assert_eq!(feed.articles[0].title, "Example & friends");
-        assert_eq!(feed.articles[0].ts, parse_rfc2822("09 Oct 2026 12:00:00 +0000"));
+        assert_eq!(feed.articles[0].ts, crate::feed_date::parse_rfc2822("09 Oct 2026 12:00:00 +0000"));
         assert_eq!(feed.articles[0].size, Some(321));
         assert_eq!(feed.articles[0].torrent_url, "https://example.org/1.torrent");
         assert_eq!(feed.articles[0].link, "https://example.org/release/1");
@@ -630,6 +626,14 @@ mod tests {
             merge_articles(&mut data.feeds[0], vec![RssArticle { id: "old".into(), title: "returning release".into(), ..RssArticle::default() }]); Ok(())
         }).unwrap();
         assert!(store.list().unwrap()[0].articles[0].is_read);
+    }
+
+    #[test]
+    fn deeply_nested_feeds_are_refused() {
+        let nested = |depth: usize| format!("<rss><channel>{}text{}</channel></rss>", "<x>".repeat(depth), "</x>".repeat(depth));
+        assert!(parse_feed(nested(60).as_bytes(), "https://example.org").is_ok());
+        let error = parse_feed(nested(100_000).as_bytes(), "https://example.org").err().unwrap();
+        assert!(format!("{error:#}").contains("nesting limit"));
     }
 
     #[test]
@@ -679,6 +683,60 @@ mod tests {
         worker.join().unwrap();
         assert!(headers.lock().unwrap()[1].to_ascii_lowercase().contains("if-none-match: \"version-1\""));
         assert_eq!(store.list().unwrap()[0].articles.len(), 2);
+    }
+
+    /// One HTTP response from a loopback server; true when a request arrived.
+    fn serve(body: String) -> (String, std::thread::JoinHandle<bool>) {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/rss", listener.local_addr().unwrap());
+        (url, std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while std::time::Instant::now() < deadline {
+                if let Ok((mut socket, _)) = listener.accept() {
+                    socket.set_nonblocking(false).unwrap();
+                    let _ = socket.read(&mut [0u8; 4096]);
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).unwrap();
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            false
+        }))
+    }
+
+    #[test]
+    fn hostile_pub_dates_refresh_instead_of_panicking_the_owner() {
+        // Byte-sliced zones ("+0é0") used to panic inside the daemon's RSS thread.
+        let items: String = ["+0é0", "-é000", "+00é", "+😀", "99999999999999999999"].iter().enumerate()
+            .map(|(i, zone)| format!("<item><guid>g{i}</guid><title>t{i}</title><link>magnet:?xt=urn:btih:{i:040}</link><pubDate>Fri, 09 Oct 2026 12:00:00 {zone}</pubDate></item>"))
+            .collect();
+        let (url, server) = serve(format!("<rss><channel><title>Hostile</title>{items}</channel></rss>"));
+        let (_scratch, store) = Scratch::store();
+        store.import(&[RssFeed { name: "Hostile".into(), url, ..RssFeed::default() }]).unwrap();
+        store.refresh("Hostile", 2).unwrap();
+        assert!(server.join().unwrap());
+        let snapshot = store.snapshot().unwrap().remove(0);
+        assert_eq!(snapshot.feed.articles.len(), 5);
+        assert!(snapshot.last_checked > 0 && snapshot.error.is_empty());
+        assert!(snapshot.feed.articles.iter().all(|a| a.ts == crate::feed_date::parse_rfc2822("09 Oct 2026 12:00:00 +0000")));
+    }
+
+    #[test]
+    fn failing_and_vpn_refused_refreshes_record_their_failure_and_check_time() {
+        let (_scratch, store) = Scratch::store();
+        store.import(&[RssFeed { name: "Offline".into(), url: "http://127.0.0.1:1/offline".into(), ..RssFeed::default() }]).unwrap();
+        assert!(store.refresh("Offline", 1).is_err());
+        let offline = store.snapshot().unwrap().remove(0);
+        assert!(offline.last_checked > 0 && !offline.error.is_empty() && offline.feed.has_error, "{}", offline.error);
+        // Under an unavailable VPN binding no request is sent, and the refusal is recorded.
+        let (url, server) = serve(RSS.into());
+        store.import(&[RssFeed { name: "Bound".into(), url, ..RssFeed::default() }]).unwrap();
+        assert!(crate::outbound::with_interface(Some("fbmissing0"), || store.refresh("Bound", 1)).is_err());
+        let bound = store.snapshot().unwrap().into_iter().find(|s| s.feed.name == "Bound").unwrap();
+        assert!(bound.last_checked > 0 && bound.error.contains("interface unavailable"), "{}", bound.error);
+        assert!(!server.join().unwrap(), "a refused refresh must not reach the feed host");
     }
 
     #[test]

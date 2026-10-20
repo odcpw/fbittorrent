@@ -22,10 +22,14 @@ ShellRoot {
       }}
   }
   Component.onCompleted: {
-    var s = session(), ladder = []
-    for (var i=0; i<7; i++) ladder.push(s.c.attempt())
-    check("backoff", JSON.stringify(ladder) === "[500,1000,2000,4000,8000,10000,10000]", "exact reconnect ladder", JSON.stringify(ladder))
-    console.log("FBTQS-PASS backoff")
+    var s = session(), i
+    s.c.attempt();s.c.attempt()
+    check("socket_wakeup",s.events.join(",")==="connect" && s.c.connecting,"one explicit wake makes one connection attempt",s.events)
+    s.c.disconnected();s.time.ms=60000;s.c.tick()
+    check("socket_wakeup",s.events.join(",")==="connect" && s.c.mode==="stopped","clock ticks never reconnect while waiting for socket appearance",s.events)
+    s.c.attempt()
+    check("socket_wakeup",s.events.join(",")==="connect,connect","a new socket/input wake retries immediately",s.events)
+    console.log("FBTQS-PASS socket_wakeup")
     s = session(); s.c.connected(); s.c.connected()
     check("bootstrap", s.writes.length === 1 && JSON.parse(s.writes[0]).args.client.kind === "bar", "bootstrap hello once, fixed bar identity", s.writes)
     check("bootstrap", s.events.join(",") === "write,flush", "every write immediately flushed and newline terminated", s.events)
@@ -189,9 +193,9 @@ ShellRoot {
     })
     console.log("FBTQS-PASS cleanup_progress")
     s=session();s.hello();s.c.disconnected()
-    check("reconnecting",s.c.reconnecting,"unexpected EOF retains reconnecting state",s.c.reconnecting)
-    for(i=0;i<6;i++)s.c.attempt()
-    check("reconnecting",!s.c.reconnecting,"reconnecting ends when backoff reaches its cap",s.c.retryDelay)
+    check("reconnecting",!s.c.reconnecting && s.c.mode==="stopped","unexpected EOF waits quietly for a socket/input edge",s.c.state())
+    s.c.attempt()
+    check("reconnecting",s.c.reconnecting && s.c.connecting,"socket appearance begins a real reconnect",s.c.state())
     s=session();s.hello();s.c.receive(JSON.stringify({ev:"bye",reason:"shutdown"}));s.c.disconnected()
     check("reconnecting",!s.c.reconnecting && !s.c.online,"bye is graceful and leaves the daemon offline",JSON.stringify(s.c.state()))
     console.log("FBTQS-PASS reconnecting")

@@ -7,7 +7,7 @@ fn summary_subscribers_observe_the_same_tick_and_each_new_tick() {
         row.staged = false;
         Sample {
             topics: BTreeSet::from([Topic::Summary]),
-            summary_cache: OnceCell::new(), history: vec![12, 34], stats: Value::Null,
+            failed: BTreeSet::new(), memo: Default::default(), history: vec![12, 34], stats: Value::Null,
             epoch: 1, state: "running".into(), rows: vec![row], completions: vec![],
             logs: json!([]), searches: BTreeMap::new(), files: BTreeMap::new(),
             peers: BTreeMap::new(), pieces: BTreeMap::new(), trackers: BTreeMap::new(),
@@ -74,7 +74,7 @@ fn rev_monotonic() {
     };
     let mut sample = Sample {
         topics: subscription.topics.iter().map(|t|t.topic.clone()).collect(),
-        summary_cache: OnceCell::new(),
+        failed: BTreeSet::new(),
         history:vec![],stats:json!({"history":{"download":[],"upload":[],"interval_s":1}}),
         epoch: 1,
         state: "starting".into(),
@@ -90,6 +90,7 @@ fn rev_monotonic() {
         shows:json!([]),show_releases:BTreeMap::new(),
         rss_feeds:json!([]),rss_items:BTreeMap::new(),
         daemon: json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),
+        memo: Default::default(),
     };
     subscription.update(&sample, &[], 1).unwrap();
     assert!(sink.take_frames().is_empty());
@@ -99,9 +100,8 @@ fn rev_monotonic() {
     sample.state = "running".into();
     let mut last = 0;
     for i in 0..100 {
-        // Each loop models a fresh sampler tick, with a changed observation.
-        sample.summary_cache.take();
         sample.network["message"] = json!(format!("observation {i}"));
+        sample.memo = Default::default();
         subscription.update(&sample, &[], 1).unwrap();
         for frame in sink.take_frames() {
             let rev = frame["rev"].as_u64().unwrap();
@@ -211,7 +211,7 @@ fn pieces_are_singleton_state_and_never_structural_updates() {
     let old=json!({"count":8,"piece_size":16384,"have":"AA==","priority":[0,7]});
     let new=json!({"count":8,"piece_size":16384,"have":"gA==","priority":[0,7]});
     assert_eq!(structural_projection(&topic,&old,&new),old);
-    let event=state_event(1,&topic,1,new).unwrap();
+    let event=state_event(1,&topic,1,&new).unwrap();
     use validation::Validate;
     event.validate().unwrap();
     assert!(matches!(event,Event::State {data:StateData::Pieces(_),..}));
@@ -224,15 +224,15 @@ fn pieces_missing_between_samples_does_not_postpone_the_deadline_and_restart_res
     let row=include_str!("../../../contracts/ipc/v1/torrents.ndjson").lines().filter_map(|line|serde_json::from_str::<Value>(line).ok())
         .find_map(|line|line.pointer("/frame/result/torrents/0").cloned()).unwrap();
     let mut row:Torrent=serde_json::from_value(row).unwrap();row.hash=hash.clone();
-    let mut sample=Sample {summary_cache:OnceCell::new(),topics:BTreeSet::from([topic.clone()]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({})};
+    let mut sample=Sample {topics:BTreeSet::from([topic.clone()]),failed:BTreeSet::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),rows:vec![row],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),network:json!({}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},daemon:json!({}),memo:Default::default()};
     let due=Instant::now()+Duration::from_secs(2);let sink=EventSink::testing();
     let hello:Value=serde_json::from_str(include_str!("../../../contracts/ipc/v1/pieces.ndjson").lines().nth(1).unwrap()).unwrap();
     sink.testing_negotiate(&serde_json::from_value(hello["frame"]["result"].clone()).unwrap());
-    let mut sub=Subscription {sub:1,sink:sink.clone(),rev:1,topics:vec![TopicState {topic,interval:Duration::from_secs(2),due,sent:Some(data.clone())}],since:None,epoch:Some((1,"running".into())),active:true};
+    let mut sub=Subscription {sub:1,sink:sink.clone(),rev:1,topics:vec![TopicState {topic,interval:Duration::from_secs(2),due,sent:Some(Arc::new(data.clone()))}],since:None,epoch:Some((1,"running".into())),active:true};
     for _ in 0..10 {sub.update(&sample,&[],1).unwrap();}
     assert_eq!(sub.topics[0].due,due);assert!(sink.take_frames().is_empty());
     sample.epoch=2;sub.update(&sample,&[],1).unwrap();assert!(sub.topics[0].sent.is_none());
-    sample.pieces.insert(hash.to_string(),data);sub.topics[0].due=Instant::now();
+    sample.pieces.insert(hash.to_string(),data);sample.memo=Default::default();sub.topics[0].due=Instant::now();
     sub.update(&sample,&[],1).unwrap();assert_eq!(sink.take_frames().len(),1,"new engine must republish even an identical bitfield");
 }
 
@@ -243,15 +243,15 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
         topics:vec![TopicState {topic:Topic::Stats,interval:Duration::from_secs(1),due:Instant::now(),sent:None}],
         since:None,epoch:None,active:true};
     // The worker collected its topic set before this subscription arrived.
-    let mut sample=Sample {summary_cache:OnceCell::new(),topics:BTreeSet::from([Topic::Stats]),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
+    let mut sample=Sample {topics:BTreeSet::from([Topic::Stats]),failed:BTreeSet::new(),trackers:BTreeMap::new(),history:vec![],stats:Value::Null,epoch:1,state:"running".into(),
         rows:vec![],completions:vec![],logs:json!([]),searches:BTreeMap::new(),files:BTreeMap::new(),peers:BTreeMap::new(),pieces:BTreeMap::new(),
         network:json!({"ready":true,"message":"ready"}),settings:json!({}),disk:Disk {needed_bytes:0,low:false,free_bytes:None},
         shows:json!([]),show_releases:BTreeMap::new(),rss_feeds:json!([]),rss_items:BTreeMap::new(),
-        daemon:json!({"state":"running","busy_reasons":[],"upgrade_pending":false})};
+        daemon:json!({"state":"running","busy_reasons":[],"upgrade_pending":false}),memo:Default::default()};
     subscription.update(&sample,&[],1).unwrap();
     assert!(sink.take_frames().is_empty());assert_eq!(subscription.rev,0);
     assert!(subscription.topics[0].sent.is_none() && subscription.topics[0].due>Instant::now());
-    sample.stats=json!({"history":{"download":[0],"upload":[0],"interval_s":1}});
+    sample.stats=json!({"history":{"download":[0],"upload":[0],"interval_s":1}});sample.memo=Default::default();
     subscription.update(&sample,&[],1).unwrap();
     let frames=sink.take_frames();assert_eq!(frames.len(),1);
     assert_eq!(frames[0]["ev"],"state");assert_eq!(frames[0]["rev"],1);
@@ -261,13 +261,13 @@ fn stats_subscription_waits_for_a_sample_of_its_new_topic() {
 
 fn sample_for(topics: &[Topic]) -> Sample {
     Sample {
-        summary_cache: OnceCell::new(),
-        topics: topics.iter().cloned().collect(), history: vec![], stats: Value::Null,
+        topics: topics.iter().cloned().collect(), failed: BTreeSet::new(), history: vec![], stats: Value::Null,
         epoch: 1, state: "running".into(), rows: vec![], completions: vec![], logs: json!([]),
         searches: BTreeMap::new(), files: BTreeMap::new(), peers: BTreeMap::new(),
         pieces: BTreeMap::new(), trackers: BTreeMap::new(), network: json!({}), settings: json!({}),
         disk: Disk {needed_bytes: 0, low: false, free_bytes: None}, shows: json!([]),
         show_releases: BTreeMap::new(), rss_feeds: json!([]), rss_items: BTreeMap::new(), daemon: json!({}),
+        memo: Default::default(),
     }
 }
 fn subscription_for(topic: Topic) -> Subscription {
@@ -309,6 +309,7 @@ fn late_files_subscription_cannot_erase_a_newer_read_with_an_uncollected_snapsho
     assert!(subscription.sink.take_frames().is_empty(), "a skipped sample cannot remove known files either");
     assert_eq!(subscription.rev, rev);
     fresh.files.insert(hash.to_string(), json!([]));
+    fresh.memo = Default::default();
     subscription.update(&fresh, &[], 1).unwrap();
     let frames = subscription.sink.take_frames();
     assert_eq!(frames[0]["removed"], json!([0,1,2]), "an actually sampled removal still arrives");
@@ -355,4 +356,68 @@ fn skipped_pieces_sample_still_invalidates_the_old_engine_bitfield() {
     sample.topics.insert(topic);
     subscription.update(&sample,&[],1).unwrap();
     assert_eq!(subscription.sink.take_frames()[0]["data"]["have"],"gA==","the new engine must republish even identical data");
+}
+
+#[test]
+fn a_failed_store_topic_is_local_and_keeps_the_subscription() {
+    // A corrupt shows.json fails only its own topic. Summary still reports the
+    // warning, rss.feeds still snapshots and the connection stays open.
+    let topics = [Topic::Summary, Topic::Shows, Topic::RssFeeds];
+    let mut subscription = Subscription {
+        sub: 1, sink: EventSink::testing_with_hello(), rev: 0,
+        topics: topics.iter().cloned().map(|topic| TopicState {topic, interval: Duration::from_secs(86400), due: Instant::now(), sent: None}).collect(),
+        since: None, epoch: None, active: true,
+    };
+    let mut sample = sample_for(&topics);
+    sample.network = json!({"ready":true,"message":"ready"});
+    sample.daemon = json!({"state":"running","busy_reasons":[],"upgrade_pending":false,
+        "warnings":[{"source":"shows","message":"parsing shows.json; existing history was preserved"}]});
+    sample.failed.insert(Topic::Shows);
+    for _ in 0..3 { subscription.update(&sample, &[], 1).unwrap(); }
+    let frames = subscription.sink.take_frames();
+    assert!(!subscription.sink.closed(), "a store failure never closes the shared connection");
+    let summary = frames.iter().find(|f| f["topic"] == "summary" && f["ev"] == "state").expect("summary delivered");
+    assert_eq!(summary["data"]["daemon"]["warnings"][0]["source"], "shows");
+    assert!(frames.iter().any(|f| f["topic"] == "rss.feeds" && f["ev"] == "snapshot.end"), "{frames:?}");
+    assert!(!frames.iter().any(|f| f["topic"] == "shows"), "unknown is not empty: {frames:?}");
+    let shows = subscription.topics.iter().find(|t| t.topic == Topic::Shows).unwrap();
+    assert!(shows.sent.is_none() && shows.due > Instant::now() + Duration::from_millis(800), "retry is bounded to once a second");
+    // Readable again: the pending topic receives its first snapshot.
+    sample.failed.clear();
+    sample.shows = json!([]);
+    sample.memo = Default::default();
+    subscription.topics.iter_mut().filter(|t| t.topic == Topic::Shows).for_each(|t| t.due = Instant::now());
+    subscription.update(&sample, &[], 1).unwrap();
+    let frames = subscription.sink.take_frames();
+    assert!(frames.iter().any(|f| f["topic"] == "shows" && f["ev"] == "snapshot.begin"), "{frames:?}");
+    // A later failure keeps the delivered value instead of erasing it.
+    sample.failed.insert(Topic::Shows);
+    let rev = subscription.rev;
+    subscription.update(&sample, &[], 1).unwrap();
+    assert!(subscription.sink.take_frames().is_empty());
+    assert_eq!(subscription.rev, rev);
+}
+
+#[test]
+fn each_topic_value_is_built_once_per_sample_and_shared_by_subscriptions() {
+    let topics = [Topic::Summary, Topic::Torrents];
+    let mut sample = sample_for(&topics);
+    sample.network = json!({"ready":true,"message":"ready"});
+    sample.daemon = json!({"state":"running","busy_reasons":[],"upgrade_pending":false});
+    let mut subscriptions: Vec<_> = (0..4).map(|_| Subscription {
+        sub: 1, sink: EventSink::testing_with_hello(), rev: 0,
+        topics: topics.iter().cloned().map(|topic| TopicState {topic, interval: Duration::from_secs(1), due: Instant::now(), sent: None}).collect(),
+        since: None, epoch: None, active: true,
+    }).collect();
+    for subscription in &mut subscriptions { subscription.update(&sample, &[], 1).unwrap(); }
+    assert_eq!(sample.memo.0.borrow().len(), topics.len(), "one value per topic, not per subscription");
+    for index in 0..topics.len() {
+        let first = subscriptions[0].topics[index].sent.clone().unwrap();
+        assert!(subscriptions.iter().all(|s| Arc::ptr_eq(s.topics[index].sent.as_ref().unwrap(), &first)),
+            "every subscription keeps the shared value, not a copy");
+    }
+    for subscription in &subscriptions {
+        let frames = subscription.sink.take_frames();
+        assert!(frames.iter().any(|f| f["topic"] == "summary") && frames.iter().any(|f| f["topic"] == "torrents" && f["ev"] == "snapshot.end"));
+    }
 }

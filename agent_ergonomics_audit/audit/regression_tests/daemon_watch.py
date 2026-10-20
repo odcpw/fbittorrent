@@ -35,7 +35,7 @@ def history(client):
     return list(events.values())
 
 @contextmanager
-def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override=None,prepared_prefix=0):
+def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override=None,prepared_prefix=0,payload_writer=None,stopped=False):
     binary=Path(binary).resolve()
     with (nullcontext(case_override) if case_override else d.Case('daemon',name)) as case,d.Sandbox() as box,d.Sandbox() as seedbox:
         notify.shims(box,action);notify.config(box,notify=True)
@@ -51,9 +51,12 @@ def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override
                     body=fixtures.bencode(dict(interval=1,peers=peers))
                     with fixtures.HttpFixture(seedbox.root,{'/announce':dict(base64=base64.b64encode(body).decode())}) as tracker:
                         payload=seedbox.downloads/('Fixture.'+extension)
-                        with payload.open('wb') as f:
-                            f.write(header() if extension=='mkv' else b'local iso fixture')
-                            while f.tell()<size:f.write(os.urandom(min(MIB,size-f.tell())))
+                        if payload_writer:
+                            payload_writer(case,seedbox,payload,size)
+                        else:
+                            with payload.open('wb') as f:
+                                f.write(header() if extension=='mkv' else b'local iso fixture')
+                                while f.tell()<size:f.write(os.urandom(min(MIB,size-f.tell())))
                         item=fixtures.torrent_fixture(seedbox.root,[payload],tracker=tracker.base+'/announce',piece_length=MIB)
                         peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(seedbox.downloads),seed=True))
                         seed.wait_for(lambda:((v:=row(peer,item.info_hash))['state']=='seeding',json.dumps(v)),'loopback seed verifies fixture payload')
@@ -64,7 +67,7 @@ def pair(name,binary,systemd,extension='mkv',size=64*MIB,action='',case_override
                             with payload.open('rb') as source,(box.downloads/payload.name).open('wb') as target:
                                 target.truncate(size);target.write(source.read(prepared_prefix))
                                 source.seek(-MIB,2);target.seek(-MIB,2);target.write(source.read())
-                        client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(box.downloads)))
+                        client.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(box.downloads),stopped=stopped))
                         yield case,box,h,p,client,peer,item,payload
             finally:
                 for owner,process in [(h,p),(seed,sp)]:
@@ -124,6 +127,8 @@ def playable_before_complete(binary,systemd):
                 fresh.call('torrents.start',dict(hashes=[item.info_hash]))
                 h.wait_for(lambda:(any(e['ev']=='torrent.playable' for e in history(fresh)),json.dumps(history(fresh))),'repair re-arms exactly one playable event after prefix loss',timeout=15)
                 events=history(fresh);case.check(sum(e['ev']=='torrent.playable' for e in events)==1,'prefix loss allows one new event in the restarted daemon',json.dumps(events))
+                h.wait_for(lambda:((v:=row(fresh,item.info_hash))['playable']['acked'],json.dumps(v)),
+                           'repair notification Open acknowledges the video before owned teardown',timeout=10)
         finally:
             if last.child.poll() is None:h.stop_serve(last)
 

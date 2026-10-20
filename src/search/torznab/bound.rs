@@ -1,4 +1,5 @@
-//! The existing interface guard also owns private-indexer DNS and HTTP sockets.
+//! The existing interface guard also owns private-indexer DNS and HTTP sockets,
+//! and (through `crate::outbound`) every other app-owned HTTP request.
 use super::*;
 use crate::native_runtime::{Handle, NativeRuntime};
 use anyhow::Context as _;
@@ -16,33 +17,37 @@ use ureq::{
     },
 };
 
-pub(super) struct Context {
+pub(crate) struct Context {
     runtime: NativeRuntime,
     binding: InterfaceBinding,
 }
 impl Context {
     pub(super) fn configured() -> Result<Option<Self>> {
-        let cfg = crate::config::Config::load()?;
+        Self::for_config(&crate::config::Config::load()?, "Torznab")
+    }
+    /// None without a VPN binding; an error (never an unbound fallback) when
+    /// the configured interface is unavailable.
+    pub(crate) fn for_config(cfg: &crate::config::Config, what: &str) -> Result<Option<Self>> {
         if cfg.network_interface.is_none() {
             return Ok(None);
         }
-        let network = crate::network_app::state(&cfg);
-        anyhow::ensure!(network.ready, "Torznab interface unavailable");
+        let network = crate::network_app::state(cfg);
+        anyhow::ensure!(network.ready, "{what} interface unavailable");
         let binding = InterfaceBinding::new(
             network
                 .interface
                 .as_deref()
-                .context("Torznab interface unavailable")?,
+                .with_context(|| format!("{what} interface unavailable"))?,
         )?;
         Ok(Some(Self {
             runtime: NativeRuntime::new()?,
             binding,
         }))
     }
-    pub(super) fn close(self) -> Result<()> {
+    pub(crate) fn close(self) -> Result<()> {
         self.runtime.shutdown_timeout(Duration::from_secs(2))
     }
-    pub(super) fn agent(&self, config: Config) -> ureq::Agent {
+    pub(crate) fn agent(&self, config: Config) -> ureq::Agent {
         let socket = Bound {
             runtime: self.runtime.handle(),
             binding: self.binding.clone(),

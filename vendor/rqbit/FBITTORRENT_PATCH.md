@@ -27,3 +27,24 @@ Test: `cargo test --locked -p librqbit-tracker-comms`;
 exercises real HTTP/UDP failures, unmodified announce credentials and captured traces;
 the application's `api::trackers` and engine alias-removal tests cover wire identities; `plugin/tests/tracker_privacy.py`
 checks real API/TUI/dashboard/popup and diagnostic output with synthetic secrets.
+
+
+# Remote-input hardening (security pass 2026-10-19)
+
+- `librqbit-bencode`: `BencodeDeserializer` counts list/dictionary nesting and
+  fails with `DepthLimitExceeded` above `MAX_DEPTH` (64). Ignored DHT
+  arguments, tracker bodies, peer extension messages and fetched .torrent files
+  all recursed once per level before, so a crafted datagram or body overflowed
+  a 2 MiB worker stack and aborted the daemon.
+- `librqbit` ut_metadata: a request for piece `total_pieces` (one past the end)
+  is refused instead of panicking in `Bytes::slice`; metadata data received
+  before an extended handshake or after completion is an error, not an unwrap.
+- `librqbit` magnet metadata: a peer's announced `metadata_size` must be
+  non-zero, and all peers share one 64 MiB in-flight allocation budget.
+- `librqbit` storage: the torrent-named subfolder the session derives under its
+  own folder is opened with `O_NOFOLLOW` through its parent, and only that
+  derived folder is removed by delete-with-files. A user-selected output folder
+  (including a single-file torrent's save path) is followed and never removed.
+
+Tests: `cargo test --locked -p librqbit-bencode -p librqbit-dht -p librqbit-tracker-comms nest`;
+`cargo test --locked -p librqbit --no-default-features --features rust-tls --lib -- metadata_piece derived_ budget_tests torrent_paths_cannot selected_folder_can`.

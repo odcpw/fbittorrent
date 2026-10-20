@@ -2,6 +2,31 @@ use super::*;
 use crate::engine::tests::{review_record, wire};
 
 #[test]
+fn missing_files_discards_live_estimates_in_shared_torrent_model() {
+    let record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
+    let mut view = TorrentView::unrestored(&record, None);
+    view.activity = Activity::Live;
+    view.state = TorrentState::Downloading;
+    view.checked = true;
+    view.progress = Some(0.25);
+    view.completed_bytes = Some(1024);
+    view.dl_bps = Some(4096);
+    view.ul_bps = Some(2048);
+    view.eta_s = Some(3);
+    view.files_missing();
+    let row = crate::api::ops::torrents::torrent(view.clone()).unwrap();
+    let wire = serde_json::to_value(row).unwrap();
+    assert_eq!(wire["state"], "error");
+    assert_eq!(wire["reason"], "missing_files");
+    assert_eq!(wire["checked"], false);
+    for key in ["progress", "completed_bytes", "completed_at", "dl_bps", "ul_bps", "eta_s"] {
+        assert!(wire.get(key).is_none(), "missing payload cannot retain {key}: {wire}");
+    }
+    assert_eq!(view.activity, Activity::Error);
+    // CLI and TUI now consume this same typed API row; no second serializer.
+}
+
+#[test]
 fn api_projection_keeps_owned_origin_and_unknown_observations() {
     let mut record = review_record(&"a".repeat(40), Path::new("/private-downloads"));
     record.display_name = Some("My display name".into());

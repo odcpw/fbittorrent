@@ -110,8 +110,9 @@ def namespace_case(name,binary):
             payload=seedbox.downloads/'disk-100MiB.bin'
             with payload.open('wb') as stream:
                 for _ in range(100):stream.write(os.urandom(MIB))
-            port=d.tomllib.loads((Path(seedbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml').read_text())['peer_port']
-            body=fixtures.bencode(dict(interval=1,peers=socket.inet_aton('127.0.0.1')+port.to_bytes(2,'big')))
+            # The seed binds :0 itself; advertise no peer until wait_engine has
+            # published its actual listener, rather than a permanently stale :0.
+            body=fixtures.bencode(dict(interval=1,peers=b''))
             http=stack.enter_context(fixtures.HttpFixture(seedbox.root,{'/announce':dict(base64=base64.b64encode(body).decode())}))
             item=fixtures.torrent_fixture(seedbox.root,[payload],tracker=http.base+'/announce')
             p=h.start_serve(idle_exit_secs=0);h.receive_ready();h.wait_engine()
@@ -126,6 +127,10 @@ def namespace_case(name,binary):
                 for _ in range(32):stream.write(b'F'*MIB)
                 stream.flush();os.fsync(stream.fileno())
             sp=seed.start_serve(idle_exit_secs=0);seed.receive_ready();seed.wait_engine()
+            port=d.tomllib.loads((Path(seedbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml').read_text())['peer_port']
+            case.check(port>0,'tracker advertises the ready seed listener',str(port))
+            body=fixtures.bencode(dict(interval=1,peers=socket.inet_aton('127.0.0.1')+port.to_bytes(2,'big')))
+            http.routes['/announce']=dict(base64=base64.b64encode(body).decode())
             peer=stack.enter_context(d.ApiConn(seed));peer.hello()
             peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(seedbox.downloads),seed=True))
             seed.wait_for(lambda:((row:=peer.call('torrents.get',dict(hash=item.info_hash))['result']['torrent'])['state']=='seeding',json.dumps(row)),'actual 100 MiB seed verifies its payload',timeout=20)

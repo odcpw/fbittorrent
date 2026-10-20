@@ -10,14 +10,27 @@ from daemon_bus import RevisionStream
 
 
 @contextmanager
-def owned(name, binary, systemd):
-    with d.api_owned(name, binary, systemd) as (case, sandbox, harness, process):
+def owned(name, binary, systemd, *, bound=False):
+    with d.Case('daemon', name) as case, d.Sandbox() as sandbox:
+        # These installed providers only print owned fixture rows. Nova cannot
+        # honour an interface binding; ordinary positive cases select no binding.
+        if not bound:
+            d.select_replay_interface(Path(sandbox.env['XDG_CONFIG_HOME']) / 'fbittorrent/config.toml', None)
         runtime = Path(sandbox.env['XDG_DATA_HOME']) / 'fbittorrent/nova3'
         engines = runtime / 'engines'
         engines.mkdir(parents=True, exist_ok=True)
         for provider in ('alpha', 'beta'):
             shutil.copyfile(Path(__file__).parent / 'fixtures/providers' / (provider+'.py'), engines / (provider+'.py'))
-        yield case, sandbox, harness, process, runtime
+        with d.Harness(case, binary, sandbox, systemd) as harness:
+            process = harness.start_serve()
+            if not (harness.receive_ready() and harness.wait_engine()):
+                raise RuntimeError('owned search fixture did not start')
+            try:
+                yield case, sandbox, harness, process, runtime
+            finally:
+                if process.child.poll() is None:
+                    harness.stop_serve(process)
+                harness.lock_free()
 
 
 def start(client, query='hold', providers=None):
@@ -76,12 +89,20 @@ def wait_groups(harness, runtime):
 
 
 def search_dedupe_and_repair(binary, systemd):
-    with owned('search_dedupe_and_repair', binary, systemd) as (case, sandbox, h, process, runtime), d.ApiConn(h) as client:
+    with owned('search_dedupe_and_repair', binary, systemd, bound=True) as (case, sandbox, h, process, runtime), d.ApiConn(h) as client:
         hello = client.hello()['result']
         case.check('search' in hello['caps'], 'search capability is negotiated', json.dumps(hello))
         providers = client.call('search.providers')['result']['providers']
         case.check({p['name'] for p in providers} == {'alpha', 'beta'} and all(p['kind'] == 'nova' for p in providers),
                    'the daemon inspects both real local Nova scripts', json.dumps(providers))
+        refused = client.call('search.start', dict(query='hold-refused'), error='upstream')
+        case.check('VPN binding' in refused['error']['message'] and not groups(runtime)
+                   and not (runtime / 'alpha-raw.txt').exists(),
+                   'an interface binding refuses Nova before either fixture provider runs', json.dumps(refused))
+        client.call('app.settings.set', dict(network_interface=None))
+        h.wait_for(lambda: ((info := client.call('app.info')['result'])['state'] == 'running'
+                            and info['engine_epoch'] > hello['engine_epoch'], json.dumps(info)),
+                   'the same owner restarts with the explicitly unbound local-provider configuration')
         identifier = start(client, 'Sintel')
         observed = []
         def merged():

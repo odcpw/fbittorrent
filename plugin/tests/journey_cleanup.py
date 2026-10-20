@@ -28,6 +28,20 @@ def run(binary):
                 q=JourneySession(case,box)
                 def view():return q.state().get('view') or {}
                 def press(keys,predicate):return q.keys(keys,predicate)
+                def rendered_matches(expected):
+                    actual=json.loads(q.ipc('renderedRows'))
+                    if len(actual)!=len(expected):return False
+                    for hash,name in expected.items():
+                        same=[row for row in actual if row.get('hash')==hash]
+                        if len(same)!=1 or name not in same[0]['texts']:return False
+                        if any(other!=name and other in same[0]['texts'] for other in expected.values()):return False
+                    return True
+                def check_names(label,expected):
+                    try:q.wait(lambda:rendered_matches(expected));ok=True
+                    except TimeoutError:ok=False
+                    case.check(ok,label,json.dumps(dict(expected=expected,rendered=json.loads(q.ipc('renderedRows')))))
+                expected={t.info_hash:t.info['name'].decode() if isinstance(t.info['name'],bytes) else t.info['name'] for t,_,_ in prepared}
+
                 def intact():return all(p.exists() and hashlib.sha256(p.read_bytes()).hexdigest()==digest for _,p,digest in prepared) and sentinel.read_text()=='Never remove files outside the torrent'
                 q.wait(lambda:q.ipc('ready')=='true');q.shell('summon',json.dumps(dict(view='torrents',hash=prepared[0][0].info_hash)))
                 q.wait(lambda:view().get('rows')==len(prepared) and view().get('cursor')==prepared[0][0].info_hash)
@@ -40,6 +54,7 @@ def run(binary):
                 case.check(intact(),'Remove keeps the watched film on disk and exposes a confirmed Undo','all file digests retained')
                 press(['U'],lambda:hashes()==wanted)
                 case.check(intact(),'Undo restores the single torrent without changing payloads','same hashes and bytes')
+                check_names('single Undo renders each restored hash with its own name, without reopening or sorting',expected)
                 press(['/Watched','-k','Return'],lambda:view().get('query')=='Watched' and view().get('focus')=='table')
                 press(['-M','ctrl','a','-m','ctrl'],lambda:len(view().get('selection',[]))==2)
                 press(['d'],lambda:(view().get('dialog') or {}).get('kind')=='remove')
@@ -48,6 +63,7 @@ def run(binary):
                 case.check(intact(),'filtered selection removes only the two matching records and keeps every file',str(hashes()))
                 press(['U'],lambda:hashes()==wanted)
                 case.check(intact(),'one Undo restores every record from the filtered removal','all three records returned')
+                check_names('bulk Undo renders both restored hashes with their distinct names in the active filter',{hash:name for hash,name in expected.items() if name.startswith('Watched')})
                 # Delete uses a separate, explicit dialog and remains cancel-first.
                 q.shell('summon',json.dumps(dict(view='torrents',hash=prepared[0][0].info_hash)))
                 press(['-k','Escape'],lambda:view().get('query')=='')

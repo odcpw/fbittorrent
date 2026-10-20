@@ -190,8 +190,8 @@
         let entry = pending.get_mut(&bad.hash).unwrap();
         let failed_outcome = std::mem::replace(&mut entry.outcome, RestoreOutcome::Checking);
         drop(pending);
-        assert_eq!(dispatcher.inner.unrestored_view(&bad).state, view::TorrentState::Checking);
-        assert_eq!(dispatcher.inner.unrestored_view(&bad).error, failed.error);
+        assert_eq!(dispatcher.inner.unrestored_view(&bad, true).state, view::TorrentState::Checking);
+        assert_eq!(dispatcher.inner.unrestored_view(&bad, true).error, failed.error);
         dispatcher.inner.restores.lock().unwrap().get_mut(&bad.hash).unwrap().outcome = failed_outcome;
 
         // A retry may spend another 90 seconds resolving metadata. Keep the

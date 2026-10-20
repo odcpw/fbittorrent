@@ -288,6 +288,7 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
                 } else {
                     target.as_path()
                 };
+                crate::public_text::openable_payload(path)?;
                 run_action(shared, Command::new("xdg-open").arg(path))?;
             }
         }

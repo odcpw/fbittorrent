@@ -4,7 +4,9 @@ use std::{collections::BTreeSet,os::unix::fs::MetadataExt,sync::{Arc,Weak,Mutex,
 use anyhow::Result;
 use serde_json::json;
 pub(crate) type Stamp=(u64,u64,i64,i64);
-#[derive(Default)] struct Cache {stamp:Option<Stamp>,loaded:bool,rows:Arc<Vec<shows::Show>>}
+// A failed load is cached under its stamp: an unchanged broken file is neither
+// reread nor re-logged, and other sampled topics never inherit its failure.
+#[derive(Default)] struct Cache {stamp:Option<Stamp>,loaded:bool,rows:Arc<Vec<shows::Show>>,failure:Option<(Option<Stamp>,String)>}
 #[derive(Default)] struct State {requested:bool,clients:BTreeSet<u64>,checking:BTreeSet<String>}
 #[derive(Default)] struct Shared {state:Mutex<State>,changed:Condvar,check:Mutex<()>,stopped:AtomicBool,bus:Mutex<Weak<api::bus::Bus>>}
 pub(crate) struct Service {
@@ -69,8 +71,23 @@ impl Service {
     pub fn stamp(&self)->Option<Stamp>{std::fs::metadata(shows::path()).ok().map(|m|(m.ino(),m.len(),m.mtime(),m.mtime_nsec()))}
     pub fn snapshot(&self)->Result<Arc<Vec<shows::Show>>>{
         let mut cache=self.cache.lock().unwrap();let stamp=self.stamp();
-        if !cache.loaded||cache.stamp!=stamp{cache.rows=Arc::new(Shows::load()?.shows);cache.stamp=stamp;cache.loaded=true;}
+        if let Some((failed,message))=&cache.failure {if *failed==stamp {anyhow::bail!("{message}");}}
+        if !cache.loaded||cache.stamp!=stamp{
+            match Shows::load() {
+                Ok(all)=>{cache.rows=Arc::new(all.shows);cache.stamp=stamp;cache.loaded=true;cache.failure=None;}
+                Err(error)=>{
+                    let message=format!("{error:#}");
+                    eprintln!("WARN shows store unreadable message={message:?}");
+                    cache.failure=Some((stamp,message));return Err(error);
+                }
+            }
+        }
         Ok(cache.rows.clone())
+    }
+    /// The recorded load failure while the same broken file remains in place.
+    pub fn problem(&self)->Option<String>{
+        let cache=self.cache.lock().unwrap();
+        cache.failure.as_ref().filter(|(failed,_)|*failed==self.stamp()).map(|(_,message)|message.clone())
     }
     pub fn list(&self)->Result<Vec<api::Show>>{
         let rows=self.snapshot()?;let state=self.shared.state.lock().unwrap();

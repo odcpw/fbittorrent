@@ -13,6 +13,7 @@ pub(crate) mod shows;
 pub(crate) mod staged_sources;
 pub(crate) mod watch;
 pub(crate) mod history;
+pub(crate) mod config_cache;
 pub(crate) mod stats;
 mod upgrade;
 mod test_ready;
@@ -43,6 +44,8 @@ pub struct Daemon {
     pub launcher: &'static str,
     pub(crate) policy: Arc<Mutex<policy::Policy>>,
     pub(crate) settings: crate::api::ops::settings::Service,
+    /// Last valid config.toml for the sampler and engine restarts.
+    pub(crate) config: config_cache::ConfigCache,
     pub no_notify: bool,
     pub(crate) upgrade_pending: AtomicBool,
     pub(crate) notifier: notify::Notifier,
@@ -56,7 +59,7 @@ pub struct Daemon {
     pub(crate) shows: shows::Service,
     pub(crate) staged_sources: staged_sources::Registry,
     pub(crate) peers: crate::api::peers::Sampler,
-    pub(crate) history: Mutex<history::History>,
+    pub(crate) history: Arc<Mutex<history::History>>,
     pub(crate) stats: Mutex<stats::Stats>,
     pub(crate) disk: Mutex<supervisor::DiskMonitor>,
     pub(crate) imdb: crate::imdb::service::Service,
@@ -197,7 +200,8 @@ impl Daemon {
         let (epoch,state)=(slot.engine_epoch,slot.slot.state().name());
         drop(slot);
         // Record transitions at their source: a fast restart can finish between sampler ticks.
-        if initialized {if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){bus.engine_changed(epoch,state);}}
+        // The sampler waits up to a second; the first slot also wakes it.
+        if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){if initialized {bus.engine_changed(epoch,state);} else {bus.refresh();}}
         if let Slot::Running(app)=&mut old {
             app.drain(Duration::from_secs(4));
             self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
@@ -224,7 +228,7 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
         eprintln!("INFO network {}", network.message);
         daemon.replace(Slot::Parked(engine::ParkedLedger::new(
             crate::config::data_dir().join("engine"),
-        ).with_undo(daemon.undo.clone())))?;
+        ).with_network(network.clone()).with_undo(daemon.undo.clone())))?;
     } else {
         let mut engine_cfg = cfg.clone();
         engine_cfg.network_interface = network.interface.clone();
@@ -238,6 +242,10 @@ fn open_slot(daemon: &Daemon, cfg: &Config, lock: Arc<ipc::InstanceLock>) -> Res
                 Err(error) => return Err(error),
             };
         engine.dispatcher().attach_undo(daemon.undo.clone());
+        let history = daemon.history.clone();
+        engine.dispatcher().attach_rates(Arc::new(move |download, upload| {
+            history.lock().unwrap().record_tick(Instant::now(), download, upload);
+        }));
         eprintln!(
             "INFO engine session exists restores={}",
             engine.dispatcher().restore_outcomes().len()
@@ -265,22 +273,8 @@ fn supervise(
     open_slot(daemon, &cfg, lock.clone())?;
     notify.send("STATUS=Engine ready")?;
     loop {
-        if let Ok(engine::ops::EngineResult::Torrents(rows)) = daemon.execute(engine::ops::EngineOp::Info) {
-            let (retries, notify) = daemon.disk.lock().unwrap().sample(&rows, Instant::now());
-            if notify { daemon.notifier.disk_low(); }
-            for (hash, free) in retries {
-                let result = match &daemon.slot.read().unwrap().slot {
-                    Slot::Running(app) => app.dispatcher().retry_disk_full(&hash),
-                    _ => Ok(false),
-                };
-                // Consume this rise even when the attempt fails; the next
-                // ENOSPC observation records a fresh baseline for another rise.
-                daemon.disk.lock().unwrap().restarted(&hash);
-                if result.as_ref().is_ok_and(|retry| *retry) {
-                    eprintln!("INFO engine disk_full_recovered hash={hash} free_bytes={free}");
-                } else if let Err(error) = result { eprintln!("ERROR engine disk_full retry failed hash={hash} message={:?}",format!("{error:#}")); }
-            }
-        }
+        // Disk sampling rides on the bus observation (api/bus/sample.rs),
+        // which already holds every row; see DiskMonitor::sample.
         let timeout = {
             let mut policy = daemon.policy.lock().unwrap();
             let now = Instant::now();
@@ -303,7 +297,9 @@ fn supervise(
             Some(LifecycleRequest::Restart(reason)) => {
                 eprintln!("INFO daemon restarting engine reason={reason:?}");
                 drop(daemon.replace(Slot::Starting)?);
-                cfg = Config::load()?;
+                // A broken edit must not end the owner: restart with the last
+                // valid settings; the sampler reports the unreadable file.
+                cfg = daemon.config.config();
                 if daemon.no_notify {
                     cfg.notify = false;
                 }
@@ -363,6 +359,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         },
         policy: Arc::new(Mutex::new(policy::Policy::new(cfg.idle_exit_secs, idle_exit_secs, Instant::now()))),
         settings: Default::default(),
+        config: config_cache::ConfigCache::new(cfg.clone()),
         no_notify,
         upgrade_pending: AtomicBool::new(false),
         notifier: notify::Notifier::new(cfg.notify)?,

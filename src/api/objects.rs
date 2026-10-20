@@ -236,6 +236,17 @@ pub struct SummaryDaemon {
     pub upgrade_pending: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_exit_in_s: Option<u64>,
+    /// Unreadable local files the owner is working around (config keeps its
+    /// last valid settings; shows/rss topics keep their last snapshot).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<DaemonWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DaemonWarning {
+    /// "config", "shows" or "rss".
+    pub source: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
