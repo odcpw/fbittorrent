@@ -13,6 +13,7 @@ import time
 import urllib.request
 
 seed = Path(sys.argv[1]).resolve()
+rate = int(sys.argv[2]) if len(sys.argv) > 2 else 0
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]/"agent_ergonomics_audit/audit/regression_tests"))
 from fixtures import Sandbox
 from process_cleanup import ProcessRun
@@ -39,7 +40,7 @@ with Sandbox() as sandbox:
     payload = sandbox.root/"expected.bin"
     subprocess.run([seed,"write","--file",payload,"--size","262144","--key","42"],check=True,env=sandbox.env,cwd=sandbox.root)
     ready = sandbox.root/"ready.json"
-    child = subprocess.Popen([seed,"serve","--torrents",directory,"--peers","4","--tracker-port","0","--ready",ready],
+    child = subprocess.Popen([seed,"serve","--torrents",directory,"--peers","4","--tracker-port","0","--ready",ready,"--rate",str(rate)],
                              env=sandbox.env,cwd=sandbox.root,start_new_session=True)
     connections = []
     try:
@@ -60,8 +61,11 @@ with Sandbox() as sandbox:
         assert len(set(identities))==4, "seed identities must be distinct"
         connection=connections[0]
         got=bytearray()
+        # Queue a complete piece at once. A throttled peer must deliver blocks
+        # steadily even when the request buffer is full, not sleep for a burst.
+        connection.sendall(b"".join(struct.pack("!IBIII",13,6,0,offset,16384)
+                                   for offset in range(0,262144,16384)))
         for offset in range(0,262144,16384):
-            connection.sendall(struct.pack("!IBIII",13,6,0,offset,16384))
             while True:
                 length=struct.unpack("!I",exact(connection,4))[0]
                 message=exact(connection,length)
