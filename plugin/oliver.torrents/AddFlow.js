@@ -1,11 +1,12 @@
 .pragma library
 .import "AddSource.js" as Source
 .import "Model.js" as Model
-function create(service,changed,debug) {
+function create(service,changed,debug,clock) {
+  var now=clock || Date.now
   var f={},epoch=0,trace=[],s={},filesRequested=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
   function publish(){changed()}
   function record(kind,op,data){if(debug){trace.push({kind:kind,op:op,data:data});if(trace.length>32)trace.shift()}}
-  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
+  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,created:now(),elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
   reset()
   function requiredBytes(){
     if(s.files.length)return s.files.reduce(function(total,row){return total+(s.included[row.index] ? row.size : 0)},0)
@@ -23,14 +24,14 @@ function create(service,changed,debug) {
       s.space={supported:true,path:path,pending:false,writable:result ? result.writable : false}
       if(result && result.free_bytes!==undefined)s.space.free_bytes=result.free_bytes
       if(failure)s.space.message=failure.message
-      else if(!s.space.writable)s.space.message="Folder is not writable"
+      else if(!s.space.writable)s.space.message=result.message || "Cannot write to this folder. Choose another download folder."
       publish();if(s.commitRequested)f.commit()
     }})
     publish()
   }
   function scheduleSpace(immediate){
     if(service.client.caps.indexOf("free_space")<0)return
-    spaceSerial++;s.space={supported:true,path:s.savePath,pending:true};spaceDue=service.now+250
+    spaceSerial++;s.space={supported:true,path:s.savePath,pending:true};spaceDue=now()+250
     if(immediate)checkSpace()
   }
   function busy(){return ["staging","committing","discarding","cancel_wait","keeping"].indexOf(s.phase)>=0}
@@ -119,7 +120,7 @@ function create(service,changed,debug) {
     settings(options)
     if(!source){publish();return true}
     var parsed=Source.normalize(source)
-    if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}
+    if(!parsed){error(Source.invalidMessage(source && (source.magnet || source.url || source.path)));return false}
     s.source=parsed.source;s.hash=parsed.hash;s.name=Model.sourceName(s.source)
     var existing=s.hash && service.store.torrents[s.hash]
     if(existing){if(existing.staged){adoptStage(existing);return true}s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
@@ -143,7 +144,7 @@ function create(service,changed,debug) {
     s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
     send(op,Object.assign({},args,{stage:true,seed:false}),s.origin,staged);publish();return true
   }
-  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
+  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error(Source.invalidMessage(text));return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
     if(s.visible)return false
     epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.owned=true
@@ -185,11 +186,15 @@ function create(service,changed,debug) {
   // Retire this connection's review and callbacks locally. A reconnect may
   // expose a surviving stage for an explicit new review; never commit here.
   f.disconnected=function(){close()}
+  f.nextWakeup=function(){
+    if(!s.visible)return Infinity
+    return Math.min(spaceDue || Infinity,s.phase==="resolving" ? s.created+90000 : Infinity)
+  }
   f.tick=function(){
     if(!s.visible)return
     if(s.phase==="connecting" && service.online)stageSource()
-    if(spaceDue && service.now>=spaceDue)checkSpace()
-    s.elapsed_s=Math.max(0,Math.floor((service.now-s.created)/1000))
+    if(spaceDue && now()>=spaceDue)checkSpace()
+    s.elapsed_s=Math.max(0,Math.floor((now()-s.created)/1000))
     if(s.phase==="resolving" && s.elapsed_s>=90)s.phase="metadata_timeout"
     publish()
   }

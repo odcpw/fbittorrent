@@ -15,6 +15,7 @@ ColumnLayout {
   readonly property var state:({cap:capField.value,effective:effectiveField.value,status:status})
   Layout.fillWidth:true
   RowLayout {
+    Ui.Button {objectName:"torrent-retry";visible:root.torrent.state==="error";text:"Retry (p)";enabled:!root.busy;onClicked:root.service.resume(root.torrent.hash)}
     Ui.Button {visible:root.service.hasCap("move");text:"Move… (m)";enabled:!root.busy;onClicked:root.flow.open(root.torrent.hash,"move")}
     Ui.Button {text:"Refresh status";onClicked:root.flow.refresh(root.torrent.hash)}
   }

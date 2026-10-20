@@ -12,7 +12,7 @@ function isActive(t) {
   return !t.staged && isActiveState(t.state)
 }
 function isStopped(t) {
-  return !t.staged && ["paused", "done"].indexOf(t.state) >= 0
+  return !t.staged && ["paused", "done", "error"].indexOf(t.state) >= 0
 }
 function isDone(t) { return !t.staged && (t.state === "done" || t.state === "seeding") }
 
@@ -96,3 +96,10 @@ function when(value,now) {return Formats.when(value,now)}
 function ago(value,now) {return Formats.ago(value,now)}
 function dim(fg,bg) {return Palette.dim(fg,bg)}
 function accentText(accent,bg,fg) {return Palette.accentText(accent,bg,fg)}
+
+function problem(row){
+  if(row.error)return row.error
+  if(row.reason==="metadata_timeout" || row.state==="metadata" || (row.staged && row.size===undefined))return "No peers have supplied the file list yet. Check Trackers, retry later or try another source."
+  if(row.state==="stalled")return "No peers are sending data. Check Trackers, retry later or try another source."
+  return ""
+}

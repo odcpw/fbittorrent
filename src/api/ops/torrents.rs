@@ -55,8 +55,8 @@ pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
         save_path: view.save_path,
         added_at: unsigned(view.added_at)?,
         force: view.force,
+        error: crate::user_messages::torrent_error(view.reason.as_deref(),view.error.as_deref()),
         reason: view.reason,
-        error: view.error,
         progress: view.progress.filter(|v| v.is_finite()),
         size: view.size,
         completed_bytes: view.completed_bytes,
@@ -137,21 +137,21 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
         .map_err(|_| {
             error(
                 ErrorCode::InvalidArgs,
-                "torrent path must be an accessible regular file without symlinks",
+                crate::user_messages::UNREADABLE_TORRENT,
                 Some("source.path"),
             )
         })?;
     let metadata = file.metadata().map_err(|_| {
         error(
             ErrorCode::InvalidArgs,
-            "cannot inspect torrent path",
+            crate::user_messages::UNREADABLE_TORRENT,
             Some("source.path"),
         )
     })?;
     if !metadata.is_file() || metadata.len() > 16 * 1024 * 1024 {
         return Err(error(
             ErrorCode::InvalidArgs,
-            "torrent must be a regular file at most 16 MiB",
+            "Choose a regular .torrent file smaller than 16 MiB.",
             Some("source.path"),
         ));
     }
@@ -162,7 +162,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
         .map_err(|_| {
             error(
                 ErrorCode::InvalidArgs,
-                "cannot read torrent file",
+                crate::user_messages::UNREADABLE_TORRENT,
                 Some("source.path"),
             )
         })?;
@@ -172,7 +172,7 @@ fn read_torrent(path: &str) -> ApiResult<(String, Vec<u8>)> {
     {
         return Err(error(
             ErrorCode::InvalidArgs,
-            "torrent must be valid bencoded metainfo at most 16 MiB",
+            crate::user_messages::INVALID_TORRENT,
             Some("source.path"),
         ));
     }
@@ -193,6 +193,8 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
                 return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
             }
+            let folder=if let Some(path)=&args.save_path {path.clone()}else{let EngineResult::Detail(detail)=execute(daemon,EngineOp::Get {hash:args.hash.to_string()})? else {unreachable!()};detail.torrent.save_path};
+            crate::free_space::require_writable(&folder).map_err(engine_error)?;
             if let Some(indices)=&args.files {
                 let entries=files(daemon,&args.hash)?;
                 if indices.iter().any(|index|*index>=entries.len() as u64) {return Err(error(InvalidArgs,"file index is out of range",Some("files")));}
@@ -344,7 +346,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 }
                 AddSource::Magnet(source) => {
                     let mut source = url::Url::parse(source)
-                        .map_err(|_| error(InvalidArgs, "invalid magnet", Some("source.magnet")))?;
+                        .map_err(|_| error(InvalidArgs, crate::user_messages::INVALID_MAGNET, Some("source.magnet")))?;
                     if let Some(files) = &args.files {
                         source.query_pairs_mut().append_pair(
                             "so",
@@ -369,12 +371,12 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                         ));
                     }
                     let parsed = librqbit::Magnet::parse(source.as_str()).map_err(|_| {
-                        error(InvalidArgs, "invalid v1 magnet", Some("source.magnet"))
+                        error(InvalidArgs, crate::user_messages::INVALID_MAGNET, Some("source.magnet"))
                     })?;
                     if parsed.as_id20().is_none() {
                         return Err(error(
                             Unsupported,
-                            "a v1 magnet hash is required",
+                            crate::user_messages::INVALID_MAGNET,
                             Some("source.magnet"),
                         ));
                     }
@@ -402,6 +404,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 }
                 Some(indices.into_iter().map(|index| index as usize).collect())
             } else { None };
+            if args.stage!=Some(true) {crate::free_space::require_writable(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)).map_err(engine_error)?;}
             let disk = add.torrent.as_ref().and_then(|(_,bytes)| crate::daemon::supervisor::add_warning(Path::new(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)),bytes,selected.as_deref()));
             let EngineResult::Added(mut added) = execute(
                 daemon,

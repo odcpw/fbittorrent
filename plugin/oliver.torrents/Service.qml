@@ -197,6 +197,7 @@ Item {
 
 
   function syncClient(c) {
+    clock.schedule()
     if(c.online || c.graceful || c.protocolMismatch)socket.endRecovery()
     if(c.online)socket.wasOnline=true
     var connectionReset=status.ok!==c.online || instance!==c.instance
@@ -206,6 +207,7 @@ Item {
     }
     clientReconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
+    if(c.protocolMismatch){startupRequested=false;actionStatus="";startupTimer.stop()}
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
@@ -323,6 +325,7 @@ Item {
     focusRetry.restart()
   }
   function startDaemon() {
+    if(client && client.protocolMismatch)return
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
     Quickshell.execDetached([bin,"up"])
@@ -361,7 +364,7 @@ Item {
   function clipboardSource(text,allowDuplicate) {
     var parsed=AddSource.parse(text),source=parsed ? parsed.source : null,hash=parsed ? parsed.hash : ""
     if (hash && store.torrents[hash] && !allowDuplicate) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
-    if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
+    if (!source) { actionStatus = AddSource.invalidMessage(text); noticeTimer.restart() }
     return source
   }
   onQuickVisibleChanged:if(client){if(quickVisible)checkSocket(true);client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}
@@ -427,7 +430,8 @@ Item {
   ApiSocket {id:socket;service:root;retry:socketRetry;handshake:socketHello}
   Timer {id:socketRetry;interval:socket.delay;onTriggered:socket.retryExpired()}
   Timer {id:socketHello;interval:5000;onTriggered:socket.helloExpired()}
-  Timer { interval: 1000; repeat: true; running: !!root.client && (socket.connected || root.busy || root.startupRequested); onTriggered: { root.now=Date.now();root.client.tick(); root.syncRows();if(root.addFlow)root.addFlow.tick();if(root.settingsFlow)root.settingsFlow.tick() } }
+  Timer {id:deadline;property real at:Infinity;onTriggered:clock.wake()}
+  ServiceClock {id:clock;service:root;timer:deadline}
   Timer { id:focusRetry;interval:50;onTriggered:root.advanceWindowFocus() }
   Timer { id: startupTimer; interval: 20000; onTriggered: {root.startupRequested=false;root.actionStatus="fbittorrent did not start; inspect the daemon log"} }
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }

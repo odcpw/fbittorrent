@@ -11,7 +11,9 @@ pub(super) fn label(id: &str, default: &str, app: &TuiApp) -> Option<String> {
                 if app.complete_no_seed(torrent) {
                     return None;
                 }
-                if app.torrent_paused(torrent) {
+                if torrent.state==crate::api::TorrentState::Error {
+                    "Retry"
+                } else if app.torrent_paused(torrent) {
                     "Resume"
                 } else {
                     "Pause"

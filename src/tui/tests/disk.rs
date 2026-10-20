@@ -89,7 +89,8 @@ fn disk_warning_has_priority_and_unknown_space_never_claims_zero() {
         row.error = None;
         row.state = crate::api::TorrentState::Downloading;
     }
-    assert_eq!(app.priority_banner().as_deref(), Some("VPN missing"));
+    let banner=app.priority_banner().unwrap();
+    assert!(banner.starts_with("VPN missing") && banner.contains("Settings"),"VPN warning keeps priority and explains how to fix it: {banner}");
     app.store.network.as_mut().unwrap().ready = true;
     assert_eq!(
         app.priority_banner().as_deref(),
