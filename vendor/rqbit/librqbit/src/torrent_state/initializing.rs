@@ -16,11 +16,12 @@ use crate::{
     api::TorrentIdOrHash,
     bitv::BitV,
     chunk_tracker::{compute_selected_pieces, ChunkTracker},
-    file_ops::FileOps,
     type_aliases::FileStorage,
 };
 
 use super::{paused::TorrentStatePaused, ManagedTorrentShared, TorrentMetadata};
+
+mod verify;
 
 pub struct TorrentStateInitializing {
     pub(crate) files: FileStorage,
@@ -136,29 +137,7 @@ impl TorrentStateInitializing {
         } else {
             info!("Doing initial checksum validation, this might take a while...");
             self.checked_bytes.store(0, Ordering::Relaxed);
-            let operation = self.clone();
-            let operation_cx = cx.clone();
-            self.blocking_operation_running
-                .store(true, Ordering::Release);
-            let work_guard = BlockingCheckGuard(self.clone());
-            let have_pieces = self
-                .shared
-                .spawner
-                .run(cx, move || {
-                    let _guard = work_guard;
-                    FileOps::new(
-                        &operation.metadata.info,
-                        &operation.files,
-                        &operation.metadata.file_infos,
-                    )
-                    .initial_check(
-                        &operation_cx,
-                        &operation.checked_bytes,
-                        &operation.pause_requested,
-                    )
-                })
-                .await??;
-            have_pieces
+            verify::check(self.clone(), cx).await?
         };
         cx.checkpoint()?;
         anyhow::ensure!(!self.is_pause_requested(), "initial check paused");

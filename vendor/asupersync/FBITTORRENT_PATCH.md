@@ -167,3 +167,24 @@ detached and cancellation/region close semantics are unchanged. Application
 regression: `native_runtime::tests::more_than_one_thousand_owned_regions_admit_and_close`
 opens and closes 1,100 regions on the actual native runtime. The loopback engine
 benchmark additionally requires verified progress from all 500 active torrents.
+
+## Atomic child-region wake registration (2026-10-20)
+
+`src/runtime/spawn_mailbox.rs`: `AdmittedRegionSlot::register` retains the
+outcome lock until its waker is inserted, using the same inner -> waiters lock
+order as publication. An already-published result releases the lock before
+invoking the waker. Previously publication could occur between the empty-result
+check and waiter insertion, drain an empty list, and permanently strand the
+opening despite successful admission.
+
+The app's real 1,100-region capacity regression reproduced this in 4/50 parallel
+runs; phase-timed controls stalled during admission after 2-238 ms of progress,
+then hit the unchanged ten-second child fuse. The regression retains 1,100
+simultaneous, now explicitly distinct region identities, checks every close and
+the two-second runtime shutdown, and reports admission/close timings.
+
+Test: `cargo test --locked -p fbittorrent
+native_runtime::tests::more_than_one_thousand_owned_regions_admit_and_close
+-- --exact --nocapture`; loop the resulting Cargo-identified test executable
+50 times with four parallel processes and other focused suites running. Also
+run the native runtime and engine tests for cancellation/close behavior.

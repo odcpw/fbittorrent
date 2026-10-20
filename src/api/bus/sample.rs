@@ -166,6 +166,11 @@ impl Bus {
             let mut watch = self.daemon.watch.lock().unwrap();
             if watch.due() || !watch.needs_tick() {
                 completions.extend(watch.sample(app.dispatcher().watch_samples().map_err(ops::engine_error)?));
+                for (hash, file, range) in watch.metadata_demands() {
+                    // A torrent may have completed/changed selection since the
+                    // owned snapshot. Such a stale hint must not fail the bus.
+                    let _ = app.dispatcher().prioritize_metadata(hash, *file, range.clone());
+                }
             }
         } else {
             let mut watch = self.daemon.watch.lock().unwrap();
