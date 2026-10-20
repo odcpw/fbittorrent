@@ -59,7 +59,7 @@ ShellRoot {
     if(spec.kind==="filter")return v.query===spec.text && v.rows===spec.count
     if(spec.kind==="search")return !!d.search && d.search.queryTarget.text===spec.text
     if(spec.kind==="review"){var add=service.addFlow.snapshot();return add.visible && add.name===spec.name && (!withData || (!!d.perfReview && d.perfReview.activeFocus && d.isWindowActive()))}
-    if(spec.kind==="download"){var row=service.store.torrents[spec.hash];return !!d.torrents && !service.addFlow.snapshot().visible && !!row && !row.staged && row.state==="downloading"}
+    if(spec.kind==="download"){var row=service.store.torrents[spec.hash],table=d.torrents ? d.torrents.perfTable : null,point=table ? table.rowPoint(table.indexOf(spec.hash)) : null;return !!row && !row.staged && row.state==="downloading" && !service.addFlow.snapshot().visible && !!point && point.y>=0 && point.y<d.perfWindow.height && table.stateText(spec.hash)==="Downloading"}
     return false
   }
   function presented(popup){

@@ -14,3 +14,7 @@ def instrument(source,destination):
     text=text.replace('  function syncRows() {','  function syncRows() {\n    perfSyncRows++')
     text=text.replace('  function applyFrame(frame, request) {','  function applyFrame(frame, request) {\n    perfFrames++')
     path.write_text(text)
+    path=destination/'views/TorrentsView.qml'
+    text=path.read_text()
+    assert text.count('  id:root\n')==1
+    path.write_text(text.replace('  id:root\n','  id:root\n  readonly property var perfTable:table\n',1))
