@@ -246,7 +246,10 @@ impl Inner {
                     return Ok(());
                 }
                 let resolved_name=metadata.info.name().map(|s|s.into_owned()).unwrap_or_else(||record.hash.clone());
-                inner.admit_record(&cx, current, true, metadata).await?;
+                let handle = inner.admit_record(&cx, current, true, metadata).await?;
+                let initializing = matches!(
+                    handle.stats().state, TorrentStatsState::Initializing { .. }
+                );
                 if let Some(saved) = ledger.records.iter_mut().find(|saved| saved.hash == record.hash) {
                     if saved.deferred || saved.name!=resolved_name {
                         saved.name=resolved_name;
@@ -254,7 +257,27 @@ impl Inner {
                         inner.save(&cx, &ledger).await?;
                     }
                 }
-                inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await
+                // Count a real in-flight check in the queue immediately, then
+                // reapply current intent when validation completes. Otherwise a
+                // newly checked download waits for the one-second maintenance tick.
+                inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await?;
+                drop(ledger);
+                if initializing {
+                    rqbit_runtime::select! {
+                        _ = task_cancel.cancelled() => bail!("torrent restore cancelled"),
+                        result = handle.wait_until_initialized(&cx) => result?,
+                    }
+                    let mut ledger = OwnedMutexGuard::lock(inner.ledger.clone(), &cx).await?;
+                    cx.checkpoint()?;
+                    if inner.stopping.load(Ordering::Acquire) {
+                        bail!("native engine is closing");
+                    }
+                    let current_generation = inner.restores.lock().unwrap().get(&record.hash)
+                        .map(|restore| restore.generation);
+                    if current_generation != Some(generation) { return Ok(()); }
+                    inner.reconcile_queue(&cx, &mut ledger, &HashSet::new()).await?;
+                }
+                Ok(())
             }.await;
             if result.is_err() {inner.resume_prepared.finish(&record.hash);}
             let mut restores = inner.restores.lock().unwrap();
