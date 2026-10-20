@@ -37,6 +37,9 @@ url = "2"
 urlencoding = "2"
 ring = "0.17.14"
 
+[dev-dependencies]
+tracing = "0.1"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

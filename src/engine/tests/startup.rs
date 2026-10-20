@@ -578,16 +578,24 @@
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let (exited_tx, exited_rx) = std::sync::mpsc::channel();
-        let task = task::try_spawn_with(dispatcher.runtime.cx(), move |cx| async move {
-            resolver.await.unwrap();
-            // Deliberately uncooperative cleanup, after a real resolver joined.
-            // The owning test releases this barrier after observing the fuse.
-            cx.checkpoint_with("blocked_restore_cleanup at src/engine/tests/startup.rs").unwrap();
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-            exited_tx.send(()).unwrap();
-        })
-        .unwrap();
+        // This cleanup belongs to both the restore handle and the session
+        // region, so neither phase can become ready before its deadline.
+        let (task_tx, task_rx) = std::sync::mpsc::channel();
+        dispatcher.inner.session.spawn(tracing::Span::none(), "timeout_control", move |session_cx| async move {
+            let task = task::try_spawn_with(&session_cx, move |cx| async move {
+                resolver.await.unwrap();
+                // Deliberately uncooperative cleanup, after a real resolver joined.
+                // The owning test releases this barrier after observing the fuse.
+                cx.checkpoint_with("blocked_restore_cleanup at src/engine/tests/startup.rs").unwrap();
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                exited_tx.send(()).unwrap();
+            })
+            .unwrap();
+            task_tx.send(task).unwrap();
+            Ok(())
+        });
+        let task = task_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         {
             let mut restores = dispatcher.inner.restores.lock().unwrap();
             let restore = restores.get_mut(hash).unwrap();
