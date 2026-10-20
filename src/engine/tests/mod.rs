@@ -22,6 +22,34 @@
         ledger: Ledger,
         port: Option<u16>,
     ) -> AppEngine {
+        test_app_with_session(
+            directory,
+            downloads,
+            ledger,
+            SessionOptions {
+                upload_enabled: false,
+                dht: None,
+                disable_trackers: true,
+                disable_local_service_discovery: true,
+                listen: port.map(|port| ListenerOptions {
+                    mode: ListenerMode::TcpOnly,
+                    listen_addr: ([127, 0, 0, 1], port).into(),
+                    enable_upnp_port_forwarding: false,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            true,
+        )
+    }
+
+    pub(super) fn test_app_with_session(
+        directory: &Path,
+        downloads: &Path,
+        ledger: Ledger,
+        options: SessionOptions,
+        maintenance_enabled: bool,
+    ) -> AppEngine {
         let instance =
             InstanceLock::acquire_in(directory.join("runtime")).unwrap_or_else(|error| {
                 use std::os::unix::fs::MetadataExt;
@@ -54,19 +82,7 @@
             .block_on(Session::new_with_opts(
                 runtime.cx(),
                 downloads.to_path_buf(),
-                SessionOptions {
-                    upload_enabled: false,
-                    dht: None,
-                    disable_trackers: true,
-                    disable_local_service_discovery: true,
-                    listen: port.map(|port| ListenerOptions {
-                        mode: ListenerMode::TcpOnly,
-                        listen_addr: ([127, 0, 0, 1], port).into(),
-                        enable_upnp_port_forwarding: false,
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
+                options,
             ))
             .unwrap();
         let generation = ledger.generation.clone();
@@ -114,21 +130,23 @@
         // retains paused transfer intent until a post-check queue decision.
         // In particular a restored seed must resume after verification even
         // when this fixture's caller sends no additional engine operations.
-        let maintenance = inner.clone();
-        task::spawn_with(runtime.cx(), move |cx| async move {
-            let mut interval = time::interval(&cx, Duration::from_secs(1));
-            loop {
-                if cx.checkpoint().is_err() { break; }
-                interval.tick(&cx).await;
-                if maintenance.stopping.load(Ordering::Acquire) { break; }
-                if let Err(error) = maintenance.maintain(&cx).await {
-                    if cx.checkpoint().is_err() || maintenance.stopping.load(Ordering::Acquire) {
-                        break;
+        if maintenance_enabled {
+            let maintenance = inner.clone();
+            task::spawn_with(runtime.cx(), move |cx| async move {
+                let mut interval = time::interval(&cx, Duration::from_secs(1));
+                loop {
+                    if cx.checkpoint().is_err() { break; }
+                    interval.tick(&cx).await;
+                    if maintenance.stopping.load(Ordering::Acquire) { break; }
+                    if let Err(error) = maintenance.maintain(&cx).await {
+                        if cx.checkpoint().is_err() || maintenance.stopping.load(Ordering::Acquire) {
+                            break;
+                        }
+                        panic!("test queue maintenance failed: {error:#}");
                     }
-                    panic!("test queue maintenance failed: {error:#}");
                 }
-            }
-        });
+            });
+        }
         let dispatcher = EngineDispatcher {
             generation,
             lifecycle: Lifecycle::default(),

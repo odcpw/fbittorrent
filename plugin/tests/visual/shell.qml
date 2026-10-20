@@ -58,6 +58,12 @@ ShellRoot {
   IpcHandler {
     target:"fbt-visual"
     function confirmed(hash:string):string{return JSON.stringify(service.store.torrents[hash] || null)}
+    function activity():string {
+      var texts=[],progress=0,popup=widget.popupItem(),button=root.find(popup,"popup-power")
+      function visit(item){if(!item || !item.visible)return;if(typeof item.text==="string")texts.push(item.text);if(item.objectName==="popup-row-progress")progress++;for(var i=0;i<item.children.length;i++)visit(item.children[i])}
+      visit(popup)
+      return JSON.stringify({texts:texts,progress:progress,model:service.torrentModel.count,rows:service.torrents.length,status:service.status,summary:service.store.summary,pendingFrame:service.pendingFrame,power:button ? button.tooltipText : "",startup:service.startupRequested})
+    }
     function peerLabels():string {
       if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return "[]"
       var labels=[]

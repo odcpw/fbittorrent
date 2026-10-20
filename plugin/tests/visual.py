@@ -42,14 +42,14 @@ def pair(left,right,output,geometry):
 
 
 class Capture:
-    def __init__(self,case,sandbox,theme):
+    def __init__(self,case,sandbox,theme,source=None):
         self.case=case
         self.compositor=Headless(sandbox,case)
-        try:self.start(case,sandbox,theme)
+        try:self.start(case,sandbox,theme,source)
         except BaseException:self.compositor.close();raise
 
-    def start(self,case,sandbox,theme):
-        self.config,self.env=prepare(sandbox,Path(__file__).with_name('visual'))
+    def start(self,case,sandbox,theme,source=None):
+        self.config,self.env=prepare(sandbox,Path(__file__).with_name('visual'),source=source)
         self.env.update(self.compositor.env)
         self.env.pop('HYPRLAND_INSTANCE_SIGNATURE',None)
         reference=self.config/'Reference';reference.mkdir()
@@ -94,7 +94,7 @@ class Capture:
             try:self.child.wait(timeout=3)
             except subprocess.TimeoutExpired:self.child.kill();self.child.wait(timeout=3)
         self.stream.close()
-        errors=[line for line in self.log.read_text().splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Binding loop detected','Error calling method'))]
+        errors=[line for line in self.log.read_text().splitlines() if any(t in line for t in ('TypeError:','ReferenceError:','SyntaxError:','Failed to load configuration','Cannot assign','Unable to assign',"Can't create role for unsupported data type",'Binding loop detected','Error calling method'))]
         self.case.check(self.child.returncode==0 and not errors,'owned shell closes without QML errors',f'exit={self.child.returncode}; errors={errors}; log={self.log}')
         self.compositor.close()
 

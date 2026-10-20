@@ -136,7 +136,7 @@ Item {
   onFilterChanged:publish()
   onSelectedHashChanged:publish()
   onQueryChanged:publish()
-  Connections {target:root.svc;function onRssRevisionChanged(){root.publish()} function onShowsRevisionChanged(){root.publish()} function onSettingsRevisionChanged(){root.publish()} function onClipboardOfferChanged(){root.publish()} function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(root.svc.online)Qt.callLater(root.focusView)}}
+  Connections {target:root.svc;function onRssRevisionChanged(){root.publish()} function onShowsRevisionChanged(){root.publish()} function onSettingsRevisionChanged(){root.publish()} function onClipboardOfferChanged(){root.publish()} function onStatusChanged(){root.publish()} function onAddRevisionChanged(){root.publish()} function onOnlineChanged(){if(!root.svc.online)stopConfirm.opened=false;Qt.callLater(root.focusView)}}
   Component.onDestruction:{disposing=true;if(svc){if(svc.dashboardOwner===root){svc.dashboardVisible=false;svc.dashboardState=null;svc.dashboardOwner=null}svc.cancelWindowFocus(window);svc.hideDetail()}}
 
   FloatingWindow {
@@ -226,7 +226,8 @@ Item {
             visible:!root.svc || !root.svc.online
             Text {
               width:parent.width;textFormat:Text.PlainText;horizontalAlignment:Text.AlignHCenter
-              text:root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent is not running"
+              objectName:"dashboard-stopped"
+              text:root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent stopped"
               color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title
             }
             Ui.Button {id:startButton;anchors.horizontalCenter:parent.horizontalCenter;text:"Start";focusable:true;enabled:!!root.svc && !root.svc.startupRequested;onClicked:root.svc.startDaemon()}

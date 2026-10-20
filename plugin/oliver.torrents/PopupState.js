@@ -18,20 +18,20 @@ function warningBanner(warnings) {
     (warnings.length>1 ? " (+"+(warnings.length-1)+" more)" : "")+". Fix the file to clear this."
 }
 function describe(s) {
-  if(!s)return {message:"fbittorrent is not running",banner:"",urgent:false,dim:false}
+  if(!s)return {message:"fbittorrent stopped",banner:"",urgent:false,dim:false}
   var client=s.client || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
   var r={message:"",banner:"",urgent:false,dim:!s.online,idle:""}
   if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
   else if(s.reconnecting){r.message="Reconnecting…";r.dim=true}
-  else if(!s.online)r.message=s.stoppedRecently ? "fbittorrent stopped. Enter Start · w Open window" : client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent is not running. Enter Start · w Open window"
+  else if(!s.online)r.message=!s.stoppedRecently && client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent stopped. Enter Start · w Open window"
   if(s.online && (s.backendState==="parked" || network.ready===false || network.state==="waiting")){
     var name=networkName(network)
     r.banner="Waiting for "+(name==="ProtonVPN" ? "ProtonVPN ("+(network.interface || "proton0")+")" : name)+". Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
-  else if(info.upgrade_pending || daemon.upgrade_pending)r.banner="Update installed; restarts when idle"
+  else if(s.online && (info.upgrade_pending || daemon.upgrade_pending))r.banner="Update installed; restarts when idle"
   else if(s.online && daemon.warnings && daemon.warnings.length)r.banner=warningBanner(daemon.warnings)
   if(s.online && s.torrents.length===0 && !r.message)r.message="Nothing here yet. Copy a magnet link and press a, or press / to search."
-  if(summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
+  if(s.online && summary.disk && summary.disk.low){r.banner=diskBanner(summary.disk);r.urgent=true}
   r.idle=idle(daemon,s.online)
   return r
 }

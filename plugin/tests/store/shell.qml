@@ -7,7 +7,7 @@ ShellRoot {
   id: root
   property int resets: 0
   property int updates: 0
-  ListModel { id: mirror; dynamicRoles: true }
+  ListModel { id: mirror; dynamicRoles: false }
   Connections {
     target: mirror
     function onModelReset() { root.resets++ }
@@ -89,11 +89,11 @@ ShellRoot {
     store.syncModel(mirror,"added",false)
     check("mirror","apply progress and deletion patch","stable row identity; changed Qt roles; no reset",JSON.stringify(mirror.get(0)),
       store.torrents[hash]===original && !Object.prototype.hasOwnProperty.call(original,"eta_s") &&
-      mirror.get(0).eta_s===null && mirror.get(0).progress===0.5 && resets===resetBefore && updates>updateBefore)
+      mirror.get(0).uiTorrent.eta_s===undefined && mirror.get(0).uiTorrent.progress===0.5 && resets===resetBefore && updates>updateBefore)
     store.apply({ev:"delta",sub:1,rev:2,topic:"torrents",changed:{[hash]:{state:"paused"}}})
     store.syncModel(mirror,"added",false)
     check("mirror","change state","incremental counts and filter use confirmed state",JSON.stringify(store.counts),
-      store.counts.downloading===0 && store.counts.paused===1 && store.filter("paused")[0]===hash && mirror.get(0).state==="paused")
+      store.counts.downloading===0 && store.counts.paused===1 && store.filter("paused")[0]===hash && mirror.get(0).uiTorrent.state==="paused")
     store.apply({ev:"delta",sub:1,rev:3,topic:"torrents",added:[{hash:other,name:"Two",state:"done",added_at:3}],removed:[hash]})
     store.syncModel(mirror,"added",false)
     check("mirror","add/remove membership","only member changes insert/remove; no reset",JSON.stringify(mirror.get(0)),mirror.count===1 && mirror.get(0).hash===other && resets===resetBefore)
@@ -142,7 +142,10 @@ ShellRoot {
 
   }
   Component.onCompleted: {
-    corpus(); controls(); benchmark()
+    var focus=Quickshell.env("FBT_QS_STORE_FOCUS")
+    if(!focus || focus==="behavior"){corpus();controls()}
+    if(!focus || focus==="benchmark")benchmark()
+    if(focus && ["behavior","benchmark"].indexOf(focus)<0)console.log("FBTQS-FAIL selector unknown store focus")
     Qt.callLater(function() { Quickshell.execDetached(["qs","kill","-p",Quickshell.shellPath(".")]) })
   }
 }
