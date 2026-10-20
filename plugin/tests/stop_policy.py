@@ -2,10 +2,16 @@
 """Actual popup client: power drains the owner; glance freezes its idle clock."""
 import argparse
 import json
+import os
+import shutil
+import signal
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 import time
 from visual import Capture,ROOT
+from dashboard import Session
+from desktop_setup import prepare as prepare_setup,call as setup_call
 import daemon as d
 import fixtures
 import private_net
@@ -14,13 +20,52 @@ from fbtlog import Case,suite_status
 from daemon_policy import hello,subscribe,idle_exit
 
 
+def stopped(case,q,dashboard,phase):
+    def empty():
+        state=json.loads(q.ipc('activity'))
+        return state if not json.loads(q.ipc('state'))['online'] and state['model']==state['rows']==0 else None
+    state=q.wait(empty)
+    texts=' '.join(state['texts'])
+    case.check(not json.loads(q.ipc('groups')) and state['progress']==0 and state['summary']=={}
+               and state['status']['active']==state['status']['seeding']==0
+               and state['status'].get('dl') is None and state['status'].get('up') is None
+               and 'Stopped' in texts and 'fbittorrent stopped' in texts
+               and not any(word in texts for word in ('DOWNLOADING','UPLOADING','peers','↓','↑')),
+               phase+': popup renders stopped with no live groups, rates, peers or progress',json.dumps(state))
+    window=dashboard.wait(lambda:value if (value:=json.loads(dashboard.ipc('stoppedState')))['visible'] and not value['table'] else None)
+    case.check(window['message']=='fbittorrent stopped' and window['model']==0
+               and json.loads(dashboard.ipc('renderedRows'))==[],
+               phase+': already-open dashboard renders stopped and unloads its table',json.dumps(window))
+    frame=state['pendingFrame'];time.sleep(1)
+    case.check(json.loads(q.ipc('activity'))['pendingFrame']==frame,
+               phase+': no pending progress animation while stopped',str(frame))
+    screenshot=case.path.with_suffix('.'+phase+'.png');q.capture(screenshot)
+
+
 def power(binary):
-    with Case('plugin_policy','power') as case,fixtures.daemon_pair(case,binary,False,65536) as pair:
+    with Case('plugin_policy','power') as case,fixtures.daemon_pair(case,binary,False,65536) as pair,fixtures.Sandbox() as dashboard_box:
         c=pair.client;c.call('subscribe',dict(topics=['summary'],interval_ms=250))
-        q=Capture(case,pair.box,'owner')
+        # Exercise the actual embedded install, not a separate source plugin.
+        prepare_setup(pair.box);setup_call(case,binary,pair.box,'--plugin=copy')
+        source=Path(pair.box.env['XDG_CONFIG_HOME'])/'omarchy/plugins/oliver.torrents'
+        fixtures.path_shim('fbittorrent','exit 0',pair.box.root)
+        dashboard_source=dashboard_box.root/'installed-plugin';shutil.copytree(source,dashboard_source)
+        q=Capture(case,pair.box,'owner',source=source)
+        dashboard=None
         try:
             q.wait(lambda:json.loads(q.ipc('state'))['online']);q.ipc('open')
             q.wait(lambda:json.loads(q.ipc('cursor'))['rows']==1)
+            dashboard_case=SimpleNamespace(path=case.path.with_name('power_dashboard.jsonl'),check=case.check)
+            dashboard=Session(dashboard_case,dashboard_box,source_link=dashboard_source)
+            dashboard.wait(lambda:dashboard.state())
+            dashboard.wait(lambda:dashboard.native_hook('useRuntimeDir',pair.box.env['XDG_RUNTIME_DIR'])=='ok')
+            dashboard.wait(lambda:dashboard.state()['online'])
+            dashboard.shell('summon','{}')
+            dashboard.wait(lambda:len(json.loads(dashboard.ipc('renderedRows')))==1)
+            active=json.loads(q.ipc('activity'))
+            case.check(active['progress']>0 and active['status']['active']>0
+                       and any('peers' in text for text in active['texts']),
+                       'real download renders live rows, progress and peer observations before stop',json.dumps(active))
             case.check(q.ipc('clickPower')=='true','click the real popup power control')
             q.wait(lambda:json.loads(q.ipc('cursor')).get('stopping'))
             cursor=json.loads(q.ipc('cursor'))
@@ -39,7 +84,38 @@ def power(binary):
             case.check(terminal.get('reason')=='shutdown' and not pair.h.engine_path.exists() and not json.loads(q.ipc('state'))['idle'],
                        'plugin power produces shutdown bye, clean daemon exit, unlinked socket and cleared countdown',json.dumps(terminal))
             pair.h.lock_free()
-        finally:q.close()
+            stopped(case,q,dashboard,'shutdown')
+            case.check(json.loads(q.ipc('activity'))['power']=='Start fbittorrent',
+                       'stopped power control advertises Start')
+            case.check(q.ipc('clickPower')=='true','click the stopped power control')
+            launcher=pair.box.root/'shims/fbittorrent.log'
+            q.wait(lambda:launcher.exists())
+            calls=[json.loads(line) for line in launcher.read_text().splitlines()]
+            case.check(calls==[['up']] and not json.loads(q.ipc('cursor'))['stopping']
+                       and json.loads(q.ipc('activity'))['startup'],
+                       'offline power requests up immediately without a Stop confirmation',json.dumps(calls))
+            # The recording launcher stands in for the user manager; the harness
+            # owns the real serve process it launches in this private namespace.
+            pair.h.notify.close();restarted=pair.h.start_serve(idle_exit_secs=0)
+            assert pair.h.receive_ready() and pair.h.wait_engine()
+            q.wait(lambda:json.loads(q.ipc('state'))['online'])
+            dashboard.wait(lambda:dashboard.state()['online'])
+            q.wait(lambda:json.loads(q.ipc('activity'))['status']['active']>0)
+            dashboard.wait(lambda:len(json.loads(dashboard.ipc('renderedRows')))==1)
+            case.check(not json.loads(q.ipc('cursor'))['stopping'],
+                       'requested start reconnects the plugin and restores live download rows')
+            case.check(q.ipc('clickPower')=='true','online power still opens Stop confirmation after restart')
+            q.wait(lambda:json.loads(q.ipc('cursor'))['stopping'])
+            # No bye frame: EOF must clear observations and cancel an open Stop
+            # prompt too. SIGKILL affects only this fixture's peer-credential PID.
+            os.kill(pair.h.daemon_pid(),signal.SIGKILL);restarted.wait(timeout=10,code=-signal.SIGKILL)
+            stopped(case,q,dashboard,'unexpected_exit')
+            case.check(not json.loads(q.ipc('cursor'))['stopping'],
+                       'unexpected exit cancels the stale Stop confirmation')
+            pair.h.lock_free()
+        finally:
+            if dashboard:dashboard.close()
+            q.close()
 
 
 def glance(binary):

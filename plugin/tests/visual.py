@@ -42,14 +42,14 @@ def pair(left,right,output,geometry):
 
 
 class Capture:
-    def __init__(self,case,sandbox,theme):
+    def __init__(self,case,sandbox,theme,source=None):
         self.case=case
         self.compositor=Headless(sandbox,case)
-        try:self.start(case,sandbox,theme)
+        try:self.start(case,sandbox,theme,source)
         except BaseException:self.compositor.close();raise
 
-    def start(self,case,sandbox,theme):
-        self.config,self.env=prepare(sandbox,Path(__file__).with_name('visual'))
+    def start(self,case,sandbox,theme,source=None):
+        self.config,self.env=prepare(sandbox,Path(__file__).with_name('visual'),source=source)
         self.env.update(self.compositor.env)
         self.env.pop('HYPRLAND_INSTANCE_SIGNATURE',None)
         reference=self.config/'Reference';reference.mkdir()

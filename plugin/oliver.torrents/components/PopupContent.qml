@@ -47,7 +47,7 @@ PanelKeyCatcher {
   function rebuild() {
     var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"UPLOADING",key:"seeding",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
     var indexes={};groups.forEach(function(g,i){indexes[g.key]=i})
-    svc.torrents.forEach(function(t){groups[indexes[PopupState.group(t)]].rows.push(t)})
+    if(svc.online)svc.torrents.forEach(function(t){groups[indexes[PopupState.group(t)]].rows.push(t)})
     var all=[],parts=[]
     groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="seeding" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
     var items=[];parts.forEach(function(g){items.push({header:true,group:g});g.visibleRows.forEach(function(t,i){items.push({header:false,torrent:t,index:g.start+i})})});syncEntries(items);sections=parts;rows=all;rowIndex=Math.max(0,Math.min(rowIndex,rows.length-1))
@@ -61,7 +61,7 @@ PanelKeyCatcher {
   function requestRemoval(t){if(!t || svc.busy)return;pendingRemoval={hash:t.hash,name:t.name};stopping=false;Qt.callLater(function(){var strip=currentStrip();if(strip)strip.reset()})}
   function cancelRemove(){pendingRemoval=null;forceActiveFocus()}
   function confirmRemove(){var target=pendingRemoval;cancelRemove();if(target)svc.remove(target.hash,false)}
-  function power(){if(svc.needsStopConfirm()){pendingRemoval=null;stopping=true;Qt.callLater(function(){stopStrip.reset()})}else svc.quit()}
+  function power(){pendingRemoval=null;if(!svc.online){stopping=false;svc.startDaemon();return}stopping=true;Qt.callLater(function(){stopStrip.reset()})}
   function stop(){stopping=false;svc.quit();forceActiveFocus()}
   function dashboard(view){svc.openDashboard(view || "torrents");owner.close()}
   function toggleGroup(group){var next=Object.assign({},expanded);next[group.key]=!group.open;expanded=next;rebuild()}
@@ -108,7 +108,7 @@ PanelKeyCatcher {
     else if(t==="d" || t==="x")requestRemoval(selected())
   }
   function cursor(){var strip=currentStrip();return {keySerial:keySerial,qtFocus:activeFocus,section:focusSection,row:rowIndex,header:headerIndex,active:cursorActive,rows:rows.length,hashes:rows.map(function(t){return t.hash}),confirming:!!pendingRemoval,stopping:stopping,confirmFocused:strip && strip.cancelFocused ? "cancel" : "other",selected:strip ? strip.selected : null,group:sections[groupIndex] ? sections[groupIndex].key : "",pendingHash:pendingRemoval ? pendingRemoval.hash : "",hints:hints}}
-  Connections {target:svc;function onTorrentsChanged(){root.rebuild()} function onClipboardOfferChanged(){if(!svc.clipboardOffer)root.forceActiveFocus()}}
+  Connections {target:svc;function onTorrentsChanged(){root.rebuild()} function onOnlineChanged(){if(!svc.online){root.stopping=false;root.pendingRemoval=null}root.rebuild()} function onClipboardOfferChanged(){if(!svc.clipboardOffer)root.forceActiveFocus()}}
   Connections {target:owner;function onOpenedChanged(){if(owner.opened)root.reset()}}
   Component.onCompleted:reset()
   Flickable {
@@ -117,14 +117,14 @@ PanelKeyCatcher {
     Column {
       id:column;width:flick.width;spacing:Style.spacing.xxl
       PanelHero {
-        width:parent.width;title:"Torrents";meta:svc.online && svc.status.total===0 && svc.store.counts.reviewing>0 ? "Reviewing…" : Model.heroMeta(svc.status);detail:(svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
+        width:parent.width;title:"Torrents";meta:svc.online && svc.status.total===0 && svc.store.counts.reviewing>0 ? "Reviewing…" : Model.heroMeta(svc.status);detail:(svc.online && svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs
           HeaderAction {host:root;index:0;iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
           HeaderAction {host:root;index:1;iconText:"▢";tooltipText:"Open window (w)";onClicked:root.dashboard()}
-          HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
-          HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:"Stop fbittorrent (Q)";onClicked:root.power()}
+          HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.online && svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
+          HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:svc.online ? "Stop fbittorrent (Q)" : "Start fbittorrent";enabled:!svc.startupRequested;onClicked:root.power()}
         }}
       }
       Text {visible:text!=="";text:root.presentation.idle;textFormat:Text.PlainText;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.caption}

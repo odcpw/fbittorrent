@@ -44,6 +44,7 @@ CursorSurface {
       }
     }
     Item {
+      objectName:"popup-row-progress"
       width:parent.width;implicitHeight:Style.space(3)
       visible:!root.parked && root.torrent.progress!==undefined && (root.torrent.progress<1 || Model.isActive(root.torrent))
       Rectangle {anchors.fill:parent;radius:height/2;color:Commons.Util.alpha(host.foreground,0.12)}
