@@ -90,7 +90,10 @@ python3 tools/engine-bench/summarize_profile.py \
 
 Allocation counts include startup and shutdown. Diagnostic timings are never
 used to claim a throughput or CPU improvement. Flat PC attribution includes an
-unresolved bucket and fails on dropped samples or collection errors. Repeated
+unresolved bucket and fails on dropped samples or collection errors. Without
+DWARF line information, attribution requires an ELF function range containing
+the sampled address; a nearby exported name in a stripped library is insufficient.
+Repeated
 normal runs, payload integrity, zero-upload probes, piece ordering and the local
 gate are required for an optimization claim.
 
