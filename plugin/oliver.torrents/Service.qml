@@ -206,7 +206,7 @@ Item {
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
     var errorText=c.lastError ? c.lastError.message : ""
-    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=({});toastTimer.stop();actionStatus=""}
+    if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=null;toastTimer.stop();actionStatus=""}
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode

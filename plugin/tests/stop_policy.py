@@ -42,12 +42,15 @@ def stopped(case,q,dashboard,phase):
     screenshot=case.path.with_suffix('.'+phase+'.png');q.capture(screenshot)
 
 
-def power(binary):
+def power(binary,plugin_source=None):
     with Case('plugin_policy','power') as case,fixtures.daemon_pair(case,binary,False,65536) as pair,fixtures.Sandbox() as dashboard_box:
         c=pair.client;c.call('subscribe',dict(topics=['summary'],interval_ms=250))
         # Exercise the actual embedded install, not a separate source plugin.
         prepare_setup(pair.box);setup_call(case,binary,pair.box,'--plugin=copy')
         source=Path(pair.box.env['XDG_CONFIG_HOME'])/'omarchy/plugins/oliver.torrents'
+        if plugin_source:
+            shutil.copytree(plugin_source,source,dirs_exist_ok=True)
+            print('Focused QML source overlay in private installation: '+str(plugin_source),flush=True)
         fixtures.path_shim('fbittorrent','exit 0',pair.box.root)
         dashboard_source=dashboard_box.root/'installed-plugin';shutil.copytree(source,dashboard_source)
         q=Capture(case,pair.box,'owner',source=source)
@@ -166,8 +169,11 @@ def default_delay(binary):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--binary',required=True,type=Path);parser.add_argument('--case',choices=['power','glance','default_delay'],required=True);parser.add_argument('--log-root',type=Path)
+    parser.add_argument('--plugin-source',type=Path,help='power case only: explicitly test source QML instead of the embedded copy')
     args=parser.parse_args()
     if args.log_root:fbtlog.LOG_ROOT=args.log_root.resolve()
     private_net.enter()
-    globals()[args.case](args.binary.resolve())
+    if args.plugin_source and args.case!='power':parser.error('--plugin-source requires --case power')
+    if args.case=='power':power(args.binary.resolve(),args.plugin_source.resolve() if args.plugin_source else None)
+    else:globals()[args.case](args.binary.resolve())
     sys.exit(suite_status('plugin_policy'))
