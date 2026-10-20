@@ -24,11 +24,6 @@ impl Inner {
 }
 
 impl EngineDispatcher {
-    pub(crate) fn transfer_rates(&self) -> (u64, u64) {
-        let stats = self.inner.session.stats_snapshot();
-        (stats.download_speed.as_bytes(), stats.upload_speed.as_bytes())
-    }
-
     pub(crate) fn transfer_totals(&self)->(u64,u64,u64) {
         let counters=self.inner.session.stats_snapshot().counters;
         (counters.fetched_bytes,counters.uploaded_bytes,self.inner.completed_count.load(Ordering::Acquire))

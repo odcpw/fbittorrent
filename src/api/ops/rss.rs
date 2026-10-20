@@ -32,7 +32,7 @@ fn dispatch_in(service:&crate::daemon::rss::Service,call:&Call,add_torrent:impl 
             let url=url::Url::parse(&args.url).map_err(|_|error(ErrorCode::InvalidArgs,"invalid feed URL",Some("url")))?;
             if !matches!(url.scheme(),"http"|"https") || url.host_str().is_none() {return Err(error(ErrorCode::InvalidArgs,"feed URL must use HTTP(S)",Some("url")));}
             // Public feed URLs are redacted; compare the stored originals.
-            if store.list().map_err(failure)?.iter().any(|f|f.url==args.url){return Err(error(ErrorCode::InvalidState,"feed already followed",Some("url")));}
+            if store.snapshot().map_err(failure)?.iter().any(|row|row.feed.url==args.url){return Err(error(ErrorCode::InvalidState,"feed already followed",Some("url")));}
             let cfg=crate::config::Config::load().map_err(failure)?;
             store.add(&args.url,args.name.as_deref(),cfg.timeout_secs.min(10)).map_err(failure)?;
             Reply::RssAdd(FeedResult { feed:feed_in(service,&crate::rss::stable_id(&args.url))? })
