@@ -13,6 +13,7 @@ fn sample(prefix: u64) -> Sample {
         active: true,
         dl_bps: Some(MIB),
         download_limit: None,
+        verified: None,
     }
 }
 #[test]
