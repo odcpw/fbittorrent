@@ -113,7 +113,11 @@ def run(binary):
                 press(case,q,['-k','Escape'],lambda:not view(q).get('panel'),'Esc closes providers')
             with Case('qs_search','search_enter_stages') as case:
                 # Review stages a real provider result before any payload download.
-                press(case,q,['g'],lambda:view(q).get('cursor')==sources[0]['fixture'].info_hash,'g selects the new real metainfo result')
+                # URL results have no info hash until review fetches metainfo.
+                # Match the exact provider URL, then use its current row key.
+                source_url=torrent_http.base+'/'+sources[0]['fixture'].torrent.name
+                result_key=next(r['key'] for r in view(q)['rows'] if r.get('url')==source_url)
+                press(case,q,['g'],lambda:view(q).get('cursor')==result_key,'g selects the new real metainfo result')
                 before=client.call('torrents.list',{})['result']['torrents']
                 press(case,q,['-k','Return'],lambda:view(q).get('add',{}).get('visible'),'Enter opens the shared add sheet')
                 add=view(q)['add']
