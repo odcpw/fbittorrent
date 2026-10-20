@@ -252,9 +252,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             if let Err(error) = inner.periodic_resume(cx).await {
                 eprintln!("WARN resume periodic snapshot error={error:?}");
             }
-            if let Err(error) = inner.maintain(cx).await {
-                eprintln!("ERROR engine queue maintenance failed message={:?}", format!("{error:#}"));
-            }
+            if !inner.maintenance_tick(cx).await { break; }
         }
     });
     Ok(AppEngine {
