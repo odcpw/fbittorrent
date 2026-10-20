@@ -177,7 +177,7 @@ impl Daemon {
         .into()
     }
 
-    fn replace(&self, next: Slot) -> Result<Slot> {
+    fn quiesce_engine(&self) {
         // Running handlers hold read guards. Cancellation makes their existing
         // engine dispatch select return before we wait for exclusive ownership.
         if let Slot::Running(app) = &self
@@ -188,6 +188,10 @@ impl Daemon {
         {
             app.quiesce();
         }
+    }
+
+    fn replace(&self, next: Slot) -> Result<Slot> {
+        self.quiesce_engine();
         let mut slot = self.slot.write().unwrap_or_else(|error| error.into_inner());
         let old_epoch=slot.engine_epoch;
         let initialized=old_epoch>0;
@@ -415,13 +419,23 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    // The bus and service workers can already be borrowing the engine while
+    // waiting for its ledger. Cancel those dispatches BEFORE joining them;
+    // joining first can wait forever and never reach the engine's drain fuse.
+    daemon.quiesce_engine();
+    eprintln!("DEBUG daemon joining component=shows");
     daemon.shows.stop();
+    eprintln!("DEBUG daemon joining component=rss");
     daemon.rss.stop();
+    eprintln!("DEBUG daemon joining component=clipboard");
     daemon.clipboard.stop();
+    eprintln!("DEBUG daemon joining component=inhibitor");
     daemon.inhibitor.stop();
+    eprintln!("DEBUG daemon joining component=notifier");
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
+    eprintln!("DEBUG daemon joining component=api_bus");
     api.stop_accepting();
     daemon.search.shutdown();
     let began = Instant::now();

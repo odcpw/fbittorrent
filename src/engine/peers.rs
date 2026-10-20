@@ -14,7 +14,7 @@ impl EngineDispatcher {
     pub(crate) fn peer_snapshot(&self, hash: &str) -> Result<Vec<Peer>> {
         self.runtime.block_on(async {
             let ledger =
-                OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+                self.observation_ledger().await?;
             if !ledger.records.iter().any(|r| r.hash == hash) {
                 bail!("torrent record not found");
             }

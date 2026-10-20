@@ -5,7 +5,7 @@ impl EngineDispatcher {
     pub(crate) fn watch_samples(&self) -> Result<Vec<Sample>> {
         self.runtime.block_on(async {
             let ledger =
-                OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+                self.observation_ledger().await?;
             let mut result = Vec::new();
             for record in &ledger.records {
                 if record.staged {

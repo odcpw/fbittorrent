@@ -58,3 +58,35 @@ fn queue_maintenance_shutdown_is_quiet() {
     drop(InstanceLock::acquire_in(directory.join("runtime")).unwrap());
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn quiesce_releases_observers_while_the_ledger_is_still_held() {
+    use std::{future::{poll_fn, Future}, task::Poll};
+    let directory = review_directory("observer-shutdown");
+    let mut app = test_app(&directory, &directory.join("downloads"), Ledger::default(), None);
+    let dispatcher = app.dispatcher();
+    dispatcher.runtime.block_on(async {
+        let cx = dispatcher.runtime.cx();
+        let ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), cx).await.unwrap();
+        let mut read = std::pin::pin!(dispatcher.observation_ledger());
+        poll_fn(|task| {
+            assert!(read.as_mut().poll(task).is_pending(), "observer must be waiting for the ledger");
+            Poll::Ready(())
+        }).await;
+        app.quiesce();
+        // Retain the ledger until AFTER the cancellation receipt. The old
+        // unconditional lock would remain pending forever at this boundary.
+        poll_fn(|task| match read.as_mut().poll(task) {
+            Poll::Ready(Err(error)) => {
+                assert!(error.to_string().contains("native engine is closing"));
+                Poll::Ready(())
+            }
+            _ => panic!("quiesced observer must resolve before the ledger is released"),
+        }).await;
+        drop(ledger);
+    });
+    assert!(app.drain(Duration::from_secs(2)));
+    drop(dispatcher);
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}

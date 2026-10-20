@@ -24,6 +24,15 @@ impl Inner {
 }
 
 impl EngineDispatcher {
+    /// Read-only borrowers must release the slot before the daemon joins the
+    /// sampler. A pending durable write must not pin those threads at shutdown.
+    pub(super) async fn observation_ledger(&self) -> Result<OwnedMutexGuard<Ledger>> {
+        if self.inner.stopping.load(Ordering::Acquire) { bail!("native engine is closing"); }
+        rqbit_runtime::select! {
+            result = OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()) => Ok(result?),
+            _ = self.inner.session.cancellation_token().cancelled() => bail!("native engine is closing"),
+        }
+    }
     pub(crate) fn transfer_totals(&self)->(u64,u64,u64) {
         let counters=self.inner.session.stats_snapshot().counters;
         (counters.fetched_bytes,counters.uploaded_bytes,self.inner.completed_count.load(Ordering::Acquire))
@@ -37,7 +46,7 @@ impl EngineDispatcher {
     /// Ledger record hashes, exactly the rows Info would list.
     pub(crate) fn record_hashes(&self) -> Result<std::collections::BTreeSet<String>> {
         self.runtime.block_on(async {
-            let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+            let ledger = self.observation_ledger().await?;
             Ok(ledger.records.iter().map(|record| record.hash.clone()).collect())
         })
     }
@@ -52,7 +61,7 @@ impl EngineDispatcher {
     ) -> Result<(Vec<view::TorrentView>, HashMap<String, Vec<TorrentFile>>, bool)> {
         self.runtime.block_on(async {
             let ledger =
-                OwnedMutexGuard::lock(self.inner.ledger.clone(), self.runtime.cx()).await?;
+                self.observation_ledger().await?;
             // The sampler's presence checks are bounded; see saved::PRESENCE_TTL.
             let rows = self.info_observed(&ledger, false);
             let mut details = HashMap::new();

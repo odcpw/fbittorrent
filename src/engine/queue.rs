@@ -6,7 +6,10 @@ static INJECTED_ERROR: AtomicBool = AtomicBool::new(false);
 impl Inner {
     /// Return whether the background maintenance task should keep running.
     pub(super) async fn maintenance_tick(&self, cx: &Cx) -> bool {
-        let result = self.maintain(cx).await;
+        let result = rqbit_runtime::select! {
+            result = self.maintain(cx) => result,
+            _ = self.session.cancellation_token().cancelled() => return false,
+        };
         // Quiesce can begin while maintenance waits for the ledger. Retire
         // that tick quietly instead of reporting its expected closing error.
         if self.stopping.load(Ordering::Acquire) || cx.checkpoint().is_err() {
