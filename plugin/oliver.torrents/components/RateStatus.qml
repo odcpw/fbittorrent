@@ -7,7 +7,7 @@ RowLayout {
   id:root
   property var service:null
   readonly property var history:service && service.online && Array.isArray(service.status.history) ? service.status.history : []
-  readonly property string rateText:service && service.online ? "↓ "+Formats.rate(service.status.dl,false)+"   ↑ "+Formats.rate(service.status.up,false) : "Offline"
+  readonly property string rateText:service && service.online ? "↓ "+Formats.rate(service.status.dl,false)+"   ↑ "+Formats.rate(service.status.up,false) : "Stopped"
   spacing:Commons.Style.spacing.panelGap
   Layout.minimumHeight:24
   height:Math.max(24,implicitHeight)

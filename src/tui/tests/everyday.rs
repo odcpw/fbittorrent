@@ -68,6 +68,33 @@ fn settings_destination_idle_and_clipboard_are_cancelable_drafts() {
     assert_eq!(serde_json::to_value(&app.cfg).unwrap(),serde_json::to_value(original).unwrap());
 }
 #[test]
+fn open_settings_follows_remote_fields_and_preserves_only_local_edits() {
+    let mut app=fixture::app("settings");
+    let original=app.cfg.clone();
+    let local=original.max_active_downloads+1;
+    app.on_key(KeyEvent::new(KeyCode::Right));
+    assert_eq!(app.settings.as_ref().unwrap().cfg.max_active_downloads,local);
+    let mut remote=original.clone();
+    remote.upload="on".into();
+    remote.download_limit_bps=Some(131072);
+    remote.max_active_downloads=local+3;
+    app.sync_settings_snapshot(&api::ops::settings::view(&remote)).unwrap();
+    let modal=app.settings.as_ref().unwrap();
+    assert_eq!(app.cfg.max_active_downloads,remote.max_active_downloads);
+    assert_eq!(modal.cfg.max_active_downloads,local,"keep the deliberate local edit");
+    assert_eq!(modal.cfg.upload,"on","untouched upload follows the CLI");
+    assert_eq!(modal.cfg.download_limit_bps,Some(131072));
+    assert_eq!(settings_fields::settings_patch(&modal.original,&modal.cfg),serde_json::json!({"max_active_downloads":local}));
+    app.on_key(KeyEvent::new(KeyCode::Escape));
+    assert_eq!(app.cfg.max_active_downloads,remote.max_active_downloads,"Cancel discards the draft, never remote state");
+    app.show_settings(app.cfg.clone());
+    remote.max_active_downloads+=1;
+    app.sync_settings_snapshot(&api::ops::settings::view(&remote)).unwrap();
+    let modal=app.settings.as_ref().unwrap();
+    assert_eq!(modal.cfg.max_active_downloads,remote.max_active_downloads);
+    assert_eq!(settings_fields::settings_patch(&modal.original,&modal.cfg),serde_json::json!({}));
+}
+#[test]
 fn removal_undo_requires_confirmed_keep_files_receipt_and_expires() {
     let mut app=fixture::app("torrents");
     assert!(!app.can_undo_removal());

@@ -54,7 +54,7 @@ function peerCount(t,compact) {
 }
 
 function heroMeta(s) {
-  if (!s.ok) return "Backend offline"
+  if (!s.ok) return "Stopped"
   if (s.loaded === false) return "Loading torrents…"
   if (s.connection === "vpn_waiting") return "Waiting for VPN"
   if (s.active > 0 || Number(s.up) > 0 || Number(s.dl) > 0) return "↓ " + rate(s.dl) + "   ↑ " + rate(s.up)
