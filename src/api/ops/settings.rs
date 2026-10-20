@@ -123,6 +123,9 @@ pub fn set(daemon: &Daemon, patch: &Map<String, Value>) -> ApiResult<SettingsSet
     let _transaction = daemon.settings.transaction.lock().unwrap();
     let previous = Config::load().map_err(engine_error)?;
     let (cfg, mut result) = prepare(&previous, patch)?;
+    if let Some(path)=patch.get("save_path").and_then(Value::as_str) {
+        crate::free_space::require_writable(path).map_err(engine_error)?;
+    }
     // A serve --idle-exit-secs override is effective process policy. An explicit
     // API write must replace it even if the durable file already has that value.
     if patch.contains_key("idle_exit_secs")

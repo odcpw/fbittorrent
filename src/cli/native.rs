@@ -62,7 +62,9 @@ pub(super) fn emit(json_mode: bool, value: Value) {
         } else if value["action"] == "add" {
             println!(
                 "{}: {}  ({})",
-                if value["deferred"] == true {
+                if value["duplicate"] == true {
+                    "already in your list"
+                } else if value["deferred"] == true {
                     "waiting for VPN"
                 } else {
                     "added"
@@ -123,6 +125,7 @@ pub(super) fn emit(json_mode: bool, value: Value) {
                     }
                 }
             }
+            if let Some(hint)=value["hint"].as_str() {println!("{hint}");}
         } else if let Some(rows) = value["torrents"].as_array() {
             for row in rows {
                 let hash = row["hash"].as_str().unwrap_or("");
@@ -146,6 +149,7 @@ pub(super) fn emit(json_mode: bool, value: Value) {
                 torrent["state"].as_str().unwrap_or("unknown"),
                 value["open_target"].as_str().unwrap_or("")
             );
+            if let Some(hint)=value["hint"].as_str() {println!("  {hint}");}
         } else {
             println!("{value}");
         }
@@ -248,6 +252,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let mut value = added;
             value["ok"] = json!(true);
             value["action"] = json!("add");
+            if value["duplicate"]==true {value["hint"]=json!("Already in your list. Open the existing torrent; no second download was added.");}
             value["sequential"] = json!(true);
             value["first_last"] = json!(true);
             value["upload"] = json!(*upload);
@@ -272,6 +277,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let mut value = add(&client, cfg, &source, false, false, None, None, "manual", false)?;
             value["ok"] = json!(true);
             value["action"] = json!("add");
+            if value["duplicate"]==true {value["hint"]=json!("Already in your list. Open the existing torrent; no second download was added.");}
             emit(json_mode, value);
         }
         Cmd::Status {quiet} => return super::status::run(cfg,json_mode,*quiet),
@@ -320,6 +326,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                             serde_json::to_value(serde_json::from_value::<api::TrackersResult>(c.call("torrents.trackers",json!({"hash":hashes[0]}))?)?.trackers.into_iter().map(api::trackers::public_tracker).collect::<Vec<_>>())?
                         } else {json!([])};
                     }
+                    if let Some(message)=crate::user_messages::row(t) {value["hint"]=json!(message);}
                     emit(json_mode, value);
                 }
                 Cmd::Triage => {

@@ -152,7 +152,7 @@ pub fn error(code: crate::api::ErrorCode, message: &str, key: Option<&str>) -> c
     crate::api::Error {
         code,
         message: match code {
-            ProtoUnsupported => "proto unsupported".into(),
+            ProtoUnsupported => crate::user_messages::PROTOCOL.into(),
             UnknownOp => "unknown op".into(),
             NotFound => "not found".into(),
             EngineUnavailable => "engine unavailable".into(),
@@ -172,6 +172,9 @@ pub fn error(code: crate::api::ErrorCode, message: &str, key: Option<&str>) -> c
 
 pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
     use crate::api::ErrorCode::*;
+    if let Some(app)=value.downcast_ref::<crate::agent::AppError>() {
+        let mut failure=error(if app.code==crate::agent::Code::Usage {InvalidArgs}else{Internal},&app.message,None);failure.hint=app.hint.clone();return failure;
+    }
     if let Some(state) = value.downcast_ref::<crate::engine::InvalidTorrentState>() {
         let mut failure = error(InvalidState, &state.to_string(), None);
         failure.details = Some(serde_json::Map::from_iter([
@@ -193,6 +196,7 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
         failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));
         return failure;
     }
+    if let Some(message)=crate::user_messages::storage(&format!("{value:#}")) {return error(InvalidState,message,None);}
     let text = format!("{value:#}");
     let code = if text.contains("not found") {
         NotFound

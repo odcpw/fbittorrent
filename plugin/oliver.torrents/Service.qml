@@ -202,6 +202,7 @@ Item {
     }
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
+    if(c.protocolMismatch){startupRequested=false;actionStatus="";startupTimer.stop()}
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
@@ -319,6 +320,7 @@ Item {
     focusRetry.restart()
   }
   function startDaemon() {
+    if(client && client.protocolMismatch)return
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
     Quickshell.execDetached([bin,"up"])

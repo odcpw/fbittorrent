@@ -17,6 +17,8 @@ pub struct FreeSpaceResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub free_bytes: Option<u64>,
     pub writable: bool,
+    #[serde(default,skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 #[cfg(test)]
 mod tests {

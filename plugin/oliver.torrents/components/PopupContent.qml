@@ -40,6 +40,17 @@ PanelKeyCatcher {
     else for(var k=0;k<items.length;k++)entryModel.setProperty(k,"itemData",items[k])
     entries=items
   }
+  // Membership/state rebuilds use torrentsChanged; ordinary row updates must
+  // also replace the visible delegate snapshot (including a cleared error).
+  function refreshRows(first,last){
+    if(!owner.opened)return
+    for(var i=first;i<=last;i++){
+      var row=svc.torrentModel.get(i).uiTorrent
+      for(var j=0;j<entries.length;j++)if(!entries[j].header && entries[j].torrent.hash===row.hash)
+        entryModel.setProperty(j,"itemData",{header:false,torrent:row,index:entries[j].index})
+    }
+  }
+  Connections {target:svc.torrentModel;function onDataChanged(first,last,roles){root.refreshRows(first.row,last.row)}}
   implicitHeight:column.implicitHeight
   function registerConfirm(hash,strip){confirms[hash]=strip}
   function unregisterConfirm(hash,strip){if(confirms[hash]===strip)delete confirms[hash]}

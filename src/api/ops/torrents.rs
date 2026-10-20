@@ -55,8 +55,8 @@ pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
         save_path: view.save_path,
         added_at: unsigned(view.added_at)?,
         force: view.force,
+        error: crate::user_messages::torrent_error(view.reason.as_deref(),view.error.as_deref()),
         reason: view.reason,
-        error: view.error,
         progress: view.progress.filter(|v| v.is_finite()),
         size: view.size,
         completed_bytes: view.completed_bytes,
@@ -193,6 +193,8 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             if args.save_path.as_deref().is_some_and(|path| !Path::new(path).is_absolute()) {
                 return Err(error(InvalidArgs,"save_path must be absolute",Some("save_path")));
             }
+            let folder=if let Some(path)=&args.save_path {path.clone()}else{let EngineResult::Detail(detail)=execute(daemon,EngineOp::Get {hash:args.hash.to_string()})? else {unreachable!()};detail.torrent.save_path};
+            crate::free_space::require_writable(&folder).map_err(engine_error)?;
             if let Some(indices)=&args.files {
                 let entries=files(daemon,&args.hash)?;
                 if indices.iter().any(|index|*index>=entries.len() as u64) {return Err(error(InvalidArgs,"file index is out of range",Some("files")));}
@@ -402,6 +404,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 }
                 Some(indices.into_iter().map(|index| index as usize).collect())
             } else { None };
+            if args.stage!=Some(true) {crate::free_space::require_writable(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)).map_err(engine_error)?;}
             let disk = add.torrent.as_ref().and_then(|(_,bytes)| crate::daemon::supervisor::add_warning(Path::new(&add.save_path.clone().unwrap_or_else(||super::settings::view(&cfg).save_path)),bytes,selected.as_deref()));
             let EngineResult::Added(mut added) = execute(
                 daemon,

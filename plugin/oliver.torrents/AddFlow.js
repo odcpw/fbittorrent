@@ -23,7 +23,7 @@ function create(service,changed,debug) {
       s.space={supported:true,path:path,pending:false,writable:result ? result.writable : false}
       if(result && result.free_bytes!==undefined)s.space.free_bytes=result.free_bytes
       if(failure)s.space.message=failure.message
-      else if(!s.space.writable)s.space.message="Folder is not writable"
+      else if(!s.space.writable)s.space.message=result.message || "Cannot write to this folder. Choose another download folder."
       publish();if(s.commitRequested)f.commit()
     }})
     publish()

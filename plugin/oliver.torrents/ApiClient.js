@@ -102,7 +102,7 @@ function create(io, options) {
     changed()
   }
   c.disconnected = function() {
-    c.lastError=null
+    if(!c.protocolMismatch)c.lastError=null
     subscriptionGeneration++; subscriptionRun=null;subscriptionWanted=false;subscriptionRetryAt=0;subscriptionFailure=null;subscriptionForced=false; c.online = false; c.helloSent = false; c.connecting = false; c.subs = Object.create(null); c.topicRevs = Object.create(null)
     c.reconnecting = false
     c.mode = c.protocolMismatch ? "protocol_mismatch" : "stopped"
@@ -122,7 +122,7 @@ function create(io, options) {
         delete c.awaiting[ref]
       }
     })
-    c.lastError=null
+    if(!c.protocolMismatch)c.lastError=null
     changed()
   }
   c.attempt = function() {
@@ -246,8 +246,8 @@ function create(io, options) {
         })
         Object.keys(c.awaiting).forEach(function(ref){if(c.awaiting[ref].op==="app.shutdown"){c.actions[ref].status="confirmed";delete c.awaiting[ref]}})
       }
-      if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = "stopped"; c.online = false; c.lastError=null }
-      if (frame.ev === "error") c.lastError = frame.error
+      if (frame.ev === "bye") { c.graceful = true; c.reconnecting = false; c.mode = c.protocolMismatch ? "protocol_mismatch" : "stopped"; c.online = false; if(!c.protocolMismatch)c.lastError=null }
+      if (frame.ev === "error") {c.lastError = frame.error;if(frame.error && frame.error.code==="proto_unsupported"){c.protocolMismatch=true;c.mode="protocol_mismatch"}}
       if (frame.ev === "mutation.result") {
         mutationResult(frame)
       }
@@ -280,8 +280,11 @@ function create(io, options) {
     if (frame.ok && frame.result.state === "pending" && (!entry.ref || frame.result.ref !== entry.ref)) {
       c.reset("pending response has missing or mismatched ref"); return
     }
+    if(entry.op==="hello" && !frame.ok && frame.error.code==="proto_unsupported") {
+      c.protocolMismatch=true;c.mode="protocol_mismatch";c.lastError=frame.error;io.disconnect();changed();return
+    }
     if (entry.op === "hello" && frame.ok) {
-      if (frame.result.proto !== 1) { c.protocolMismatch = true; c.mode = "protocol_mismatch"; io.disconnect(); changed(); return }
+      if (frame.result.proto !== 1) { c.protocolMismatch = true; c.mode = "protocol_mismatch"; c.lastError={code:"proto_unsupported",message:"The daemon and plugin use different API versions. Run fbittorrent setup --plugin=copy, then restart the shell."}; io.disconnect(); changed(); return }
       if (!/^[0-9a-f]{32}$/.test(frame.result.instance) || !Array.isArray(frame.result.caps) ||
           frame.result.caps.some(function(cap) { return typeof cap !== "string" })) { c.reset("invalid hello result"); return }
       c.protocolMismatch = false; c.lastError=null

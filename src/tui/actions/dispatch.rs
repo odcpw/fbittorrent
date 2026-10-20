@@ -137,7 +137,7 @@ pub(in crate::tui) fn dispatch_scope(app: &mut TuiApp, requested: Scope, key: Ke
 }
 pub(super) fn clipboard(app: &mut TuiApp) -> Cmd<Msg> {
     let options = app.add_opts();
-    app.action("added from clipboard", move |client| {
+    app.action_result(move |client| {
         let out = std::process::Command::new("wl-paste").arg("--no-newline").output()?;
         let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !(value.starts_with("magnet:") || value.starts_with("http")) {

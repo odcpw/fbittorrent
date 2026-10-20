@@ -28,6 +28,7 @@ pub struct TrackerStat {
     pub peers: Option<u32>,
     pub message: Option<String>,
     revision: u64,
+    failed: bool,
 }
 impl std::fmt::Debug for TrackerStat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,6 +50,7 @@ impl TrackerStat {
             peers: None,
             message: None,
             revision: 0,
+            failed: false,
         }
     }
 }
@@ -76,6 +78,11 @@ impl TrackerStats {
     pub fn retain(&self, urls: &[Url]) {
         self.rows.lock().retain(|url, _| urls.contains(url));
     }
+    /// Read the aggregate without cloning URLs or diagnostic strings.
+    pub fn all_failed(&self) -> bool {
+        let rows=self.rows.lock();
+        !rows.is_empty() && rows.values().all(|row|row.failed)
+    }
     pub fn snapshot(&self) -> Vec<TrackerStat> {
         self.rows.lock().values().cloned().collect()
     }
@@ -83,6 +90,7 @@ impl TrackerStats {
         let mut rows = self.rows.lock();
         if let Some(row) = rows.get_mut(url) {
             row.status = TrackerStatus::NotContacted;
+            row.failed = false;
             row.message = Some(sanitize(url, message));
         }
     }
@@ -151,6 +159,7 @@ impl AnnounceGuard {
             .filter(|row| row.revision == self.revision)
         {
             row.status = status;
+            row.failed = status==TrackerStatus::Error;
             row.peers = peers;
             row.message = message;
             let now = SystemTime::now();
@@ -255,4 +264,18 @@ fn userinfo_and_fragments_never_reach_tracker_diagnostics() {
     let scheme_secret=Url::parse("https://tracker.invalid/?key=https").unwrap();
     let value=sanitize(&scheme_secret,"https://other-user:other-pass@other.invalid/error?secret=value");
     for secret in ["other-user","other-pass","secret=","value"] {assert!(!value.contains(secret),"{value}");}
+}
+
+#[cfg(test)]
+#[test]
+fn failed_tracker_warning_survives_retry_until_a_successful_announce() {
+    let state=Arc::new(TrackerStats::default());
+    let url=Url::parse("http://localhost/announce").unwrap();
+    assert!(!state.all_failed());
+    state.register([url.clone()]);assert!(!state.all_failed());
+    state.updating(&url).error("unavailable",Duration::from_secs(1));assert!(state.all_failed());
+    let retry=state.updating(&url);assert!(state.all_failed(),"a retry is not recovery");
+    drop(retry);assert!(state.all_failed(),"cancel retains the last failure");
+    state.updating(&url).ok(0,Duration::from_secs(1));assert!(!state.all_failed());
+    state.remove(&url);assert!(!state.all_failed());
 }
