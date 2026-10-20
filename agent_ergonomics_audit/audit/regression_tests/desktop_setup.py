@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from fbtlog import Case
@@ -11,23 +12,24 @@ import fixtures
 ROOT=Path(__file__).resolve().parents[3]
 
 def prepare(sandbox):
-    for name in ('systemctl','omarchy','omarchy-restart-shell','update-desktop-database'):
+    for name in ('systemctl','omarchy','omarchy-shell','omarchy-restart-shell','update-desktop-database'):
         fixtures.path_shim(name,'printf "external integration chatter\\n"\nexit 0',sandbox.root)
     # Keep the real xdg-mime's isolated output and association semantics; suppress
     # desktop-environment discovery so it uses its generic MIME writer.
     mime=Path('/usr/bin/xdg-mime')
     fixtures.path_shim('xdg-mime',f'exec {mime} "$@"',sandbox.root)
     sandbox.env.update(XDG_CURRENT_DESKTOP='generic',DE='generic')
-    sandbox.env.pop('WAYLAND_DISPLAY',None);sandbox.env.pop('DISPLAY',None)
+    for name in ('WAYLAND_DISPLAY','DISPLAY','HYPRLAND_INSTANCE_SIGNATURE','SWAYSOCK'):
+        sandbox.env.pop(name,None)
     sandbox.env['DBUS_SESSION_BUS_ADDRESS']='unix:path='+str(sandbox.root/'absent-bus')
     config=Path(sandbox.env['XDG_CONFIG_HOME'])
     extension=config/'omarchy/extensions/omarchy-menu.jsonc';extension.parent.mkdir(parents=True)
     extension.write_text('{\n// retain this unrelated comment\n"other":{"label":"Kept","action":"echo keep"},\n"torrents.stop":{"when":"systemctl --user is-active qbittorrent-nox"},\n}\n')
     return config
 
-def call(case,binary,sandbox,*args,expected=0):
-    command=[str(binary),'setup',*args,'--json']
-    result=subprocess.run(command,env=sandbox.env,capture_output=True,text=True,timeout=12)
+def call(case,binary,sandbox,*args,expected=0,cwd=None,prefix=()):
+    command=[*prefix,str(binary),'setup',*args,'--json']
+    result=subprocess.run(command,env=sandbox.env,cwd=cwd,capture_output=True,text=True,timeout=12)
     path=case.path.with_suffix('.stdout.log')
     with path.open('a') as output:output.write(json.dumps(command)+'\n'+result.stdout+result.stderr+'\n')
     case.step('run '+' '.join(command),'setup exits '+str(expected)).close(result.returncode==expected,f'exit={result.returncode}; {result.stdout}; {result.stderr}',artifacts=[path])
@@ -117,4 +119,70 @@ def setup_uninstall_keeps_data(binary,systemd=False):
                    and nested.read_bytes()==b'nested payload stays' and saved_payload.read_bytes()==b'saved payload stays',
                    'confirmed purge removes readable records but preserves configured and saved payload folders',str([download,nested,saved_payload]))
 
-CASES=(setup_dry_run_lists_actions,setup_idempotent,setup_uninstall_keeps_data)
+def setup_embedded_plugins(binary,systemd=False):
+    with Case('daemon','setup_embedded_plugins') as case:
+        for mode in ('copy','link'):
+            with fixtures.Sandbox() as sandbox:
+                config=prepare(sandbox)
+                # A missing command must fail, never fall through to a desktop
+                # executable later in the owner's PATH. Shim interpreters and
+                # their logger use absolute paths.
+                sandbox.env['PATH']=str(sandbox.root/'shims')
+                relocated=sandbox.root/'bin/fbittorrent';relocated.parent.mkdir()
+                relocated.touch()
+                # Relocate the executable with a read-only file mount instead
+                # of duplicating its large debug symbols into /tmp. All setup
+                # writes still use the harness's usual private /tmp filesystem.
+                # Hide the build checkout in a private mount namespace too:
+                # an old CARGO_MANIFEST_DIR lookup must actually fail here.
+                # The host filesystem is read-only except this sandbox.
+                prefix=[shutil.which('bwrap') or 'bwrap','--die-with-parent','--unshare-user','--unshare-pid',
+                        '--unshare-ipc','--unshare-net','--ro-bind','/','/',
+                        '--tmpfs','/run/user','--tmpfs',str(Path.home()),
+                        '--tmpfs',str(ROOT),'--bind',str(sandbox.root),str(sandbox.root),
+                        '--ro-bind',str(binary),str(relocated),
+                        '--dev','/dev','--proc','/proc',
+                        '--chdir',str(sandbox.root),'--']
+                hidden=subprocess.run([*prefix,'/bin/sh','-c','test ! -e "$1/Cargo.toml"',
+                                       'source-check',str(ROOT)],env=sandbox.env,capture_output=True,text=True,timeout=5)
+                case.check(hidden.returncode==0,'build checkout is absent inside the relocated process namespace',hidden.stderr)
+                case.check(not (sandbox.root/'plugin').exists(),
+                           'relocated binary and working directory contain no plugin source',str(relocated))
+                first=call(case,relocated,sandbox,'--plugin='+mode,'--quick',cwd=sandbox.root,prefix=prefix)
+                if mode=='link':
+                    warnings=first.get('warnings',[])
+                    case.check(len(warnings)==2 and all(w['code']=='plugin_link_copy' and 'embedded' in w['message'] for w in warnings),
+                               'source-free link explicitly falls back to embedded copies for both plugins',str(warnings))
+                for name in ('oliver.torrents','oliver.torrents-quick'):
+                    source=ROOT/'plugin'/name;target=config/'omarchy/plugins'/name
+                    expected={str(p.relative_to(source)):p.read_bytes() for p in source.rglob('*') if p.is_file()}
+                    actual={str(p.relative_to(target)):p.read_bytes() for p in target.rglob('*') if p.is_file()}
+                    case.check(not target.is_symlink() and actual==expected,
+                               mode+' installs every shipping file byte-identically: '+name,
+                               f'files={len(actual)}; bytes={sum(map(len,actual.values()))}')
+                restart=sandbox.root/'shims/omarchy-restart-shell.log'
+                case.check(len(restart.read_text().splitlines())==1,'changed install restarts only the private shim once',restart.read_text())
+                before=snapshot(sandbox)
+                commands={p.name:p.read_bytes() for p in (sandbox.root/'shims').glob('*.log')}
+                second=call(case,relocated,sandbox,'--plugin='+mode,'--quick',cwd=sandbox.root,prefix=prefix)
+                case.check(second['actions']==[] and snapshot(sandbox)==before,
+                           'second relocated '+mode+' setup changes no bytes or mtimes',str(second))
+                case.check(commands=={p.name:p.read_bytes() for p in (sandbox.root/'shims').glob('*.log')},
+                           'second setup runs no integration commands or shell restart',str(commands.keys()))
+                # A failed shell restart must not write the revision stamp:
+                # the next successful invocation must retry even if files match.
+                plugin=config/'omarchy/plugins/oliver.torrents/Dashboard.qml'
+                plugin.write_text('stale UI')
+                shim=sandbox.root/'shims/omarchy-restart-shell'
+                shim.write_text('#!/missing-fbt-interpreter\n');shim.chmod(0o700)
+                failed=call(case,relocated,sandbox,'--plugin='+mode,'--quick',expected=1,cwd=sandbox.root,prefix=prefix)
+                case.check(failed['code_name']=='failure' and 'running omarchy-restart-shell' in failed['error']
+                           and 'is closed' not in failed['error'] and 'hint' not in failed,
+                           'missing setup program reports its real I/O failure, not a closed daemon',str(failed))
+                fixtures.path_shim('omarchy-restart-shell','exit 0',sandbox.root)
+                repaired=call(case,relocated,sandbox,'--plugin='+mode,'--quick',cwd=sandbox.root,prefix=prefix)
+                case.check(any(a['path']=='omarchy-restart-shell' for a in repaired['actions'])
+                           and plugin.read_bytes()==(ROOT/'plugin/oliver.torrents/Dashboard.qml').read_bytes(),
+                           'retry restarts after the failed restart and retains the embedded UI',str(repaired))
+
+CASES=(setup_dry_run_lists_actions,setup_idempotent,setup_uninstall_keeps_data,setup_embedded_plugins)
