@@ -170,6 +170,12 @@ struct Handler {
 }
 
 impl PeerConnectionHandler for Handler {
+    // Metadata bootstrap has no payload store. Keep its wire state choked just
+    // like the download-only live torrent; BEP 9 metadata does not need Unchoke.
+    fn upload_enabled(&self) -> bool {
+        false
+    }
+
     fn should_send_bitfield(&self) -> bool {
         false
     }
