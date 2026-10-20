@@ -1,4 +1,4 @@
-# fbittorrent's Asupersync fork
+# fbittorrent's Asupersync patches
 
 This is the crates.io Asupersync 0.5.0 package (`asupersync-0.5.0.crate`, sha256
 `f34b1a19ffd6b74570339a156912436335bb09c594c675c62ea164b19a1f2511`; upstream
@@ -6,8 +6,10 @@ revision `78b64636e99fea4ea2d868096576021dd3b8e519`) with the fbittorrent change
 below, retained under its original licence: `LICENSE` is byte-identical to the
 package's, "MIT License (with OpenAI/Anthropic Rider)", and every distribution
 must carry it unmodified. The root `Cargo.toml` selects this tree through
-`[patch.crates-io] asupersync = { path = "vendor/asupersync" }`. This is now a
-private native-runtime fork, not an API-compatible distribution of upstream.
+`[patch.crates-io] asupersync = { path = "vendor/asupersync" }`. The packaged
+upstream source is retained, including modules outside fbittorrent's feature
+set. Keep the local changes scoped and documented so an upstream update does
+not require reconstructing deleted source.
 
 ## Native build scope (2026-10-20)
 
@@ -37,6 +39,17 @@ and audit tooling, plan/conformance/session modules, and Lab's swarm-replay and
 deadlock-radar tools require `extended-services`. The remaining OTLP exporter
 and structured-concurrency adapters follow the existing `metrics` boundary.
 None of those features is enabled by the app or its consumer test suites.
+The existing CLI, database, messaging-fabric and metrics features also remain
+off. `extended-network` and `extended-services` imply `lab-runtime`; existing
+`cli`, `quic`, `messaging-fabric`, `metrics` and `test-internals` feature
+dependencies preserve access to the helpers those profiles require.
+
+These gates reduce compilation work and compiler memory for the native app;
+they do not change the implementations it uses. All disabled module bodies
+remain in the vendored package. Removing their files would give no additional
+compile-time benefit and would make upstream updates harder. The three gating
+commits are `da4129e`, `4a338d2` and `8998f6e`; the subsequent source deletion
+was reverted in `35bd6a5`.
 
 ## Original runtime patches
 
