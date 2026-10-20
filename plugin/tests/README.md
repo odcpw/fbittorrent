@@ -246,3 +246,37 @@ its data. The `--details-only`, `--settings-only` and `--handler-only` subsets
 repeat a focused measurement without the CPU windows; the handler subset also
 measures a magnet with the dashboard destroyed before every click. Fresh subscription data and a populated
 table are reported separately from the first visible response to an input.
+
+## Shared-daemon convergence and cold startup
+
+These checks attach the actual dashboard and popup in private headless Sway,
+a tmux TUI and CLI to the same app daemon. Supply `FBT_TEST_SWAY` if Sway is
+not installed on PATH. They never connect to the owner's compositor or data.
+
+```sh
+python3 -B plugin/tests/convergence.py --binary target/debug/fbittorrent --case settings
+python3 -B plugin/tests/convergence.py --binary target/debug/fbittorrent --case settings_focused
+python3 -B plugin/tests/convergence.py --binary target/debug/fbittorrent --case settings_race
+python3 -B plugin/tests/convergence_catalogues.py --binary target/debug/fbittorrent --case torrents
+python3 -B plugin/tests/convergence_catalogues.py --binary target/debug/fbittorrent --case rss
+python3 -B plugin/tests/convergence_catalogues.py --binary target/debug/fbittorrent --case shows
+python3 -B plugin/tests/cold_start.py --binary target/debug/fbittorrent
+```
+
+Pass a fresh `--log-root` to retain another run. Catalogue checks bound the
+observation after each action to 1.25 seconds; `after_action_ms` excludes command
+execution and input injection. Settings checks preserve deliberately dirty
+fields while remote writes update clean fields. Torrent removal keeps files;
+the test compares payload hashes before and after Undo. RSS review leaves an
+article unread until commit, which must preserve a concurrent feed addition.
+Shows read/Undo and preferences are checked against both rendered clients and CLI.
+
+Cold startup runs real `setup --magnet --plugin=copy` from an empty private HOME,
+then feeds its generated layout and installed plugin copy into the installed
+bar host components. The real `xdg-open` uses private MIME associations. A unique
+runtime-only systemd unit has every private path verified before start and its
+actual child environment checked afterwards. The fixture binds networking to lo
+and supplies an explicit private download folder before any daemon starts.
+The two cold clicks are separated by a complete `down`; sheet and online latency
+are measured independently. This covers MIME dispatch and headless shell behavior,
+not a real browser or the owner's live desktop.
