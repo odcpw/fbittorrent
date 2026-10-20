@@ -13,9 +13,10 @@ import time
 import urllib.request
 
 seed = Path(sys.argv[1]).resolve()
-rate = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+rate = next((int(arg) for arg in sys.argv[2:] if not arg.startswith('--')), 0)
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]/"agent_ergonomics_audit/audit/regression_tests"))
-from fixtures import Sandbox
+from fixtures import Sandbox, bencode
+from head_to_head import decode
 from process_cleanup import ProcessRun
 
 
@@ -37,6 +38,14 @@ with Sandbox() as sandbox:
     info = json.loads(subprocess.check_output([seed,"make","--out",directory/"one.torrent","--name","fixture.bin",
                        "--size","262144","--piece-len","262144","--key","42","--tracker","http://127.0.0.1:1/announce"],
                       env=sandbox.env, cwd=sandbox.root))
+    if '--multi' in sys.argv:
+        path=directory/'one.torrent'
+        metadata=decode(path.read_bytes())
+        del metadata[b'info'][b'length']
+        metadata[b'info'][b'files']=[{b'length':length,b'path':[str(i).encode()]}
+                                  for i,length in enumerate((17,0,262127))]
+        path.write_bytes(bencode(metadata))
+        info['info_hash']=hashlib.sha1(bencode(metadata[b'info'])).hexdigest()
     payload = sandbox.root/"expected.bin"
     subprocess.run([seed,"write","--file",payload,"--size","262144","--key","42"],check=True,env=sandbox.env,cwd=sandbox.root)
     ready = sandbox.root/"ready.json"

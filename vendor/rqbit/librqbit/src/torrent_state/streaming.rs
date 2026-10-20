@@ -61,6 +61,9 @@ impl StreamState {
 pub(crate) struct TorrentStreams {
     next_stream_id: AtomicUsize,
     streams: DashMap<StreamId, StreamState>,
+    // One bounded range, not a vector proportional to the media's size. The
+    // caller replaces/clears this as verified container inspection advances.
+    metadata: parking_lot::Mutex<Option<std::ops::Range<u32>>>,
 }
 
 impl TorrentStreams {
@@ -104,7 +107,10 @@ impl TorrentStreams {
         use rand::seq::SliceRandom;
         all.shuffle(&mut rand::rng());
 
-        Interleave { all: all.into() }
+        let metadata = self.metadata.lock().clone().unwrap_or(0..0);
+        metadata
+            .filter_map(|i| lengths.validate_piece_index(i))
+            .chain(Interleave { all: all.into() })
     }
 
     pub(crate) fn wake_streams_on_piece_completed(
@@ -326,6 +332,35 @@ impl Drop for FileStream {
 }
 
 impl ManagedTorrent {
+    /// Prioritise the exact file-relative bytes needed to inspect a container.
+    /// This does not read data, create a stream, or change the saved selection.
+    pub fn prioritize_metadata(
+        &self,
+        file_id: usize,
+        range: Option<std::ops::Range<u64>>,
+    ) -> anyhow::Result<()> {
+        let metadata = self.metadata.load_full().context("metadata unavailable")?;
+        let file = metadata.file_infos.get(file_id).context("invalid file")?;
+        let range = if self.only_files().is_some_and(|ids| !ids.contains(&file_id)) {
+            None
+        } else {
+            range.map(|range| {
+                anyhow::ensure!(!range.is_empty() && range.end <= file.len, "invalid metadata range");
+                let piece = u64::from(metadata.lengths().default_piece_length());
+                let first = (file.offset_in_torrent + range.start) / piece;
+                let end = (file.offset_in_torrent + range.end).div_ceil(piece);
+                Ok::<_, anyhow::Error>(u32::try_from(first)?..u32::try_from(end)?)
+            }).transpose()?
+        };
+        *self.streams()?.metadata.lock() = range;
+        Ok(())
+    }
+
+    /// Snapshot the temporary metadata priority for diagnostics; no lock escapes.
+    pub fn metadata_priority(&self) -> Option<std::ops::Range<u32>> {
+        self.streams().ok()?.metadata.lock().clone()
+    }
+
     fn with_storage_and_file<F, R>(
         &self,
         file_id: usize,
@@ -452,6 +487,17 @@ mod tests {
     use rqbit_runtime::{Budget, RuntimeBuilder, io::AsyncReadExt, task};
 
     #[test]
+    fn metadata_demand_prioritizes_every_tail_piece_without_a_stream() {
+        let lengths = Lengths::new(79_927_630, 16_384).unwrap();
+        let streams = TorrentStreams::default();
+        *streams.metadata.lock() = Some(4877..4879);
+        assert_eq!(streams.iter_next_pieces(&lengths).map(|p| p.get()).collect::<Vec<_>>(), vec![4877, 4878]);
+        assert!(streams.streams.is_empty());
+        *streams.metadata.lock() = None;
+        assert!(streams.iter_next_pieces(&lengths).next().is_none());
+    }
+
+    #[test]
     fn stream_crosses_creator_task_without_retaining_its_permit() {
         let directory = tempfile::TempDir::new().unwrap();
         let payload = vec![b'x'; CHUNK_SIZE as usize * 2 + 7];
@@ -497,6 +543,12 @@ mod tests {
                 .into_handle()
                 .unwrap();
             torrent.wait_until_initialized(&cx).await.unwrap();
+            torrent.prioritize_metadata(0, Some(payload.len() as u64 - 9..payload.len() as u64)).unwrap();
+            assert_eq!(torrent.metadata_priority(), Some(0..1));
+            assert!(torrent.prioritize_metadata(0, Some(0..payload.len() as u64 + 1)).is_err());
+            assert_eq!(torrent.metadata_priority(), Some(0..1));
+            torrent.prioritize_metadata(0, None).unwrap();
+            assert_eq!(torrent.metadata_priority(), None);
             let stream =
                 task::spawn_with(&cx, move |cx| async move { torrent.stream(&cx, 0).await })
                     .await

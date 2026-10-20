@@ -10,21 +10,23 @@ struct GateState {
     blocked: bool,
     released: bool,
     timed_out: bool,
+    cx: Option<Cx>,
 }
 #[derive(Default)]
-struct ReadGate {
+pub(in crate::engine::tests) struct ReadGate {
     state: StdMutex<GateState>,
     changed: Condvar,
+    offset: Option<u64>,
 }
 impl ReadGate {
-    fn arm(&self) {
+    pub(in crate::engine::tests) fn arm(&self) {
         *self.state.lock().unwrap() = GateState {
             armed: true,
             ..Default::default()
         };
     }
     fn before_read(&self, offset: u64) -> Result<()> {
-        if offset != PIECE as u64 {
+        if offset != self.offset.unwrap_or(PIECE as u64) {
             return Ok(());
         }
         let state = self.state.lock().unwrap();
@@ -34,6 +36,7 @@ impl ReadGate {
         let mut state = state;
         state.armed = false;
         state.blocked = true;
+        state.cx = Cx::current();
         self.changed.notify_all();
         let (mut state, deadline) = self
             .changed
@@ -45,15 +48,18 @@ impl ReadGate {
         }
         Ok(())
     }
-    fn wait_blocked(&self) {
+    pub(in crate::engine::tests) fn wait_blocked(&self) {
         let state = self.state.lock().unwrap();
         let (state, _) = self
             .changed
             .wait_timeout_while(state, Duration::from_secs(5), |state| !state.blocked)
             .unwrap();
-        assert!(state.blocked, "the real check must reach its second piece");
+        assert!(state.blocked, "the real check must reach read offset {}", self.offset.unwrap_or(PIECE as u64));
     }
-    fn release(&self) {
+    pub(in crate::engine::tests) fn cancelled(&self) -> bool {
+        self.state.lock().unwrap().cx.as_ref().is_some_and(|cx| cx.checkpoint().is_err())
+    }
+    pub(in crate::engine::tests) fn release(&self) {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -61,7 +67,7 @@ impl ReadGate {
         self.changed.notify_all();
     }
 }
-struct ReleaseOnDrop(Arc<ReadGate>);
+pub(in crate::engine::tests) struct ReleaseOnDrop(pub(in crate::engine::tests) Arc<ReadGate>);
 impl Drop for ReleaseOnDrop {
     fn drop(&mut self) {
         self.0.release();
@@ -74,6 +80,11 @@ impl Drop for ReleaseOnDrop {
 struct GatedFactory {
     counted: CountedFilesystemFactory,
     gate: Arc<ReadGate>,
+}
+pub(in crate::engine::tests) fn read_gate_storage(offset: u64) -> (BoxStorageFactory, Arc<ReadGate>) {
+    let gate = Arc::new(ReadGate { offset: Some(offset), ..Default::default() });
+    gate.arm();
+    (GatedFactory { counted: CountedFilesystemFactory(Arc::new(StorageCounts::default())), gate: gate.clone() }.boxed(), gate)
 }
 struct GatedStorage {
     storage: Box<dyn TorrentStorage>,

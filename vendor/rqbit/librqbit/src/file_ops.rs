@@ -20,6 +20,10 @@ use crate::{
     type_aliases::{BF, FileInfos, PeerHandle},
 };
 
+#[cfg(test)]
+#[path = "file_ops/verify_tests.rs"]
+mod verify_tests;
+
 pub fn update_hash_from_file<Sha1: ISha1>(
     file_id: usize,
     file_info: &FileInfo,
@@ -71,12 +75,33 @@ impl<'a> FileOps<'a> {
     }
 
     // Returns the bitvector with pieces we have.
+    #[cfg(test)]
     pub fn initial_check(
         &self,
         cx: &Cx,
         progress: &AtomicU64,
         pause_requested: &AtomicBool,
     ) -> anyhow::Result<BF> {
+        self.initial_check_range(
+            cx,
+            progress,
+            pause_requested,
+            0..self.torrent.lengths().total_pieces(),
+        )
+    }
+
+    // Disjoint ranges start and end on piece boundaries. Each result remains
+    // private until all workers succeed; neither a failed read nor cancellation
+    // can publish an unverified piece to peers or the resume cache.
+    pub(super) fn initial_check_range(
+        &self,
+        cx: &Cx,
+        progress: &AtomicU64,
+        pause_requested: &AtomicBool,
+        pieces: std::ops::Range<u32>,
+    ) -> anyhow::Result<BF> {
+        let start_offset =
+            u64::from(pieces.start) * u64::from(self.torrent.lengths().default_piece_length());
         let mut have_pieces =
             BF::from_boxed_slice(vec![0u8; self.torrent.lengths().piece_bitfield_bytes()].into());
         let mut piece_files = Vec::<usize>::new();
@@ -103,7 +128,9 @@ impl<'a> FileOps<'a> {
             .map(|(idx, fi)| CurrentFile {
                 index: idx,
                 fi,
-                processed_bytes: 0,
+                processed_bytes: start_offset
+                    .saturating_sub(fi.offset_in_torrent)
+                    .min(fi.len),
                 is_broken: false,
             });
 
@@ -111,7 +138,13 @@ impl<'a> FileOps<'a> {
 
         let mut read_buffer = vec![0u8; 65536];
 
-        for piece_info in self.torrent.lengths().iter_piece_infos() {
+        for piece_info in self
+            .torrent
+            .lengths()
+            .iter_piece_infos()
+            .skip(pieces.start as usize)
+            .take(pieces.len())
+        {
             cx.checkpoint()?;
             if pause_requested.load(Ordering::Relaxed) {
                 bail!("initial check paused");
@@ -144,6 +177,7 @@ impl<'a> FileOps<'a> {
 
                 if current_file.is_broken {
                     // no need to read.
+                    some_files_broken = true;
                     continue;
                 }
 
