@@ -175,7 +175,11 @@ Trials alternate client order. Independent post-timer verification hashes every
 piece across file boundaries and compares whole-payload SHA-256 between clients.
 The shared playable byte condition is the first file's verified 3%/32 MiB prefix
 (or the complete file if smaller), plus its last piece; the prefix must decode.
-Native `app_ready_s` is separate. API polling adds at least 20 ms uncertainty.
+Native `app_ready_s` is separate. These are API-observed latencies, not wire
+timestamps. Polling adds at least 20 ms uncertainty; the installed qBittorrent's
+piece observations often arrive on a roughly 1.5-second cadence. Treat small
+latency advantages as visibility-limited. Admission timings distinguish POST
+latency from the time a row first becomes visible.
 `/proc` CPU/RSS/write-call counters describe the client process and all its
 threads; write calls include sockets. Use separate `--strace /path/to/strace`
 trials for positioned disk-write call counts, and `--profile` for per-phase CPU

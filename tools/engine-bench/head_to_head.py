@@ -25,6 +25,16 @@ MIB=1024**2
 WORKLOADS={'single1':(1024*MIB,1),'single4':(4096*MIB,1),'multi2':(2048*MIB,1000)}
 
 
+def memory_budget():
+    """Record the current benchmark scope, including kernel/file-cache charges."""
+    try:
+        group=Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().split(':')[-1].strip().lstrip('/')
+        values={name:(group/name).read_text().strip() for name in
+                ('memory.current','memory.peak','memory.high','memory.max','memory.events')}
+        return dict(group=str(group),**values)
+    except OSError:return None
+
+
 def decode(data):
     def one(i):
         tag=data[i:i+1]
@@ -81,6 +91,7 @@ class Match(Run):
         self.sandbox.env.pop('RUST_MIN_STACK',None)
         private_environment(self.sandbox)
         self.load_begin=os.getloadavg();self.pressure_begin=self.pressure()
+        self.budget_begin=memory_budget()
         self.client=None;self.profiler=None
         errors=[]
         try:
@@ -156,6 +167,7 @@ class Match(Run):
             (self.output/'teardown.json').write_text(json.dumps(dict(shutdown_ms=shutdown_ms,
                 survivors=len(remaining),emergency_cleanup=bool(survivors),
                 qualified=not errors and original is None,
+                memory_budget_after_cleanup=memory_budget(),
                 children=[{'pid':child.pid,'returncode':child.returncode} for child in self.children])))
             if errors:
                 if original:errors.insert(0,original)
@@ -195,6 +207,8 @@ class Match(Run):
                 time.sleep(.02)
             else:raise TimeoutError(f'{name}: {row}')
             measured=delta(before,proc(self.pid),time.monotonic()-begin,size)
+            measured.update(admission=getattr(self.client,'admission',None),
+                            memory_budget_begin=self.budget_begin,memory_budget_at_complete=memory_budget())
             if self.profiler:
                 self.profiler.stop();self.profiler=None
             measured.update(first_piece_s=first,prefix_s=prefix,last_piece_s=last,playable_s=playable,app_ready_s=ready,

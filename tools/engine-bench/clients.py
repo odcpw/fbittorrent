@@ -162,14 +162,18 @@ class Qbittorrent:
 
     def add(self,path,info_hash,stopped=False):
         self.hash=info_hash
+        began=time.monotonic()
         result=self.call('torrents/add',dict(savepath=str(self.run.sandbox.downloads),
             stopped=str(stopped).lower(), sequentialDownload='true',firstLastPiecePrio='true',
             autoTMM='false', contentLayout='Original'),file=path)
         assert result['success_count']==1 and result['failure_count']==0 and result['pending_count']==0,result
         assert result['added_torrent_ids']==[info_hash],result
+        post_s=time.monotonic()-began
         wait(lambda:self.call('torrents/info?hashes='+self.hash),15)
+        visible_s=time.monotonic()-began
         props=self.call('torrents/info?hashes='+self.hash)[0]
         assert props['seq_dl'] and props['f_l_piece_prio'],props
+        self.admission=dict(post_s=post_s,visible_s=visible_s)
 
     def observation(self):
         rows=self.call('torrents/info?hashes='+self.hash)
