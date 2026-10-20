@@ -144,13 +144,30 @@ impl Record {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub(super) struct Ledger {
     #[serde(skip)]
     pub(super) generation: Arc<LedgerGeneration>,
     #[serde(default)]
     pub(super) migrated_legacy: bool,
     pub(super) records: Vec<Record>,
+}
+
+/// Readers borrow the current ledger when available, or its last durable
+/// publication while an effect owns the writer. The fallback contains only
+/// successfully persisted intent, never an edit still waiting for its save.
+pub(super) enum ReadLedger {
+    Current(OwnedMutexGuard<Ledger>),
+    Committed(Arc<Ledger>),
+}
+impl std::ops::Deref for ReadLedger {
+    type Target = Ledger;
+    fn deref(&self) -> &Ledger {
+        match self {
+            Self::Current(ledger) => ledger,
+            Self::Committed(ledger) => ledger,
+        }
+    }
 }
 
 pub(super) fn validate_info_hash(hash: &str) -> Result<()> {
@@ -221,6 +238,7 @@ impl Inner {
     pub(super) async fn save(&self, cx: &Cx, ledger: &Ledger) -> Result<()> {
         self.write_store(cx, "torrents.json", &serde_json::to_vec_pretty(ledger)?)
             .await?;
+        *self.committed_ledger.write().unwrap() = Arc::new(ledger.clone());
         ledger.generation.bump();
         Ok(())
     }

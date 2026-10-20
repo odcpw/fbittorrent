@@ -60,6 +60,9 @@ impl NativeRuntime {
             .blocking_threads(1, 2)
             .enable_time()
             .build()?;
+        // The daemon may settle millions of file I/O obligations without
+        // restarting. Keep recent history rather than every completed record.
+        runtime.set_resolved_obligation_history_limit(1024);
         let root = runtime.request_cx_with_budget(Budget::INFINITE);
         let region = runtime.block_on(root.open_child_region(ChildRegionSpec::inherit()))?;
         let cx = region.cx().clone();
@@ -316,6 +319,10 @@ mod tests {
 #[cfg(test)]
 #[path = "native_runtime/storage_ownership_tests.rs"]
 mod storage_ownership_tests;
+
+#[cfg(test)]
+#[path = "native_runtime/obligation_history_tests.rs"]
+mod obligation_history_tests;
 
 #[cfg(test)]
 #[path = "native_runtime/shutdown_tests.rs"]

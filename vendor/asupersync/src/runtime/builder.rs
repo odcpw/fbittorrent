@@ -4018,6 +4018,17 @@ impl Runtime {
         }
     }
 
+    /// Bounds successful obligation history for long-lived native services.
+    /// Pending obligations and leaked-resource diagnostics are always retained.
+    /// This affects diagnostics only, not region drain or settlement counters.
+    pub fn set_resolved_obligation_history_limit(&self, limit: usize) {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_resolved_obligation_history_limit(limit);
+    }
+
     /// Returns a handle that can spawn tasks from outside the runtime.
     #[must_use]
     pub fn handle(&self) -> RuntimeHandle {

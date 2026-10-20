@@ -11,7 +11,7 @@ use crate::types::{ObligationId, RegionId, TaskId, Time};
 use crate::util::{Arena, ArenaIndex};
 use smallvec::SmallVec;
 use std::backtrace::Backtrace;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 type HolderIds = SmallVec<[ObligationId; 4]>;
@@ -135,6 +135,9 @@ pub struct ObligationTable {
     /// to prevent drop-late commit/abort after region close. Obligations for
     /// finalized regions are rejected with RegionFinalized error.
     finalized_regions: BTreeSet<RegionId>,
+    /// Optional diagnostic history bound. Pending and leaked records are never evicted.
+    resolved_history_limit: Option<usize>,
+    resolved_history: VecDeque<ObligationId>,
 }
 
 /// Stable index for `ObligationKind` in the per-kind counter array.
@@ -167,6 +170,8 @@ impl ObligationTable {
             pending_by_kind: [0; OBLIGATION_KIND_COUNT],
             pending_reserved_at_sum_ns: 0,
             finalized_regions: BTreeSet::new(),
+            resolved_history_limit: None,
+            resolved_history: VecDeque::new(),
         }
     }
 
@@ -183,6 +188,52 @@ impl ObligationTable {
             pending_by_kind: [0; OBLIGATION_KIND_COUNT],
             pending_reserved_at_sum_ns: 0,
             finalized_regions: BTreeSet::new(),
+            resolved_history_limit: None,
+            resolved_history: VecDeque::new(),
+        }
+    }
+
+    /// Bounds retained committed/aborted records, leaving pending and leaked
+    /// obligations intact. By default the complete diagnostic history is kept.
+    /// Evicted IDs remain invalid even when their arena slots are reused.
+    pub fn set_resolved_history_limit(&mut self, limit: usize) {
+        let mut resolved: Vec<_> = self
+            .obligations
+            .iter()
+            .filter(|(_, record)| !record.is_pending() && !record.is_leaked())
+            .map(|(_, record)| (record.resolved_at, record.id))
+            .collect();
+        resolved.sort_unstable();
+        self.resolved_history_limit = Some(limit);
+        self.resolved_history = resolved.into_iter().map(|(_, id)| id).collect();
+        self.trim_resolved_history();
+        self.resolved_history.shrink_to_fit();
+    }
+
+    fn remember_resolved(&mut self, id: ObligationId) {
+        if self.resolved_history_limit.is_some() {
+            self.resolved_history.push_back(id);
+            self.trim_resolved_history();
+        }
+    }
+
+    fn trim_resolved_history(&mut self) {
+        let Some(limit) = self.resolved_history_limit else {
+            return;
+        };
+        while self.resolved_history.len() > limit {
+            let id = self
+                .resolved_history
+                .pop_front()
+                .expect("history is nonempty");
+            // A low-level caller may already have removed this generation.
+            // Never remove a pending/leaked record, even after direct mutation.
+            if self
+                .get(id.arena_index())
+                .is_some_and(|r| !r.is_pending() && !r.is_leaked())
+            {
+                self.remove(id.arena_index());
+            }
         }
     }
 
@@ -546,6 +597,7 @@ impl ObligationTable {
             duration,
         };
         self.note_pending_removed(kind, reserved_at);
+        self.remember_resolved(obligation);
         self.debug_assert_pending_counters_match();
         Ok(info)
     }
@@ -599,6 +651,7 @@ impl ObligationTable {
             reason,
         };
         self.note_pending_removed(kind, reserved_at);
+        self.remember_resolved(obligation);
         self.debug_assert_pending_counters_match();
         Ok(info)
     }

@@ -27,6 +27,16 @@ HARNESS = ROOT / 'agent_ergonomics_audit/audit/regression_tests'
 PYTHON = sys.executable
 RELEASE_LOCK = '/tmp/fbittorrent-release.lock'
 WORKER_FAILURE = re.compile(r'thread .*panicked|obligation.*leak|closing native (?:torrent session|runtime):|native torrent session did not drain')
+
+
+def has_worker_failure(body):
+    # Test identifiers can describe leaks/panics. Only complete libtest status
+    # lines are metadata; interleaved or following diagnostics remain failures.
+    return any(WORKER_FAILURE.search(line)
+               for line in body.splitlines()
+               if not re.fullmatch(r'test [A-Za-z_][A-Za-z_0-9:]* \.\.\. (?:ok|ignored)', line))
+
+
 # These are existing cases, not a second implementation of their assertions.
 # q_detaches includes a real loopback download that keeps moving after detach.
 FAST = {
@@ -314,7 +324,7 @@ def rust_tests(mode, logs, env):
                             if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9:]*', name := line.strip()))
     failures = sorted(failures)
     check.detail = ', '.join(failures)
-    worker_failure = bool(WORKER_FAILURE.search(body))
+    worker_failure = has_worker_failure(body)
     if not ok and failures:
         retries = []
         for name in failures:
@@ -324,7 +334,7 @@ def rust_tests(mode, logs, env):
             retry = Check('rust_retry/' + name.replace('::', '_'), retry_command)
             passed = run_once(retry, logs, env, 2)
             passed &= bool(re.search(r'^test result: ok\. [1-9][0-9]* passed;', Path(retry.log).read_text(), re.M))
-            passed &= not WORKER_FAILURE.search(Path(retry.log).read_text())
+            passed &= not has_worker_failure(Path(retry.log).read_text())
             retries.append(passed)
             check.seconds += retry.seconds
         # A failing named test explains its own panic. Unattributed worker
@@ -339,7 +349,7 @@ def rust_tests(mode, logs, env):
         passed = run_once(check, logs, env, 2)
         retried = Path(check.log).read_text()
         passed &= bool(re.search(r'^test result: ok\. [1-9][0-9]* passed;', retried, re.M))
-        check.status = 'FLAKY' if passed and not worker_failure and not WORKER_FAILURE.search(retried) else 'FAIL'
+        check.status = 'FLAKY' if passed and not worker_failure and not has_worker_failure(retried) else 'FAIL'
     return check
 
 

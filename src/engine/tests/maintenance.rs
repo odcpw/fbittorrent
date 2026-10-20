@@ -68,12 +68,14 @@ fn quiesce_releases_observers_while_the_ledger_is_still_held() {
     dispatcher.runtime.block_on(async {
         let cx = dispatcher.runtime.cx();
         let ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), cx).await.unwrap();
-        let mut read = std::pin::pin!(dispatcher.observation_ledger());
-        poll_fn(|task| {
-            assert!(read.as_mut().poll(task).is_pending(), "observer must be waiting for the ledger");
-            Poll::Ready(())
-        }).await;
+        // A disk writer must not hold a UI read behind its fsync at all.
+        // The fallback is immutable and only contains durably published intent.
+        let read = dispatcher.observation_ledger().await.unwrap();
+        assert!(matches!(read, super::ledger::ReadLedger::Committed(_)));
+        assert!(read.records.is_empty());
+        drop(read);
         app.quiesce();
+        let mut read = std::pin::pin!(dispatcher.observation_ledger());
         // Retain the ledger until AFTER the cancellation receipt. The old
         // unconditional lock would remain pending forever at this boundary.
         poll_fn(|task| match read.as_mut().poll(task) {

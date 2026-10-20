@@ -19,6 +19,20 @@ import gate
 
 
 class GateTests(unittest.TestCase):
+    def test_passing_test_names_do_not_claim_a_runtime_failure(self):
+        line = 'test native_runtime::obligation_history_tests::completed_io_history_is_bounded_without_losing_pending_or_leaks ... ok'
+        self.assertIsNotNone(gate.WORKER_FAILURE.search(line), 'reproduce the old scanner false positive')
+        self.assertFalse(gate.has_worker_failure(line))
+        self.assertFalse(gate.has_worker_failure(line + '\ntest result: ok. 723 passed; 0 failed;'))
+
+    def test_actual_runtime_failures_remain_red_around_libtest_status(self):
+        status = 'test native_runtime::obligation_history_tests::retention ... ok'
+        for failure in ('WARN obligation IoOp leaked', "thread 'io' panicked at storage.rs:8",
+                        'ERROR closing native runtime: timeout', 'native torrent session did not drain'):
+            with self.subTest(failure=failure):
+                self.assertTrue(gate.has_worker_failure(status + '\n' + failure))
+                self.assertTrue(gate.has_worker_failure('test native_runtime::retention ... ' + failure))
+
     def test_python_entrypoint_keeps_its_sibling_imports(self):
         with tempfile.TemporaryDirectory(prefix='fbt-python-entry-') as directory:
             root=Path(directory)

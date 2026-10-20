@@ -378,7 +378,8 @@ impl Inner {
 }
 impl EngineDispatcher {
     pub(super) async fn info(&self, cx: &Cx) -> Result<Vec<TorrentView>> {
-        let ledger = OwnedMutexGuard::lock(self.inner.ledger.clone(), cx).await?;
+        cx.checkpoint()?;
+        let ledger = self.observation_ledger().await?;
         Ok(self.info_locked(&ledger))
     }
     /// Explicit reads stat payload presence now.

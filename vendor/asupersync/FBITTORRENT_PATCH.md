@@ -1,5 +1,22 @@
 # fbittorrent's Asupersync patches
 
+## Bounded completed I/O history (2026-10-20)
+
+The native daemon configures `Runtime::set_resolved_obligation_history_limit(1024)`
+before opening its application region. Previously the obligation arena retained
+every committed/aborted file operation for the entire daemon lifetime. A real
+128-cycle, 2 GiB local download/remove trace showed the arena grow to 15 MiB;
+debug settlement also rescanned that growing history on every operation.
+
+`ObligationTable` now optionally retires old successful records using a bounded
+FIFO. Unconfigured runtimes retain their diagnostic history. Pending obligations,
+leak evidence, pending counters and region-finalization fences are preserved;
+arena generations keep retired IDs from settling a reused slot. This bounds
+completed history, not the number of outstanding operations or actual leaks.
+Downstream public-API regressions live in
+`src/native_runtime/obligation_history_tests.rs`; the app's native storage,
+cancellation and shutdown tests cover the configured runtime.
+
 This is the crates.io Asupersync 0.5.0 package (`asupersync-0.5.0.crate`, sha256
 `f34b1a19ffd6b74570339a156912436335bb09c594c675c62ea164b19a1f2511`; upstream
 revision `78b64636e99fea4ea2d868096576021dd3b8e519`) with the fbittorrent changes
