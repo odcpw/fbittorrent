@@ -126,12 +126,27 @@ For a comparison, alternate the before/after binaries in each repeat (AB then
 BA), using the same seed, workload and private filesystem. Warmup cases run all
 behaviour checks but live under `warmup-*` names and must not enter statistics:
 
+Run `compare.py` directly. It acquires the shared `flock` + memory-capped
+`systemd-run` wrapper separately for each matched pair, then releases it before
+queuing the next pair. An outer matrix-wide `flock` is rejected. This lets
+stabilization builds advance without separating the two matched measurements.
+Each pair has a 600-second wall-clock limit, including fixture creation,
+measurement, verification and teardown; `--pair-budget-secs` changes that limit.
+The scope sends SIGINT at the limit, allows ten seconds for cleanup, then kills
+any remaining processes in the scope, including detached children. A failed
+pair stops the matrix and marks both halves unusable for comparison.
+
 ```sh
 python3 tools/engine-bench/compare.py --before /evidence/bin/control \
   --after /evidence/bin/candidate --before-source CONTROL_REV \
   --after-source CANDIDATE_REV_OR_PATCH --seed /evidence/bin/fbt-bench-seed \
   --output /evidence/paired --disk-root /tmp --runs 10 --warmup 3
 ```
+
+`python3 tools/engine-bench/compare_test.py` exercises lock handoff, pair ordering,
+failure barriers and the scope deadline with private control processes and a
+private lock. It starts no engine benchmark and does not acquire the shared
+release lock.
 
 A completed/dormant API view may report unknown upload counters. Wire-observed
 payload bytes and Unchoke messages must still be zero, and every known API
