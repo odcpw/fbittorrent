@@ -1,11 +1,12 @@
 .pragma library
 .import "AddSource.js" as Source
 .import "Model.js" as Model
-function create(service,changed,debug) {
+function create(service,changed,debug,clock) {
+  var now=clock || Date.now
   var f={},epoch=0,trace=[],s={},filesRequested=false,pathDirty=false,spaceSerial=0,spaceDue=0,adopting=false
   function publish(){changed()}
   function record(kind,op,data){if(debug){trace.push({kind:kind,op:op,data:data});if(trace.length>32)trace.shift()}}
-  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,created:service.now,elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
+  function reset(){s={commitRequested:false,visible:false,phase:"closed",source:null,origin:"manual",hash:"",name:"",files:[],included:{},seed:false,savePath:"",error:"",duplicate:false,owned:false,created:now(),elapsed_s:0,pendingRef:"",cancelRequested:false,space:{supported:false,pending:false}};filesRequested=false;pathDirty=false;spaceDue=0;adopting=false}
   reset()
   function requiredBytes(){
     if(s.files.length)return s.files.reduce(function(total,row){return total+(s.included[row.index] ? row.size : 0)},0)
@@ -30,7 +31,7 @@ function create(service,changed,debug) {
   }
   function scheduleSpace(immediate){
     if(service.client.caps.indexOf("free_space")<0)return
-    spaceSerial++;s.space={supported:true,path:s.savePath,pending:true};spaceDue=service.now+250
+    spaceSerial++;s.space={supported:true,path:s.savePath,pending:true};spaceDue=now()+250
     if(immediate)checkSpace()
   }
   function busy(){return ["staging","committing","discarding","cancel_wait","keeping"].indexOf(s.phase)>=0}
@@ -185,11 +186,15 @@ function create(service,changed,debug) {
   // Retire this connection's review and callbacks locally. A reconnect may
   // expose a surviving stage for an explicit new review; never commit here.
   f.disconnected=function(){close()}
+  f.nextWakeup=function(){
+    if(!s.visible)return Infinity
+    return Math.min(spaceDue || Infinity,s.phase==="resolving" ? s.created+90000 : Infinity)
+  }
   f.tick=function(){
     if(!s.visible)return
     if(s.phase==="connecting" && service.online)stageSource()
-    if(spaceDue && service.now>=spaceDue)checkSpace()
-    s.elapsed_s=Math.max(0,Math.floor((service.now-s.created)/1000))
+    if(spaceDue && now()>=spaceDue)checkSpace()
+    s.elapsed_s=Math.max(0,Math.floor((now()-s.created)/1000))
     if(s.phase==="resolving" && s.elapsed_s>=90)s.phase="metadata_timeout"
     publish()
   }
