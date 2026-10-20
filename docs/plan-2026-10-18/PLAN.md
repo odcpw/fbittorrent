@@ -882,9 +882,10 @@ The network check runs once per second here, only when binding is configured. To
   download started before the tunnel dropped resumes by itself when it returns. The busy table
   counts a parked engine with waiting downloads as busy (§3.2.10), so the daemon does not exit
   while it waits.
-- Search, RSS and IMDb traffic from the daemon uses normal routing, and provider download helpers
-  stay refused while binding is on (`src/qbt.rs:413-423`), exactly as documented today
-  (`README.md:79-86`).
+- Search, RSS/Shows and IMDb use the same required interface, including DNS. Nova search,
+  provider inspection and selected-result download hooks use an authenticated local SOCKS5h
+  proxy whose DNS and TCP connections are interface-bound. An unavailable interface refuses
+  these requests without a normal-route fallback.
 - Messages name the configured interface instead of hard-coding "ProtonVPN" for every interface
   (`src/engine.rs:831`, `1248`) [RC §3 #19].
 - The owner's live config has binding **off** (`evidence/installed-config.json`); R10 keeps the
