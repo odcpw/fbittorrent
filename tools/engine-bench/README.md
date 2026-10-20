@@ -88,3 +88,26 @@ used to claim a throughput or CPU improvement. Flat PC attribution includes an
 unresolved bucket and fails on dropped samples or collection errors. Repeated
 normal runs, payload integrity, zero-upload probes, piece ordering and the local
 gate are required for an optimization claim.
+
+For syscall counts, use `--strace /absolute/path/to/strace` in a separate run.
+The `-f -c -w` report includes the daemon's owned helper execs. Its time column
+sums wall-clock syscall durations across threads, so futex wait time is **not**
+CPU attribution. Divide the total call count by payload bytes / 1e6.
+
+The seed SHA-256 is recorded as well as the daemon's. Rch can return a different
+artifact directory when it changes workers or falls back locally: take the
+artifact from the actual build output, never infer it from an old target file.
+
+Harness controls (no engine performance claim):
+
+```sh
+cargo test --manifest-path tools/engine-bench/Cargo.toml --locked
+python3 tools/engine-bench/seed_test.py /actual/build/path/fbt-bench-seed
+python3 tools/engine-bench/cleanup_test.py
+```
+
+The cleanup control injects both a setup exception and KeyboardInterrupt after
+starting a private child. Both must fail qualification and reap the child.
+Low-rate active workloads accept transient `stalled` gauges between blocks, but
+require every torrent to make verified byte progress in the measured window.
+Paused and queued torrents cannot pass as active.

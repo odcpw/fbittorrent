@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Symbolize CPU-time PC samples from profile.c; no suspended async stacks.
+"""Symbolize CPU-time PC samples from perf_sample.py; no suspended async stacks.
 
 The denominator includes unresolved and library PCs. This is exclusive CPU
 attribution, not wall time or an inclusive call graph. Count runs are diagnostic.

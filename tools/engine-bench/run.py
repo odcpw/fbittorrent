@@ -79,9 +79,9 @@ def wait(check, seconds=60):
 
 
 class Run:
-    def __init__(self, args):
+    def __init__(self, args, owners=None):
         self.args = args
-        self.owners = ProcessRun()
+        self.owners = owners if owners is not None else ProcessRun()
         self.children = []
         self.handles = []
 
@@ -243,7 +243,7 @@ class Run:
     def finish_row(self, row):
         row.update(load_begin=self.load_begin, load_end=os.getloadavg(), pressure_begin=self.pressure_begin, pressure_end=self.pressure(), worktree_source=self.args.worktree_source,
                    binary_source=self.args.binary_source,
-                   binary_sha256=self.args.binary_hash, instrumented=bool(self.args.preload or self.args.profile or self.args.strace))
+                   binary_sha256=self.args.binary_hash, seed_sha256=self.args.seed_hash, instrumented=bool(self.args.preload or self.args.profile or self.args.strace))
         (self.output / "result.json").write_text(json.dumps(row, indent=2)+"\n")
         print(json.dumps(dict(case=self.output.name, **row)), flush=True)
         return row
@@ -348,7 +348,7 @@ class Run:
                 self.add(item, stopped=not active)
             def settled():
                 rows = self.api("torrents.list")["torrents"]
-                return rows if len(rows) == count and all(r["checked"] and r["state"] in (("downloading",) if active else ("paused",)) for r in rows) else None
+                return rows if len(rows) == count and all(r["checked"] and r["state"] in (("downloading", "stalled") if active else ("paused",)) and (not active or r["completed_bytes"] > 0) for r in rows) else None
             rows = wait(settled, self.args.timeout)
             before = proc(self.pid)
             started = time.monotonic()
@@ -389,11 +389,14 @@ def main():
     args.worktree_source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     with args.binary.open("rb") as source:
         args.binary_hash = hashlib.file_digest(source, "sha256").hexdigest()
+    with args.seed.open("rb") as source:
+        args.seed_hash = hashlib.file_digest(source, "sha256").hexdigest()
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     failures = []
+    owners = ProcessRun()
     for index in range(args.runs):
         for case in args.cases:
-            run, name = Run(args), f"{case}-{index+1}"
+            run, name = Run(args, owners), f"{case}-{index+1}"
             try:
                 if case.startswith("download"):
                     run.download(name, int(case.removeprefix("download")))
@@ -418,6 +421,10 @@ def main():
                 if hasattr(run, "output"):
                     (run.output / "failure.json").write_text(json.dumps(failure, indent=2)+"\n")
                 print(json.dumps(failure), flush=True)
+    survivors = owners.survivors()
+    if survivors:
+        owners.cleanup()
+        raise RuntimeError(f"processes survived this benchmark suite (cleaned): {survivors}")
     if failures:
         raise SystemExit(1)
 
