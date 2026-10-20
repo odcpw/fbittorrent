@@ -9,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import time
+import traceback
 
 from dashboard import ROOT
 from responsiveness import PerformanceSession,summarize,pressure
@@ -29,6 +30,20 @@ class TimedSession(PerformanceSession):
         return super().wait(observed,timeout)
 
 
+def start_requested_daemon(swarm,launches):
+    code=swarm.p.child.poll()
+    if code is None:return
+    # Only the deliberately stopped initial owner is adapted. A warm-session
+    # death must retain its exit evidence, not attempt another notify.sock bind.
+    if launches:raise RuntimeError(f'owned daemon exited {code} during warm session')
+    log=swarm.box.root/'shims/fbittorrent.log'
+    if not log.exists():return
+    calls=[json.loads(line) for line in log.read_text().splitlines()]
+    assert calls==[['up']],calls
+    at=time.monotonic();swarm.start()
+    launches.append(dict(daemon_ready_ms=(time.monotonic()-at)*1000,adapter='recorded up -> harness-owned real serve'))
+
+
 def run(args,count):
     name=args.label+'_'+str(count)
     with Case('qs_latency',name) as case,LocalMagnet(case,args.binary) as swarm:
@@ -47,12 +62,7 @@ def run(args,count):
                     kernel=platform.release(),load_before=os.getloadavg(),pressure_before=pressure(),
                     renderer='private headless Sway pixman / Qt software',samples=samples,launches=launches)
         def launch():
-            log=swarm.box.root/'shims/fbittorrent.log'
-            if swarm.p.child.poll() is not None and log.exists():
-                calls=[json.loads(line) for line in log.read_text().splitlines()]
-                assert calls==[['up']],calls
-                at=time.monotonic();swarm.start()
-                launches.append(dict(daemon_ready_ms=(time.monotonic()-at)*1000,adapter='recorded up -> harness-owned real serve'))
+            start_requested_daemon(swarm,launches)
         q.launcher=launch
         def state():return q.state().get('view') or {}
         def timed(name,spec,action,external=False):
@@ -105,6 +115,7 @@ def run(args,count):
             case.check(len(launches)==1 and len(samples)>4*args.runs,
                        'measured real dispatch, Download, popup and window frames at '+str(count)+' records',str(path))
         except BaseException:
+            traceback.print_exc()
             failure=dict(state=q.state(),focus=json.loads(q.ipc('focusState')),samples=json.loads(q.ipc('samples')),launches=launches,
                          child_exit=child.poll() if child else None)
             if child and child.poll() is not None:
