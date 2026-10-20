@@ -1,6 +1,19 @@
 //! Replaceable engine state; the daemon owns the listener, lock and lifecycle.
 use crate::engine::{AppEngine, ParkedLedger};
 use anyhow::{bail, Result};
+use std::time::{Duration, Instant};
+
+/// The owner confirms the result before publishing slot release. A best-effort
+/// diagnostic worker must never turn a failed drain into a successful exit, or
+/// let a late success line arrive after the sockets have already been unlinked.
+pub(crate) fn drain_engine(app: &mut AppEngine, bound: Duration) -> Result<()> {
+    let began = Instant::now();
+    if !app.drain(bound) {
+        bail!("native engine did not drain within its shutdown deadline");
+    }
+    eprintln!("INFO engine drained in {} ms", began.elapsed().as_millis());
+    Ok(())
+}
 
 pub enum Slot {
     Starting,

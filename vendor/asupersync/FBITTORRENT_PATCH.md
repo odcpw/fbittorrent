@@ -126,3 +126,14 @@ calls an arbitrary timer/TimeSource implementation while holding state locks.
 The held-task application control arms a trap clock to verify this property;
 the native observer samples the concrete process-monotonic WallClock outside
 the collection. Socket stderr uses MSG_DONTWAIT rather than reopening procfs.
+
+## Structured-region capacity (2026-10-20)
+
+The swarm governor's default 1,000-region cap rejected the 500th real active
+transfer (each transfer has multiple owned regions), even with modest memory
+usage. The default count cap is now zero (unlimited); an explicitly configured
+nonzero cap and the existing pressure/envelope checks still apply. No task is
+detached and cancellation/region close semantics are unchanged. Application
+regression: `native_runtime::tests::more_than_one_thousand_owned_regions_admit_and_close`
+opens and closes 1,100 regions on the actual native runtime. The loopback engine
+benchmark additionally requires verified progress from all 500 active torrents.

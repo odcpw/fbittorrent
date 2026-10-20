@@ -175,7 +175,9 @@ class Run:
                 except BaseException as error:
                     errors.append(error)
             def stop_daemon():
+                self.shutdown_ms = 0
                 if hasattr(self, "daemon") and self.daemon.poll() is None:
+                    shutdown_started = time.monotonic()
                     try:
                         os.kill(getattr(self, "pid", self.daemon.pid), signal.SIGINT)
                     except ProcessLookupError:
@@ -184,6 +186,7 @@ class Run:
                         self.daemon.wait(10)
                     except subprocess.TimeoutExpired:
                         pass  # The ownership audit below fails and cleans survivors.
+                    self.shutdown_ms = (time.monotonic() - shutdown_started) * 1000
             def stop_seed():
                 if hasattr(self, "seed") and self.seed.poll() is None:
                     self.seed.terminate()
@@ -220,7 +223,7 @@ class Run:
                 if workload_error:
                     errors.insert(0, workload_error)
                 raise BaseExceptionGroup("benchmark teardown failed", errors) from None
-            (self.output / "teardown.json").write_text('{"drained":true,"survivors":0}\n')
+            (self.output / "teardown.json").write_text(json.dumps(dict(drained=True, survivors=0, shutdown_ms=self.shutdown_ms)) + "\n")
 
     def api(self, op, args=None, **kwargs):
         return self.client.call(op, args or {}, **kwargs)["result"]

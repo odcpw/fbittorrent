@@ -53,8 +53,72 @@ fn queue_maintenance_shutdown_is_quiet() {
         drop(ledger);
         println!("maintenance_keep_running={}", tick.await);
     });
-    assert!(app.drain(Duration::from_secs(2)));
+    crate::daemon::slot::drain_engine(&mut app, Duration::from_secs(2)).unwrap();
     drop(app);
     drop(InstanceLock::acquire_in(directory.join("runtime")).unwrap());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn quiesce_releases_observers_while_the_ledger_is_still_held() {
+    use std::{future::{poll_fn, Future}, task::Poll};
+    let directory = review_directory("observer-shutdown");
+    let mut app = test_app(&directory, &directory.join("downloads"), Ledger::default(), None);
+    let dispatcher = app.dispatcher();
+    dispatcher.runtime.block_on(async {
+        let cx = dispatcher.runtime.cx();
+        let ledger = OwnedMutexGuard::lock(dispatcher.inner.ledger.clone(), cx).await.unwrap();
+        let mut read = std::pin::pin!(dispatcher.observation_ledger());
+        poll_fn(|task| {
+            assert!(read.as_mut().poll(task).is_pending(), "observer must be waiting for the ledger");
+            Poll::Ready(())
+        }).await;
+        app.quiesce();
+        // Retain the ledger until AFTER the cancellation receipt. The old
+        // unconditional lock would remain pending forever at this boundary.
+        poll_fn(|task| match read.as_mut().poll(task) {
+            Poll::Ready(Err(error)) => {
+                assert!(error.to_string().contains("native engine is closing"));
+                Poll::Ready(())
+            }
+            _ => panic!("quiesced observer must resolve before the ledger is released"),
+        }).await;
+        drop(ledger);
+    });
+    assert!(app.drain(Duration::from_secs(2)));
+    drop(dispatcher);
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn daemon_owner_rejects_a_failed_native_drain() {
+    use std::sync::mpsc;
+    let directory = review_directory("owner-drain-failure");
+    let mut app = test_app(&directory, &directory.join("downloads"), Ledger::default(), None);
+    let runtime = app.runtime.as_ref().unwrap();
+    let (entered, started) = mpsc::channel();
+    let (release, held) = mpsc::channel();
+    let (finished, complete) = mpsc::channel();
+    let work = task::spawn_blocking(runtime.cx(), move || {
+        entered.send(()).unwrap();
+        held.recv().unwrap();
+        finished.send(()).unwrap();
+    });
+    started.recv_timeout(Duration::from_secs(2)).unwrap();
+    let began = std::time::Instant::now();
+    let result = crate::daemon::slot::drain_engine(&mut app, Duration::from_millis(50));
+    let elapsed = began.elapsed();
+    // Reap our physically held work before assertions can unwind the fixture.
+    release.send(()).unwrap();
+    complete.recv_timeout(Duration::from_secs(2)).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !work.is_finished() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(result.unwrap_err().to_string().contains("did not drain"));
+    assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
+    drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }

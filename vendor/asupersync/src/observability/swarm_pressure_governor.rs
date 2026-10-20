@@ -289,7 +289,7 @@ pub struct SwarmPressureGovernorConfig {
     pub enabled: bool,
     /// Underlying pressure governor configuration.
     pub pressure_config: PressureGovernorConfig,
-    /// Maximum regions per swarm instance.
+    /// Maximum regions per swarm instance; zero leaves admission to resource pressure.
     pub max_regions_per_instance: usize,
     /// Default memory budget per region in bytes.
     pub default_memory_budget_bytes: u64,
@@ -328,7 +328,7 @@ impl Default for SwarmPressureGovernorConfig {
         Self {
             enabled: true,
             pressure_config: PressureGovernorConfig::default(),
-            max_regions_per_instance: 1000,
+            max_regions_per_instance: 0,
             default_memory_budget_bytes: 100 * 1024 * 1024, // 100MB per region
             default_cpu_budget_ns_per_sec: 100_000_000,     // 100ms per second
             default_io_budget_ops_per_sec: 1000,            // 1000 ops per second
@@ -4002,7 +4002,9 @@ impl SwarmPressureGovernor {
             envelopes.len()
         };
 
-        if active_count >= self.config.max_regions_per_instance {
+        if self.config.max_regions_per_instance != 0
+            && active_count >= self.config.max_regions_per_instance
+        {
             return Ok(SwarmAdmissionDecisionInternal {
                 decision: AdmissionDecision::Reject,
                 reason: format!(

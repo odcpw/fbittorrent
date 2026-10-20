@@ -1,5 +1,58 @@
 use super::*;
 #[test]
+fn shutdown_cache_needs_no_fsync_and_keeps_fast_process_restart() {
+    const CHILD: &str = "FBT_NO_SHUTDOWN_FSYNC_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let name = format!("{}::shutdown_cache_needs_no_fsync_and_keeps_fast_process_restart", module_path!().split_once("::").unwrap().1);
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &name, "--nocapture"])
+            .env(CHILD, "1").stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                panic!("cache shutdown child exceeded its ten-second fuse");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"), "child must execute the regression: {output:?}");
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        return;
+    }
+    let (mut app, directory, hash, _counts) = fixture(false);
+    let dispatcher = app.dispatcher();
+    set_seed(&dispatcher, &hash, true).unwrap();
+    // Inject fsync failure only after durable torrent admission/intent writes.
+    // TSYNC includes the real engine blocking workers, not just this thread.
+    let instruction = |code, jt, jf, k| libc::sock_filter { code, jt, jf, k };
+    let mut filter = [
+        instruction(0x20, 0, 0, 0), // BPF_LD W ABS: seccomp_data.nr
+        instruction(0x15, 1, 0, libc::SYS_fsync as u32),
+        instruction(0x15, 0, 1, libc::SYS_fdatasync as u32),
+        instruction(0x06, 0, 0, 0x00050000 | libc::EIO as u32),
+        instruction(0x06, 0, 0, 0x7fff0000), // ALLOW
+    ];
+    let program = libc::sock_fprog { len: filter.len() as u16, filter: filter.as_mut_ptr() };
+    unsafe {
+        assert_eq!(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
+        assert_eq!(libc::syscall(libc::SYS_seccomp, 1, 1, &program), 0);
+    }
+    app.quiesce();
+    let began = std::time::Instant::now();
+    assert!(app.drain(Duration::from_secs(2)));
+    assert!(began.elapsed() < Duration::from_secs(2));
+    assert!(directory.join("resume/CLEAN").is_file(), "boot cache must survive without fsync");
+    drop(dispatcher);
+    let store = resume::Store::open(&directory).unwrap();
+    let records: Vec<Record> = read_ledger(&directory.join("torrents.json")).unwrap().records;
+    assert!(store.prepare(&directory, &records).unwrap().take(&hash).is_some());
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn clean_restart_trusts_real_storage_without_checksum_reads_and_recheck_invalidates_first() {
     let (app, directory, hash, counts) = fixture(false);
     let dispatcher = app.dispatcher();

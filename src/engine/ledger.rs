@@ -225,6 +225,12 @@ impl Inner {
         Ok(())
     }
     pub(super) async fn write_store(&self, cx: &Cx, name: &str, bytes: &[u8]) -> Result<()> {
+        rqbit_runtime::select! {
+            result = self.write_store_effects(cx, name, bytes) => result,
+            _ = self.session.cancellation_token().cancelled() => bail!("native engine is closing"),
+        }
+    }
+    async fn write_store_effects(&self, cx: &Cx, name: &str, bytes: &[u8]) -> Result<()> {
         cx.checkpoint()?;
         let temporary = self.directory.join(format!("{name}.tmp"));
         let final_path = self.directory.join(name);
@@ -240,14 +246,13 @@ impl Inner {
         file.set_permissions(rqbit_runtime::fs::Permissions::from_mode(0o600))
             .await?;
         file.write_all(bytes).await?;
-        file.sync_all().await?;
+        let file = file.into_std()?;
+        crate::durable_sync::sync_all(cx, &file).await?;
         drop(file);
         rqbit_runtime::fs::rename(&temporary, &final_path).await?;
         // Make both the replacement ledger and preceding metadata renames durable.
-        rqbit_runtime::fs::File::open(&self.directory)
-            .await?
-            .sync_all()
-            .await?;
+        let directory = rqbit_runtime::fs::File::open(&self.directory).await?.into_std()?;
+        crate::durable_sync::sync_all(cx, &directory).await?;
         Ok(())
     }
     pub(super) async fn cache_metadata(&self, cx: &Cx, handle: &Arc<ManagedTorrent>) -> Result<()> {

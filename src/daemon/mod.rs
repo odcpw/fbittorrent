@@ -74,7 +74,9 @@ impl Daemon {
         let slot=self.slot.read().unwrap_or_else(|e|e.into_inner());
         let mut stats=self.stats.lock().unwrap();
         if let Slot::Running(app)=&slot.slot {stats.observe(slot.engine_epoch,app.dispatcher().transfer_totals());}
-        if let Err(error)=stats.save(Instant::now(),false){eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        if let Err(error)=stats.save_cancellable(Instant::now(),false,Some(&self.stopping)){
+            if !self.is_stopping() || !stats::checkpoint_deferred(&error) {eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        }
         (stats.session.clone(),stats.all_time.clone())
     }
 
@@ -177,7 +179,7 @@ impl Daemon {
         .into()
     }
 
-    fn replace(&self, next: Slot) -> Result<Slot> {
+    fn quiesce_engine(&self) {
         // Running handlers hold read guards. Cancellation makes their existing
         // engine dispatch select return before we wait for exclusive ownership.
         if let Slot::Running(app) = &self
@@ -188,6 +190,10 @@ impl Daemon {
         {
             app.quiesce();
         }
+    }
+
+    fn replace(&self, next: Slot) -> Result<Slot> {
+        self.quiesce_engine();
         let mut slot = self.slot.write().unwrap_or_else(|error| error.into_inner());
         let old_epoch=slot.engine_epoch;
         let initialized=old_epoch>0;
@@ -203,7 +209,7 @@ impl Daemon {
         // The sampler waits up to a second; the first slot also wakes it.
         if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){if initialized {bus.engine_changed(epoch,state);} else {bus.refresh();}}
         if let Slot::Running(app)=&mut old {
-            app.drain(Duration::from_secs(4));
+            slot::drain_engine(app, Duration::from_secs(4))?;
             self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
         }
         Ok(old)
@@ -415,13 +421,23 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    // The bus and service workers can already be borrowing the engine while
+    // waiting for its ledger. Cancel those dispatches BEFORE joining them;
+    // joining first can wait forever and never reach the engine's drain fuse.
+    daemon.quiesce_engine();
+    eprintln!("DEBUG daemon joining component=shows");
     daemon.shows.stop();
+    eprintln!("DEBUG daemon joining component=rss");
     daemon.rss.stop();
+    eprintln!("DEBUG daemon joining component=clipboard");
     daemon.clipboard.stop();
+    eprintln!("DEBUG daemon joining component=inhibitor");
     daemon.inhibitor.stop();
+    eprintln!("DEBUG daemon joining component=notifier");
     daemon.notifier.stop();
     // Quiesce the persistent listener before taking the slot's writer lock.
     // Already-read requests complete; new handlers see stopping immediately.
+    eprintln!("DEBUG daemon joining component=api_bus");
     api.stop_accepting();
     daemon.search.shutdown();
     let began = Instant::now();
@@ -472,8 +488,12 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     drop(hook);
     let reason = reason?;
     if let Err(error)=stats_saved {
-        eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
-        if reason!=StopReason::Panic {return Err(error);}
+        if stats::checkpoint_deferred(&error) {
+            eprintln!("INFO stats retained previous durable checkpoint reason=shutdown_deadline");
+        } else {
+            eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
+            if reason!=StopReason::Panic {return Err(error);}
+        }
     }
     eprintln!(
         "INFO daemon stopped reason={reason:?} code={}",

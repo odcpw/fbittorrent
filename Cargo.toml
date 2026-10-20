@@ -22,6 +22,7 @@ toml = "1.1"
 dirs = "6"
 anyhow = "1"
 libc = "0.2"
+io-uring = "0.7.15"
 ftui = { version = "0.6", features = ["crossterm"] }
 ftui-extras = { version = "0.6", features = ["canvas", "image"] }
 unicode-width = "0.2"

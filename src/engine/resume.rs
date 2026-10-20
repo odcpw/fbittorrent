@@ -1,5 +1,6 @@
-//! App-owned have snapshots. A clean marker is consumed before a writer starts;
-//! every relevant payload stamp and the exact selection must still match.
+//! Optional, boot-scoped have cache. A token is consumed before a writer starts;
+//! every payload stamp and the exact selection must still match. The durable
+//! ledger is independent: after reboot we hash rather than trust unflushed data.
 use super::*;
 use std::{
     io::{Read, Write},
@@ -85,6 +86,7 @@ impl Prepared {
 pub(crate) struct Store {
     directory: PathBuf,
     clean: AtomicBool,
+    boot_marker: Option<Vec<u8>>,
     io: StdMutex<()>,
     periodic: StdMutex<Instant>,
 }
@@ -93,15 +95,18 @@ impl Store {
         let directory = directory.join("resume");
         private_directory(&directory)?;
         let marker = directory.join("CLEAN");
-        let clean = std::fs::read(&marker).is_ok_and(|bytes| bytes == b"clean-v1\n");
+        let boot_marker = boot_marker();
+        let clean = boot_marker.as_ref().is_some_and(|boot|
+            std::fs::read(&marker).is_ok_and(|bytes| bytes == *boot));
         match std::fs::remove_file(&marker) {
-            Ok(()) => std::fs::File::open(&directory)?.sync_all()?,
+            Ok(()) => {},
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error).context("consuming resume CLEAN marker"),
         }
         Ok(Self {
             directory,
             clean: AtomicBool::new(clean),
+            boot_marker,
             io: StdMutex::new(()),
             periodic: StdMutex::new(Instant::now()),
         })
@@ -113,7 +118,6 @@ impl Store {
         // On an in-process engine restart the previous clean slot created this.
         if marker.exists() {
             if let Err(error) = std::fs::remove_file(&marker)
-                .and_then(|_| std::fs::File::open(&self.directory)?.sync_all())
             {
                 return Err(error).context("consuming slot resume marker");
             }
@@ -201,13 +205,13 @@ impl Store {
     pub(super) fn invalidate(&self, hash: &str) -> Result<()> {
         let _io = self.io.lock().unwrap();
         match std::fs::remove_file(self.path(hash)?) {
-            Ok(()) => std::fs::File::open(&self.directory)?.sync_all()?,
+            Ok(()) => {},
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
         Ok(())
     }
-    pub(super) fn snapshot(&self, record: &Record, handle: &ManagedTorrent, clean: bool) -> Result<()> {
+    pub(super) fn snapshot(&self, record: &Record, handle: &ManagedTorrent, _clean: bool) -> Result<()> {
         let bits = handle
             .have_pieces_snapshot()
             .context("torrent has no verified have snapshot")?;
@@ -227,12 +231,10 @@ impl Store {
             size: value.size,
             have: value.have,
         };
-        if clean {
-            // The durable marker must never precede the payload bytes it trusts.
-            for stamp in &header.files {
-                std::fs::File::open(&stamp.path)?.sync_all()?;
-            }
-        }
+        // Cache trust never crosses a kernel boot. Written, verified pages
+        // survive process exit in this boot, so shutdown must not fsync the
+        // entire payload (uncancellable under write pressure). A reboot always
+        // requires hashing, even if these optional cache files reached disk.
         let header = serde_json::to_vec(&header)?;
         anyhow::ensure!(
             16 + header.len() + bits.as_bytes().len() <= MAX_BYTES as usize,
@@ -271,13 +273,23 @@ impl Store {
                 }
             }
         }
-        std::fs::File::open(&self.directory)?.sync_all()?;
         if clean {
-            atomic_write(&self.directory.join("CLEAN"), b"clean-v1\n")?;
-            self.clean.store(true, Ordering::Release);
+            if let Some(marker) = &self.boot_marker {
+                atomic_write(&self.directory.join("CLEAN"), marker)?;
+                self.clean.store(true, Ordering::Release);
+            }
         }
         Ok(())
     }
+}
+fn boot_marker() -> Option<Vec<u8>> {
+    let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    let id = id.trim();
+    if id.len() != 36 || !id.bytes().enumerate().all(|(i, b)|
+        if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() }) {
+        return None;
+    }
+    Some(format!("boot-v2 {id}\n").into_bytes())
 }
 fn private_directory(path: &Path) -> Result<()> {
     std::fs::DirBuilder::new()
@@ -298,10 +310,8 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .open(&temp)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(bytes)?;
-    file.sync_all()?;
     drop(file);
     std::fs::rename(temp, path)?;
-    std::fs::File::open(path.parent().unwrap())?.sync_all()?;
     Ok(())
 }
 fn read_bounded(path: &Path) -> Result<Vec<u8>> {
