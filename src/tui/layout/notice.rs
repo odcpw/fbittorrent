@@ -2,12 +2,9 @@
 use super::*;
 use std::borrow::Cow;
 impl TuiApp {
-    pub(in crate::tui) fn torrent_reason(&self, torrent: &Torrent) -> String {
-        let Some(row) = self.store.torrents.get(&torrent.hash) else {
-            return format::state_word(torrent, None).to_lowercase();
-        };
+    pub(in crate::tui) fn torrent_reason(&self, row: &Torrent) -> String {
         let Some(code) = row.reason.as_deref() else {
-            return format::state_word(torrent, Some(row)).to_lowercase();
+            return format::state_word(row).to_lowercase();
         };
         let interface = self
             .store
@@ -23,18 +20,14 @@ impl TuiApp {
         let Some(t) = self.selected_torrent() else {
             return;
         };
-        let row = self.store.torrents.get(&t.hash);
-        let queue = row
-            .and_then(|r| r.queue_pos)
+        let queue = t
+            .queue_pos
             .map(|p| format!(" · queue {p}"))
             .unwrap_or_default();
-        let metrics = format::Metrics {
-            legacy: t,
-            api: row,
-        };
+        let metrics = format::Metrics(t);
         let text = format!(
             "{} · {}{queue} · {} · {}",
-            format::state_cell(t, row).trim_end(),
+            format::state_cell(t).trim_end(),
             self.torrent_reason(t),
             metrics.upload(),
             t.save_path

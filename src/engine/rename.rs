@@ -59,7 +59,7 @@ mod tests {
             torrent: None,
             save_path: None,
             upload_limit: 0,
-            ratio_limit: -1.0,
+            seed: false,
             stopped: true,
             category: String::new(),
             tags: String::new(),

@@ -17,7 +17,6 @@ pub fn run(
     port: Option<u16>,
     upload: Option<String>,
 ) -> Result<Code> {
-    anyhow::ensure!(cfg.native(), "these settings require the native engine");
     let mut patch = Map::new();
     if let Some(v) = max {
         patch.insert("max_active_downloads".into(), json!(v));

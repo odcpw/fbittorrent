@@ -26,7 +26,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
         frame("contracts/ipc/v1/torrents.ndjson", "result")["result"]["torrents"][0].clone(),
     )
     .unwrap();
-    row.hash = crate::api::Hash::new(app.torrents[0].hash.clone()).unwrap();
+    row.hash = app.torrents[0].hash.clone();
     row.name = app.torrents[0].name.clone();
     row.state = crate::api::TorrentState::Error;
     row.reason = Some("disk_full".into());
@@ -37,7 +37,7 @@ pub(super) fn prepare(app: &mut TuiApp) {
     row.peers = None;
     row.seeds = None;
     row.playable = None;
-    app.torrents[0] = format::torrent(&row);
+    app.torrents[0] = row.clone();
     app.store.torrents.insert(row.hash.to_string(), row);
 }
 #[test]
@@ -50,10 +50,7 @@ fn disk_banner_and_state_are_worded_at_every_size() {
         assert!(banner.contains("3.1 GiB needed, 1.2 GiB free"));
         assert!(pane.contains("! Disk"));
         assert_eq!(
-            dw(format::state_cell(
-                &app.torrents[0],
-                app.store.torrents.get(&app.torrents[0].hash)
-            )),
+            dw(format::state_cell(&app.torrents[0])),
             9
         );
         assert!(pane

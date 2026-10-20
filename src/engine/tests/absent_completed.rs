@@ -22,7 +22,7 @@ fn completed_listing_detects_deleted_and_truncated_selected_files_without_hashin
             row.progress.is_none() && row.completed_bytes.is_none() && row.completed_at.is_none()
         );
         assert!(!row.checked && dispatcher.inner.handle(&record.hash).is_err());
-        let value = serde_json::to_value(row).unwrap();
+        let value = wire(row);
         println!("completed selected file unavailable: {value}");
     }
     assert_eq!(

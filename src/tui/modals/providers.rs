@@ -34,11 +34,6 @@ impl TuiApp {
         self.load_plugins()
     }
 
-    #[cfg(test)]
-    pub(super) fn on_providers_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
-        actions::dispatch_scope(self, actions::Scope::Modal(actions::ModalKind::Providers), key)
-    }
-
     pub(super) fn on_providers_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         let Some(m) = self.providers.as_ref() else { return Cmd::none() };
         let n = m.plugins.len();
@@ -51,7 +46,8 @@ impl TuiApp {
             actions::Intent::Toggle => if let Some(p) = cur { return self.set_plugins(vec![p.name], !p.enabled); },
             actions::Intent::All => return self.set_plugins(all, true),
             actions::Intent::None => return self.set_plugins(all, false),
-            actions::Intent::Open => if let Some(p) = cur { if !p.url.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&p.url).spawn(); } },
+            // A provider's own (third-party) URL: web pages only.
+            actions::Intent::Open => if let Some(p) = cur { if !p.url.is_empty() { crate::public_text::open_web(&p.url); } },
             actions::Intent::Reload => return self.load_plugins(),
             _ => {}
         }
@@ -85,7 +81,7 @@ impl TuiApp {
         let iw = inner.width.saturating_sub(2) as usize;
         let elapsed = self.marquee_elapsed();
         self.view_rows(MouseList::Providers,rows[0],m.plugins.len(),
-            |i|layout::fingerprint(&(&m.plugins[i],self.cfg.native())),
+            |i|layout::fingerprint(&m.plugins[i]),
             |i|{let p=&m.plugins[i];
             let mark = if p.enabled { "[x] " } else { "[ ] " };
             let st = if p.enabled { bg.fg(th.fg) } else { bg.fg(th.dim) };

@@ -5,7 +5,7 @@ pub(super) const ACTIONS: &[Action] = &[
     action!("clipboard.dismiss_offer",Scope::Modal(ModalKind::Clipboard),&[KeyChord::plain(KeyCode::Escape)],"Dismiss offered magnet",90,
         |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
     action!("limits.toggle",Scope::Global,&[KeyChord::plain(KeyCode::Char('z'))],"Turtle limits",90,
-        |a|a.cfg.native()&&a.turtle_on().is_some()&&!a.alt_busy&&a.online&&a.store.hello.as_ref().is_some_and(|h|h.caps.iter().any(|cap|cap=="limits")),
+        |a|a.turtle_on().is_some()&&!a.alt_busy&&a.online&&a.store.hello.as_ref().is_some_and(|h|h.caps.iter().any(|cap|cap=="limits")),
         Some(TuiApp::toggle_alt),TDP,None,None,None),
     action!(
         "screen.torrents",
@@ -108,7 +108,7 @@ pub(super) const ACTIONS: &[Action] = &[
         &[KeyChord::plain(KeyCode::F(6)), KeyChord::plain(KeyCode::Char(','))],
         "Settings",
         90,
-        |a| a.cfg.native(),
+        |_| true,
         Some(|a| {
             a.open_settings()
         }),

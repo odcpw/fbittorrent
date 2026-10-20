@@ -36,40 +36,24 @@ fn execute(daemon: &Daemon, op: EngineOp) -> ApiResult<EngineResult> {
     })
 }
 fn hashes(values: &Hashes) -> HashSelection {
-    HashSelection::Hashes(values.as_slice().iter().map(ToString::to_string).collect())
+    HashSelection(values.as_slice().iter().map(ToString::to_string).collect())
 }
+/// The engine view is the API row; only identifiers and timestamps are checked.
 pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
-    use engine::view::{Intent as I, TorrentState as S, UploadPolicy as U};
     let invalid = || error(ErrorCode::Internal, "invalid normalized torrent", None);
-    // The engine already owns normalized fields. Project them directly rather
-    // than rendering and parsing the CLI object for every row on every tick.
+    let unsigned = |value: i64| u64::try_from(value).map_err(|_| invalid());
     Ok(Torrent {
         hash: Hash::new(view.hash).map_err(|_| invalid())?,
         name: view.name,
-        state: match view.state {
-            S::Metadata => TorrentState::Metadata,
-            S::Checking => TorrentState::Checking,
-            S::Downloading => TorrentState::Downloading,
-            S::Stalled => TorrentState::Stalled,
-            S::Queued => TorrentState::Queued,
-            S::Paused => TorrentState::Paused,
-            S::Done => TorrentState::Done,
-            S::Seeding => TorrentState::Seeding,
-            S::WaitingVpn => TorrentState::WaitingVpn,
-            S::Error => TorrentState::Error,
-        },
-        intent: match view.intent { I::Run => Intent::Run, I::Pause => Intent::Pause },
+        state: view.state,
+        intent: view.intent,
         staged: view.staged,
         checked: view.checked,
         seed: view.seed,
         upload_enabled: view.upload_enabled,
-        upload_policy: match view.upload_policy {
-            U::Off => UploadPolicy::Off,
-            U::Unlimited => UploadPolicy::Unlimited,
-            U::Custom => UploadPolicy::Custom,
-        },
+        upload_policy: view.upload_policy,
         save_path: view.save_path,
-        added_at: u64::try_from(view.added_at).map_err(|_| invalid())?,
+        added_at: unsigned(view.added_at)?,
         force: view.force,
         reason: view.reason,
         error: view.error,
@@ -82,16 +66,16 @@ pub fn torrent(view: engine::view::TorrentView) -> ApiResult<Torrent> {
         eta_s: view.eta_s,
         peers: view.peers,
         seeds: view.seeds,
-        upload_limit_bps: view.upload_limit_bps.filter(|v| *v != 0),
+        upload_limit_bps: view.upload_limit_bps.filter(|limit| *limit != 0),
         download_limit_bps: view.download_limit_bps,
         effective_download_limit_bps: view.effective_download_limit_bps,
         ratio: view.ratio.filter(|v| v.is_finite()),
         content_path: view.content_path,
-        completed_at: view.completed_at.map(u64::try_from).transpose().map_err(|_| invalid())?,
+        completed_at: view.completed_at.map(unsigned).transpose()?,
         origin: Some(view.origin.unwrap_or_else(|| "manual".into())),
-        queue_pos: view.queue_pos,
         imdb_id: None,
-        playable: None, // The daemon's watch sampler decorates the API rows.
+        queue_pos: view.queue_pos,
+        playable: None,
     })
 }
 pub fn list(daemon: &Daemon) -> ApiResult<Vec<Torrent>> {
@@ -297,7 +281,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 torrent: None,
                 save_path: args.save_path.clone().or(cfg.save_path.clone()),
                 upload_limit: 0,
-                ratio_limit: if seed { -2.0 } else { 0.0 },
+                seed,
                 stopped: args.stopped.unwrap_or(false),
                 category: args.category.clone().unwrap_or_default(),
                 tags: format!("fbt-origin:{origin}"), origin: Some(origin.into()),
@@ -504,7 +488,7 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
                 let EngineResult::Start(result) = execute(
                     daemon,
                     EngineOp::Start {
-                        hashes: HashSelection::Hashes(wanted),
+                        hashes: HashSelection(wanted),
                         skip_complete: requested.len() > 1,
                     },
                 )?

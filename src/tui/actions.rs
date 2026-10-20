@@ -142,7 +142,6 @@ pub(super) enum Intent {
     Left,
     Right,
     Pause,
-    Seed,
     Remove,
     DeleteFiles,
     Open,

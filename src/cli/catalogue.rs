@@ -113,7 +113,7 @@ pub(super) fn success(client:&Client,call:&api::Call,timeout:u64)->Result<Value>
 
 pub(super) fn saved_torrents()->Result<Vec<api::Torrent>> {
     // Read-only atomic ledger snapshots need no live engine or process lock.
-    let ledger=crate::engine::ParkedLedger::new(crate::config::data_dir().join("engine"),crate::daemon::lifecycle::Lifecycle::default());
+    let ledger=crate::engine::ParkedLedger::new(crate::config::data_dir().join("engine"));
     let crate::engine::ops::EngineResult::Torrents(rows)=ledger.execute(crate::engine::ops::EngineOp::Info)?else{unreachable!()};
     rows.into_iter().map(|row|api::ops::torrents::torrent(row).map_err(api::errors::app_error)).collect()
 }

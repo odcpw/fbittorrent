@@ -1,50 +1,27 @@
     #[test]
     fn two_engines_one_process() {
-        use crate::daemon::lifecycle::{Request as LifecycleRequest, RestartReason};
-        fn open(label: &str, lifecycle: Lifecycle) -> (AppEngine, PathBuf) {
+        fn open(label: &str) -> (AppEngine, PathBuf) {
             let directory = review_directory(label);
             let cfg = Config { save_path: Some(directory.join("downloads").to_string_lossy().into()), ..Default::default() };
             let instance = InstanceLock::acquire_in(directory.join("runtime")).unwrap();
-            let app = start_in(&cfg, lifecycle.clone(), directory.clone(), instance, SessionOptions {
+            let app = start_in(&cfg, Lifecycle::default(), directory.clone(), instance, SessionOptions {
                 dht: None, disable_trackers: true, disable_local_service_discovery: true, ..Default::default()
             }).unwrap();
-            lifecycle.set_expected_network(Some(crate::network_app::state(&cfg)));
             (app, directory)
         }
-        let first = Lifecycle::default();
-        let second = Lifecycle::default();
-        let (app_a, directory_a) = open("lifecycle-a", first.clone());
-        app_a.dispatcher().execute(ops::EngineOp::Restart).unwrap();
-        // Starting another real session must not clear the first owner's request.
-        let (app_b, directory_b) = open("lifecycle-b", second.clone());
+        let (app_a, directory_a) = open("lifecycle-a");
+        // Starting another real session must not disturb the first one.
+        let (app_b, directory_b) = open("lifecycle-b");
         assert_ne!(directory_a, directory_b);
-        assert_eq!(first.pending_request(), Some(LifecycleRequest::Restart(RestartReason::Explicit)));
-        assert_eq!(second.wait(Duration::ZERO), None);
-        assert_eq!(app_a.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
-        assert_eq!(app_b.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
-        app_a.dispatcher().execute(ops::EngineOp::Shutdown).unwrap();
-        assert_eq!(first.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
-        assert_eq!(second.pending_request(), None);
+        assert!(rows(&app_a.dispatcher()).is_empty());
+        assert!(rows(&app_b.dispatcher()).is_empty());
         drop(app_a);
         assert!(InstanceLock::acquire_in(directory_a.join("runtime")).is_ok());
-        assert_eq!(app_b.dispatcher().execute(ops::EngineOp::Info).unwrap().to_cli_json().unwrap(), "[]");
-        app_b.dispatcher().execute(ops::EngineOp::Shutdown).unwrap();
-        assert_eq!(second.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
-        assert_eq!(first.pending_request(), None);
+        assert!(rows(&app_b.dispatcher()).is_empty());
         drop(app_b);
         assert!(InstanceLock::acquire_in(directory_b.join("runtime")).is_ok());
         std::fs::remove_dir_all(directory_a).unwrap();
         std::fs::remove_dir_all(directory_b).unwrap();
-    }
-
-    #[test]
-    fn parked_shutdown_uses_its_lifecycle() {
-        use crate::daemon::lifecycle::Request as LifecycleRequest;
-        let directory = review_directory("parked-lifecycle");
-        let lifecycle = Lifecycle::default();
-        assert_eq!(fixture::dispatch_parked_in(&request("app/shutdown", &[]), &directory, &lifecycle)
-            .unwrap().unwrap(), "Ok.");
-        assert_eq!(lifecycle.wait(Duration::ZERO), Some(LifecycleRequest::Stop(StopReason::Quit)));
     }
 
     #[test]
@@ -193,9 +170,9 @@
             source: String::new(),
             output_folder: downloads.to_string_lossy().into_owned(),
             only_files: None,
-            upload_limit: NO_UPLOAD_LIMIT,
+            upload_limit: 0,
             trackers: Vec::new(), removed_trackers: Vec::new(), download_limit: None,
-            ratio_limit: 0.0,
+
             category: String::new(),
             tags: String::new(), origin: "manual".into(),
             added_on: 1,

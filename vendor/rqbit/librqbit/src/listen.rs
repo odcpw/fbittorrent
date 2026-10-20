@@ -12,7 +12,6 @@ use crate::{stream_connect::ConnectionKind, vectored_traits::AsyncReadVectored};
 
 pub(crate) struct ListenResult {
     pub tcp_socket: Option<TcpListener>,
-    pub enable_upnp_port_forwarding: bool,
     pub addr: SocketAddr,
     pub announce_port: Option<u16>,
     pub max_pending_incoming_handshake_checks: usize,
@@ -125,7 +124,6 @@ impl ListenerOptions {
             tcp_socket,
             announce_port,
             addr: listen_addr,
-            enable_upnp_port_forwarding: self.enable_upnp_port_forwarding,
             max_pending_incoming_handshake_checks: self.max_pending_incoming_handshake_checks,
         })
     }

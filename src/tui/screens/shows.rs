@@ -548,7 +548,7 @@ impl TuiApp {
                 });
                 let unread = show.is_new(&episode.key);
                 let state = if let Some(t) = torrent {
-                    format::state_cell(t, self.store.torrents.get(&t.hash))
+                    format::state_cell(t)
                 } else if show.grabbed.contains_key(&episode.key) {
                     "+ Added  "
                 } else if unread {

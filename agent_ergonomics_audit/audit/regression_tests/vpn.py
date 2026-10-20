@@ -149,7 +149,7 @@ def headless_park_unpark(binary):
             digest = hashlib.sha1(fixtures.bencode(info)).hexdigest()
             (directory / f"{digest}.torrent").write_bytes(fixtures.bencode({b"info": info}))
             records.append(dict(hash=digest, name=name, source="", output_folder=str(sandbox.downloads),
-                                only_files=None, upload_limit=32768, ratio_limit=0.0, category="fixture", tags="",
+                                only_files=None, upload_limit=32768, upload=False, category="fixture", tags="",
                                 added_on=number, completion_on=0, paused=paused, resume_after_migration=False))
         ledger = directory / "torrents.json"
         ledger.write_text(json.dumps(dict(migrated_legacy=True, records=records)))

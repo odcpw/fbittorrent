@@ -76,7 +76,7 @@ fn move_preserves_explicit_pause_intent_and_rejects_missing_source_data() {
     let dispatcher = app.dispatcher();
     dispatcher
         .execute(EngineOp::Stop {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
         })
         .unwrap();
     let before = row(&dispatcher);
@@ -156,7 +156,7 @@ fn move_reads_remain_available_and_timed_out_drain_retains_join() {
     );
     let refused = dispatcher
         .execute(EngineOp::Stop {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
         })
         .unwrap_err();
     let refusal = crate::api::ops::engine_error(refused);

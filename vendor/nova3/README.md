@@ -5,7 +5,10 @@ on this machine). Their original copyright and BSD licence notices are
 retained in each file. Upstream: https://github.com/qbittorrent/qBittorrent/tree/master/src/searchengine/nova3
 
 fbittorrent changes to nova2.py cap concurrent search workers at four and add
-Linux parent-death cleanup to each worker. Installed search providers retain
+Linux parent-death cleanup to each worker. helpers.py gives every socket a
+20-second default timeout, passes it to `urlopen`, and bounds each response to
+16 MiB read and 64 MiB after gunzip (the app also caps each Python process's
+address space and each search's duration). Installed search providers retain
 their own licences and are copied into the user data directory separately.
 
 ## Licences

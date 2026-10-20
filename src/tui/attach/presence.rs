@@ -14,7 +14,7 @@ use std::{
 mod actor;
 mod confirmations;
 
-pub(in crate::tui) enum Update {
+pub(crate) enum Update {
     Event(crate::api::Event),
     Sent {
         reference: crate::api::MutationRef,

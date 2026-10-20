@@ -28,11 +28,9 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
-use crate::daemon::lifecycle::{Lifecycle, StopReason};
+use crate::daemon::lifecycle::Lifecycle;
 use crate::ipc::InstanceLock;
-#[cfg(test)]
-use tests::fixture::{Request, Route};
-use crate::qbt::{Torrent, TorrentFile, TransferInfo, NO_UPLOAD_LIMIT, SEED_TAG};
+use crate::qbt::{TorrentFile, TransferInfo};
 
 mod ledger;
 pub(crate) mod rename;
@@ -56,13 +54,14 @@ pub(crate) mod disk;
 pub mod ops;
 mod restore;
 mod dormant;
+mod saved;
 mod dormant_delete;
 pub mod view;
 mod parked;
 
 use ledger::{Record, Ledger, read_ledger, save_parked_ledger};
-use ops::{mutation_hashes, json, now};
-pub use parked::ParkedLedger;
+use ops::{mutation_hashes, now};
+pub use parked::{ParkedLedger, ParkedRefusal};
 pub use ledger::LedgerGeneration;
 pub use dormant::InvalidTorrentState;
 
@@ -102,9 +101,13 @@ struct Inner {
     directory: PathBuf,
     default_folder: PathBuf,
     rechecks: recheck::Rechecks,
+    /// Parsed saved metainfo and sampled payload presence (see saved.rs).
+    saved: saved::SavedCache,
     resume: Arc<resume::Store>,
     resume_prepared: resume::Prepared,
     undo: std::sync::Mutex<Arc<undo::History>>,
+    /// The owner's rate-history sink, fed from this engine's 1 s tick.
+    rates: std::sync::Mutex<Option<RateSink>>,
     stopping: AtomicBool,
     max_active_downloads: AtomicUsize,
     queue_pins: std::sync::Mutex<HashSet<String>>,
@@ -120,6 +123,9 @@ struct Inner {
     cancelled_checks: std::sync::Mutex<HashMap<String, Weak<ManagedTorrent>>>,
 }
 
+/// Receives (download, upload) bytes/s once per engine tick.
+pub(crate) type RateSink = Arc<dyn Fn(u64, u64) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct EngineDispatcher {
     generation: Arc<LedgerGeneration>,
@@ -132,12 +138,7 @@ pub struct AppEngine {
     dispatcher: EngineDispatcher,
     runtime: Option<NativeRuntime>,
     // Released only after the socket, workers, session and runtime have stopped.
-    instance: Arc<InstanceLock>,
-}
-
-pub fn start(cfg: &Config, lifecycle: Lifecycle) -> Result<AppEngine> {
-    cfg.validate()?;
-    start_with_lock(cfg, lifecycle, Arc::new(InstanceLock::acquire()?), None)
+    _instance: Arc<InstanceLock>,
 }
 
 /// Start one replaceable session under the daemon owner's existing lock. The
@@ -211,8 +212,10 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
         directory,
         default_folder,
         rechecks: Default::default(),
+        saved: Default::default(),
         resume, resume_prepared,
         undo: Default::default(),
+        rates: Default::default(),
         stopping: AtomicBool::new(false),
         max_active_downloads: AtomicUsize::new(cfg.max_active_downloads),
         queue_pins: Default::default(),
@@ -244,6 +247,8 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
             if inner.stopping.load(Ordering::Acquire) {
                 break;
             }
+            // Before resume/queue work, which can wait for the ledger.
+            inner.record_rates();
             if let Err(error) = inner.periodic_resume(cx).await {
                 eprintln!("WARN resume periodic snapshot error={error:?}");
             }
@@ -255,7 +260,7 @@ fn start_shared(cfg: &Config, lifecycle: Lifecycle, directory: PathBuf, instance
     Ok(AppEngine {
         dispatcher,
         runtime: Some(runtime),
-        instance,
+        _instance: instance,
     })
 }
 

@@ -9,12 +9,12 @@ fn dormant_caps_are_durable_without_storage_and_rollback_failed_saves() {
     let cap = |download| {
         if download {
             EngineOp::SetDownloadLimit {
-                hashes: HashSelection::Hashes(vec![hash.clone()]),
+                hashes: HashSelection(vec![hash.clone()]),
                 bps: Some(131072),
             }
         } else {
             EngineOp::SetUploadLimit {
-                hashes: HashSelection::Hashes(vec![hash.clone()]),
+                hashes: HashSelection(vec![hash.clone()]),
                 limit: 65536,
             }
         }
@@ -38,15 +38,15 @@ fn dormant_caps_are_durable_without_storage_and_rollback_failed_saves() {
     }
     for op in [
         EngineOp::SetDownloadLimit {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             bps: Some(1),
         },
         EngineOp::SetUploadLimit {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             limit: 1,
         },
         EngineOp::SetDownloadLimit {
-            hashes: HashSelection::Hashes(vec!["0".repeat(40)]),
+            hashes: HashSelection(vec!["0".repeat(40)]),
             bps: Some(65536),
         },
     ] {

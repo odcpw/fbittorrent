@@ -1,7 +1,7 @@
 //! Native search is a view of daemon sessions on the existing UI connection.
 use super::*;
 
-pub(in crate::tui) struct Session {
+pub(crate) struct Session {
     pub id: u64,
     pub instance: api::Instance,
     pub subscriptions: Vec<u64>,
@@ -274,13 +274,8 @@ impl TuiApp {
                     .find(|s| s.provider == entry.provider && s.label == entry.label)
                     .ok_or_else(|| anyhow::anyhow!("browse source is no longer available"))?;
                 if !source.in_app {
-                    std::process::Command::new("xdg-open")
-                        .arg(
-                            source
-                                .url
-                                .ok_or_else(|| anyhow::anyhow!("source has no URL"))?,
-                        )
-                        .spawn()?;
+                    let url = source.url.ok_or_else(|| anyhow::anyhow!("source has no URL"))?;
+                    anyhow::ensure!(crate::public_text::open_web(&url), "browse source is not a web page");
                     return Ok(None);
                 }
                 let reply: api::SearchItemsResult =

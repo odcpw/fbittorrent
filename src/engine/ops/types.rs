@@ -1,22 +1,13 @@
 pub use super::super::queue_policy::Direction as QueueDirection;
 use super::*;
 
+/// Explicit torrent hashes; every one must name a saved record.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HashSelection {
-    All,
-    Hashes(Vec<String>),
-}
+pub struct HashSelection(pub Vec<String>);
 
 impl HashSelection {
     pub(in crate::engine) fn resolve(&self, ledger: &Ledger) -> Result<Vec<String>> {
-        let hashes = match self {
-            Self::All => ledger
-                .records
-                .iter()
-                .map(|record| record.hash.clone())
-                .collect(),
-            Self::Hashes(hashes) => hashes.clone(),
-        };
+        let hashes = self.0.clone();
         for hash in &hashes {
             if !ledger.records.iter().any(|record| &record.hash == hash) {
                 bail!("torrent not found: {hash}");
@@ -32,7 +23,8 @@ pub struct AddRequest {
     pub torrent: Option<(String, Vec<u8>)>,
     pub save_path: Option<String>,
     pub upload_limit: i64,
-    pub ratio_limit: f64,
+    /// Explicit upload opt-in, including after completion.
+    pub seed: bool,
     pub stopped: bool,
     pub category: String,
     pub tags: String,
@@ -41,16 +33,6 @@ pub struct AddRequest {
 
 #[derive(Debug, Clone)]
 pub enum EngineOp {
-    Version,
-    Shutdown,
-    Restart,
-    Network,
-    Settings,
-    SetPreferences,
-    Queue,
-    SetQueue {
-        limit: usize,
-    },
     TransferInfo,
     Info,
     Get {
@@ -62,17 +44,12 @@ pub enum EngineOp {
     Peers { hash: String },
     Rename {hash:String,name:String},
     EditTracker { hash: String, url: String, add: bool },
-    // Typed engine entry points for the daemon adapter. These do not add routes
-    // to the legacy transport or advertise v1 operations before that API lands.
     OpenTarget {
         hash: String,
     },
     Move { hashes: Vec<String>, save_path: PathBuf },
     Trackers { hash: String },
     Reannounce { hashes: Vec<String> },
-    Recheck {
-        hash: String,
-    },
     RecheckBatch { hashes: Vec<String> },
     ForceStart { hashes: HashSelection, on: bool },
     QueueMove { hash: String, to: super::super::queue_policy::Direction },
@@ -107,54 +84,24 @@ pub enum EngineOp {
     },
     RemoveKeep { hashes: HashSelection },
     RestoreUndo { hash: String },
-    FilePriority {
-        hash: String,
-        ids: Vec<usize>,
-        priority: u8,
-    },
     SetDownloadLimit { hashes: HashSelection, bps: Option<u64> },
     SetUploadLimit {
         hashes: HashSelection,
         limit: i64,
     },
-    SetShareLimits {
-        hashes: HashSelection,
-        ratio: f64,
-    },
-    AddTags {
-        hashes: HashSelection,
-        tags: Vec<String>,
-    },
-    RemoveTags {
-        hashes: HashSelection,
-        tags: Vec<String>,
-    },
-    ToggleSequentialDownload,
-    ToggleFirstLastPiecePrio,
 }
 
 impl EngineOp {
     pub(crate) fn validate(&self) -> Result<()> {
         match self {
             Self::Rename {name,..} if !crate::engine::rename::valid_name(name)=>bail!("invalid display name"),
-            Self::FilePriority { priority, .. } if !matches!(priority, 0 | 1) => bail!(
-                "the native engine supports skip (0) and normal (1) file priorities; high and maximum are unavailable"
-            ),
             Self::SetDownloadLimit{bps:Some(bps),..} if !(16384..=u32::MAX as u64).contains(bps)=>bail!("download cap must be between 16 KiB/s and the engine maximum"),
             Self::SetUploadLimit { limit, .. } if *limit < 0 => {
                 bail!("upload limit must be zero (unlimited) or a positive byte rate")
             }
-            Self::SetShareLimits { ratio, .. } if !matches!(ratio, -2.0 | 0.0) => bail!(
-                "native share limits support unlimited (-2) or stop on completion (ratio 0, Stop)"
-            ),
             Self::Add(options) | Self::AddMagnet(options) | Self::AddSelected {options, ..} | Self::Stage {options, ..} => {
                 if options.upload_limit < 0 {
                     bail!("upload limit cannot be negative");
-                }
-                if !matches!(options.ratio_limit, -2.0 | 0.0) {
-                    bail!(
-                        "native share limits support unlimited (-2) or stop on completion (ratio 0)"
-                    );
                 }
                 if options.sources.is_empty() && options.torrent.is_none() {
                     bail!("no torrent was supplied");
@@ -171,53 +118,10 @@ impl EngineOp {
             | Self::Stop { hashes }
             | Self::Delete { hashes, .. }
             | Self::SetUploadLimit { hashes, .. }
-            | Self::SetDownloadLimit { hashes, .. }
-            | Self::SetShareLimits { hashes, .. }
-            | Self::AddTags { hashes, .. }
-            | Self::RemoveTags { hashes, .. } => Some(hashes),
+            | Self::SetDownloadLimit { hashes, .. } => Some(hashes),
             _ => None,
         }
     }
-    pub(crate) fn control(
-        &self,
-        snapshot: &crate::network_app::NetworkState,
-        lifecycle: &Lifecycle,
-    ) -> Option<Result<EngineResult>> {
-        use crate::daemon::lifecycle::RestartReason;
-        Some(match self {
-            Self::Network => Ok(EngineResult::Network(snapshot.clone())),
-            Self::Settings => Config::load().map(|cfg| {
-                EngineResult::Settings(EngineSettings {
-                    max_active_downloads: cfg.max_active_downloads,
-                    peer_encryption: cfg.peer_encryption,
-                    network_interface: cfg.network_interface,
-                })
-            }),
-            Self::Restart => {
-                lifecycle.request_restart(RestartReason::Explicit);
-                Ok(EngineResult::Acknowledged)
-            }
-            Self::Shutdown => {
-                lifecycle.request_stop(StopReason::Quit);
-                Ok(EngineResult::Acknowledged)
-            }
-            _ => return None,
-        })
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct QueueInfo {
-    pub max_active_downloads: usize,
-    pub active_downloads: usize,
-    pub queued_downloads: usize,
-    pub network_blocked: bool,
-}
-#[derive(Debug, Serialize)]
-pub struct EngineSettings {
-    pub max_active_downloads: usize,
-    pub peer_encryption: String,
-    pub network_interface: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -286,7 +190,6 @@ pub enum EngineResult {
     QueuePosition(u64),
     Recheck(Arc<super::super::recheck::Batch>),
     Acknowledged,
-    Version(String),
     Torrents(Vec<super::super::view::TorrentView>),
     Detail(TorrentDetails),
     Added(Vec<AddedTorrent>),
@@ -294,39 +197,5 @@ pub enum EngineResult {
     Peers(Vec<super::super::peers::Peer>),
     OpenTarget(PathBuf),
     Transfer(TransferInfo),
-    Queue(QueueInfo),
     Start(crate::qbt::StartResult),
-    Settings(EngineSettings),
-    Network(crate::network_app::NetworkState),
-}
-impl EngineResult {
-    #[cfg(test)]
-    pub fn to_cli_json(&self) -> Result<String> {
-        match self {
-            Self::Move(_) => bail!("payload relocation has no legacy route"),
-            Self::Trackers(_) => bail!("tracker observations have no legacy route"),
-            Self::RemovedUndo { .. } => bail!("undo removal has no legacy route"),
-            Self::QueuePosition(_) => bail!("queue movement has no legacy route"),
-            Self::Recheck(_) => bail!("asynchronous recheck has no legacy route"),
-            Self::Acknowledged | Self::Added(_) => Ok("Ok.".into()),
-            Self::Peers(_) | Self::Detail(_) => bail!("torrent detail has no legacy route"),
-            Self::Version(version) => Ok(version.clone()),
-            Self::Torrents(rows) => Ok(format!(
-                "[{}]",
-                rows.iter()
-                    .map(|row| row.to_cli_json())
-                    .collect::<Result<Vec<_>>>()?
-                    .join(",")
-            )),
-            Self::Files(files) => json(files),
-            Self::OpenTarget(path) => json(path),
-            Self::Transfer(info) => json(info),
-            // These responses historically serialized through Value. Preserve
-            // its object-member ordering at the legacy boundary.
-            Self::Queue(info) => json(&serde_json::to_value(info)?),
-            Self::Start(result) => json(result),
-            Self::Settings(settings) => json(&serde_json::to_value(settings)?),
-            Self::Network(network) => json(network),
-        }
-    }
 }

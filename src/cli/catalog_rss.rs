@@ -1,5 +1,5 @@
 //! RSS commands use one set of native handlers and views on either side of api.sock.
-use super::{catalog_search,catalogue,shapes,RssCmd};
+use super::{catalog_search,catalogue,RssCmd};
 use crate::{agent::{AppError,Code},api::{self,client::Client},config::Config};
 use anyhow::{Context,Result};
 use serde_json::{json,Value};
@@ -48,15 +48,15 @@ pub(crate) fn run(cfg:&Config,sub:&RssCmd,json_mode:bool,no_start:bool)->Result<
     match sub {
         RssCmd::List=>{
             let feeds=source.feeds()?;
-            let rows=feeds.iter().map(|feed|Ok(shapes::feed(feed,&source.items(&feed.id,false)?))).collect::<Result<Vec<_>>>()?;
-            crate::emit(json_mode,json!({"ok":true,"count":rows.len(),"feeds":rows}),||{
-                for feed in &rows {println!("{:<30} {:>4} unread / {:>4}  {}{}",feed.name,feed.articles.iter().filter(|item|!item.is_read).count(),feed.articles.len(),feed.url,if feed.has_error{"  [error]"}else{""});}
+            crate::emit(json_mode,json!({"ok":true,"count":feeds.len(),"feeds":feeds}),||{
+                for feed in &feeds {println!("{:<30} {:>4} unread  {}{}",feed.name,feed.unread,feed.url,if feed.error.is_some(){"  [error]"}else{""});}
             });
         },
         RssCmd::Add{url,name}=>{
-            let name=name.clone().or_else(||crate::host_of(url)).unwrap_or_else(||url.clone());
+            let name=name.clone().or_else(||crate::host_of(url)).unwrap_or_else(||crate::public_text::feed_label(url));
             source.call(api::Call::RssAdd{args:api::FeedAddArgs{url:url.clone(),name:Some(name.clone())}})?;
-            crate::emit(json_mode,json!({"ok":true,"action":"rss-add","name":name,"url":url}),||println!("added feed {name}"));
+            // The raw URL (with any passkey) stays in the private store only.
+            crate::emit(json_mode,json!({"ok":true,"action":"rss-add","name":name,"url":crate::public_text::url(url)}),||println!("added feed {}",crate::public_text::terminal(&name)));
         },
         RssCmd::Remove{name}=>{
             let feeds=source.feeds()?;let feed=select(&feeds,name)?;
@@ -74,9 +74,9 @@ pub(crate) fn run(cfg:&Config,sub:&RssCmd,json_mode:bool,no_start:bool)->Result<
         },
         RssCmd::Items{name,unread}=>{
             let feeds=source.feeds()?;let feed=select(&feeds,name)?;
-            let rows=source.items(&feed.id,*unread)?.iter().map(shapes::article).collect::<Vec<_>>();
+            let rows=source.items(&feed.id,*unread)?;
             crate::emit(json_mode,json!({"ok":true,"feed":feed.name,"count":rows.len(),"items":rows}),||{
-                for item in &rows {println!("{}  {}  {}  {}",if item.is_read{" "}else{"*"},crate::qbt::ymd(item.ts),item.id,item.title);}
+                for item in &rows {println!("{}  {}  {}  {}",if item.read{" "}else{"*"},item.published_at.map_or_else(|| "—".into(), |ts| crate::qbt::ymd(ts.min(i64::MAX as u64) as i64)),item.id,item.title);}
             });
         },
         RssCmd::Grab{name,article_id}=>{

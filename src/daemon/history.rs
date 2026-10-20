@@ -14,6 +14,15 @@ impl History {
     }
     pub fn record(&mut self,now:Instant,download:u64,upload:u64) {
         if !self.due(now) {return;}
+        self.push(now,download,upload);
+    }
+    /// One point per engine tick. The tick is periodic, so a slightly early
+    /// tick is not skipped; a burst after a stalled runtime collapses to one.
+    pub fn record_tick(&mut self,now:Instant,download:u64,upload:u64) {
+        if self.last.is_some_and(|last|now.saturating_duration_since(last)<Duration::from_millis(500)) {return;}
+        self.push(now,download,upload);
+    }
+    fn push(&mut self,now:Instant,download:u64,upload:u64) {
         if self.samples.len()==600 {self.samples.pop_front();}
         self.samples.push_back((download,upload));self.last=Some(now);
     }
@@ -39,5 +48,17 @@ impl History {
         assert_eq!(ring.download(60),(640..700).collect::<Vec<_>>());
         assert_eq!(sample.interval_s,1);assert_eq!(ring.samples.capacity(),600);
         assert_eq!(History::default().snapshot().download,Vec::<u64>::new());
+    }
+    #[test] fn engine_ticks_record_one_point_each_and_bursts_collapse() {
+        let mut ring=History::default();let start=Instant::now();
+        // A periodic tick may land a few milliseconds early: still one point each.
+        for (i,offset) in [0u64,998,1999,3001,3999].into_iter().enumerate() {
+            ring.record_tick(start+Duration::from_millis(offset),i as u64,0);
+        }
+        assert_eq!(ring.download(60),vec![0,1,2,3,4]);
+        // Missed ticks fired back to back after a stall are one observation.
+        ring.record_tick(start+Duration::from_millis(9000),5,0);
+        ring.record_tick(start+Duration::from_millis(9001),6,0);
+        assert_eq!(ring.download(60),vec![0,1,2,3,4,5]);
     }
 }

@@ -100,7 +100,7 @@ pub(crate) fn run(
         } else {
             args
         };
-        return print(Client::hello_envelope(cfg, args)?);
+        return print(Client::hello_envelope(args)?);
     }
     let client = match Client::connect_named(cfg, "raw-api") {
         Ok(client) => client,

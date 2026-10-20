@@ -53,7 +53,7 @@ impl TuiApp {
 
     pub(super) fn rename_prompt(&mut self)->Cmd<Msg> {
         if let Some(t)=self.selected_torrent() {
-            let (hash,name)=(t.hash.clone(),t.name.clone());
+            let (hash,name)=(t.hash.to_string(),t.name.clone());
             self.open_prompt(PromptKind::RenameTorrent {hash},"Rename to: (empty restores original)",false);
             self.prompt.as_mut().unwrap().input.set_value(name);
         }
@@ -116,7 +116,7 @@ impl TuiApp {
                     PromptKind::AddMagnet => {
                         let label = crate::magnet_name(&value).unwrap_or_else(|| value.chars().take(40).collect());
                         let mut opts = self.add_opts();
-                        opts.sequential = seq; opts.first_last = fl; opts.seed = seed;
+                        opts.seed = seed;
                         let flags = format!("{}{}{}", if seq { "S" } else { "" }, if fl { "F" } else { "" }, if seed { "U" } else { "" });
                         self.action(format!("added {label} [{flags}]"), move |c| c.add_url(&value, &opts))
                     }

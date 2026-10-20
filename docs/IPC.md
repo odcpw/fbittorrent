@@ -3,7 +3,7 @@
 This is the maintained contract for `$XDG_RUNTIME_DIR/fbittorrent/api.sock`.
 `src/api/` contains P1 wire types. `contracts/ipc/v1/` supplies shared Rust,
 daemon and UI replay examples. P1-05 defines types and fixtures; it starts no
-listener. The existing legacy `engine.sock` protocol remains independent.
+listener. `api.sock` is the only client protocol; there is no `engine.sock` compatibility listener.
 
 ## Framing
 
@@ -527,10 +527,10 @@ parked, stopping, silent or lacks the capability, the same normalized sources ru
 in-process. These reads never start the daemon. Search waits for `search.done`,
 then takes a final atomic result snapshot before releasing its owned session;
 `--limit` applies after shared deduplication and sorting. `--install` waits for its
-mutation result. The legacy WebUI selection retains its existing route.
+mutation result.
 The frozen `search.install` accepts HTTPS sources; Invalid non-HTTPS CLI install URLs retain their local validation failure
-(exit 5), including while a daemon is running. No API input rule is relaxed. Contract 1.2.24 adds only `providers[]` to each native CLI search row;
-legacy fields and human output share one shaper. `imdb --refresh` forwards
+(exit 5), including while a daemon is running. No API input rule is relaxed. CLI search returns API SearchItem objects directly;
+plain output formats the same observations without inventing missing measurements. `imdb --refresh` forwards
 `refresh:true` so the daemon replaces its index exactly once per forced call.
 RSS/Shows routing and TUI on-open refresh removal follow their service integration.
 
@@ -566,9 +566,8 @@ RSS/Shows routing and TUI on-open refresh removal follow their service integrati
 The typed engine's existing `SetUploadLimit` operation now applies a validated
 cap synchronously after its durable ledger save. It retains the torrent handle,
 checked data and peers, and returns `EngineResult::Acknowledged` only after the
-live limiter has been updated. Legacy `torrents/setUploadLimit` still replies
-`Ok.`. Existing CLI `seed` / `noseed` use this path and no longer rebuild a
-managed torrent to change its cap. Nonzero caps below 16384 bytes/s or above
+live limiter has been updated. CLI `upload` / `noupload` use this path and do
+not rebuild a managed torrent to change its cap. Nonzero caps below 16384 bytes/s or above
 the native `u32` maximum are rejected. Zero remains legacy unlimited.
 
 For the planned v1 adapter, `torrents.set_upload_limit {hashes, bps?}` can return
@@ -600,7 +599,7 @@ a not-yet-implemented service. The standalone TUI persists and applies the same
 preference from `config.toml`; API-client attachment consumes it in P4-03.
 
 
-### P1-11 — CLI client and contract 1.2.0
+### CLI client
 
 The CLI uses the bounded blocking API session, matches up to eight requests by
 ID, keeps events separate, and decodes subscription revisions using the frozen
@@ -609,10 +608,10 @@ and keep-files removal share engine.lock and the durable parked ledger. A lost
 idempotent request can reconnect once with the original ref and observed
 instance; destructive unknown outcomes return timeout without replay. Native
 add uses the returned hash and accepts `--origin manual|handler|agent`.
-Contract 1.2.0 declares the stopped-status `ok:true` change and additive normalized
-torrent fields while preserving the legacy numeric sentinels. Capabilities are
-generated from clap, with starts/since metadata. JSON warnings identify legacy
-mode and version skew. `SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
+The stopped status reports `ok:true,running:false`. CLI torrents are the same
+objects as the API, with absent unknown observations rather than numeric
+sentinels. Capabilities are generated from clap with startup policy metadata.
+`SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
 ledger timestamps are preserved. Live summary/idle/upgrade qualification follows
 the P1-08/P1-12/P1-17 integration; cumulative app.info client counters never stand
 in for live interactive presence.
@@ -673,7 +672,7 @@ Capability `queue` adds idempotent `torrents.force_start` and non-idempotent
 hashes remain in `started`). Force-on clears user pause and bypasses the ordinary
 queue limit; force-off rejoins the ordinary queue. Stop and completion clear force.
 Staged torrents are refused; completed stop-on-complete records give the explicit
-`fbittorrent seed <hash>` hint. Failed records retry through the existing start
+`fbittorrent upload <hash>` hint. Failed records retry through the existing start
 path. Parked force/order changes persist without opening a session.
 
 Ledger order remains queue order. `queue_pos` is one-based among unforced,
@@ -920,52 +919,19 @@ can still fail. Native `add --save` uses the same check and exits 2 before
 submission for an unwritable folder. `contracts/ipc/v1/free-space.ndjson`
 covers known, absent and zero space.
 
-### Integrated CLI contract patch history
+### CLI contract 2.0.0: torrents are API objects
 
-The current CLI contract is **1.2.32**. Additive changes from parallel tracks
-may share a patch version. Integration preserves their version numbers and
-change descriptions; patches are not renumbered at merge time.
-API hello still negotiates wire version 1; these CLI patches do not change
-NDJSON framing or the capability arrays in the wire fixtures.
-
-| CLI contract patch | capabilities.changes field |
-|---|---|
-| `1.2.1` | `add.deferred` |
-| `1.2.2` | `settings` |
-| `1.2.3` | `api.torrents.recheck` |
-| `1.2.4` | `api.queue` |
-| `1.2.5` | `api.origin` |
-| `1.2.6` | `log` |
-| `1.2.7` | `restart.server` |
-| `1.2.8` | `events` |
-| `1.2.9` | `api` |
-| `1.2.10` | `api.search` |
-| `1.2.11` | `setup.actions` |
-| `1.2.12` | `trackers` |
-| `1.2.13` | `add.confirmation_required` |
-| `1.2.14` | `limits` |
-| `1.2.15` | `caps.imdb` |
-| `1.2.16` | `app.free_space` |
-| `1.2.17` | `add.disk` |
-| `1.2.18` | `clipboard` |
-| `1.2.19` | `rss` |
-| `1.2.20` | `shows` |
-| `1.2.21` | `api.move` |
-| `1.2.22` | `api.staging` |
-| `1.2.23` | `app.client.dashboard_visible` |
-| `1.2.24` | `search.results[].providers` |
-| `1.2.25` | `playable` |
-| `1.2.26` | `list[].num_seeds` |
-| `1.2.27` | `download_limit_bps` |
-| `1.2.28` | `search.install_torznab` |
-| `1.2.29` | `search.torznab` |
-| `1.2.30` | `shows.quality` |
-| `1.2.30` | `trackers.edit` |
-| `1.2.31` | `status.history` |
-| `1.2.31` | `pieces` |
-| `1.2.31` | `cli.catalogue` |
-| `1.2.32` | `status.session`, `status.all_time` |
-| `1.2.32` | `torrents.rename` |
+The current CLI contract is **2.0.0**. `list`, `triage`, `status`, `wait` and
+`delete --dry-run` print `torrents[]` as the A.9 `Torrent` objects that
+`torrents.list` returns, field for field; `show` prints
+`{torrent, files[], peers[], trackers[], open_target, complete?}` with
+`torrent` from `torrents.get` and the other arrays from their API reads. An
+absent field is unknown: the contract-1.x qBittorrent shapes and their
+sentinels (`stoppedDL`-style states, `eta` 8640000, `num_seeds` 0,
+`progress_known`, `native_state`, `ratio_limit`, `tags`) are gone, as is the
+`capabilities.changes[]` patch history. The upload opt-in verbs are `upload` /
+`noupload` and `add --upload`. API hello still negotiates wire version 1; the
+wire objects are unchanged.
 
 ### P5-07: disk warnings and ENOSPC recovery (contract 1.2.17)
 
@@ -1090,9 +1056,8 @@ rates coalesce on the detail tick. Rates require two observations at least one
 second apart and are absent initially or after a counter reset. Reads of known
 inactive torrents return an empty peer table. Live torrent `seeds` counts
 connected peers whose entire piece bitfield is set (padding bits excluded);
-inactive/unknown counts remain absent. CLI `show --json` adds `peers[]` and
-`seeds`; contract-1.x `num_seeds` now uses that connected seed count, with its
-historical zero fallback when the optional count is absent. No tracker scrape.
+inactive/unknown counts remain absent. CLI `show --json` carries `peers[]` and
+the torrent's optional `seeds`. No tracker scrape.
 
 ### M1a: visible dashboard presence (contract 1.2.23)
 
@@ -1319,3 +1284,10 @@ torrent rows, selectors, filters and sorting uses this override; `original_name`
 An optional quick palette on the shared bar socket declares `app.client` with
 `interactive:true, overlay_visible:true` while visible, then clears `overlay_visible`
 on close. A bar with neither dashboard nor palette visible never prevents idle exit.
+
+CLI catalogue results use their API objects too: search `results[]` are
+`SearchItem`, `--plugins` returns `Provider`, RSS `feeds[]` and `items[]` are
+`Feed` and `FeedItem`, Shows `shows[]` and `episodes[]` are `Show` and `Release`,
+and a found IMDb lookup returns `{ok:true,found:true,card:ImdbCard}`.
+Unknown fields remain absent, including seed counts, dates and sizes. The CLI
+and TUI no longer convert torrents into qBittorrent states or sentinel values.

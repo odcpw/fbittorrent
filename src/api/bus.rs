@@ -18,7 +18,6 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
-    cell::OnceCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -56,7 +55,8 @@ struct TopicState {
     topic: Topic,
     interval: Duration,
     due: Instant,
-    sent: Option<Value>,
+    /// Shared with the sample that produced it; never deep-copied per client.
+    sent: Option<Arc<Value>>,
 }
 struct Subscription {
     sub: u64,
@@ -124,70 +124,6 @@ impl EventRing {
         )
     }
 }
-struct Sample {
-    topics: BTreeSet<Topic>,
-    summary_cache: OnceCell<Value>,
-    history:Vec<u64>,stats:Value,
-    epoch: u64,
-    state: String,
-    rows: Vec<Torrent>,
-    completions: Vec<Value>,
-    logs: Value,
-    searches: BTreeMap<u64, Value>,
-    files: BTreeMap<String, Value>,
-    peers: BTreeMap<String, Value>,
-    pieces: BTreeMap<String, Value>,
-    trackers: BTreeMap<String, Value>,
-    network: Value,
-    settings: Value,
-    disk: Disk,
-    shows:Value,
-    show_releases:BTreeMap<String,Value>,
-    rss_feeds: Value,
-    rss_items: BTreeMap<String,Value>,
-    daemon: Value,
-}
-impl Sample {
-    fn value(&self, topic: &Topic) -> Value {
-        match topic {
-            Topic::Stats=>self.stats.clone(),
-            Topic::Shows=>self.shows.clone(),Topic::ShowReleases(id)=>self.show_releases.get(id).cloned().unwrap_or(json!([])),
-            Topic::RssFeeds=>self.rss_feeds.clone(),
-            Topic::RssItems(id)=>self.rss_items.get(id).cloned().unwrap_or(json!([])),
-            Topic::Torrents => serde_json::to_value(&self.rows).unwrap(),
-            Topic::Trackers(h) => self.trackers.get(h.as_str()).cloned().unwrap_or(json!([])),
-            Topic::Peers(h) => self.peers.get(h.as_str()).cloned().unwrap_or(json!([])),
-            Topic::Pieces(h) => self.pieces.get(h.as_str()).cloned().unwrap_or(Value::Null),
-            Topic::Files(h) => self.files.get(&h.to_string()).cloned().unwrap_or(json!([])),
-            Topic::Network => self.network.clone(),
-            Topic::Settings => self.settings.clone(),
-            Topic::Summary => self.summary(),
-            Topic::Search(id) => self.searches.get(id).cloned().unwrap_or(json!([])),
-            Topic::Events => unreachable!(),
-            Topic::Log => self.logs.clone(),
-        }
-    }
-    fn summary(&self) -> Value {
-        // A sample is immutable while fanned out to subscribers. Count and
-        // project its rows once, even when several bars share the same tick.
-        self.summary_cache.get_or_init(|| self.build_summary()).clone()
-    }
-    fn build_summary(&self) -> Value {
-        let counts = summary_counts(&self.rows);
-        let top = summary::top(&self.rows);
-        let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
-        result["history"]=json!(self.history);
-        if let Some(v) = self.network.get("interface") {
-            result["network"]["interface"] = v.clone();
-        }
-        if self.state == "running" {
-            result["dl_bps"] = json!(self.rows.iter().filter_map(|r| r.dl_bps).sum::<u64>());
-            result["ul_bps"] = json!(self.rows.iter().filter_map(|r| r.ul_bps).sum::<u64>());
-        }
-        result
-    }
-}
-
 pub(crate) struct Bus {
     daemon: Arc<Daemon>,
     registry: Mutex<Registry>,
@@ -195,6 +131,8 @@ pub(crate) struct Bus {
     wake: Arc<Wake>,
     stopping: AtomicBool,
     initial_hashes: BTreeSet<String>,
+    /// A log line wakes the sampler only while a Log topic is subscribed.
+    log_wanted: Arc<AtomicBool>,
 }
 impl Bus {
     pub(crate) fn refresh(&self) { self.wake.signal(); }
@@ -207,6 +145,7 @@ impl Bus {
             peers: Default::default(),
             wake: Arc::default(),
             stopping: AtomicBool::new(false),
+            log_wanted: Arc::default(),
             initial_hashes: std::fs::read(crate::config::data_dir().join("engine/torrents.json"))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -218,8 +157,8 @@ impl Bus {
         })
     }
     pub fn start(self: &Arc<Self>) -> std::io::Result<JoinHandle<()>> {
-        let wake = self.wake.clone();
-        self.daemon.logs.set_waker(Arc::new(move || wake.signal()));
+        let (wake, wanted) = (self.wake.clone(), self.log_wanted.clone());
+        self.daemon.logs.set_waker(Arc::new(move || if wanted.load(Ordering::Acquire) { wake.signal() }));
         let bus = self.clone();
         thread::Builder::new()
             .name("fbt-api-bus".into())
@@ -265,12 +204,17 @@ impl Bus {
         for topic in &args.topics {
             if let Topic::Search(id) = topic { self.daemon.search.reclaim(sink.id(), *id)?; }
         }
-        let sample = self.sample(&args.topics)?;
+        // Validation reads record hashes only: no sample, no side effects.
+        let details = args.topics.iter().any(|t| matches!(t, Topic::Files(_) | Topic::Peers(_) | Topic::Pieces(_) | Topic::Trackers(_)));
+        let records = if details { self.record_hashes()? } else { BTreeSet::new() };
         for topic in &args.topics {
-            if let Topic::ShowReleases(id)=topic {if id!="inbox"{ops::shows::require(&self.daemon,id)?;}}
-            if let Topic::RssItems(id)=topic {ops::rss::feed(&self.daemon,id)?;}
+            // An unreadable store is not an unknown id: the topic waits for a
+            // readable file instead of refusing the whole subscription.
+            let known=|result:ApiResult<()>|match result {Err(e) if e.code==ErrorCode::NotFound=>Err(e),_=>Ok(())};
+            if let Topic::ShowReleases(id)=topic {if id!="inbox"{known(ops::shows::require(&self.daemon,id).map(drop))?;}}
+            if let Topic::RssItems(id)=topic {known(ops::rss::feed(&self.daemon,id).map(drop))?;}
             if let Topic::Files(hash) | Topic::Peers(hash) | Topic::Pieces(hash) | Topic::Trackers(hash) = topic {
-                if !sample.rows.iter().any(|r| &r.hash == hash) {
+                if !records.contains(hash.as_str()) {
                     let mut e = error(ErrorCode::NotFound, "unknown torrent", None);
                     e.details = Some(serde_json::Map::from_iter([("hash".into(), json!(hash))]));
                     return Err(e);
@@ -351,182 +295,65 @@ impl Bus {
         self.wake.signal();
         value
     }
-    fn sample(&self, topics: &[Topic]) -> ApiResult<Sample> {
-        let files: Vec<_> = topics
-            .iter()
-            .filter_map(|t| {
-                if let Topic::Files(h) = t {
-                    Some(h.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
-        let epoch = slot.engine_epoch;
-        let state = slot.slot.state().name().to_owned();
-        let (rows, details, restoring) = match &slot.slot {
-            Slot::Running(app) => app
-                .dispatcher()
-                .bus_sample(&files)
-                .map_err(ops::engine_error)?,
-            Slot::Parked(ledger) => {
-                // Parked operations are serialized internally. A generation
-                // check retries if a mutation crossed the collection reads.
-                loop {
-                    let g = ledger.ledger_generation();
-                    let before = g.current();
-                    let EngineResult::Torrents(rows) =
-                        ledger.execute(EngineOp::Info).map_err(ops::engine_error)?
-                    else {
-                        unreachable!()
-                    };
-                    let mut details = std::collections::HashMap::new();
-                    for h in &files {
-                        if let Ok(EngineResult::Files(rows)) =
-                            ledger.execute(EngineOp::Files { hash: h.clone() })
-                        {
-                            details.insert(h.clone(), rows);
-                        }
-                    }
-                    if before == g.current() {
-                        break (rows, details, false);
-                    }
-                }
-            }
-            Slot::Starting | Slot::Stopping => (Vec::new(), std::collections::HashMap::new(), false),
-        };
-        let mut completions = match &slot.slot {
-            Slot::Running(app) => app.dispatcher().take_completions(),
-            _ => Vec::new(),
-        };
-        self.daemon.disk.lock().unwrap().observe(&rows);
-        if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
-        if let Slot::Running(app)=&slot.slot {
-            let mut watch=self.daemon.watch.lock().unwrap();
-            if watch.due() || !watch.needs_tick() {
-                completions.extend(watch.sample(app.dispatcher().watch_samples().map_err(ops::engine_error)?));
-            }
-        } else {
-            let mut watch=self.daemon.watch.lock().unwrap();
-            if watch.due() {watch.sample(Vec::new());}
+    /// torrent.added/torrent.error transitions and engine completions go to
+    /// the notifier and the event ring, with or without subscribers.
+    fn transitions(&self, r: &mut Registry, state: &str, rows: &[Torrent], completions: &[Value],
+                   ready_seen: &mut bool, previous_rows: &mut BTreeMap<String, (bool, Option<String>)>) {
+        let restored_baseline = !*ready_seen;
+        if matches!(state, "starting" | "stopping") {
+            return;
         }
-        let mut rows: Vec<Torrent> = rows
-            .into_iter()
-            .map(ops::torrents::torrent)
-            .collect::<ApiResult<Vec<_>>>()?;
-        self.daemon.watch.lock().unwrap().decorate(&mut rows);
-        let mut pieces=BTreeMap::new();
-        if let Slot::Running(app)=&slot.slot {
-            for hash in topics.iter().filter_map(|t|if let Topic::Pieces(h)=t {Some(h)}else{None}).collect::<BTreeSet<_>>() {
-                let playable=rows.iter().find(|row|&row.hash==hash).and_then(|row|row.playable.as_ref());
-                if let Ok(value)=app.dispatcher().pieces_snapshot(hash.as_str()).map_err(ops::engine_error).and_then(|value|ops::pieces::encode(value,playable)) {
-                    pieces.insert(hash.to_string(),json!(value));
-                }
-            }
-        }
-        let files = details
-            .into_iter()
-            .map(|(hash, files)| {
-                let playable=rows.iter().find(|r|r.hash.as_str()==hash).and_then(|r|r.playable.clone());
-                (
-                    hash,
-                    json!(files
-                        .into_iter()
-                        .map(|f| File {
-                            index: f.index as u64,
-                            path: f.name.clone(),
-                            size: f.size.max(0) as u64,
-                            progress: f.progress,
-                            included: f.priority != 0,
-                            sort_key: ops::torrents::sort_key(&f.name),
-                            ready: playable.as_ref().filter(|p|p.file==f.index as u64).map(|p|p.ready)
-                        })
-                        .collect::<Vec<_>>()),
+        *ready_seen = true;
+        for row in rows {
+            let old = previous_rows.get(&row.hash.to_string());
+            let event = if !row.staged && old.is_none_or(|previous| previous.0)
+                && (old.is_some() || !restored_baseline
+                    || !self.initial_hashes.contains(&row.hash.to_string()))
+            {
+                Some(
+                    json!({"ev":"torrent.added","hash":row.hash,"name":row.name,"origin":row.origin.as_deref().unwrap_or("manual")}),
                 )
-            })
-            .collect();
-        let cfg = crate::config::Config::load().map_err(ops::engine_error)?;
-        let activity = crate::daemon::policy::Transfers::from_torrents(&rows, &state, restoring);
-        let mut searches = BTreeMap::new();
-        for id in topics.iter().filter_map(|t| if let Topic::Search(id) = t { Some(*id) } else { None }).collect::<BTreeSet<_>>() {
-            let mut items = self.daemon.search.items(id).unwrap_or_default();
-            let hashes: BTreeSet<_> = rows.iter().map(|r| r.hash.clone()).collect();
-            for item in &mut items {
-                item.added = Hash::new(&item.key).ok().filter(|h| hashes.contains(h));
+            } else if old.is_some_and(|o| o.1 != row.error)
+                && row.error.is_some()
+            {
+                Some(
+                    json!({"ev":"torrent.error","hash":row.hash,"name":row.name,"message":row.error}),
+                )
+            } else {
+                None
+            };
+            if let Some(event) = event {
+                self.daemon.notifier.event(&event);
+                r.events.append(event);
             }
-            searches.insert(id, json!(items));
         }
-        let mut daemon = {
-            let mut policy = self.daemon.policy.lock().unwrap();
-            let now = Instant::now();
-            policy.configure(cfg.idle_exit_secs, now);
-            policy.searches(self.daemon.search.count(), now);
-            policy.transfers(activity, now);
-            serde_json::to_value(policy.snapshot(now)).unwrap()
-        };
-        daemon["state"] = json!(state);
-        daemon["upgrade_pending"] = json!(self.daemon.upgrade_pending.load(Ordering::Acquire));
-        self.daemon.notifier.enabled(cfg.notify && !self.daemon.no_notify);
-        let network = serde_json::to_value(self.daemon.network()).unwrap();
-        let mut effective = cfg;
-        effective.idle_exit_secs = self.daemon.idle_exit_secs();
-        effective.notify &= !self.daemon.no_notify;
-        let settings = if topics.contains(&Topic::Settings) || topics.contains(&Topic::Summary) {
-            serde_json::to_value(ops::settings::view(&effective)).unwrap()
-        } else { Value::Null };
-        let mut show_releases=BTreeMap::new();
-        for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
-            show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
+        for event in completions {
+            self.daemon.notifier.event(event);
+            r.events.append(event.clone());
         }
-        drop(slot);
-        self.peers.retain(topics);
-        let mut peers = BTreeMap::new();
-        for hash in topics.iter().filter_map(|t|if let Topic::Peers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
-            if rows.iter().any(|r|&r.hash==hash){peers.insert(hash.to_string(),serde_json::to_value(self.peers.read(&self.daemon,hash)?).unwrap());}
-        }
-        let mut trackers=BTreeMap::new();
-        for hash in topics.iter().filter_map(|t|if let Topic::Trackers(h)=t{Some(h)}else{None}).collect::<BTreeSet<_>>() {
-            if rows.iter().any(|r|&r.hash==hash) {trackers.insert(hash.to_string(),serde_json::to_value(ops::trackers::read(&self.daemon,hash)?).unwrap());}
-        }
-        let (session,all_time)=self.daemon.statistics();
-        let (history,stats)={let ring=self.daemon.history.lock().unwrap();
-            (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
-        Ok(Sample {
-            topics: topics.iter().cloned().collect(),
-            summary_cache: OnceCell::new(),
-            history,stats,
-            peers,trackers,
-            shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
-            show_releases,
-
-            rss_feeds: if topics.contains(&Topic::RssFeeds){serde_json::to_value(self.daemon.rss.feeds().map_err(ops::rss::failure)?).unwrap()}else{json!([])},
-            rss_items: topics.iter().filter_map(|t|if let Topic::RssItems(id)=t{Some(id)}else{None}).map(|id|Ok((id.clone(),serde_json::to_value(self.daemon.rss.snapshot().map_err(ops::rss::failure)?.items.get(id).cloned().unwrap_or_default()).unwrap()))).collect::<ApiResult<_>>()?,
-            epoch,
-            state,
-            rows,
-            completions,
-            logs: if topics.contains(&Topic::Log) {
-                serde_json::to_value(self.daemon.logs.all()).unwrap()
-            } else { Value::Null },
-            searches,
-            files,
-            pieces,
-            network,
-            settings,
-            disk: self.daemon.disk.lock().unwrap().summary.clone(),
-            daemon,
-        })
+        *previous_rows = rows
+            .iter()
+            .map(|row| (row.hash.to_string(), (row.staged, row.error.clone())))
+            .collect();
+    }
+    /// Sleep until the next topic deadline or fallback observation. Search
+    /// sessions are polled every 100 ms; otherwise slot swaps, the engine,
+    /// ledger, logs and stores wake the loop and it rechecks once a second.
+    fn idle_wait(&self, next_observation: Instant) -> Duration {
+        let now = Instant::now();
+        let cap = if self.daemon.search.count() > 0 { Duration::from_millis(100) } else { Duration::from_secs(1) };
+        let deadline = self.registry.lock().unwrap().subscriptions.values()
+            .flat_map(|s| s.topics.iter()).map(|t| t.due).min()
+            .map_or(next_observation, |due| due.min(next_observation));
+        deadline.saturating_duration_since(now).min(cap).max(Duration::from_millis(1))
     }
     fn run(&self) {
         let mut observer: Option<rqbit_runtime::task::JoinHandle<()>> = None;
         let mut generation = None;
         let mut seen_generation = 0;
         let mut identity = None;
-        let mut previous_rows: BTreeMap<String, Torrent> = BTreeMap::new();
-        let mut active_work = false;
+        // Only what the added/error transitions compare: (staged, error).
+        let mut previous_rows: BTreeMap<String, (bool, Option<String>)> = BTreeMap::new();
         let mut ready_seen = false;
         let mut dirty = true;
         let mut generation_threads = Vec::new();
@@ -534,6 +361,11 @@ impl Bus {
         let mut config_stamp = None;
         let mut rss_stamp = None;
         let mut shows_stamp=None;
+        // Without a subscriber the owner is observed on wakes (ledger, engine
+        // state, completions, config) and on this fallback: every second while
+        // a transfer is active (watch, policy), otherwise every five seconds.
+        let mut next_observation = Instant::now();
+        let mut running;
         while !self.stopping.load(Ordering::Acquire) {
             self.daemon.search.sweep();
             self.daemon.policy.lock().unwrap().searches(self.daemon.search.count(), Instant::now());
@@ -551,6 +383,7 @@ impl Bus {
             {
                 let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
                 let current = (slot.engine_epoch, slot.slot.state().name().to_owned());
+                running = matches!(&slot.slot, Slot::Running(_));
                 let next_generation = match &slot.slot {
                     Slot::Running(app) => Some(app.dispatcher().ledger_generation()),
                     Slot::Parked(ledger) => Some(ledger.ledger_generation()),
@@ -615,21 +448,36 @@ impl Bus {
                 let stamp=self.daemon.shows.stamp();if stamp!=shows_stamp{shows_stamp=stamp;dirty=true;}
             }
             {let registry=self.registry.lock().unwrap();self.peers.retain_if(|hash|registry.subscriptions.values().any(|s|s.topics.iter().any(|t|matches!(&t.topic,Topic::Peers(h) if h.as_str()==hash))));}
-            let due = self
-                .registry
-                .lock()
-                .unwrap()
-                .subscriptions
-                .values()
-                .filter(|s| s.active)
-                .flat_map(|s| s.topics.iter())
-                .any(|t| t.due <= Instant::now());
-            if self.clocks_due(active_work) { dirty = true; }
+            let (due, subscribed) = {
+                let registry = self.registry.lock().unwrap();
+                self.log_wanted.store(registry.subscriptions.values().any(|s| s.topics.iter().any(|t| t.topic == Topic::Log)), Ordering::Release);
+                let now = Instant::now();
+                (registry.subscriptions.values().filter(|s| s.active).flat_map(|s| s.topics.iter()).any(|t| t.due <= now),
+                 !registry.subscriptions.is_empty())
+            };
+            // A running engine records rate history from its own one-second
+            // tick; without one the ring advances with zero rates here.
+            if !running { self.daemon.history.lock().unwrap().record(Instant::now(), 0, 0); }
+            if Instant::now() >= next_observation { dirty = true; }
             if !dirty && !due {
-                dirty = self.wake.wait(Duration::from_millis(100));
+                dirty = self.wake.wait(self.idle_wait(next_observation));
                 continue;
             }
             dirty = false;
+            if !subscribed {
+                match self.observe(&[]) {
+                    Ok(observed) => {
+                        next_observation = Instant::now() + if observed.active { Duration::from_secs(1) } else { Duration::from_secs(5) };
+                        let mut r = self.registry.lock().unwrap();
+                        self.transitions(&mut r, &observed.state, &observed.rows, &observed.completions, &mut ready_seen, &mut previous_rows);
+                    }
+                    Err(e) => {
+                        eprintln!("ERROR api sample failed message={:?}", e.message);
+                        next_observation = Instant::now() + Duration::from_secs(1);
+                    }
+                }
+                continue;
+            }
             let topics: Vec<_> = self
                 .registry
                 .lock()
@@ -639,46 +487,10 @@ impl Bus {
                 .flat_map(|s| s.topics.iter().filter(|t| !matches!(t.topic,Topic::Pieces(_)) || t.due<=Instant::now()).map(|t| t.topic.clone()))
                 .collect();
             match self.sample(&topics) {
-                Ok(sample) => {
-                    active_work = clocks::active_work(&sample.rows);
+                Ok((sample, active)) => {
+                    next_observation = Instant::now() + if active { Duration::from_secs(1) } else { Duration::from_secs(5) };
                     let mut r = self.registry.lock().unwrap();
-                    let restored_baseline = !ready_seen;
-                    if !matches!(sample.state.as_str(), "starting" | "stopping") {
-                        ready_seen = true;
-                        for row in &sample.rows {
-                            let old = previous_rows.get(&row.hash.to_string());
-                            let event = if !row.staged && old.is_none_or(|previous| previous.staged)
-                                && (old.is_some() || !restored_baseline
-                                    || !self.initial_hashes.contains(&row.hash.to_string()))
-                            {
-                                Some(
-                                    json!({"ev":"torrent.added","hash":row.hash,"name":row.name,"origin":row.origin.as_deref().unwrap_or("manual")}),
-                                )
-                            } else if old.is_some_and(|o| o.error != row.error)
-                                && row.error.is_some()
-                            {
-                                Some(
-                                    json!({"ev":"torrent.error","hash":row.hash,"name":row.name,"message":row.error}),
-                                )
-                            } else {
-                                None
-                            };
-                            if let Some(event) = event {
-                                self.daemon.notifier.event(&event);
-                                r.events.append(event);
-                            }
-                        }
-                        for event in &sample.completions {
-                            self.daemon.notifier.event(event);
-                            r.events.append(event.clone());
-                        }
-                        previous_rows = sample
-                            .rows
-                            .iter()
-                            .cloned()
-                            .map(|row| (row.hash.to_string(), row))
-                            .collect();
-                    }
+                    self.transitions(&mut r, &sample.state, &sample.rows, &sample.completions, &mut ready_seen, &mut previous_rows);
                     let needs_events = r
                         .subscriptions
                         .values()
@@ -710,29 +522,15 @@ impl Bus {
                     r.subscriptions.clear();
                 }
             }
-            // Ledger mutations wake immediately via its Condvar. The short
-            // bound observes slot swaps and also bounds shutdown when parked;
-            // handle state transitions wake the bus independently below.
-            let deadline = self
-                .registry
-                .lock()
-                .unwrap()
-                .subscriptions
-                .values()
-                .flat_map(|s| s.topics.iter())
-                .map(|t| t.due)
-                .min()
-                .unwrap_or(Instant::now() + Duration::from_secs(1));
-            let timeout = deadline
-                .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(100));
+            // Ledger mutations wake immediately via its Condvar (and the
+            // generation thread); see idle_wait for the other wake sources.
             // No async mutex is acquired by this generation wait.
             if let Some(g) = &generation {
                 if g.wait_after(seen_generation, Duration::ZERO).is_some() {
                     continue;
                 }
             }
-            dirty = self.wake.wait(timeout.max(Duration::from_millis(1)));
+            dirty = self.wake.wait(self.idle_wait(next_observation));
         }
         if let Some(w) = observer {
             w.abort();
@@ -745,155 +543,13 @@ impl Bus {
         }
     }
 }
-impl Subscription {
-    fn update(&mut self, sample: &Sample, events: &[Value], oldest: u64) -> ApiResult<()> {
-        // A slot without a usable ledger is transitional, not an empty saved
-        // history. Keep detail subscriptions until the replacement is ready.
-        // A new stats subscription can arrive while the worker samples an
-        // older topic set. Wait for its first actual sample, rather than emit
-        // null and tear down the shared UI connection.
-        if matches!(sample.state.as_str(), "starting" | "stopping")
-            || (sample.stats.is_null() && self.topics.iter().any(|t|t.topic==Topic::Stats)) {
-            // An initial snapshot stays pending, but must not leave a past-due
-            // deadline spinning the sampler while the engine opens/drains.
-            for topic in &mut self.topics {
-                topic.due = Instant::now() + Duration::from_millis(100);
-            }
-            return Ok(());
-        }
-        let engine = (sample.epoch, sample.state.clone());
-        let restart = self.epoch.as_ref().is_some_and(|e| e != &engine);
-        // State topics precede keyed snapshots, matching the contract fixture.
-        let mut order: Vec<_> = (0..self.topics.len()).collect();
-        order.sort_by_key(|i| {
-            matches!(
-                self.topics[*i].topic,
-                Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_)
-            )
-        });
-        for index in order {
-            let t = &mut self.topics[index];
-            if restart && matches!(t.topic,Topic::Pieces(_)) {t.sent=None;}
-            // subscribe/activate can finish while this sample is in flight.
-            // An uncollected topic is unknown, not an empty collection. In
-            // particular, an empty Files snapshot would erase a newer RPC read
-            // and its keyboard selection. Wait for the next actual sample.
-            if !sample.topics.contains(&t.topic) {
-                let now=Instant::now();
-                if t.sent.is_none() && t.due<=now {t.due=now+Duration::from_millis(100);}
-                continue;
-            }
-            let mut value = if t.topic == Topic::Events {
-                json!(events
-                    .iter()
-                    .filter(|e| self.since.is_none_or(|s| e["seq"].as_u64().unwrap() > s))
-                    .collect::<Vec<_>>())
-            } else {
-                sample.value(&t.topic)
-            };
-            if matches!(t.topic,Topic::Pieces(_)) && value.is_null() {if t.due<=Instant::now() {t.due=Instant::now()+t.interval;}continue;}
-            let keyed = matches!(t.topic, Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_) | Topic::Search(_) | Topic::Events | Topic::Log | Topic::RssFeeds | Topic::RssItems(_) | Topic::Shows | Topic::ShowReleases(_));
-            let reset =
-                restart && matches!(t.topic, Topic::Summary | Topic::Torrents | Topic::Peers(_) | Topic::Trackers(_) | Topic::Files(_));
-            if t.sent.is_none() || reset {
-                if keyed {
-                    let resync = t.topic == Topic::Events
-                        && self.since.is_some_and(|s| s.saturating_add(1) < oldest);
-                    if resync {
-                        value = json!(events);
-                    }
-                    let items = value
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .cloned()
-                        .map(serde_json::from_value)
-                        .collect::<Result<Vec<Item>, _>>()
-                        .map_err(|_| error(ErrorCode::Internal, "invalid snapshot", None))?;
-                    self.rev = self.sink.snapshot_resync(
-                        self.sub,
-                        t.topic.clone(),
-                        self.rev,
-                        items,
-                        if reset {
-                            SnapshotReason::EngineRestart
-                        } else if resync {
-                            SnapshotReason::Resync
-                        } else {
-                            SnapshotReason::Subscribe
-                        },
-                        if resync { Some(oldest) } else { None },
-                    )?;
-                } else {
-                    self.rev += 1;
-                    self.sink
-                        .send(state_event(self.sub, &t.topic, self.rev, value.clone())?)?;
-                }
-                t.sent = Some(value);
-                t.due = Instant::now() + t.interval;
-            } else {
-                let old = t.sent.as_ref().unwrap();
-                let due = Instant::now() >= t.due;
-                let next = if due {
-                    value
-                } else {
-                    structural_projection(&t.topic, old, &value)
-                };
-                if &next != old {
-                    if keyed {
-                        let (changed, added, removed) = diff(&t.topic, old, &next);
-                        if !changed.is_empty() || !added.is_empty() || !removed.is_empty() {
-                            // Split additions using EventSink's byte/count bounds.
-                            self.rev = self.sink.added(
-                                self.sub,
-                                t.topic.clone(),
-                                self.rev,
-                                added
-                                    .into_iter()
-                                    .map(serde_json::from_value)
-                                    .collect::<Result<Vec<Item>, _>>()
-                                    .map_err(|_| {
-                                        error(ErrorCode::Internal, "invalid delta", None)
-                                    })?,
-                            )?;
-                            if !changed.is_empty() || !removed.is_empty() {
-                                self.rev += 1;
-                                self.sink.send(Event::Delta {
-                                    sub: self.sub,
-                                    topic: t.topic.clone(),
-                                    rev: self.rev,
-                                    changed: (!changed.is_empty()).then_some(changed),
-                                    added: None,
-                                    removed: (!removed.is_empty()).then_some(removed),
-                                })?;
-                            }
-                        }
-                    } else {
-                        self.rev += 1;
-                        self.sink
-                            .send(state_event(self.sub, &t.topic, self.rev, next.clone())?)?;
-                    }
-                    t.sent = Some(next);
-                }
-                if due {
-                    t.due = Instant::now() + t.interval;
-                }
-            }
-        }
-        // An absent detail after restart gets exactly one empty snapshot; its
-        // sampling is then released while the owning connection remains open.
-        if restart {
-            self.topics.retain(
-                |t| !matches!(&t.topic,Topic::Files(h) | Topic::Peers(h) | Topic::Trackers(h) if !sample.rows.iter().any(|r|&r.hash==h)),
-            );
-        }
-        self.topics.retain(|t|!matches!(&t.topic,Topic::Pieces(h) if !sample.rows.iter().any(|r|&r.hash==h)));
-        self.epoch = Some(engine);
-        Ok(())
-    }
-}
+mod sample;
+use sample::Sample;
+mod update;
 mod diff;
-use diff::{diff, state_event, structural_projection};
+use diff::{diff, project, state_event};
+#[cfg(test)]
+use diff::structural_projection;
 
 #[cfg(test)]
 #[path = "bus/tests.rs"]

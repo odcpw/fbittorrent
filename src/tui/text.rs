@@ -1,12 +1,6 @@
 //! Existing text behavior.
 use super::*;
 
-/// List row with a blank 2-column marker, so unselected rows sit at the same
-/// x as the highlighted one (the widget only indents the selected row otherwise).
-pub(super) fn li<'t>(content: impl Into<Text<'t>>) -> ListItem<'static> {
-    ListItem::new(content).marker(" ")
-}
-
 /// Display width in terminal cells.
 pub(super) fn dw(s: &str) -> usize { unicode_width::UnicodeWidthStr::width(s) }
 

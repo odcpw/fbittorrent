@@ -61,7 +61,6 @@ fn table_covers_appendix_b() {
     assert_eq!(all().find(|a| a.id == "torrents.seed").unwrap().keys[0].label(), "u");
     let popup = keymap("popup").to_string();
     assert!(!popup.contains("screen.torrents") && !popup.contains("torrents.wiki"));
-    assert_eq!(fixture::SURFACES.len(), 12);
     println!(
         "{} catalogue actions cover TUI and both documented popup exceptions",
         all().count()
@@ -305,7 +304,7 @@ fn footer_cache_tracks_label_and_selection_changes() {
 #[test]
 fn pending_row_mutations_are_disabled_in_both_keys_and_footer() {
     let mut app = fixture::app("torrents");
-    let hash = crate::api::Hash::new(app.selected_torrent().unwrap().hash.clone()).unwrap();
+    let hash = app.selected_torrent().unwrap().hash.clone();
     let before = app.footer_signature(120);
     app.store.begin_mutation(
         crate::api::MutationRef::new("selecting-files").unwrap(),

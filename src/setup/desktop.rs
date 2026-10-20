@@ -69,26 +69,69 @@ fn remove(actions: &mut Vec<Action>, path: PathBuf) {
         actions.push(action("remove", path));
     }
 }
-fn purge(actions: &mut Vec<Action>, path: PathBuf, protected: Option<&Path>) -> Result<()> {
-    if let Some(keep) = protected {
-        let resolved = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if resolved == keep || resolved.starts_with(keep) {
-            return Ok(());
+fn purge(actions: &mut Vec<Action>, path: PathBuf, protected: &[PathBuf]) -> Result<()> {
+    let resolved = resolve(&path);
+    if protected.iter().any(|keep| resolved == *keep || resolved.starts_with(keep)) {
+        return Ok(());
+    }
+    if protected.iter().any(|keep| keep.starts_with(&resolved))
+        && path.is_dir()
+        && !path.symlink_metadata()?.file_type().is_symlink()
+    {
+        let mut entries = std::fs::read_dir(&path)?.collect::<std::io::Result<Vec<_>>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            purge(actions, entry.path(), protected)?;
         }
-        if keep.starts_with(&resolved)
-            && path.is_dir()
-            && !path.symlink_metadata()?.file_type().is_symlink()
-        {
-            let mut entries = std::fs::read_dir(&path)?.collect::<std::io::Result<Vec<_>>>()?;
-            entries.sort_by_key(|entry| entry.file_name());
-            for entry in entries {
-                purge(actions, entry.path(), protected)?;
-            }
-            return Ok(());
-        }
+        return Ok(());
     }
     remove(actions, path);
     Ok(())
+}
+/// Canonical form of a path whose tail may not exist yet: the longest existing
+/// ancestor is resolved, so a missing payload folder still compares correctly.
+fn resolve(path: &Path) -> PathBuf {
+    let mut tail = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(found) = current.canonicalize() {
+            return tail.iter().rev().fold(found, |acc: PathBuf, name: &&std::ffi::OsStr| acc.join(name));
+        }
+        match (current.parent(), current.file_name()) {
+            (Some(parent), Some(name)) => { tail.push(name); current = parent; }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+/// Every folder that may hold downloaded payloads: the configured and default
+/// save folders and each saved torrent's output folder. `--purge` never removes
+/// them, and refuses to run when the saved torrent records cannot be read.
+fn payload_folders(save_path: Option<&str>, engine: &Path) -> Result<Vec<PathBuf>> {
+    let mut folders: Vec<PathBuf> = save_path.map(PathBuf::from).into_iter().collect();
+    folders.push(dirs::download_dir().unwrap_or_else(|| crate::config::data_dir().join("downloads")));
+    folders.push(crate::config::data_dir().join("downloads"));
+    let ledger = engine.join("torrents.json");
+    match std::fs::read(&ledger) {
+        Ok(bytes) => {
+            #[derive(serde::Deserialize)]
+            struct PayloadRecord { output_folder: PathBuf }
+            #[derive(serde::Deserialize)]
+            struct PayloadRecords { records: Vec<PayloadRecord> }
+            // A malformed records list cannot establish which folders are safe
+            // to remove. Never treat it, or a record without a folder, as empty.
+            let saved: PayloadRecords = serde_json::from_slice(&bytes).with_context(|| {
+                format!("reading saved torrent records {}; refusing to purge their download folders", ledger.display())
+            })?;
+            for record in saved.records {
+                anyhow::ensure!(record.output_folder.is_absolute(),
+                    "saved torrent output folder is not absolute; refusing to purge");
+                folders.push(record.output_folder);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).with_context(|| format!("reading {}; refusing to purge", ledger.display())),
+    }
+    Ok(folders.iter().map(|folder| resolve(folder)).collect())
 }
 fn existing(path: &Path) -> Result<String> {
     match std::fs::read_to_string(path) {
@@ -207,11 +250,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
             write(&mut actions, mime, new.into_bytes());
         }
         if options.purge {
-            let protected = cfg
-                .save_path
-                .as_ref()
-                .map(PathBuf::from)
-                .map(|path| path.canonicalize().unwrap_or(path));
+            let protected = payload_folders(cfg.save_path.as_deref(), &crate::config::data_dir().join("engine"))?;
             for path in [
                 crate::config::data_dir(),
                 config.join("fbittorrent"),
@@ -222,7 +261,7 @@ pub fn run(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action>>
                     .unwrap_or_else(|| data.join("cache"))
                     .join("fbittorrent"),
             ] {
-                purge(&mut actions, path, protected.as_deref())?;
+                purge(&mut actions, path, &protected)?;
             }
         }
     } else {
@@ -481,7 +520,7 @@ mod tests {
         std::fs::write(payload.join("movie.mkv"), b"payload").unwrap();
         std::fs::write(root.join("rss.json"), b"records").unwrap();
         let mut actions = Vec::new();
-        super::purge(&mut actions, root.clone(), Some(&payload)).unwrap();
+        super::purge(&mut actions, root.clone(), &[payload.canonicalize().unwrap()]).unwrap();
         assert_eq!(actions.len(), 1);
         for action in &actions {
             super::apply(action).unwrap();
@@ -493,4 +532,61 @@ mod tests {
         assert!(!root.join("rss.json").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn purge_keeps_default_folder_and_every_saved_output_folder() {
+        let root = std::env::temp_dir().join(format!("fbt-purge-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let data = root.join("data");
+        let engine = data.join("engine");
+        std::fs::create_dir_all(&engine).unwrap();
+        // The default folder (data/downloads) and two record folders, one of
+        // them a single-file torrent's save path inside the data directory.
+        let default = data.join("downloads");
+        let multi = data.join("downloads/Show.S01");
+        let single = data.join("kept-movies");
+        for (folder, file) in [(&default, "a.mkv"), (&multi, "e01.mkv"), (&single, "movie.mkv")] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join(file), b"payload").unwrap();
+        }
+        std::fs::write(engine.join("torrents.json"), serde_json::to_vec(&serde_json::json!({"records":[
+            {"hash":"a","output_folder":multi},{"hash":"b","output_folder":single}]})).unwrap()).unwrap();
+        std::fs::write(data.join("rss.json"), b"records").unwrap();
+        let mut protected = super::payload_folders(None, &engine).unwrap();
+        protected.push(super::resolve(&default));
+        assert!(protected.contains(&super::resolve(&single)) && protected.contains(&super::resolve(&multi)));
+        let mut actions = Vec::new();
+        super::purge(&mut actions, data.clone(), &protected).unwrap();
+        for action in &actions { super::apply(action).unwrap(); }
+        for kept in [default.join("a.mkv"), multi.join("e01.mkv"), single.join("movie.mkv")] {
+            assert_eq!(std::fs::read(&kept).unwrap(), b"payload", "{}", kept.display());
+        }
+        assert!(!data.join("rss.json").exists() && !engine.exists());
+        // Unreadable records refuse the purge instead of guessing.
+        std::fs::create_dir_all(&engine).unwrap();
+        std::fs::write(engine.join("torrents.json"), b"{not json").unwrap();
+        assert!(super::payload_folders(None, &engine).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn purge_refuses_malformed_record_shapes_before_planning_removals() {
+        let root = std::env::temp_dir().join(format!("fbt-purge-malformed-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let payload = root.join("movie.mkv");
+        std::fs::write(&payload, b"owned payload").unwrap();
+        for malformed in ["{}", "null", r#"{"records":null}"#, r#"{"records":{}}"#,
+            r#"{"records":[null]}"#, r#"{"records":[{}]}"#,
+            r#"{"records":[{"output_folder":17}]}"#,
+            r#"{"records":[{"output_folder":""}]}"#,
+            r#"{"records":[{"output_folder":"relative"}]}"#] {
+            std::fs::write(root.join("torrents.json"), malformed).unwrap();
+            assert!(super::payload_folders(None, &root).is_err(), "accepted {malformed}");
+            assert_eq!(std::fs::read(&payload).unwrap(), b"owned payload");
+        }
+        std::fs::write(root.join("torrents.json"), r#"{"records":[]}"#).unwrap();
+        assert!(super::payload_folders(None, &root).is_ok(), "an empty valid ledger is allowed");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
 }

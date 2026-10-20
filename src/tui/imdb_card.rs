@@ -28,7 +28,7 @@ impl TuiApp {
     /// Open the IMDb page (or start the lookup) for a release name.
     pub(super) fn open_imdb(&mut self, name: String, id: Option<String>) -> Cmd<Msg> {
         if let Some(ImdbState::Ready(t, _)) = self.imdb_state(&name) {
-            let _ = std::process::Command::new("xdg-open").arg(t.url()).spawn();
+            crate::public_text::open_web(&t.url());
             self.set_status("opened IMDb in browser", false);
             Cmd::none()
         } else {
@@ -40,8 +40,9 @@ impl TuiApp {
     pub(super) fn open_wiki(&mut self, name: String, id: Option<String>) -> Cmd<Msg> {
         match self.imdb_state(&name) {
             Some(ImdbState::Ready(t, _)) if !t.wiki_url.is_empty() => {
-                let _ = std::process::Command::new("xdg-open").arg(&t.wiki_url).spawn();
-                self.set_status("opened Wikipedia in browser", false);
+                // The article URL comes from a remote API response: web pages only.
+                let opened = crate::public_text::open_web(&t.wiki_url);
+                self.set_status(if opened { "opened Wikipedia in browser" } else { "Wikipedia link is not a web page" }, !opened);
                 Cmd::none()
             }
             Some(ImdbState::Ready(..)) => { self.set_status("no Wikipedia article found for this title", true); Cmd::none() }

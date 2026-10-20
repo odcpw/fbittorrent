@@ -1,6 +1,5 @@
 //! Torznab RSS -> the common search model. Unknown measurements stay unknown.
 use super::*;
-use crate::api::validation::Validate;
 use quick_xml::{events::Event, Reader};
 #[derive(Default)]
 struct Item {
@@ -154,7 +153,7 @@ fn finish(i: Item, indexer: &Indexer) -> Option<SearchResult> {
         descr_link: i.comments,
         engine: indexer.name.clone(),
         imdb: String::new(),
-        pub_date: crate::qbt::parse_rfc2822(&i.date).max(0),
+        pub_date: crate::feed_date::parse_rfc2822(&i.date).max(0),
     };
     super::super::normalize::item(&row).validate().ok()?;
     Some(row)

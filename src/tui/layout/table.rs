@@ -77,10 +77,11 @@ impl Rects {
         for (line, index) in range.enumerate() {
             let rect = Rect::new(area.x, area.y + line as u16, area.width, 1);
             if let Some((hash, old)) = self.rows.get_mut(line) {
-                hash.clone_from(&app.torrents[index].hash);
+                hash.clear();
+                hash.push_str(app.torrents[index].hash.as_str());
                 *old = rect;
             } else {
-                self.rows.push((app.torrents[index].hash.clone(), rect));
+                self.rows.push((app.torrents[index].hash.to_string(), rect));
             }
         }
         self.rows.truncate(count);
@@ -226,29 +227,18 @@ impl TuiApp {
             (
                 &t.hash,
                 &t.name,
-                &t.state,
-                t.progress.to_bits(),
-                t.progress_known,
+                t.state,
                 t.size,
-                t.dlspeed,
-                t.eta,
-                t.num_leechs,
-                t.num_seeds,
+                t.progress.map(f64::to_bits),
+                t.dl_bps,
+                t.eta_s,
+                t.peers,
+                t.seeds,
+                t.reason.as_deref(),
+                t.playable.as_ref().map(|p| p.ready),
             )
                 .hash(&mut signature);
-            self.store.pending_for_key(&t.hash).hash(&mut signature);
-            if let Some(row) = self.store.torrents.get(&t.hash) {
-                (
-                    row.size,
-                    row.progress.map(f64::to_bits),
-                    row.dl_bps,
-                    row.eta_s,
-                    row.peers,
-                    row.reason.as_deref(),
-                    row.playable.as_ref().map(|p| p.ready),
-                )
-                    .hash(&mut signature);
-            }
+            self.store.pending_for_key(t.hash.as_str()).hash(&mut signature);
         }
         let signature = signature.finish();
         let mut cache = self.torrent_table.borrow_mut();
@@ -280,14 +270,14 @@ impl TuiApp {
             }));
             let rows = range.clone().map(|index| {
                 let t = &self.torrents[index];
-                let row = self.store.torrents.get(&t.hash);
-                let pending = self.store.pending_for_key(&t.hash);
-                let style = if self.theme.low_chroma && !stale && pending.is_none() && matches!(t.state.as_str(),"error"|"missingFiles"|"disk_full") {self.theme.err()} else if stale || pending.is_some() || t.is_stopped() {
+                let pending = self.store.pending_for_key(t.hash.as_str());
+                let failed = t.state == crate::api::TorrentState::Error;
+                let style = if self.theme.low_chroma && !stale && pending.is_none() && failed {self.theme.err()} else if stale || pending.is_some() || matches!(t.state, crate::api::TorrentState::Paused | crate::api::TorrentState::Done) {
                     self.theme.dimmed()
                 } else {
                     self.theme.text()
                 };
-                let metrics = format::Columns::of(t, row);
+                let metrics = format::Columns::of(t);
                 let name = if let Some(op) = pending {
                     format!("{}… {}", remote::mutation_verb(op), t.name)
                 } else {
@@ -302,7 +292,7 @@ impl TuiApp {
                                 String::new()
                             }
                         }
-                        Column::State => format::state_cell(t, row).into(),
+                        Column::State => format::state_cell(t).into(),
                         Column::Name => readable_cell(
                             &name,
                             *width as usize,
@@ -316,8 +306,7 @@ impl TuiApp {
                         _=>String::new(),
                     };
                     let style = if *column == Column::State
-                        && (matches!(row.map(|r| r.state), Some(crate::api::TorrentState::Error))
-                            || matches!(t.state.as_str(), "error" | "missingFiles" | "disk_full"))
+                        && failed
                         && !stale
                         && pending.is_none()
                     {

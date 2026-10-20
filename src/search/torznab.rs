@@ -1,5 +1,5 @@
 //! Native Torznab requests; private keys never enter argv or public diagnostics.
-mod bound;
+pub(crate) mod bound;
 mod config;
 #[cfg(test)]
 mod tests;

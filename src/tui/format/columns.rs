@@ -25,45 +25,20 @@ pub(in crate::tui) struct Columns {
     pub peers: String,
 }
 impl Columns {
-    pub fn of(t: &Torrent, row: Option<&api::Torrent>) -> Self {
-        let progress = row.map_or_else(|| t.progress_known.then_some(t.progress), |r| r.progress);
-        let size = row.map_or_else(
-            || (t.progress_known || t.size > 0).then_some(t.size.max(0) as u64),
-            |r| r.size,
-        );
-        let down = row.map_or_else(
-            || (t.is_active() && t.progress_known).then_some(t.dlspeed.max(0) as u64),
-            |r| (r.state==api::TorrentState::Downloading).then_some(r.dl_bps).flatten(),
-        );
-        let eta = row.map_or_else(
-            || (t.is_active() && t.eta > 0 && t.eta < 8_640_000).then_some(t.eta as u64),
-            |r| r.eta_s,
-        );
-        let peers = row.map_or_else(
-            || {
-                (t.is_active() || t.is_seeding())
-                    .then_some(t.num_leechs.max(0).saturating_add(t.num_seeds.max(0)) as u64)
-            },
-            |r| r.peers,
-        );
+    pub fn of(row: &api::Torrent) -> Self {
+        let down = (row.state==api::TorrentState::Downloading).then_some(row.dl_bps).flatten();
         Self {
-            size: size.map_or_else(|| "—".into(), |v| human_bytes(signed(v))),
-            progress: crate::torrent_format::progress(progress),
+            size: row.size.map_or_else(|| "—".into(), |v| human_bytes(signed(v))),
+            progress: crate::torrent_format::progress(row.progress),
             down: down.map_or_else(String::new, compact_rate),
             eta: if down.is_some() {
-                eta.map_or_else(String::new, compact_eta)
+                row.eta_s.map_or_else(String::new, compact_eta)
             } else {
                 String::new()
             },
-            peers: peers.map_or_else(
-                || {
-                    if t.is_active() || t.is_seeding() {
-                        "—".into()
-                    } else {
-                        String::new()
-                    }
-                },
-                |p| row.and_then(|r|r.seeds).map_or_else(||p.to_string(),|s|format!("{s}/{p}")),
+            peers: row.peers.map_or_else(
+                || if super::transferring(row.state) { "—".into() } else { String::new() },
+                |p| row.seeds.map_or_else(||p.to_string(),|s|format!("{s}/{p}")),
             ),
         }
     }
@@ -85,8 +60,7 @@ mod tests {
             .iter()
             .find(|r| r.state == api::TorrentState::Metadata)
             .unwrap();
-        let legacy = torrent(row);
-        let cells = Columns::of(&legacy, Some(row));
+        let cells = Columns::of(row);
         assert_eq!(cells.size, "—");
         assert_eq!(cells.progress, "—");
         assert_eq!(cells.down, "");
@@ -95,7 +69,7 @@ mod tests {
         assert_eq!(compact_eta(720), "12m");
         for state in [api::TorrentState::Paused,api::TorrentState::Done,api::TorrentState::Seeding,api::TorrentState::Queued] {
             let mut row=row.clone();row.state=state;row.dl_bps=Some(0);row.eta_s=Some(0);
-            let cells=Columns::of(&torrent(&row),Some(&row));
+            let cells=Columns::of(&row);
             assert!(cells.down.is_empty()&&cells.eta.is_empty(),"inactive rate and ETA stay blank: {state:?}");
         }
     }

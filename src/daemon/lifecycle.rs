@@ -3,13 +3,11 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use crate::network_app::NetworkState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopReason {
     Signal(i32),
     Idle,
-    Explicit,
     Panic,
     Upgrade,
     Quit,
@@ -18,7 +16,7 @@ pub enum StopReason {
 impl StopReason {
     pub fn exit_code(self) -> i32 {
         match self {
-            Self::Signal(_) | Self::Idle | Self::Explicit | Self::Quit => 0,
+            Self::Signal(_) | Self::Idle | Self::Quit => 0,
             Self::Panic => 70,
             Self::Upgrade => 75,
         }
@@ -28,7 +26,6 @@ impl StopReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestartReason {
     Settings,
-    Network,
     Explicit,
 }
 
@@ -41,7 +38,6 @@ pub enum Request {
 #[derive(Default)]
 struct State {
     requests: VecDeque<Request>,
-    expected_network: Option<NetworkState>,
 }
 
 #[derive(Clone, Default)]
@@ -89,6 +85,7 @@ impl Lifecycle {
 
     /// The current TUI observes requests while its outer owner consumes them
     /// after teardown. Observation must not steal the owner's restart reason.
+    #[cfg(test)]
     pub fn pending_request(&self) -> Option<Request> {
         let (mutex, _) = &*self.0;
         mutex
@@ -97,23 +94,6 @@ impl Lifecycle {
             .requests
             .front()
             .copied()
-    }
-
-    pub fn expected_network(&self) -> Option<NetworkState> {
-        let (mutex, _) = &*self.0;
-        mutex
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .expected_network
-            .clone()
-    }
-
-    pub fn set_expected_network(&self, network: Option<NetworkState>) {
-        let (mutex, _) = &*self.0;
-        mutex
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .expected_network = network;
     }
 }
 
@@ -158,9 +138,9 @@ mod tests {
     #[test]
     fn pending_restarts_are_fifo_and_observation_does_not_consume() {
         let lifecycle = Lifecycle::default();
-        lifecycle.request_restart(RestartReason::Network);
+        lifecycle.request_restart(RestartReason::Explicit);
         lifecycle.request_restart(RestartReason::Settings);
-        let network = Some(Request::Restart(RestartReason::Network));
+        let network = Some(Request::Restart(RestartReason::Explicit));
         assert_eq!(lifecycle.pending_request(), network);
         assert_eq!(lifecycle.pending_request(), network);
         let observed = [
@@ -187,10 +167,10 @@ mod tests {
         let began = std::time::Instant::now();
         // Whether the waiter is already asleep or still entering wait, the
         // notification/predicate pair must not lose the request.
-        lifecycle.request_stop(StopReason::Explicit);
+        lifecycle.request_stop(StopReason::Quit);
         assert_eq!(
             waiter.join().unwrap(),
-            Some(Request::Stop(StopReason::Explicit))
+            Some(Request::Stop(StopReason::Quit))
         );
         assert!(
             began.elapsed() < Duration::from_secs(4),
@@ -206,7 +186,6 @@ mod tests {
         for reason in [
             StopReason::Signal(libc::SIGTERM),
             StopReason::Idle,
-            StopReason::Explicit,
             StopReason::Quit,
         ] {
             assert_eq!(reason.exit_code(), 0);

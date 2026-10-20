@@ -47,7 +47,7 @@ impl TuiApp {
     pub(super) fn open_details(&mut self, torrent: &Torrent) -> Cmd<Msg> {
         let close=self.close_details();
         self.details = Some(DetailsModal {
-            hash: torrent.hash.clone(),
+            hash: torrent.hash.to_string(),
             name: torrent.name.clone(),
             tab: DetailsTab::Overview,
             loading: false,
@@ -199,8 +199,7 @@ impl TuiApp {
         } else if details.tab == DetailsTab::Files {
             self.view_file_contents(rows[1], frame);
         } else if let Some(t) = self.selected_torrent() {
-            let api = self.store.torrents.get(&t.hash);
-            let metrics = format::Metrics { legacy: t, api };
+            let metrics = format::Metrics(t);
             let kv = |key: &str, value: String| {
                 Line::from_spans([
                     Span::styled(format!("{key:<10}"), th.dimmed()),
@@ -211,11 +210,11 @@ impl TuiApp {
                 "state",
                 format!(
                     "{} · {}",
-                    format::state_cell(t, api).trim_end(),
+                    format::state_cell(t).trim_end(),
                     self.torrent_reason(t)
                 ),
             )];
-            if let Some(playable) = api.and_then(|r| r.playable.as_ref()) {
+            if let Some(playable) = t.playable.as_ref() {
                 let ready = if !playable.ready { "Buffering" }
                     else if playable.stall_free==Some(true) || (playable.stall_free.is_none() && playable.buffered_s.is_some_and(|s|s>=120)) {"▶ Ready to watch"}
                     else {"Playable · may stall"};
@@ -225,7 +224,7 @@ impl TuiApp {
                     .unwrap_or_default();
                 let finish=playable.finishes_in_s.map(|s|format!(" · finishes in {}",human_eta(s.min(i64::MAX as u64) as i64))).unwrap_or_default();
                 let estimate=if playable.buffered_s.is_none() {
-                    let steady=api.is_some_and(|r|crate::daemon::watch::estimate_rate(r.size.unwrap_or(0),r.dl_bps.unwrap_or(0)));
+                    let steady=crate::daemon::watch::estimate_rate(t.size.unwrap_or(0),t.dl_bps.unwrap_or(0));
                     if steady {" · rate estimate: keeps up with a 2 h video"}else{" · rate estimate: may stall for a 2 h video"}
                 }else{""};
                 lines.push(kv("ready", format!("{ready}{buffer}{finish}{estimate} · (o) Open")));
@@ -236,22 +235,17 @@ impl TuiApp {
                     "speed",
                     format!("{} · ETA {}", metrics.speed(), metrics.eta()),
                 ),
-                kv("peers", metrics.peers(self.cfg.native())),
+                kv("peers", metrics.peers()),
                 kv("policy", metrics.upload()),
                 kv("path", t.save_path.clone()),
-                kv("added", ago(t.added_on)),
+                kv("added", ago(t.added_at.min(i64::MAX as u64) as i64)),
             ]);
-            if let Some(row) = api {
-                lines.push(kv("down cap",self.overview_cap_text(row)));
-                lines.push(kv(
-                    "origin",
-                    row.origin.clone().unwrap_or_else(|| "unknown".into()),
-                ));
-            }
+            lines.push(kv("down cap",self.overview_cap_text(t)));
+            lines.push(kv("origin", t.origin.clone().unwrap_or_else(|| "unknown".into())));
             if let Some(detail)=self.store.details.values().find(|row|row.torrent.hash.as_str()==details.hash && row.torrent.size.is_some()) {
                 lines.push(kv("network",if detail.private {"Private torrent (no DHT, no PeX)"}else{"Public torrent"}.into()));
             }
-            if let Some(error) = &t.error_message {
+            if let Some(error) = &t.error {
                 lines.push(Line::styled(error.clone(), th.err().bold()));
             }
             let height = lines.len().min(u16::MAX as usize) as u16;

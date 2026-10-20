@@ -3,7 +3,7 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn help_text(&self) -> &'static str {
-        actions::help_text(self.cfg.native())
+        actions::help_text()
     }
 
     pub(super) fn help_max_scroll(&self) -> u16 {

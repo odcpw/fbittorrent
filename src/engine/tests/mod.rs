@@ -1,11 +1,3 @@
-pub(crate) mod fixture;
-use fixture::*;
-    fn dispatch_parked_in(request: &Request, directory: &Path) -> Option<Result<String>> {
-        fixture::dispatch_parked_in(request, directory, &Lifecycle::default())
-    }
-
-    include!("info_fixture.rs");
-
     fn test_cx() -> Cx {
         Cx::current().expect("native test runtime context")
     }
@@ -89,9 +81,11 @@ use fixture::*;
             directory: directory.to_path_buf(),
             default_folder: downloads.to_path_buf(),
             rechecks: Default::default(),
+            saved: Default::default(),
             resume: Arc::new(resume::Store::open(directory).unwrap()),
             resume_prepared: Default::default(),
             undo: Default::default(),
+            rates: Default::default(),
             stopping: AtomicBool::new(false),
             max_active_downloads: AtomicUsize::new(3),
             queue_pins: Default::default(),
@@ -143,20 +137,42 @@ use fixture::*;
         AppEngine {
             dispatcher,
             runtime: Some(runtime),
-            instance: Arc::new(instance),
+            _instance: Arc::new(instance),
         }
     }
 
-    pub(super) fn request(path: &str, args: &[(&str, &str)]) -> Request {
-        Request {
-            method: "POST".into(),
-            path: path.into(),
-            args: args
-                .iter()
-                .map(|(key, value)| ((*key).into(), (*value).into()))
-                .collect(),
-            file: None,
+    /// Typed engine reads for the tests below.
+    pub(super) fn rows(dispatcher: &EngineDispatcher) -> Vec<view::TorrentView> {
+        let ops::EngineResult::Torrents(rows) = dispatcher.execute(ops::EngineOp::Info).unwrap() else {
+            unreachable!("typed info result")
+        };
+        rows
+    }
+    pub(super) fn row(dispatcher: &EngineDispatcher, hash: &str) -> view::TorrentView {
+        rows(dispatcher).into_iter().find(|row| row.hash == hash).expect("listed torrent")
+    }
+    pub(super) fn parked_rows(directory: &Path) -> Vec<view::TorrentView> {
+        let ops::EngineResult::Torrents(rows) = ParkedLedger::new(directory.into()).execute(ops::EngineOp::Info).unwrap() else {
+            unreachable!("typed parked info result")
+        };
+        rows
+    }
+    /// The serialized API row: the only wire form of a torrent view.
+    pub(super) fn wire(view: &view::TorrentView) -> serde_json::Value {
+        serde_json::to_value(crate::api::ops::torrents::torrent(view.clone()).unwrap()).unwrap()
+    }
+    pub(super) fn wire_rows(rows: &[view::TorrentView]) -> serde_json::Value {
+        rows.iter().map(wire).collect()
+    }
+    /// Add exactly what a torrent file or a source string supplies; upload off.
+    pub(super) fn add_request(sources: Vec<String>, torrent: Option<Vec<u8>>) -> ops::AddRequest {
+        ops::AddRequest {
+            sources, torrent: torrent.map(|bytes| ("fixture.torrent".into(), bytes)), save_path: None,
+            upload_limit: 0, seed: false, stopped: false, category: String::new(), tags: String::new(), origin: None,
         }
+    }
+    pub(super) fn hashes(values: &[&str]) -> ops::HashSelection {
+        ops::HashSelection(values.iter().map(|hash| (*hash).to_owned()).collect())
     }
 
     pub(super) fn review_directory(label: &str) -> PathBuf {
@@ -188,7 +204,7 @@ mod typed_seed {
         include!("check_reconciliation.rs");
     }
 }
-include!("legacy_wire.rs");
-include!("wire_probe.rs");
 include!("upload.rs");
 include!("absent_completed.rs");
+include!("live_presence.rs");
+include!("parked_edits.rs");

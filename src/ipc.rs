@@ -8,7 +8,6 @@ use std::time::Duration;
 
 /// Held for the whole engine lifetime, before any session or file I/O starts.
 pub(crate) struct InstanceLock {
-    directory: PathBuf,
     _file: File,
 }
 
@@ -55,7 +54,6 @@ impl InstanceLock {
             return Err(error).context("locking the native torrent engine");
         }
         Ok(Self {
-            directory,
             _file: file,
         })
     }

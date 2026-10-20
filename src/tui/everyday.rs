@@ -1,9 +1,6 @@
 //! Deliberate keyboard actions over current confirmed rows.
 use super::*;
 impl TuiApp {
-    pub(super) fn activity_label(&self)->Option<&str> {
-        if self.store.network.as_ref().is_some_and(|n|!n.ready) {Some("Waiting for VPN")}else{self.activity_text.as_deref()}
-    }
     pub(super) fn sync_activity_label(&mut self) {self.activity_text=self.compute_activity_label();}
     fn compute_activity_label(&self)->Option<String> {
         if self.store.network.as_ref().is_some_and(|n|!n.ready) || self.store.summary.as_ref().is_some_and(|s|s.network.state==crate::api::NetworkReadiness::Waiting) {

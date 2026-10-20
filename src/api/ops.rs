@@ -180,6 +180,14 @@ pub fn engine_error(value: anyhow::Error) -> crate::api::Error {
         ]));
         return failure;
     }
+    if value.downcast_ref::<crate::engine::ParkedRefusal>().is_some() {
+        let mut failure = error(EngineUnavailable, "engine unavailable", None);
+        failure.details = Some(serde_json::Map::from_iter([
+            ("state".into(), "parked".into()),
+            ("message".into(), "engine is parked".into()),
+        ]));
+        return failure;
+    }
     if value.downcast_ref::<crate::engine::moving::Busy>().is_some() {
         let mut failure=error(Busy,"busy",None);
         failure.details=Some(serde_json::Map::from_iter([("limit".into(),"dispatch".into())]));

@@ -27,11 +27,6 @@ impl TuiApp {
         self.native_search_start(q)
     }
 
-    #[cfg(test)]
-    pub(super) fn on_search_key(&mut self, key: KeyEvent) -> Cmd<Msg> {
-        actions::dispatch_scope(self, actions::Scope::Screen(Screen::Search), key)
-    }
-
     pub(super) fn on_search_action(&mut self, intent: actions::Intent) -> Cmd<Msg> {
         if intent==actions::Intent::Providers { return self.open_providers(); }
         if self.search_browse {
@@ -78,7 +73,8 @@ impl TuiApp {
                 return self.open_wiki(name, id);
             },
             actions::Intent::Source => if let Some(r) = self.selected_result() {
-                if !r.descr_link.is_empty() { let _ = std::process::Command::new("xdg-open").arg(&r.descr_link).spawn(); }
+                // Provider-supplied: only http(s) pages reach xdg-open.
+                if !r.descr_link.is_empty() && !crate::public_text::open_web(&r.descr_link) { self.set_status("source link is not a web page", true); }
             },
             actions::Intent::Follow => if let Some(r) = self.selected_result() {
                 let id = if !r.imdb.is_empty() { Some(r.imdb.clone()) } else { self.name_ids.get(&r.file_name).filter(|i| !i.is_empty()).cloned() };
@@ -93,27 +89,5 @@ impl TuiApp {
 
 }
 
-
-/// Collapse the same torrent reported by several providers (same info hash),
-/// keeping the copy with the most seeders.
-pub(super) fn dedupe_results(rs: Vec<SearchResult>) -> Vec<SearchResult> {
-    fn key(r: &SearchResult) -> String {
-        let u = r.file_url.to_ascii_lowercase();
-        if let Some(i) = u.find("urn:btih:") {
-            let h: String = u[i + 9..].chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
-            if h.len() >= 32 { return h; }
-        }
-        u
-    }
-    let mut best: HashMap<String, SearchResult> = HashMap::new();
-    for r in rs {
-        let k = key(&r);
-        match best.get(&k) {
-            Some(b) if b.seeders >= r.seeders => {}
-            _ => { best.insert(k, r); }
-        }
-    }
-    best.into_values().collect()
-}
 
 pub(super) const MAX_RESULTS: usize = 100;

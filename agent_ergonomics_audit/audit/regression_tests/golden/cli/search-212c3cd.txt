@@ -1,3 +1,0 @@
-    9S     1L     4.0 KiB  shape         Sintel.2010.1080p.mkv
-    7S     1L     8.0 KiB  shape         Big.Buck.Bunny.720p.mp4
-    0S     1L     1.0 KiB  shape         Linux.iso

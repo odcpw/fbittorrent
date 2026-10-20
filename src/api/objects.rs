@@ -154,6 +154,22 @@ pub struct Torrent {
     pub playable: Option<Playable>,
 }
 
+#[cfg(test)]
+impl Torrent {
+    /// A row with consistent intent and no invented observations, for tests.
+    pub fn fixture(hash: &str, name: &str, state: TorrentState) -> Self {
+        Self {
+            hash: Hash::new(hash).expect("fixture hash"), name: name.into(), state, intent: if state == TorrentState::Paused { Intent::Pause } else { Intent::Run },
+            staged: false, checked: !matches!(state, TorrentState::Metadata | TorrentState::Checking | TorrentState::WaitingVpn), seed: false, upload_enabled: false, upload_policy: UploadPolicy::Off,
+            save_path: "/fixture/downloads".into(), added_at: 0, force: false, reason: None, error: None,
+            progress: None, size: None, completed_bytes: None, uploaded_bytes: None, dl_bps: None, ul_bps: None,
+            eta_s: None, peers: None, seeds: None, upload_limit_bps: None, download_limit_bps: None,
+            effective_download_limit_bps: None, ratio: None, content_path: None, completed_at: None,
+            origin: None, imdb_id: None, queue_pos: None, playable: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct File {
     pub index: u64,
@@ -220,6 +236,17 @@ pub struct SummaryDaemon {
     pub upgrade_pending: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_exit_in_s: Option<u64>,
+    /// Unreadable local files the owner is working around (config keeps its
+    /// last valid settings; shows/rss topics keep their last snapshot).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<DaemonWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DaemonWarning {
+    /// "config", "shows" or "rss".
+    pub source: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -8,11 +8,18 @@ use serde::{Deserialize, Serialize, forward_to_deserialize_any};
 
 use crate::raw_value::TAG;
 
+/// Lists and dictionaries nest at most this deep. Every remote bencode source
+/// (DHT datagrams, tracker bodies, peer extension messages, fetched .torrent
+/// files) recurses once per level; an unbounded depth overflows a worker stack.
+/// Real metainfo and protocol messages stay well below ten levels.
+pub const MAX_DEPTH: usize = 64;
+
 pub struct BencodeDeserializer<'de> {
     buf: &'de [u8],
     field_context: ErrorContext<'de>,
     field_context_did_not_fit: u8,
     parsing_key: bool,
+    depth: usize,
 }
 
 impl<'de> BencodeDeserializer<'de> {
@@ -22,7 +29,17 @@ impl<'de> BencodeDeserializer<'de> {
             field_context: Default::default(),
             field_context_did_not_fit: 0,
             parsing_key: false,
+            depth: 0,
         }
+    }
+
+    /// Enter one list/dictionary level, refusing input nested beyond MAX_DEPTH.
+    fn enter(&mut self) -> Result<(), Error> {
+        if self.depth >= MAX_DEPTH {
+            return Err(Error::DepthLimitExceeded(MAX_DEPTH));
+        }
+        self.depth += 1;
+        Ok(())
     }
 
     pub fn into_remaining(self) -> &'de [u8] {
@@ -122,6 +139,8 @@ pub enum Error {
     InvalidUtf8,
     #[error("eof")]
     Eof,
+    #[error("bencode nesting exceeds {0} levels")]
+    DepthLimitExceeded(usize),
 }
 
 type ErrorContext<'de> = ArrayVec<ByteBuf<'de>, 4>;
@@ -359,7 +378,10 @@ impl<'de> serde::de::Deserializer<'de> for &mut BencodeDeserializer<'de> {
         V: serde::de::Visitor<'de>,
     {
         self.parse_first_byte(b'l', Error::InvalidValue)?;
-        visitor.visit_seq(SeqAccess { de: self })
+        self.enter()?;
+        let value = visitor.visit_seq(SeqAccess { de: &mut *self });
+        self.depth -= 1;
+        value
     }
 
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
@@ -386,7 +408,10 @@ impl<'de> serde::de::Deserializer<'de> for &mut BencodeDeserializer<'de> {
         V: serde::de::Visitor<'de>,
     {
         self.parse_first_byte(b'd', Error::InvalidValue)?;
-        visitor.visit_map(MapAccess { de: self })
+        self.enter()?;
+        let value = visitor.visit_map(MapAccess { de: &mut *self });
+        self.depth -= 1;
+        value
     }
 
     fn deserialize_struct<V>(
@@ -769,5 +794,54 @@ mod tests {
                 values: vec![ByteBuf(b"hello"), ByteBuf(b"world")]
             }
         );
+    }
+
+    /// Nest `depth` lists (or dictionaries) around one integer.
+    fn nested(depth: usize, dict: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        for _ in 0..depth {
+            out.extend_from_slice(if dict { b"d1:k" } else { b"l" });
+        }
+        out.extend_from_slice(b"i1e");
+        out.extend(std::iter::repeat_n(b'e', depth));
+        out
+    }
+
+    #[test]
+    fn nesting_depth_is_bounded_for_every_visitor() {
+        use crate::{BencodeValue, DeserializeError};
+        use serde::de::IgnoredAny;
+        #[derive(serde_derive::Deserialize)]
+        struct Message {
+            #[allow(unused)]
+            #[serde(default)]
+            a: Option<IgnoredAny>,
+        }
+        // The documented limit itself still parses.
+        from_bytes::<IgnoredAny>(&nested(super::MAX_DEPTH, false)).unwrap();
+        from_bytes::<BencodeValue<ByteBuf>>(&nested(super::MAX_DEPTH, true)).unwrap();
+        // Run on a 2 MiB stack (the engine worker size): unbounded recursion
+        // would abort the process here instead of returning an error.
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                for dict in [false, true] {
+                    for depth in [super::MAX_DEPTH + 1, 200_000] {
+                        let bytes = nested(depth, dict);
+                        let ignored = from_bytes::<IgnoredAny>(&bytes).unwrap_err();
+                        assert!(matches!(ignored.kind(), DeserializeError::DepthLimitExceeded(_)), "{ignored}");
+                        let value = from_bytes::<BencodeValue<ByteBuf>>(&bytes).unwrap_err();
+                        assert!(matches!(value.kind(), DeserializeError::DepthLimitExceeded(_)), "{value}");
+                        let mut wrapped = b"d1:a".to_vec();
+                        wrapped.extend_from_slice(&bytes);
+                        wrapped.push(b'e');
+                        let field = from_bytes::<Message>(&wrapped).map(|_| ()).unwrap_err();
+                        assert!(matches!(field.kind(), DeserializeError::DepthLimitExceeded(_)), "{field}");
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

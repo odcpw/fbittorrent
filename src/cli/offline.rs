@@ -2,7 +2,6 @@
 use crate::{
     api,
     config::{self, Config},
-    daemon::lifecycle::Lifecycle,
     engine::{
         ops::{EngineOp, EngineResult},
         ParkedLedger,
@@ -23,7 +22,7 @@ fn locked_for(timeout:Duration)->Result<(InstanceLock,ParkedLedger)> {
     let lock = InstanceLock::acquire_wait(config::runtime_dir(), timeout)?;
     Ok((
         lock,
-        ParkedLedger::new(config::data_dir().join("engine"), Lifecycle::default()),
+        ParkedLedger::new(config::data_dir().join("engine")),
     ))
 }
 pub fn list() -> Result<Vec<api::Torrent>> {
@@ -53,7 +52,7 @@ pub fn mutation(
                     let rows: Vec<api::Torrent> =
                         serde_json::from_value(value["torrents"].clone())?;
                     let hashes =
-                        crate::cli_sources::resolve_in(&super::shapes::legacy(&rows)?, selectors)?;
+                        crate::cli_sources::resolve_in(&rows, selectors)?;
                     for chunk in hashes.chunks(256) {
                         let args = if stop {
                             serde_json::json!({"hashes":chunk})
@@ -82,9 +81,9 @@ pub fn mutation(
                 .map(api::ops::torrents::torrent)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(api::errors::app_error)?;
-            let hashes = crate::cli_sources::resolve_in(&super::shapes::legacy(&rows)?, selectors)?;
+            let hashes = crate::cli_sources::resolve_in(&rows, selectors)?;
             use crate::engine::ops::HashSelection;
-            let selection = HashSelection::Hashes(hashes.clone());
+            let selection = HashSelection(hashes.clone());
             ledger.execute(if stop {
                 EngineOp::Stop { hashes: selection }
             } else {

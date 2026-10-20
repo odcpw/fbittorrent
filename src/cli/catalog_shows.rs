@@ -1,5 +1,5 @@
 //! Shows commands share the owner's handlers and normalized views locally.
-use super::{catalog_search,catalogue,shapes,ShowsCmd};
+use super::{catalog_search,catalogue,ShowsCmd};
 use crate::{agent::{AppError,Code},api::{self,client::Client},config::Config};
 use anyhow::{Context,Result};
 use serde_json::{json,Value};
@@ -49,9 +49,10 @@ impl<'a> Source<'a> {
         result.ok_or_else(||AppError::new(Code::NotFound,"show not found").into())
     }
 }
+fn show_label(show:&api::Show)->String {show.year.map_or_else(||show.title.clone(),|year|format!("{} ({year})",show.title))}
 fn select<'a>(shows:&'a [api::Show],selector:&str)->Result<&'a api::Show> {
     if let Some(show)=shows.iter().find(|show|show.imdb==selector){return Ok(show);}
-    let matches:Vec<_>=shows.iter().filter(|show|shapes::show_label(show).to_lowercase().contains(&selector.to_lowercase())).collect();
+    let matches:Vec<_>=shows.iter().filter(|show|show_label(show).to_lowercase().contains(&selector.to_lowercase())).collect();
     match matches.as_slice() {
         [show]=>Ok(show),
         []=>Err(AppError::new(Code::NotFound,format!("no show matching '{selector}'")).hint("fbittorrent shows list --json").into()),
@@ -76,10 +77,10 @@ pub(crate) fn run(cfg:&Config,sub:&ShowsCmd,json_mode:bool,no_start:bool)->Resul
                 ||println!("{}: {}",show,quality.unwrap_or("default")));
         },
         ShowsCmd::List=>{
-            let shows=source.shows()?;let values:Vec<_>=shows.iter().map(shapes::show).collect();
-            crate::emit(json_mode,json!({"ok":true,"count":shows.len(),"new":shows.iter().map(|show|show.unread).sum::<u64>(),"path":crate::shows::path(),"shows":values}),||{
+            let shows=source.shows()?;
+            crate::emit(json_mode,json!({"ok":true,"count":shows.len(),"new":shows.iter().map(|show|show.unread).sum::<u64>(),"path":crate::shows::path(),"shows":shows}),||{
                 if shows.is_empty(){println!("no shows followed yet: fbittorrent shows follow \"<title or tt id>\"");}
-                for show in &shows {println!("{:<10}  {:<40} {:>3} new / {:>3} eps  checked {}{}",show.imdb,crate::short(&shapes::show_label(show),40),show.unread,show.counts.episodes,show.last_check_at.map(|time|crate::qbt::ymd(time as i64)).unwrap_or_else(||"never".into()),show.warning.as_ref().map(|warning|format!("  [error: {warning}]")).unwrap_or_default());}
+                for show in &shows {println!("{:<10}  {:<40} {:>3} new / {:>3} eps  checked {}{}",show.imdb,crate::short(&show_label(show),40),show.unread,show.counts.episodes,show.last_check_at.map(|time|crate::qbt::ymd(time as i64)).unwrap_or_else(||"never".into()),show.warning.as_ref().map(|warning|format!("  [error: {warning}]")).unwrap_or_default());}
             });
         },
         ShowsCmd::Follow{query,quality}=>{
@@ -93,20 +94,19 @@ pub(crate) fn run(cfg:&Config,sub:&ShowsCmd,json_mode:bool,no_start:bool)->Resul
             let outcome=source.outcome(api::Call::ShowsCheck{args:Some(api::ShowCheckArgs{imdb:Some(title.id.clone())})})?;
             let shows=source.shows()?;let show=select(&shows,&title.id)?;
             crate::emit(json_mode,json!({"ok":true,"action":"shows-follow","added":added,"imdb":title.id,"title":title.title,"year":title.year,"kind":title.kind,"episodes":show.counts.episodes,"new":show.unread,"fetched":outcome.is_ok(),"warning":show.warning,"catalogue_complete":show.catalogue_complete}),||{
-                println!("{} {} [{}]: {} releases on EZTV, {} new",if added{"following"}else{"already following"},shapes::show_label(show),show.imdb,show.counts.episodes,show.unread);
+                println!("{} {} [{}]: {} releases on EZTV, {} new",if added{"following"}else{"already following"},show_label(show),show.imdb,show.counts.episodes,show.unread);
                 if let Some(warning)=&show.warning{println!("warning: {warning}");}
             });
         },
         ShowsCmd::Unfollow{show}=>{
             let shows=source.shows()?;let show=select(&shows,show)?;
             source.call(api::Call::ShowsUnfollow{args:api::ShowArgs{imdb:show.imdb.clone()}})?;
-            crate::emit(json_mode,json!({"ok":true,"action":"shows-unfollow","imdb":show.imdb,"title":show.title}),||println!("unfollowed {}",shapes::show_label(show)));
+            crate::emit(json_mode,json!({"ok":true,"action":"shows-unfollow","imdb":show.imdb,"title":show.title}),||println!("unfollowed {}",show_label(show)));
         },
         ShowsCmd::Episodes{show,new}=>{
             let shows=source.shows()?;let show=select(&shows,show)?;let rows=source.releases(&show.imdb,*new)?;
-            let values:Vec<_>=rows.iter().map(shapes::release).collect();
-            crate::emit(json_mode,json!({"ok":true,"imdb":show.imdb,"title":show.title,"last_checked":show.last_check_at.unwrap_or(0),"count":rows.len(),"warning":show.warning,"catalogue_complete":show.catalogue_complete,"episodes":values}),||{
-                if rows.is_empty(){println!("{}: nothing listed{}",shapes::show_label(show),if show.last_check_at.is_none(){" (never checked: fbittorrent shows check)"}else{""});}
+            crate::emit(json_mode,json!({"ok":true,"imdb":show.imdb,"title":show.title,"last_check_at":show.last_check_at,"count":rows.len(),"warning":show.warning,"catalogue_complete":show.catalogue_complete,"episodes":rows}),||{
+                if rows.is_empty(){println!("{}: nothing listed{}",show_label(show),if show.last_check_at.is_none(){" (never checked: fbittorrent shows check)"}else{""});}
                 if let Some(warning)=&show.warning{println!("warning: {warning}");}print_releases(&rows);
             });
         },
@@ -135,8 +135,8 @@ pub(crate) fn run(cfg:&Config,sub:&ShowsCmd,json_mode:bool,no_start:bool)->Resul
                 let show=select(&current,&prior.imdb)?;let rows=source.releases(&show.imdb,false)?;
                 let fresh=rows.iter().filter(|row|!old[&show.imdb].contains(&row.key)).count();
                 failed+=usize::from(show.warning.is_some());
-                report.push(json!({"imdb":show.imdb,"title":shapes::show_label(show),"fresh":fresh,"new":show.unread,"error":show.warning}));
-                releases.push((shapes::show_label(show),rows.into_iter().filter(|row|!row.read).collect::<Vec<_>>()));
+                report.push(json!({"imdb":show.imdb,"title":show_label(show),"fresh":fresh,"new":show.unread,"error":show.warning}));
+                releases.push((show_label(show),rows.into_iter().filter(|row|!row.read).collect::<Vec<_>>()));
             }
             crate::emit(json_mode,json!({"ok":true,"action":"shows-check","checked":selected.len(),"failed":failed,"new":current.iter().map(|show|show.unread).sum::<u64>(),"shows":report}),||{
                 for row in &report {if let Some(error)=row["error"].as_str(){println!("{}: {error}",row["title"].as_str().unwrap());}else{println!("{}: {} fresh, {} new",row["title"].as_str().unwrap(),row["fresh"],row["new"]);}}

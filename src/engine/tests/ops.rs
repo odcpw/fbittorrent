@@ -1,102 +1,5 @@
 use super::*;
-use crate::engine::tests::fixture::{Request, Route, LEGACY_ROUTES};
-use crate::engine::tests::{request, review_directory, test_app};
-
-#[test]
-fn every_route_named_once() {
-    let expected: Vec<String> = serde_json::from_str(include_str!("legacy-routes.json")).unwrap();
-    let names: HashSet<_> = LEGACY_ROUTES.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names.len(), LEGACY_ROUTES.len());
-    assert_eq!(names.len(), expected.len());
-    let body = request(
-        "unused",
-        &[
-            ("hashes", "all"),
-            ("hash", "0000000000000000000000000000000000000001"),
-            (
-                "urls",
-                "magnet:?xt=urn:btih:0000000000000000000000000000000000000001",
-            ),
-            ("max_active_downloads", "3"),
-            ("id", "0|1"),
-            ("priority", "1"),
-            ("limit", "32768"),
-            ("ratioLimit", "0"),
-            ("shareLimitAction", "Stop"),
-            ("tags", "alpha, beta"),
-        ],
-    );
-    for route in expected {
-        assert!(
-            names.contains(route.as_str()),
-            "old socket route {route} missing"
-        );
-        let kind = Route::from_name(&route).unwrap();
-        assert_eq!(kind.name(), route);
-        assert!(
-            EngineOp::parse(&route, &body).unwrap().is_some(),
-            "route {route} does not parse"
-        );
-        println!("route {route}: one definition; parsed {kind:?}");
-    }
-    assert!(
-        EngineOp::parse("not-an-engine-route", &body)
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[test]
-fn parser_retains_typed_values_and_rejects_invalid_arguments() {
-    let body = request("unused", &[("hashes", "a|b"), ("skip_complete", "true")]);
-    let Some(EngineOp::Start {
-        hashes,
-        skip_complete,
-    }) = EngineOp::parse(Route::Start.name(), &body).unwrap()
-    else {
-        panic!("typed Start")
-    };
-    assert_eq!(hashes, HashSelection::Hashes(vec!["a".into(), "b".into()]));
-    assert!(skip_complete);
-    for (route, fields) in [
-        (
-            Route::FilePriority,
-            vec![("hash", "a"), ("id", "0"), ("priority", "7")],
-        ),
-        (
-            Route::SetUploadLimit,
-            vec![("hashes", "a"), ("limit", "-1")],
-        ),
-        (
-            Route::SetShareLimits,
-            vec![
-                ("hashes", "a"),
-                ("ratioLimit", "0"),
-                ("shareLimitAction", "Remove"),
-            ],
-        ),
-    ] {
-        assert!(
-            EngineOp::parse(route.name(), &request("unused", &fields)).is_err(),
-            "invalid {route:?} must fail"
-        );
-    }
-    let body = request(
-        "unused",
-        &[
-            ("urls", "first\nsecond"),
-            ("tags", SEED_TAG),
-            ("stopped", "true"),
-        ],
-    );
-    let Some(EngineOp::Add(add)) = EngineOp::parse(Route::Add.name(), &body).unwrap() else {
-        panic!("typed Add")
-    };
-    assert_eq!(add.sources, ["first", "second"]);
-    assert_eq!(add.upload_limit, 0);
-    assert_eq!(add.ratio_limit, -2.0);
-    assert!(add.stopped);
-}
+use crate::engine::tests::{hashes, review_directory, rows, test_app};
 
 #[test]
 fn typed_operations_execute_without_legacy_frames() {
@@ -121,8 +24,8 @@ fn typed_operations_execute_without_legacy_frames() {
             sources: Vec::new(),
             torrent: Some(("typed.torrent".into(), bytes)),
             save_path: Some(downloads.to_string_lossy().into()),
-            upload_limit: NO_UPLOAD_LIMIT,
-            ratio_limit: 0.0,
+            upload_limit: 0,
+            seed: false,
             stopped: true,
             category: "typed".into(),
             tags: String::new(), origin: None,
@@ -143,24 +46,22 @@ fn typed_operations_execute_without_legacy_frames() {
         .unwrap()
         .unwrap();
     });
-    let EngineResult::Torrents(rows) = dispatcher.execute(EngineOp::Info).unwrap() else {
-        panic!("typed torrent result")
-    };
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].state, TorrentState::Paused);
-    assert_eq!(rows[0].intent, Intent::Pause);
-    assert_eq!(rows[0].size, Some(5));
-    assert_eq!(rows[0].completed_bytes, Some(0));
-    assert!(rows[0].dl_bps.is_none() && rows[0].eta_s.is_none() && rows[0].ratio.is_none());
+    let listed = rows(&dispatcher);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].state, TorrentState::Paused);
+    assert_eq!(listed[0].intent, Intent::Pause);
+    assert_eq!(listed[0].size, Some(5));
+    assert_eq!(listed[0].completed_bytes, Some(0));
+    assert!(listed[0].dl_bps.is_none() && listed[0].eta_s.is_none() && listed[0].ratio.is_none());
     dispatcher
         .execute(EngineOp::Start {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             skip_complete: false,
         })
         .unwrap();
     dispatcher
         .execute(EngineOp::Stop {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
         })
         .unwrap();
     let EngineResult::Files(files) = dispatcher
@@ -174,19 +75,12 @@ fn typed_operations_execute_without_legacy_frames() {
     let before = dispatcher.ledger_generation().current();
     assert!(
         dispatcher
-            .execute(EngineOp::FilePriority {
-                hash: hash.clone(),
-                ids: vec![0],
-                priority: 9
-            })
+            .execute(EngineOp::SetDownloadLimit { hashes: hashes(&[&hash]), bps: Some(1) })
             .is_err()
     );
     assert!(
         dispatcher
-            .execute(EngineOp::SetShareLimits {
-                hashes: HashSelection::All,
-                ratio: 5.0
-            })
+            .execute(EngineOp::SetUploadLimit { hashes: hashes(&[&hash]), limit: -1 })
             .is_err()
     );
     assert_eq!(
@@ -196,14 +90,11 @@ fn typed_operations_execute_without_legacy_frames() {
     );
     dispatcher
         .execute(EngineOp::Delete {
-            hashes: HashSelection::Hashes(vec![hash.clone()]),
+            hashes: HashSelection(vec![hash.clone()]),
             files: false,
         })
         .unwrap();
-    let EngineResult::Torrents(rows) = dispatcher.execute(EngineOp::Info).unwrap() else {
-        panic!("typed torrent result")
-    };
-    assert!(rows.is_empty());
+    assert!(rows(&dispatcher).is_empty());
     println!(
         "typed add/list/files/start/stop/delete passed for {hash} in {}",
         directory.display()

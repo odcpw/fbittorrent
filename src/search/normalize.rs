@@ -31,32 +31,15 @@ pub(crate) fn btih(source: &str) -> Option<String> {
         .map(|h| h.as_string())
 }
 
-/// Inspect metainfo only; never a payload or a provider download hook. Keeping
-/// this on the provider reader (not the bus) preserves responsive subscribers.
+/// Inspect local metainfo only; never a payload or a provider download hook.
+/// Remote result URLs are never fetched while browsing results: they are
+/// provider-controlled, and a prefetch would contact arbitrary hosts (over
+/// plain HTTP, through redirects, outside the VPN binding) for every row.
 pub(super) fn torrent_hash(source: &str) -> Option<String> {
-    let parsed = url::Url::parse(source).ok();
-    let path = parsed.as_ref().map_or(source, |u| u.path());
-    if !path.to_ascii_lowercase().ends_with(".torrent") {
+    if !source.to_ascii_lowercase().ends_with(".torrent") || url::Url::parse(source).is_ok() {
         return None;
     }
-    let bytes = if parsed
-        .as_ref()
-        .is_some_and(|u| matches!(u.scheme(), "http" | "https"))
-    {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_millis(500)))
-            .build()
-            .into();
-        agent
-            .get(source)
-            .call()
-            .ok()?
-            .body_mut()
-            .with_config()
-            .limit(MAX_TORRENT_BYTES)
-            .read_to_vec()
-            .ok()?
-    } else if Path::new(source).is_absolute() {
+    let bytes = if Path::new(source).is_absolute() {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)

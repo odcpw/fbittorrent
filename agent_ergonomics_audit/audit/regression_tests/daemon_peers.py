@@ -78,7 +78,7 @@ def peers_local_swarm(binary,systemd):
         case.check(all(p['state']=='live' and p['conn'] in ('tcp','tcp_mse') and p['incoming'] is False for p in swarm.peers),
                    'actual outgoing peer direction, transport and state are reported',json.dumps(swarm.peers))
         value=h.cli('show',swarm.hash)
-        case.check(value.get('seeds')==value.get('num_seeds')==1 and len(value.get('peers',[]))==2,
+        case.check(value['torrent'].get('seeds')==1 and len(value.get('peers',[]))==2,
                    'CLI show contains true connected seed count and the real peer list',json.dumps(value))
         topic='torrent:'+swarm.hash+'.peers'
         sub=c.call('subscribe',dict(topics=[topic]))['result']['sub']

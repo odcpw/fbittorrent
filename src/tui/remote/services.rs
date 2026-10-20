@@ -185,7 +185,6 @@ impl TuiApp {
                     .map(|_| 0)
             });
         self.item_list.borrow_mut().select(index);
-        self.rss_loading = false;
     }
     pub(in crate::tui) fn feed_counts(&self, feed: &RssFeed) -> (usize, Option<usize>) {
         self.store.rss_feeds.get(&feed.uid).map_or_else(

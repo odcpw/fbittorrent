@@ -24,7 +24,6 @@ impl TuiApp {
         self.footer_context().hash(&mut hash);
         if let Some(details)=&self.details {std::mem::discriminant(&details.tab).hash(&mut hash);details.trackers.busy.hash(&mut hash);}
         self.store.hello.as_ref().map(|h|&h.caps).hash(&mut hash);
-        self.cfg.native().hash(&mut hash);
         self.theme_mtime.hash(&mut hash);
         self.status.hash(&mut hash);
         self.can_undo_removal().hash(&mut hash);
@@ -37,14 +36,14 @@ impl TuiApp {
         self.inbox_last_read.is_some().hash(&mut hash);
         self.shows_inbox().hash(&mut hash);
         if let Some(torrent) = self.selected_torrent() {
-            self.store.pending_for_key(&torrent.hash).hash(&mut hash);
+            self.store.pending_for_key(torrent.hash.as_str()).hash(&mut hash);
             torrent.name.hash(&mut hash);
             self.followable_title(&torrent.name).hash(&mut hash);
             torrent.state.hash(&mut hash);
             self.complete_no_seed(torrent).hash(&mut hash);
             self.torrent_paused(torrent).hash(&mut hash);
-            self.seed_allowed(torrent).hash(&mut hash);
-            self.store.torrents.get(&torrent.hash).map(|row|row.upload_enabled).hash(&mut hash);
+            torrent.seed.hash(&mut hash);
+            torrent.upload_enabled.hash(&mut hash);
         }
         if let Some(result) = self.selected_result() {
             result.file_name.hash(&mut hash);

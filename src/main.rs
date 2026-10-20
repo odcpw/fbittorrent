@@ -1,9 +1,11 @@
+#[macro_use]
+mod terminal_macros;
 mod agent;
 mod cli;
 #[path = "cli/sources.rs"]
 mod cli_sources;
 use cli::{Cli, Cmd, RssCmd, ShowsCmd};
-use cli_sources::{short, local_torrent_source};
+use cli_sources::short;
 pub use cli_sources::{magnet_hash, magnet_name};
 mod api;
 mod backend;
@@ -12,8 +14,11 @@ mod config;
 mod free_space;
 mod daemon;
 mod engine;
+mod feed_date;
 mod native_runtime;
 mod network_app;
+mod outbound;
+mod public_text;
 mod ipc;
 mod imdb;
 mod qbt;
@@ -29,9 +34,8 @@ use agent::{AppError, Code};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::Config;
-use qbt::{human_bytes, AddOptions, Torrent};
+use qbt::human_bytes;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 fn main() {
     if let Some(code)=search::torznab::run_worker(){std::process::exit(code);}
@@ -110,7 +114,7 @@ fn run(cli: Cli) -> Result<Code> {
     };
     // Read/offline-intent commands never cause an owner to be launched. Offline
     // ledger mutations themselves are supplied by P1-11.
-    if cfg.native() && !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
+    if !native_may_start(&cmd) && !matches!(cmd, Cmd::Down) { backend::prevent_start(); }
     // `triage` and the TUI are the two bare-invocation faces; `triage` is always JSON.
     let json = json || matches!(cmd, Cmd::Triage | Cmd::Capabilities);
     if cli::native_handles(&cmd) { return cli::run_native(&cfg, &cmd, json, no_start); }
@@ -124,12 +128,7 @@ fn run(cli: Cli) -> Result<Code> {
             if purge && !yes { return Err(AppError::new(Code::Safety,"setup --purge requires --yes; saved data was kept").into()); }
             let _ = port;
             let actions=setup::desktop::run(&cfg,setup::desktop::Options {save,magnet,plugin,quick,dry_run,uninstall,purge})?;
-            emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":cfg.engine,"port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
-            return Ok(Code::Ok);
-        }
-        Cmd::RegisterMagnet => {
-            setup::register_magnet_handler()?;
-            emit(json, serde_json::json!({"ok": true, "action": "register-magnet"}), || {});
+            emit(json,serde_json::json!({"ok":true,"action":if uninstall || purge {"setup-uninstall"}else{"setup"},"engine":"native","port":cfg.peer_port,"magnet_handler":magnet,"actions":actions}),||{});
             return Ok(Code::Ok);
         }
         Cmd::Imdb { name, refresh } => {
@@ -159,7 +158,7 @@ fn run(cli: Cli) -> Result<Code> {
             explicit.autostart = !no_start;
             let started = api::client::ensure_daemon(&explicit, no_start)?;
             if ui { backend::dashboard(None, None)?; }
-            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": cfg.engine,
+            emit(json, serde_json::json!({"ok": true, "action": "up", "started": started, "engine": "native",
                 "unit": api::client::unit_name()?}),
                 || println!("fbittorrent {}", if started { "started" } else { "already running" }));
             Ok(Code::Ok)
@@ -175,7 +174,7 @@ fn run(cli: Cli) -> Result<Code> {
         }
         Cmd::Down => {
             backend::stop(&cfg)?;
-            emit(json,serde_json::json!({"ok":true,"action":"down","engine":cfg.engine,"unit":null}), || println!("fbittorrent closed; its engine is stopped"));
+            emit(json,serde_json::json!({"ok":true,"action":"down","engine":"native","unit":null}), || println!("fbittorrent closed; its engine is stopped"));
             Ok(Code::Ok)
         }
         Cmd::Tui { search, rss, shows } => {
@@ -195,13 +194,13 @@ fn run(cli: Cli) -> Result<Code> {
             }
             cli::catalog_search::run(&cfg,query,wait,limit,install,install_url,plugins,json)
         }
-        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Seed {..} | Cmd::Noseed {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Rename {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::RegisterMagnet | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } | Cmd::Rss(..) | Cmd::Shows(..) => unreachable!(),
+        Cmd::Triage | Cmd::Status {..} | Cmd::List {..} | Cmd::Show {..} | Cmd::Add {..} | Cmd::Wait {..} | Cmd::Start {..} | Cmd::Stop {..} | Cmd::Upload {..} | Cmd::Noupload {..} | Cmd::Delete {..} | Cmd::AddClipboard | Cmd::Move {..} | Cmd::Rename {..} | Cmd::Reannounce {..} | Cmd::Open {..} | Cmd::Restart | Cmd::Events { .. } | Cmd::Api { .. } | Cmd::Log { .. } | Cmd::Serve { .. } | Cmd::Capabilities | Cmd::RobotDocs { .. } | Cmd::Setup { .. } | Cmd::Config | Cmd::Settings { .. } | Cmd::Limits { .. } | Cmd::Limit { .. } | Cmd::Imdb { .. } | Cmd::Rss(..) | Cmd::Shows(..) => unreachable!(),
     }
 }
 
 fn native_may_start(cmd: &Cmd) -> bool {
-    matches!(cmd, Cmd::Limit { .. } | Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Seed { .. }
-        | Cmd::Noseed { .. } | Cmd::Delete { files: true, .. }
+    matches!(cmd, Cmd::Limit { .. } | Cmd::Move {..} | Cmd::Reannounce { .. } | Cmd::Add { .. } | Cmd::AddClipboard | Cmd::Start { .. } | Cmd::Upload { .. }
+        | Cmd::Noupload { .. } | Cmd::Delete { files: true, .. }
         | Cmd::Up { .. } | Cmd::Tui { .. } | Cmd::Dashboard { .. }
         | Cmd::Rss(RssCmd::Grab { .. }) | Cmd::Shows(ShowsCmd::Grab { .. }))
 }
@@ -219,7 +218,7 @@ impl Drop for SearchCleanup {
 #[cfg(test)]
 mod source_tests {
     use super::*;
-    use cli_sources::percent_decode;
+    use cli_sources::{local_torrent_source, percent_decode};
 
     #[test]
     fn native_start_policy_matches_command_roles() {
@@ -260,9 +259,10 @@ mod source_tests {
     }
 }
 
+/// A display/default name: the host only, never userinfo (credentials), port or query.
 pub fn host_of(url: &str) -> Option<String> {
-    let rest = url.split_once("://")?.1;
-    Some(rest.split('/').next()?.trim_start_matches("www.").to_string())
+    let parsed = url::Url::parse(url).ok()?;
+    Some(parsed.host_str().filter(|host| !host.is_empty())?.trim_start_matches("www.").to_string())
 }
 
 fn notify(title: &str, body: &str, error: bool) {

@@ -65,7 +65,7 @@ while downloading or after completion. The explicit **Upload: off/on** toggle in
 Details permits upload for that torrent, including after completion; switching
 it off persists that torrent's opt-out. Global Upload in Settings, or
 `fbittorrent settings --upload on`, permits upload during downloads. Completed
-torrents still stop unless individually opted in. Add has no upload switch.
+torrents still stop unless individually opted in. CLI `add --upload` explicitly opts in when adding; the dashboard uses the Details toggle.
 
 Streaming priority is automatic. A verified video prefix produces **Ready to
 watch** or **Playable · may stall** according to the known buffer and transfer

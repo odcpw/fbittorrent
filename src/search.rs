@@ -21,7 +21,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
-use crate::qbt::{SearchPlugin, SearchResponse, SearchResult};
+use crate::qbt::{SearchPlugin, SearchResult};
 
 const MAX_RESULTS: usize = 5000;
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -232,22 +232,6 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Enabled states from qBittorrent can be imported alongside its torrent/RSS
-/// migration. Existing app preferences take priority on subsequent imports.
-pub fn import_plugins(plugins: &[SearchPlugin]) -> Result<()> {
-    let store = ProviderStore::default();
-    store.ensure_runtime()?;
-    let _lock = store.lock()?;
-    let mut preferences = store.load()?;
-    for plugin in plugins {
-        preferences
-            .enabled
-            .entry(plugin.name.clone())
-            .or_insert(plugin.enabled);
-    }
-    store.save(&preferences)
-}
-
 type ProviderStamp = Vec<(String, u64, u128)>;
 struct PluginCache {
     runtime: PathBuf,
@@ -418,10 +402,13 @@ pub fn set_enabled(name: &str, enabled: bool) -> Result<()> {
 pub fn install(sources: &[String], timeout_secs: u64) -> Result<()> {
     let store = ProviderStore::default();
     store.ensure_runtime()?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    // Python source runs later: https only, including every redirect, and
+    // VPN-bound when network_interface is set (see `crate::outbound`).
+    let http = crate::outbound::Http::new(ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_secs.max(1))))
-        .build()
-        .into();
+        .https_only(true)
+        .build(), "provider install")?;
+    let agent = http.agent();
     let mut failures = Vec::new();
     for source in sources {
         let result = (|| -> Result<()> {
@@ -497,9 +484,11 @@ mod tests;
 pub(crate) use download::{resolve_download, ResolvedDownload};
 #[cfg(test)]
 use download::resolve_download_in;
-pub use jobs::{begin_session, delete, results, shutdown_all, start, stop};
+pub use jobs::{begin_session, delete, shutdown_all, start};
 pub(crate) use jobs::normalized_snapshot;
-use jobs::{jobs, parse_result, start_in};
+use jobs::jobs;
+#[cfg(test)]
+use jobs::{parse_result, results, start_in, stop};
 #[cfg(test)]
 use jobs::job;
 use process::*;

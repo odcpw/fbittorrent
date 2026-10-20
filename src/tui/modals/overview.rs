@@ -4,12 +4,12 @@ impl TuiApp {
     pub(super) fn overview_available(&self, cap: &str) -> bool {
         self.online && !self.service_busy
             && self.store.hello.as_ref().is_some_and(|h| h.caps.iter().any(|c| c == cap))
-            && self.selected_torrent().is_some_and(|t| self.store.pending_for_key(&t.hash).is_none())
+            && self.selected_torrent().is_some_and(|t| self.store.pending_for_key(t.hash.as_str()).is_none())
     }
     pub(super) fn overview_prompt(&mut self, limit: bool) -> Cmd<Msg> {
         let Some(torrent)=self.selected_torrent() else {return Cmd::none()};
-        let hash=torrent.hash.clone();
-        let value=if limit {self.store.torrents.get(&hash).and_then(|r|r.download_limit_bps).map(|n|n.to_string()).unwrap_or_default()} else {torrent.save_path.clone()};
+        let hash=torrent.hash.to_string();
+        let value=if limit {torrent.download_limit_bps.map(|n|n.to_string()).unwrap_or_default()} else {torrent.save_path.clone()};
         let kind=if limit {PromptKind::TorrentDownloadCap {hash}}else{PromptKind::MoveTorrent {hash}};
         self.open_prompt(kind,if limit {"Download cap · B/s, K/M · empty or none = unlimited"}else{"Move to folder · absolute path"},false);
         self.prompt.as_mut().unwrap().input.set_value(value);Cmd::none()

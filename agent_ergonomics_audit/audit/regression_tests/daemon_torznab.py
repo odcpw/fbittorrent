@@ -67,7 +67,9 @@ def secret_free(case, *texts):
 
 
 def torznab_results(binary, systemd):
-    with owned('torznab_results', binary, systemd) as (case, box, h, http, config, secret):
+    # This positive control runs both a local Nova script and a loopback indexer;
+    # the dedicated bound-indexer cases exercise the VPN route separately.
+    with owned('torznab_results', binary, systemd, unbound=True) as (case, box, h, http, config, secret):
         fixture = json.loads((box.root / 'query.json').read_text())
         fixture['xml'] = fixture['xml'].replace('1' * 40, 'a' * 40).replace('value="2"', 'value="7"').replace('262144', '1234')
         (box.root / 'query.json').write_text(json.dumps(fixture))
@@ -84,8 +86,8 @@ def torznab_results(binary, systemd):
                        'the API advertises Torznab and reports both native/Nova kinds', json.dumps(providers))
             value, result = cli(case, box, binary, 'search', 'native fixture', '--wait', '8', '--json')
             row = value['results'][0]
-            case.check(value['complete'] and value['count'] == 1 and row['nbSeeders'] == 7 and row['fileSize'] == 1234
-                       and row['providers'] == ['alpha', 'private_fixture'] and row['engineName'] == 'private_fixture',
+            case.check(value['complete'] and value['count'] == 1 and row['seeds'] == 7 and row['size'] == 1234
+                       and row['providers'] == ['alpha', 'private_fixture'] and row['provider_url'] == http.base + '/api',
                        'real Torznab and Nova responses deduplicate by hash before sorting and preserve provenance', result.stdout)
             # search.install accepts native HTTPS endpoints without fetching a Python script.
             pending = c.call('search.install', dict(sources=['https://127.0.0.1:1/torznab/api']))['result']
@@ -179,10 +181,9 @@ def torznab_key_not_logged(binary, systemd):
             secret_free(case, *argv)
         finally: release.set()
         code = process.wait(timeout=15); value = json.loads(output.read_text())
-        case.check(code == 0 and value['count'] == 1 and value['complete'] and '__FBT_TORZNAB_KEY__' in value['results'][0]['fileUrl'],
+        case.check(code == 0 and value['count'] == 1 and value['complete'] and '__FBT_TORZNAB_KEY__' in value['results'][0]['url'],
                    'native-only search needs no Python and exposes a redacted usable download reference', output.read_text())
-        legacy = value['results'][0]
-        item = dict(key='private-link', name=legacy['fileName'], url=legacy['fileUrl'], providers=legacy['providers'], provider_url=legacy['siteUrl'])
+        item = value['results'][0]
         pending = c.call('search.grab', dict(result=item, stopped=True, save_path=str(fixture.files[0].parent)), ref='private-grab')['result']
         outcome = d.mutation_outcome(c, pending['ref'])
         case.check(outcome['result']['hash'] == fixture.info_hash, 'the native worker redeems the redacted reference and adds exact metainfo', json.dumps(outcome))

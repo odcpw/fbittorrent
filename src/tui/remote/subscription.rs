@@ -151,7 +151,7 @@ impl TuiApp {
                         .store
                         .sorted_torrents(self.torrent_sort,self.torrent_descending)
                         .into_iter()
-                        .map(format::torrent)
+                        .cloned()
                         .collect();
                     return self.update(Msg::Torrents(Ok((rows, self.transfer.clone()))));
                 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract 1.2 CLI qualification against owned foreground/systemd daemons."""
+"""CLI/API model qualification against owned foreground/systemd daemons."""
 import argparse
 import hashlib
 import json
@@ -84,9 +84,14 @@ def contract(binary,systemd):
             case.check(waited.get('code_name')=='timeout','R-012 wait retains the timeout envelope',json.dumps(waited)) # R-007
             cli(case,sandbox,binary,'start',digest,'--json')
             cli(case,sandbox,binary,'stop',digest,'--json')
-            cli(case,sandbox,binary,'noseed',digest,'--json') # R-008
+            cli(case,sandbox,binary,'noupload',digest,'--json') # R-008
             cli(case,sandbox,binary,'seq',digest,'--json',code=2)
-            cli(case,sandbox,binary,'list','--json') # R-009
+            listed,_=cli(case,sandbox,binary,'list','--json') # R-009
+            row=next(row for row in listed['torrents'] if row['hash']==digest)
+            case.check(row['state']=='paused' and row['intent']=='pause' and row['upload_enabled'] is False
+                       and row['size']==sum(path.stat().st_size for path in fixture.files)
+                       and not any(key in row for key in ('progress_known','ratio_limit','dlspeed','num_leechs')),
+                       'CLI list exposes truthful typed API observations without the retired wire model',json.dumps(row))
             cli(case,sandbox,binary,'no-such-verb','--json',code=2) # R-010
             status,_=cli(case,sandbox,binary,'status','--json') # R-011
             case.check(status.get('running') and status.get('connection')=='api' and status.get('backend')=='native' and not status.get('app_open'),'running status has the additive daemon shape and no invented UI presence',json.dumps(status))
@@ -150,18 +155,11 @@ def obsolete_commands_removed(binary,systemd):
     with Case('agent_contract','obsolete_commands_removed') as case,Sandbox() as sandbox:
         caps,_=cli(case,sandbox,binary,'capabilities','--json')
         names={row['name'] for row in caps['commands']}
-        for verb in ('seq','first-last','reconcile'):
+        for verb in ('seq','first-last','reconcile','seed','noseed'):
             value,r=cli(case,sandbox,binary,verb,'--json',code=2)
             case.check(verb not in names and 'unrecognized subcommand' in value.get('error',''),
                        'obsolete command is absent rather than retained as a compatibility stub',json.dumps(dict(verb=verb,exit=r.returncode,envelope=value)))
         case.check(not (Path(sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock').exists(),'rejected obsolete commands never start a daemon')
-
-def removed_backend_refused(binary,systemd):
-    with Case('agent_contract','removed_backend_refused') as case,Sandbox() as sandbox:
-        config=Path(sandbox.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml'
-        config.write_text(config.read_text().replace('engine = "native"','engine = "qbittorrent"')+'\nurl="http://127.0.0.1:1"\n')
-        value,r=cli(case,sandbox,binary,'status','--json',code=2)
-        case.check('engine must be native' in value.get('error','') and not r.stderr,'removed backend is rejected at configuration validation',json.dumps(value))
 
 def exit_code_dictionary_total(binary,systemd):
     with Case('agent_contract','exit_code_dictionary_total') as case,Sandbox() as sandbox,Harness(case,binary,sandbox,systemd) as h:
@@ -180,7 +178,7 @@ def exit_code_dictionary_total(binary,systemd):
                 client.hello()
                 h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=added['hash']))['result']['torrent'])['state']=='done',json.dumps(row)),'completed fixture reaches done before explicit Resume refusal')
             refusal,_=cli(case,sandbox,binary,'start',added['hash'],'--json',code=1)
-            case.check(refusal.get('hint')=='fbittorrent seed '+fixture.info_hash,'completion refusal carries the exact seed command',json.dumps(refusal))
+            case.check(refusal.get('hint')=='fbittorrent upload '+fixture.info_hash,'completion refusal carries the exact upload command',json.dumps(refusal))
             cli(case,sandbox,binary,'delete',fixture.info_hash,'--files','--json',code=3)
             cli(case,sandbox,binary,'show','zzzz','--json',code=6)
             for name in ('ambiguous-one','ambiguous-two'):
@@ -228,7 +226,7 @@ def reannounce_verb(binary,systemd):
                 case.check(result==dict(ok=True,action='reannounce',count=1,hashes=[fixture.info_hash]),'reannounce uses the stable act envelope',json.dumps(result))
                 h.wait_for(lambda:((rows:=tracker_rows(client,fixture.info_hash))[0]['status']=='ok',json.dumps(rows)),'CLI force wakes backoff')
                 detail,_=cli(case,sandbox,binary,'show',fixture.info_hash,'--json')
-                case.check(detail.get('tracker_count')==1 and len(detail.get('trackers',[]))==1 and detail['trackers'][0].get('peers')==1,'show adds truthful tracker_count and tracker rows',json.dumps(detail))
+                case.check(detail['torrent'].get('tracker_count')==1 and len(detail.get('trackers',[]))==1 and detail['trackers'][0].get('peers')==1,'show carries the torrents.get tracker_count and tracker rows',json.dumps(detail))
                 cli(case,sandbox,binary,'stop',fixture.info_hash,'--json')
                 failure,_=cli(case,sandbox,binary,'reannounce',fixture.info_hash,'--json',code=1)
                 case.check(failure.get('code')==1 and failure.get('ok') is False,'paused invalid_state keeps CLI exit 1',json.dumps(failure))
@@ -305,7 +303,7 @@ def move_verb(binary,systemd):
                 moved,_=cli(case,sandbox,binary,'move',fixture.info_hash,str(destination),'--json')
                 case.check(moved==dict(ok=True,action='move',count=1,hashes=[fixture.info_hash]),'move waits for the receipt and uses the exact act envelope',json.dumps(moved))
                 shown,_=cli(case,sandbox,binary,'show',fixture.info_hash,'--json')
-                case.check(shown.get('save_path')==str(destination) and hashlib.sha256((destination/fixture.files[0].name).read_bytes()).hexdigest()==original,'CLI show follows the new verified location',json.dumps(shown))
+                case.check(shown['torrent'].get('save_path')==str(destination) and hashlib.sha256((destination/fixture.files[0].name).read_bytes()).hexdigest()==original,'CLI show follows the new verified location',json.dumps(shown))
                 cli(case,sandbox,binary,'move',fixture.info_hash,'relative-destination','--json',code=2)
                 cli(case,sandbox,binary,'move','unknown-selector',str(destination),'--json',code=6)
                 second=recheck_local_fixture(sandbox,name='recheck-second.bin')
@@ -335,7 +333,7 @@ from daemon_download_limit import limit_verb
 from agent_rename import rename_verb
 from agent_tui_format import list_human_matches_tui_format
 
-CASES={f.__name__:f for f in [list_human_matches_tui_format,rename_verb,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,removed_backend_refused,exit_code_dictionary_total]}
+CASES={f.__name__:f for f in [list_human_matches_tui_format,rename_verb,status_history_field,shows_quality_verb,limit_verb,obsolete_commands_removed,move_verb,add_save_unwritable,limits_verb,reannounce_verb,events_follow_completion,events_since_seq_replay,events_resync_when_older,events_down_exit_4,api_list_matches,api_list_matches_ipc_md,api_unknown_op_hint,api_mutating_starts_daemon_read_does_not,reads_never_start,contract,offline_records,json_determinism,exit_code_dictionary_total]}
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary',type=Path)

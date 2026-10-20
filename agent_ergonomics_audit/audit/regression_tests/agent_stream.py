@@ -182,8 +182,6 @@ def api_list_matches_ipc_md(binary,systemd):
         case.check(independent['operations']==catalog,'static catalogue works even with an invalid private config',json.dumps(independent))
         case.check(well_formed_version(caps.get('contract_version')),
                    'capabilities exposes a well-formed contract version',json.dumps(caps.get('contract_version')))
-        case.check(all(any(c['field']==name for c in caps['changes']) for name in ['events','api']),
-                   'event and API changes remain discoverable without per-change version numbering',json.dumps(caps['changes']))
 
 
 def api_unknown_op_hint(binary,systemd):

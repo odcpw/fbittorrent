@@ -89,7 +89,7 @@ def run(name,binary,systemd):
             again=c.call('rss.mark_feed_read',dict(feed=identity))['result']
             case.check(first==dict(count=2) and again==dict(count=0),'mark-feed-read is idempotent and counts changed unread rows',json.dumps([first,again]))
             cli=h.cli('rss','items','Local')
-            case.check(all(r['isRead'] for r in cli['items']),'in-process CLI reads the API-committed read history',json.dumps(cli))
+            case.check(all(r['read'] for r in cli['items']),'in-process CLI reads the API-committed read history',json.dumps(cli))
             (box.root/'child.xml').write_bytes(source.read_bytes())
             child=c.call('rss.add',dict(url=http.base+'/child.xml',name='Local/Child'))['result']['feed']
             c.call('rss.remove',dict(feed=identity))
@@ -104,3 +104,41 @@ def rss_refresh_on_interactive(binary,systemd):run('rss_refresh_on_interactive',
 def rss_cli_edit_visible(binary,systemd):run('rss_cli_edit_visible',binary,systemd)
 def rss_oversized_refused(binary,systemd):run('rss_oversized_refused',binary,systemd)
 def rss_grab_marks_read_only_on_success(binary,systemd):run('rss_grab_marks_read_only_on_success',binary,systemd)
+
+
+def rss_passkeys_redacted(binary,systemd):
+    """Private feed credentials stay in the 0600 store; every outward surface is redacted."""
+    import subprocess
+    with d.api_owned('rss_passkeys_redacted',binary,systemd) as (case,box,h,p),d.ApiConn(h) as c,fixtures.HttpFixture(box.root) as http:
+        payload=box.root/'private-owned.bin';payload.write_bytes(os.urandom(16384))
+        item=fixtures.torrent_fixture(box.root,[payload])
+        secrets=['SECRETPASSKEY','SECRETAUTHKEY','SECRETUSERPW']
+        (box.root/'private.xml').write_text('<rss><channel><title>Private</title><item><guid>p1</guid><title>Private&#x1b;]52;c;cHduZWQ=&#x7;item&#x1b;[2J</title>'
+            '<link>'+http.base+'/details.php?id=7&amp;authkey=SECRETAUTHKEY</link>'
+            '<enclosure url="'+http.base+'/'+item.torrent.name+'?passkey=SECRETPASSKEY" type="application/x-bittorrent"/></item></channel></rss>')
+        feed_url='http://feeduser:SECRETUSERPW@'+http.base.split('://',1)[1]+'/private.xml?passkey=SECRETPASSKEY'
+        c.hello('bar')
+        c.call('subscribe',dict(topics=['rss.feeds']))
+        added=c.call('rss.add',dict(url=feed_url))['result']['feed']
+        identity=added['id']
+        c.call('subscribe',dict(topics=['rss.items:'+identity]))
+        feeds=c.call('rss.feeds')['result']['feeds'];items=c.call('rss.items',dict(feed=identity))['result']['items']
+        duplicate=c.call('rss.add',dict(url=feed_url),error='invalid_state')
+        listing=h.cli('rss','list');rows=h.cli('rss','items',added['name'])
+        text=subprocess.run([binary,'--no-start','rss','list'],env=box.env,cwd=box.root,capture_output=True,text=True,timeout=10)
+        human=subprocess.run([binary,'--no-start','rss','items',added['name']],env=box.env,cwd=box.root,capture_output=True,text=True,timeout=10)
+        case.check(human.returncode==0 and 'Private' in human.stdout and not any(ch in human.stdout+text.stdout for ch in '\x1b\x07\x9b'),
+                   'human CLI output strips remote terminal control sequences',repr(human.stdout+human.stderr))
+        c.call('app.info')
+        observed=json.dumps(dict(added=added,feeds=feeds,items=items,duplicate=duplicate,listing=listing,rows=rows,text=text.stdout+text.stderr,pushed=c.pushed))
+        case.check(len(items)==1 and items[0].get('torrent_url') and not any(s in observed for s in secrets),
+                   'feed URL, default name, item link/torrent URL, errors, pushes and CLI text/JSON carry no credentials',observed)
+        grabbed=c.call('rss.grab',dict(feed=identity,item='p1',stopped=True))['result']
+        case.check(grabbed.get('hash')==item.info_hash and any('SECRETPASSKEY' in r for r in http.requests),
+                   'the owner still grabs from the stored source, passkey included',json.dumps(dict(grab=grabbed,requests=http.requests)))
+        stored=d.Path(box.env['XDG_DATA_HOME'])/'fbittorrent/rss.json'
+        case.check(stored.stat().st_mode&0o777==0o600 and 'SECRETPASSKEY' in stored.read_text(),
+                   'raw values remain only in the private 0600 store',oct(stored.stat().st_mode))
+
+
+CASES=(rss_passkeys_redacted,)

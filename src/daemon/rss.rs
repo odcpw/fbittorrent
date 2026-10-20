@@ -10,10 +10,16 @@ use std::{
 };
 type Wake = Arc<dyn Fn()+Send+Sync>;
 #[derive(Default)]
-pub(crate) struct Snapshot { pub feeds:Vec<Feed>, pub items:BTreeMap<String,Vec<FeedItem>> }
+pub(crate) struct Snapshot {
+    /// Public views: feed URLs, links, magnets, torrent URLs and errors carry no credentials.
+    pub feeds:Vec<Feed>, pub items:BTreeMap<String,Vec<FeedItem>>,
+    /// Unredacted sources, only for the owner's own grab of an item.
+    pub sources:BTreeMap<String,Vec<FeedItem>>,
+}
 type Stamp = (u64, u64, i64, i64);
 #[derive(Default)]
-struct Cache { stamp:Option<Stamp>, snapshot:Arc<Snapshot>, loaded:bool }
+// Failed loads are cached by stamp, like successful ones; see shows::Cache.
+struct Cache { stamp:Option<Stamp>, snapshot:Arc<Snapshot>, loaded:bool, failure:Option<(Option<Stamp>,String)> }
 #[derive(Default)]
 struct State { stopped:bool, requested:bool, clients:BTreeSet<u64>, loading:BTreeSet<String> }
 #[derive(Default)]
@@ -72,8 +78,17 @@ impl Service {
         // Load between two metadata observations; an atomic CLI rename that
         // crosses the read will be observed on the next sample, never cached
         // under the newer inode's stamp with older contents.
+        if let Some((failed,message))=&cache.failure { if *failed==next { anyhow::bail!("{message}"); } }
         if next != cache.stamp || !cache.loaded {
-            let rows=Store::default().snapshot()?;
+            let rows=match Store::default().snapshot() {
+                Ok(rows)=>rows,
+                Err(error)=>{
+                    let message=format!("{error:#}");
+                    eprintln!("WARN rss store unreadable message={message:?}");
+                    cache.failure=Some((next,message)); return Err(error);
+                }
+            };
+            cache.failure=None;
             let mut snapshot=Snapshot::default();
             for row in rows {
                 let f=row.feed; let id=if f.uid.is_empty() {crate::rss::stable_id(&f.url)}else{f.uid};
@@ -84,9 +99,10 @@ impl Service {
                         magnet:source.starts_with("magnet:?").then(||source.clone()), torrent_url:(!a.torrent_url.is_empty()&&(source.starts_with("http://")||source.starts_with("https://"))).then(||source.clone()),
                         read:a.is_read, grabbed:row.grabbed.contains(&a.id) }
                 }).collect();
-                snapshot.feeds.push(Feed { id:id.clone(),name:f.name,url:f.url,title:nonempty(&f.title),unread:items.iter().filter(|a|!a.read).count() as u64,
-                    last_refresh_at:(row.last_checked>0).then_some(row.last_checked as u64),loading:false,error:nonempty(&row.error) });
-                snapshot.items.insert(id,items);
+                snapshot.feeds.push(Feed { id:id.clone(),name:f.name,url:crate::public_text::url(&f.url),title:nonempty(&f.title),unread:items.iter().filter(|a|!a.read).count() as u64,
+                    last_refresh_at:(row.last_checked>0).then_some(row.last_checked as u64),loading:false,error:nonempty(&row.error).map(|e|crate::public_text::message(&f.url,&e)) });
+                snapshot.items.insert(id.clone(),items.iter().map(crate::public_text::feed_item).collect());
+                snapshot.sources.insert(id,items);
             }
             snapshot.feeds.sort_by(|a,b|a.id.cmp(&b.id));
             cache.snapshot=Arc::new(snapshot); cache.stamp=next; cache.loaded=true;
@@ -108,6 +124,11 @@ impl Service {
         if !errors.is_empty(){anyhow::bail!("{}",errors.join("; "));} Ok(())
     }
     pub fn stamp(&self)->Option<Stamp> { stamp() }
+    /// The recorded load failure while the same broken file remains in place.
+    pub fn problem(&self)->Option<String> {
+        let cache=self.cache.lock().unwrap();
+        cache.failure.as_ref().filter(|(failed,_)|*failed==stamp()).map(|(_,message)|message.clone())
+    }
     pub fn stop(&self) {
         self.shared.state.lock().unwrap().stopped=true; self.shared.changed.notify_one();
         if let Some(worker)=self.worker.lock().unwrap().take(){let _=worker.join();}

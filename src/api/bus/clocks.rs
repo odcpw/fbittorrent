@@ -1,24 +1,5 @@
-//! Global history has its own clock; idle views do not need rebuilding for it.
+//! Active work keeps background observation alive; the engine owns rate history.
 use super::*;
-
-impl Bus {
-    pub(super) fn clocks_due(&self, active_work: bool) -> bool {
-        let now = Instant::now();
-        let history_due = self.daemon.history.lock().unwrap().due(now);
-        if history_due {
-            let rates = {
-                let slot = self.daemon.slot.read().unwrap_or_else(|e| e.into_inner());
-                match &slot.slot {
-                    Slot::Running(app) => app.dispatcher().transfer_rates(),
-                    _ => (0, 0),
-                }
-            };
-            self.daemon.history.lock().unwrap().record(now, rates.0, rates.1);
-        }
-        let watch = self.daemon.watch.lock().unwrap();
-        (history_due && active_work) || (watch.needs_tick() && watch.due())
-    }
-}
 
 // Active non-video work still needs disk monitoring and completion updates,
 // even without clients. Only the idle/paused table can remain untouched.
