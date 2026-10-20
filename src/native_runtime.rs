@@ -57,7 +57,10 @@ impl NativeRuntime {
         let runtime = RuntimeBuilder::new()
             .worker_threads(1)
             .thread_name_prefix("fbittorrent-engine")
-            .blocking_threads(1, 2)
+            // Initial validation admits one torrent with at most two checksum
+            // workers. Keep control I/O (notably durable Stop intent) runnable
+            // while both workers are occupied, so it can cancel that check.
+            .blocking_threads(1, 3)
             .enable_time()
             .build()?;
         let root = runtime.request_cx_with_budget(Budget::INFINITE);
