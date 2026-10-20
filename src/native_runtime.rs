@@ -179,6 +179,23 @@ impl Drop for NativeRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn more_than_one_thousand_owned_regions_admit_and_close() {
+        let runtime = NativeRuntime::new().unwrap();
+        runtime.block_on(async {
+            let mut regions = Vec::new();
+            for index in 0..1100 {
+                regions.push(runtime.cx().open_child_region(ChildRegionSpec::inherit())
+                    .await.unwrap_or_else(|error| panic!("region {index}: {error}")));
+            }
+            for region in regions {
+                region.cancel(CancelReason::user("capacity probe finished")).unwrap();
+                region.close().await.unwrap();
+            }
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2)).unwrap();
+    }
     use std::task::Poll;
 
     #[test]
