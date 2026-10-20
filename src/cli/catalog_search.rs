@@ -1,5 +1,5 @@
 //! Search uses a running capable owner, with the same A.9 source and shapes locally.
-use super::{fallback, shapes};
+use super::fallback;
 use crate::{
     agent::{AppError, Code},
     api::{self, client::Client},
@@ -206,7 +206,7 @@ pub(crate) fn run(
         running(cfg, "search")
     };
     if plugins {
-        let ps = shapes::providers(&providers(client.as_ref())?);
+        let ps = providers(client.as_ref())?;
         crate::emit(
             json_mode,
             json!({"ok":true,"count":ps.len(),"enabled":ps.iter().filter(|p|p.enabled).count(),"plugins":ps}),
@@ -216,8 +216,8 @@ pub(crate) fn run(
                         "{:<18} {:<3} {:<8} {}",
                         p.name,
                         if p.enabled { "on" } else { "off" },
-                        p.version,
-                        p.url
+                        p.version.as_deref().unwrap_or(""),
+                        p.url.as_deref().unwrap_or("")
                     );
                 }
             },
@@ -314,25 +314,19 @@ pub(crate) fn run(
             .then(a.providers.cmp(&b.providers))
     });
     result.items.truncate(limit);
-    let rows: Vec<_> = result
-        .items
-        .iter()
-        .map(|r| shapes::search(r, &ps))
-        .collect();
-    let mut value = json!({"ok":true,"query":query,"complete":result.complete,"count":rows.len(),"results":rows});
+    let mut value = json!({"ok":true,"query":query,"complete":result.complete,"count":result.items.len(),"results":result.items});
     if client.is_some() && !result.warnings.is_empty() {
         value["warnings"] = json!(result.warnings);
     }
     crate::emit(json_mode, value, || {
         for item in &result.items {
-            let row = shapes::search_legacy(item, &ps);
             println!(
                 "{:>5}S {:>5}L  {:>10}  {:<12}  {}",
-                row.seeders,
-                row.leechers,
-                crate::human_bytes(row.file_size),
-                row.engine,
-                row.file_name
+                item.seeds.map_or_else(|| "—".into(), |n| n.to_string()),
+                item.leechers.map_or_else(|| "—".into(), |n| n.to_string()),
+                item.size.map_or_else(|| "—".into(), |n| crate::human_bytes(n.min(i64::MAX as u64) as i64)),
+                item.providers.join(","),
+                item.name
             );
         }
     });

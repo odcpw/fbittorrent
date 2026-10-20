@@ -3,7 +3,7 @@
 This is the maintained contract for `$XDG_RUNTIME_DIR/fbittorrent/api.sock`.
 `src/api/` contains P1 wire types. `contracts/ipc/v1/` supplies shared Rust,
 daemon and UI replay examples. P1-05 defines types and fixtures; it starts no
-listener. The existing legacy `engine.sock` protocol remains independent.
+listener. `api.sock` is the only client protocol; there is no `engine.sock` compatibility listener.
 
 ## Framing
 
@@ -527,10 +527,10 @@ parked, stopping, silent or lacks the capability, the same normalized sources ru
 in-process. These reads never start the daemon. Search waits for `search.done`,
 then takes a final atomic result snapshot before releasing its owned session;
 `--limit` applies after shared deduplication and sorting. `--install` waits for its
-mutation result. The legacy WebUI selection retains its existing route.
+mutation result.
 The frozen `search.install` accepts HTTPS sources; Invalid non-HTTPS CLI install URLs retain their local validation failure
-(exit 5), including while a daemon is running. No API input rule is relaxed. Contract 1.2.24 adds only `providers[]` to each native CLI search row;
-legacy fields and human output share one shaper. `imdb --refresh` forwards
+(exit 5), including while a daemon is running. No API input rule is relaxed. CLI search returns API SearchItem objects directly;
+plain output formats the same observations without inventing missing measurements. `imdb --refresh` forwards
 `refresh:true` so the daemon replaces its index exactly once per forced call.
 RSS/Shows routing and TUI on-open refresh removal follow their service integration.
 
@@ -599,7 +599,7 @@ a not-yet-implemented service. The standalone TUI persists and applies the same
 preference from `config.toml`; API-client attachment consumes it in P4-03.
 
 
-### P1-11 — CLI client and contract 1.2.0
+### CLI client
 
 The CLI uses the bounded blocking API session, matches up to eight requests by
 ID, keeps events separate, and decodes subscription revisions using the frozen
@@ -608,10 +608,10 @@ and keep-files removal share engine.lock and the durable parked ledger. A lost
 idempotent request can reconnect once with the original ref and observed
 instance; destructive unknown outcomes return timeout without replay. Native
 add uses the returned hash and accepts `--origin manual|handler|agent`.
-Contract 1.2.0 declares the stopped-status `ok:true` change and additive normalized
-torrent fields while preserving the legacy numeric sentinels. Capabilities are
-generated from clap, with starts/since metadata. JSON warnings identify legacy
-mode and version skew. `SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
+The stopped status reports `ok:true,running:false`. CLI torrents are the same
+objects as the API, with absent unknown observations rather than numeric
+sentinels. Capabilities are generated from clap with startup policy metadata.
+`SOURCE_DATE_EPOCH` removes CLI-derived elapsed time;
 ledger timestamps are preserved. Live summary/idle/upgrade qualification follows
 the P1-08/P1-12/P1-17 integration; cumulative app.info client counters never stand
 in for live interactive presence.
@@ -1284,3 +1284,10 @@ torrent rows, selectors, filters and sorting uses this override; `original_name`
 An optional quick palette on the shared bar socket declares `app.client` with
 `interactive:true, overlay_visible:true` while visible, then clears `overlay_visible`
 on close. A bar with neither dashboard nor palette visible never prevents idle exit.
+
+CLI catalogue results use their API objects too: search `results[]` are
+`SearchItem`, `--plugins` returns `Provider`, RSS `feeds[]` and `items[]` are
+`Feed` and `FeedItem`, Shows `shows[]` and `episodes[]` are `Show` and `Release`,
+and a found IMDb lookup returns `{ok:true,found:true,card:ImdbCard}`.
+Unknown fields remain absent, including seed counts, dates and sizes. The CLI
+and TUI no longer convert torrents into qBittorrent states or sentinel values.

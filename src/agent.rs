@@ -156,11 +156,11 @@ pub fn capabilities_json() -> serde_json::Value {
         CommandDoc { name: "serve", aliases: &[], summary: "Run the torrent engine daemon (other commands start it on demand)", json: false, mutating: true, needs_backend: false },
         CommandDoc { name: "triage", aliases: &["robot-triage"], summary: "One-call overview: backend, rates, torrents, warnings, next commands", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "status", aliases: &[], summary: "Rates and counts; never starts the backend", json: true, mutating: false, needs_backend: false },
-        CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents with hash, progress, speed, flags", json: true, mutating: false, needs_backend: true },
+        CommandDoc { name: "list", aliases: &["ls"], summary: "All torrents as API objects with state and known observations", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "show", aliases: &["info"], summary: "One torrent in full, including its files and the path to open", json: true, mutating: false, needs_backend: true },
         CommandDoc { name:"move", aliases:&[], summary:"Move a torrent or all to another directory and wait for its ref result", json:true, mutating:true, needs_backend:true },
         CommandDoc { name:"reannounce", aliases:&[], summary:"Force a live torrent tracker announce, rate limited to once per minute", json:true, mutating:true, needs_backend:true },
-        CommandDoc { name: "search", aliases: &["find"], summary: "Search local providers; results carry magnet links; native mode does not open the app", json: true, mutating: false, needs_backend: false },
+        CommandDoc { name: "search", aliases: &["find"], summary: "Search providers through the running daemon or locally; never starts the daemon", json: true, mutating: false, needs_backend: false },
         CommandDoc { name: "events", aliases: &[], summary: "Replay/follow NDJSON events with instance and seq; never starts", json: true, mutating: false, needs_backend: true },
         CommandDoc { name: "api", aliases: &[], summary: "Raw API envelope; --list catalogue; mutating and startup policy depend on the operation", json: true, mutating: true, needs_backend: false },
         CommandDoc { name: "limits", aliases: &[], summary: "Persist global and alternative limits; never starts a stopped daemon", json: true, mutating: true, needs_backend: false },
@@ -227,7 +227,7 @@ pub fn capabilities_json() -> serde_json::Value {
             "bare_invocation": "on a TTY opens the TUI; when stdout is not a TTY prints `triage --json`",
             "destructive": "`delete --files` requires --yes; `delete --dry-run` previews any deletion",
             "native_connect": "write commands start the static user unit on demand unless --no-start, FBITTORRENT_NO_START=1 or autostart=false; up/dashboard override autostart=false. Reads, stop and delete-keeping-files never start it; stop and delete-keeping-files edit the ledger under engine.lock while the daemon is down. Without a user manager run fbittorrent serve.",
-            "local_commands": "native search, RSS except grab, and Shows except grab operate without opening the torrent engine",
+            "local_commands": "search, RSS except grab, and Shows except grab use a running daemon or the local catalogue handlers; they never start a daemon",
             "native_upload": upload_cap_text(),
         },
         "defaults": {
@@ -325,8 +325,8 @@ EXIT CODES
 
 DOWNLOAD SOMETHING (the canonical flow)
   fbittorrent triage --json                       # backend state, torrents, warnings
-  fbittorrent search "Sintel 2010" --json         # {"results":[{fileName,fileUrl,seeders,imdb,...}]}
-  fbittorrent add "<fileUrl or magnet>" --json    # {"ok":true,"hash":"...","name":"..."}
+  fbittorrent search "Sintel 2010" --json         # {"results":[{name,magnet,seeds,imdb_id,...}]}
+  fbittorrent add "<url or magnet>" --json        # {"ok":true,"hash":"...","name":"..."}
   fbittorrent wait <hash> --timeout 3600 --json   # blocks; exit 0 complete, 8 timeout
   fbittorrent show <hash> --json                  # torrent, files[], open_target (file or folder)
   fbittorrent open <hash>                         # hands it to the desktop
@@ -362,9 +362,11 @@ JSON SHAPES (contract {contract_version}; an absent field is unknown, never a se
           vpn_down, missing_files, disk_full, ...)
   show: {torrent, files[], peers[], trackers[], open_target, complete?} where torrent
         is the torrents.get object and files/peers/trackers are the API rows. complete
-        is absent while progress is unknown; file progress is absent until checked.
-  search result: {fileName,fileUrl,fileSize,nbSeeders,nbLeechers,siteUrl,
-                  descrLink,engineName,imdb,pubDate}
+        is absent while the torrent's progress is unknown.
+  search results[] are API SearchItem rows: {key,name,providers} plus known
+    size,seeds,leechers,magnet,url,page_url,provider_url,imdb_id,rating,uploaded_at.
+  RSS feeds[] / items[], Shows shows[] / episodes[] and IMDb card are API objects;
+  absent measurements and metadata stay absent on local and daemon paths.
   seed is the explicit upload opt-in (`upload`/`noupload`); upload_enabled is the
   effective permission now. peers/seeds count connected peers, never a scrape.
   API contract: docs/IPC.md. Add agents should pass --origin agent.

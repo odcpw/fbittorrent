@@ -1,5 +1,5 @@
-//! Both catalogue sources render the same legacy IMDb title.
-use super::{catalog_search, fallback, shapes};
+//! Both catalogue sources return the same API IMDb card.
+use super::{catalog_search, fallback};
 use crate::{agent::Code, api, config::Config};
 use anyhow::Result;
 
@@ -38,25 +38,20 @@ pub(crate) fn run(cfg: &Config, query: String, refresh: bool, json_mode: bool) -
         );
         return Ok(Code::Ok);
     };
-    crate::emit(json_mode, shapes::imdb(&card), || {
-        let title = shapes::imdb_legacy(&card);
+    crate::emit(json_mode, serde_json::json!({"ok":true,"found":true,"card":card}), || {
         println!(
             "{} ({}) [{}]  {}",
-            title.name,
-            title.year.map(|v| v.to_string()).unwrap_or_default(),
-            title.kind,
-            title.url()
+            card.title,
+            card.year.map(|v| v.to_string()).unwrap_or_default(),
+            card.kind,
+            card.url
         );
-        match (title.rating, title.votes) {
+        match (card.rating, card.votes) {
             (Some(r), Some(v)) => println!("★ {r:.1}  ({v} votes)"),
             _ => println!("★ n/a"),
         }
-        if !title.stars.is_empty() {
-            println!("{}", title.stars);
-        }
-        if !title.blurb.is_empty() {
-            println!("\n{}\n{}", title.blurb, title.wiki_url);
-        }
+        if let Some(stars) = &card.stars { println!("{stars}"); }
+        if let Some(blurb) = &card.blurb { println!("\n{blurb}\n{}", card.wiki_url.as_deref().unwrap_or("")); }
         if let Some(path) = card.poster_path {
             println!("poster: {path}");
         }

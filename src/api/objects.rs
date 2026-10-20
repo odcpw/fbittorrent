@@ -156,11 +156,11 @@ pub struct Torrent {
 
 #[cfg(test)]
 impl Torrent {
-    /// A checked row whose transfer values are all unknown, for tests.
+    /// A row with consistent intent and no invented observations, for tests.
     pub fn fixture(hash: &str, name: &str, state: TorrentState) -> Self {
         Self {
-            hash: Hash::new(hash).expect("fixture hash"), name: name.into(), state, intent: Intent::Run,
-            staged: false, checked: true, seed: false, upload_enabled: false, upload_policy: UploadPolicy::Off,
+            hash: Hash::new(hash).expect("fixture hash"), name: name.into(), state, intent: if state == TorrentState::Paused { Intent::Pause } else { Intent::Run },
+            staged: false, checked: !matches!(state, TorrentState::Metadata | TorrentState::Checking | TorrentState::WaitingVpn), seed: false, upload_enabled: false, upload_policy: UploadPolicy::Off,
             save_path: "/fixture/downloads".into(), added_at: 0, force: false, reason: None, error: None,
             progress: None, size: None, completed_bytes: None, uploaded_bytes: None, dl_bps: None, ul_bps: None,
             eta_s: None, peers: None, seeds: None, upload_limit_bps: None, download_limit_bps: None,

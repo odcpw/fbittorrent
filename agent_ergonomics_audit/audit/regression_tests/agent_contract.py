@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contract 1.2 CLI qualification against owned foreground/systemd daemons."""
+"""CLI/API model qualification against owned foreground/systemd daemons."""
 import argparse
 import hashlib
 import json
@@ -86,7 +86,12 @@ def contract(binary,systemd):
             cli(case,sandbox,binary,'stop',digest,'--json')
             cli(case,sandbox,binary,'noupload',digest,'--json') # R-008
             cli(case,sandbox,binary,'seq',digest,'--json',code=2)
-            cli(case,sandbox,binary,'list','--json') # R-009
+            listed,_=cli(case,sandbox,binary,'list','--json') # R-009
+            row=next(row for row in listed['torrents'] if row['hash']==digest)
+            case.check(row['state']=='paused' and row['intent']=='pause' and row['upload_enabled'] is False
+                       and row['size']==sum(path.stat().st_size for path in fixture.files)
+                       and not any(key in row for key in ('progress_known','ratio_limit','dlspeed','num_leechs')),
+                       'CLI list exposes truthful typed API observations without the retired wire model',json.dumps(row))
             cli(case,sandbox,binary,'no-such-verb','--json',code=2) # R-010
             status,_=cli(case,sandbox,binary,'status','--json') # R-011
             case.check(status.get('running') and status.get('connection')=='api' and status.get('backend')=='native' and not status.get('app_open'),'running status has the additive daemon shape and no invented UI presence',json.dumps(status))
@@ -150,7 +155,7 @@ def obsolete_commands_removed(binary,systemd):
     with Case('agent_contract','obsolete_commands_removed') as case,Sandbox() as sandbox:
         caps,_=cli(case,sandbox,binary,'capabilities','--json')
         names={row['name'] for row in caps['commands']}
-        for verb in ('seq','first-last','reconcile'):
+        for verb in ('seq','first-last','reconcile','seed','noseed'):
             value,r=cli(case,sandbox,binary,verb,'--json',code=2)
             case.check(verb not in names and 'unrecognized subcommand' in value.get('error',''),
                        'obsolete command is absent rather than retained as a compatibility stub',json.dumps(dict(verb=verb,exit=r.returncode,envelope=value)))

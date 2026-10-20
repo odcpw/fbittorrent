@@ -808,7 +808,7 @@ def store_modes(case, root, env, cli, base, fixture):
         for path in [by_name, by_id, ratings]:
             path.chmod(0o644)
         result = cli("imdb", "Private cache fixture")
-        poster = Path(result.get("poster_path") or root / "missing-poster")
+        poster = Path(result.get("card", {}).get("poster_path") or root / "missing-poster")
         expected_poster = cache / "posters/tt1234567.jpg"
         case.check(result.get("found") is True and poster == expected_poster and poster.is_file() and poster.read_bytes() == b"Local poster fixture",
                    "The IMDb CLI repairs old JSON/ratings caches and downloads a poster from the local HTTP fixture.",
@@ -817,7 +817,7 @@ def store_modes(case, root, env, cli, base, fixture):
             poster.chmod(0o644)
             poster.parent.chmod(0o777)
         second = cli("imdb", "Private cache fixture")
-        case.check(second.get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
+        case.check(second.get("card", {}).get("poster_path") == str(poster) and fixture["poster_requests"] == 1 and poster.is_file() and poster.stat().st_mode & 0o7777 == 0o600,
                    "The second IMDb CLI call repairs the existing poster without another HTTP request.",
                    f"local poster requests={fixture['poster_requests']}; poster present={poster.is_file()}.")
     finally:
@@ -895,7 +895,7 @@ def startup_survives_bad_record(binary):
         bad, repaired_bytes = cached("P0-09.corrupt.txt")
         magnet = "a" * 40
         records = [dict(hash=hash_, name=name, source=source, output_folder=str(downloads),
-                        only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                        only_files=None, upload_limit=32768, upload=False, category="", tags="",
                         added_on=100-index, completion_on=0, paused=False, resume_after_migration=False)
                    for index, (hash_, name, source) in enumerate([
                        (magnet, "P0-09.magnet", f"magnet:?xt=urn:btih:{magnet}&tr=http%3A%2F%2F127.0.0.1%3A{tracker.server_port}%2Fannounce"),
@@ -1049,7 +1049,7 @@ def stop_during_hashing(binary):
         store = root / "data/fbittorrent/engine"
         store.mkdir(parents=True)
         record = dict(hash=hash_, name=name, source="", output_folder=str(downloads),
-                      only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                      only_files=None, upload_limit=32768, upload=False, category="", tags="",
                       added_on=100, completion_on=0, paused=True, resume_after_migration=False)
         ledger = store / "torrents.json"
         ledger.write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
@@ -1547,7 +1547,7 @@ def run_cases():
                 time.sleep(.2)
                 case.check(fixture["torrent_requests"] == 0, 'A single RSS click selects without downloading.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
                 keys("Enter")
-                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["isRead"],
+                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["read"],
                          "one Enter marks article read after add")
                 wait_for(lambda: "added Fixture episode 2" in capture(), "add result reaches the TUI")
                 case.check(fixture["torrent_requests"] == 1, 'Only the explicit RSS Enter action downloads a torrent once.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
@@ -1562,24 +1562,24 @@ def run_cases():
                 wait_for(lambda: "Fixture episode 3" in capture(), "one refresh updates view")
                 case.check(fixture["feed_requests"] == 3, 'Pressing refresh requests the feed exactly once more.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
                 items = cli("rss", "items", "Local feed")["items"]
-                case.check(next(item for item in items if item["id"] == "episode-2")["isRead"], 'Refresh preserves the read marker for episode two.')
-                case.check(not next(item for item in items if item["id"] == "episode-3")["isRead"], 'The new third episode is unread.')
+                case.check(next(item for item in items if item["id"] == "episode-2")["read"], 'Refresh preserves the read marker for episode two.')
+                case.check(not next(item for item in items if item["id"] == "episode-3")["read"], 'The new third episode is unread.')
             if options.case == "refresh_preserves_read_history":
                 return suite_status("native")
             with Case("native", "rss_mouse_and_scoped_shortcuts", enabled=options.case in (None, "rss_mouse_and_scoped_shortcuts")) as case:
                 fixture["phase"] = "rss-new-first-row-click"
                 click_text("Fixture episode 3")
                 keys("m")
-                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["isRead"], "single item marked read")
+                wait_for(lambda: cli("rss", "items", "Local feed")["items"][0]["read"], "single item marked read")
                 wait_for(lambda: "(m) Mark unread" in capture(), "read change reaches the visible TUI")
                 keys("m")
-                wait_for(lambda: not cli("rss", "items", "Local feed")["items"][0]["isRead"], "same item marked unread")
+                wait_for(lambda: not cli("rss", "items", "Local feed")["items"][0]["read"], "same item marked unread")
                 wait_for(lambda: "(m) Mark read" in capture(), "unread change reaches the visible TUI")
                 keys("Left", "m")
                 time.sleep(.2)
-                case.check(not cli("rss", "items", "Local feed")["items"][0]["isRead"], 'Lowercase m in the parent pane leaves the feed unread.')
+                case.check(not cli("rss", "items", "Local feed")["items"][0]["read"], 'Lowercase m in the parent pane leaves the feed unread.')
                 keys("M")
-                wait_for(lambda: all(item["isRead"] for item in cli("rss", "items", "Local feed")["items"]), "Shift+M marks this feed read")
+                wait_for(lambda: all(item["read"] for item in cli("rss", "items", "Local feed")["items"]), "Shift+M marks this feed read")
                 wait_for(lambda: "marked Local feed as read" in capture(), "batch read change reaches the visible TUI")
             if options.case == "rss_mouse_and_scoped_shortcuts":
                 return suite_status("native")
@@ -1599,16 +1599,16 @@ def run_cases():
                 click_text("Fixture episode 6")
                 keys("m")
                 wait_for(lambda: next(item for item in cli("rss", "items", "Local feed")["items"]
-                                      if item["id"] == "episode-6")["isRead"],
+                                      if item["id"] == "episode-6")["read"],
                          "mouse uses the scrolled row's item")
                 wait_for(lambda: "(m) Mark unread" in capture(), "scrolled read change reaches the visible TUI")
                 mouse_text("Fixture episode 5", 35)
                 keys("m")
                 wait_for(lambda: not next(item for item in cli("rss", "items", "Local feed")["items"]
-                                          if item["id"] == "episode-6")["isRead"],
+                                          if item["id"] == "episode-6")["read"],
                          "hover retains the clicked keyboard target")
                 case.check(not next(item for item in cli("rss", "items", "Local feed")["items"]
-                                if item["id"] == "episode-5")["isRead"], 'Hovering episode five does not change its read marker.')
+                                if item["id"] == "episode-5")["read"], 'Hovering episode five does not change its read marker.')
                 case.check(fixture["torrent_requests"] == 1, 'Only the explicit RSS Enter action downloads a torrent once.', f"HTTP fixture recorded {fixture['feed_requests']} feed requests and {fixture['torrent_requests']} torrent requests; phase {fixture['phase']}.")
             if options.case == "mouse_selection_at_scroll_offset":
                 return suite_status("native")
@@ -1781,7 +1781,7 @@ def run_cases():
                 restored = cli("show", expected_hash)["torrent"]
                 case.check(restored["state"] == "paused" and restored.get("upload_enabled") is False, 'Restart preserves the manual pause and upload off.')
                 case.check(next(item for item in cli("rss", "items", "Local feed")["items"]
-                            if item["id"] == "episode-2")["isRead"], 'Restart preserves the RSS episode-two read marker.')
+                            if item["id"] == "episode-2")["read"], 'Restart preserves the RSS episode-two read marker.')
                 cli("down")
                 wait_for(lambda: not socket_path.exists(), "CLI down closes app", seconds=6)
                 case.check(cli("status")["backend"] == "stopped", 'Status reports that the native app is stopped.')
@@ -1804,7 +1804,7 @@ def run_cases():
                 parked_cli = parked_harness.cli
                 records = [dict(hash=f"{index:040x}", name=f"P0-10.timestamp.{stamp}.fixture",
                                 source=f"magnet:?xt=urn:btih:{index:040x}", output_folder=str(parked_root / "downloads"),
-                                only_files=None, upload_limit=32768, ratio_limit=0.0, category="", tags="",
+                                only_files=None, upload_limit=32768, upload=False, category="", tags="",
                                 added_on=checked-index, completion_on=stamp, paused=True, resume_after_migration=False)
                            for index, stamp in [(1, -1), (2, 0), (3, 123)]]
                 ledger = parked_root / "data/fbittorrent/engine/torrents.json"

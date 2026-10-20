@@ -1,6 +1,5 @@
 //! Command declarations, kept separate from execution and owner lifetime.
 use super::*;
-pub mod shapes;
 pub(super) mod catalog_search;
 pub(super) mod catalog_imdb;
 mod fallback;

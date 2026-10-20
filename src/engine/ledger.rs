@@ -186,13 +186,6 @@ pub(super) fn read_ledger(path: &Path) -> Result<Ledger> {
             if field.origin.is_none() {record.origin=origin_from_tags(&record.tags);}
         }
     }
-    // The former default was a payload cap, never an explicit upload opt-in.
-    for record in &mut ledger.records {
-        if record.upload.is_none() && record.upload_limit == 32768 {
-            record.upload = Some(false);
-            record.upload_limit = 0;
-        }
-    }
     let mut hashes = HashSet::new();
     for record in &ledger.records {
         validate_info_hash(&record.hash).with_context(|| {

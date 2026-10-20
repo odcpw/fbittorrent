@@ -851,7 +851,7 @@ def saved_hash_fixture(sandbox, size=256 * fixtures.MIB):
     directory.mkdir(parents=True)
     (directory / (digest + ".torrent")).write_bytes(fixtures.bencode(dict(info=info)))
     record = dict(hash=digest, name=name, source="", output_folder=str(sandbox.downloads),
-                  only_files=None, upload_limit=32768, ratio_limit=0.0, category="fixture", tags="",
+                  only_files=None, upload_limit=32768, upload=False, category="fixture", tags="",
                   added_on=1, completion_on=0, paused=True, resume_after_migration=False)
     (directory / "torrents.json").write_text(json.dumps(dict(migrated_legacy=True, records=[record])))
     return digest, size
@@ -1488,7 +1488,7 @@ def api_collection_cap(binary, systemd):
         records = [dict(hash=(digest if index == 0 else f"{index:040x}"), name="x" * 1024,
                         source="magnet:?xt=urn:btih:" + (digest if index == 0 else f"{index:040x}"),
                         output_folder=str(sandbox.downloads), only_files=None, upload_limit=32768,
-                        ratio_limit=0.0, category="", tags="", added_on=1, completion_on=0, paused=True)
+                        upload=False, category="", tags="", added_on=1, completion_on=0, paused=True)
                    for index in range(2000)]
         (directory / "torrents.json").write_text(json.dumps(dict(records=records)))
         process = harness.start_serve()
@@ -4052,7 +4052,7 @@ def tui_pending_rss_failure(binary, systemd):
                     case.check(entered.wait(5),"real daemon URL fetch reaches the held loopback source",f"entered={entered.is_set()}")
                     ui.assert_pane(target,"Adding")
                     items=harness.cli("rss","items","Pending feed")["items"]
-                    case.check(len(items)==1 and not items[0]["isRead"],"pending admission does not mark the local RSS item read",json.dumps(items))
+                    case.check(len(items)==1 and not items[0]["read"],"pending admission does not mark the local RSS item read",json.dumps(items))
                     ui.keys(target,"?")
                     ui.assert_pane(target,"GLOBAL")
                     ui.keys(target,"Escape",literal=False)
@@ -4063,7 +4063,7 @@ def tui_pending_rss_failure(binary, systemd):
                     assert not hidden.exists()
             ui.assert_pane(target,"could not fetch valid torrent metainfo")
             items=harness.cli("rss","items","Pending feed")["items"]
-            case.check(not items[0]["isRead"],"failed mutation confirmation leaves RSS unread",json.dumps(items))
+            case.check(not items[0]["read"],"failed mutation confirmation leaves RSS unread",json.dumps(items))
             case.check(client.call("torrents.list",{})["result"]["torrents"]==[],"failed URL creates no torrent record")
             ui.keys(target,"q")
             harness.wait_for(lambda:(done.exists(),ui.capture(target)),"q detaches after the failed admission")
