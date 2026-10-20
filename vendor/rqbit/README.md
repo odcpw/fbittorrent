@@ -69,3 +69,11 @@ not compiled. Native module tests and fbittorrent's engine tests exercise the
 ported behavior. See `docs/engine-evaluation.md` at the repository root for
 the tested scope and remaining limits. This is a maintained source fork;
 upstream changes require deliberate review and rerunning native tests.
+
+### Unused adapter cleanup (2026-10-20)
+
+The app uses its own typed API model. Removed the unused bitfield-load hook and
+unused listener result field; the disk-snapshot durability regression lives in
+test-only support because production restore always verifies content. Metadata
+resolution still retains the peer receiver until its result is consumed. No
+transfer, shutdown or storage ordering changes.

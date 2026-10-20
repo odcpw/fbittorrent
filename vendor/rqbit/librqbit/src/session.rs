@@ -42,7 +42,7 @@ use crate::{
 use anyhow::{Context, bail};
 use arc_swap::ArcSwapOption;
 use bencode::bencode_serialize_to_writer;
-use buffers::{ByteBuf, ByteBufOwned};
+use buffers::ByteBufOwned;
 use bytes::Bytes;
 use clone_to_owned::CloneToOwned;
 use dht::{Dht, DhtBuilder, DhtConfig, DhtPersistenceConfig, Id20, PersistentDht, dht_listen_addr};
@@ -1584,7 +1584,7 @@ impl Session {
             ReadMetainfoResult::Found {
                 info,
                 info_bytes,
-                rx: _,
+                _rx: _,
                 seen,
             } => {
                 trace!(?info, "received result from DHT");
