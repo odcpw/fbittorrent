@@ -78,7 +78,16 @@ fn dispatch_in(service:&crate::daemon::shows::Service,imdb:&crate::imdb::service
         Call::ShowsGrab {args}=>{
             let e={let _edit=service.edit.lock().unwrap();episode(&Shows::load().map_err(failure)?,&args.imdb,&args.key)?};
             let source=if e.magnet.starts_with("http://")||e.magnet.starts_with("https://"){AddSource::Url(e.magnet.clone())}else{AddSource::Magnet(e.magnet.clone())};
-            let add=serde_json::from_value(json!({"source":source,"seed":args.seed,"stopped":args.stopped,"save_path":args.save_path,"files":args.files,"category":args.category,"origin":"shows","stage":args.stage})).map_err(|_|error(ErrorCode::InvalidArgs,"invalid add options",None))?;
+            let add = AddArgs {
+                source,
+                stage: args.stage,
+                stopped: args.stopped,
+                seed: args.seed,
+                save_path: args.save_path.clone(),
+                files: args.files.clone(),
+                category: args.category.clone(),
+                origin: Some("shows".into()),
+            };
             let source=crate::daemon::staged_sources::Source::Show {imdb:args.imdb.clone(),key:e.key,magnet:e.magnet};
             Reply::ShowsGrab(add_torrent(add,source)?)
         },
