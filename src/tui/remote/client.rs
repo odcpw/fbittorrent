@@ -31,9 +31,9 @@ impl ScreenClient {
         cfg.open_target(result.stream_url.as_deref().unwrap_or(&result.path))?;
         Ok(())
     }
-    pub fn add_url(&self, source: &str, options: &AddOptions) -> Result<()> {
-        self.mutate("torrents.add", add_args(source, options)?)?;
-        Ok(())
+    pub fn add_url(&self, source: &str, options: &AddOptions) -> Result<String> {
+        let result=self.mutate("torrents.add", add_args(source, options)?)?;
+        Ok(if result["duplicate"]==true {"Already in your list. Open the existing torrent; no second download was added.".into()}else{format!("added {}",result["name"].as_str().unwrap_or("torrent"))})
     }
     pub fn search_plugins(&self) -> Result<Vec<SearchPlugin>> {
         let result: api::ProvidersResult = request(self.connection()?, "search.providers", json!({}))?;
@@ -50,7 +50,7 @@ fn add_args(source: &str, options: &AddOptions) -> Result<Value> {
     } else if source.starts_with("https://") || source.starts_with("http://") {
         json!({"url":source})
     } else {
-        json!({"path":std::path::Path::new(source).canonicalize()?.to_str().ok_or_else(||anyhow::anyhow!("torrent path is not UTF-8"))?})
+        json!({"path":std::path::Path::new(source).canonicalize().map_err(|_|anyhow::anyhow!(crate::user_messages::UNREADABLE_TORRENT))?.to_str().ok_or_else(||anyhow::anyhow!("torrent path is not UTF-8"))?})
     };
     let mut args = json!({"source":source,"seed":options.seed,"stopped":options.stopped});
     if let Some(path) = &options.save_path {

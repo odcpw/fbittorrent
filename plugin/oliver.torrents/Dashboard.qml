@@ -5,6 +5,7 @@ import Quickshell
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "Model.js" as Model
+import "PopupState.js" as PopupState
 import "Glyphs.js" as Glyphs
 import "AddSource.js" as Source
 import "views" as Views
@@ -19,6 +20,7 @@ Item {
   property string currentView:"torrents"
   property string settingsReturnView:"torrents"
   property bool helpOpen:false
+  readonly property var windowContent:scope
   readonly property var settingsSheet:settingsLoader.item
   readonly property var logView:logLoader.item
   readonly property var helpOverlay:helpLoader.item
@@ -215,7 +217,7 @@ Item {
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }
         Components.ClipboardOffer {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
-        Components.PopupBanner {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;text:root.svc ? root.svc.diskBanner : "";urgent:true}
+        Components.PopupBanner {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;text:{if(!root.svc)return "";var revision=root.svc.status;return PopupState.describe(root.svc).banner} urgent:true}
         Ui.PanelSeparator {Layout.fillWidth:true}
         Item {
           Layout.fillWidth:true;Layout.fillHeight:true
@@ -227,10 +229,10 @@ Item {
             Text {
               width:parent.width;textFormat:Text.PlainText;horizontalAlignment:Text.AlignHCenter
               objectName:"dashboard-stopped"
-              text:root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent stopped"
+              text:root.svc && root.svc.backendState==="protocol_mismatch" ? root.svc.lastError : root.svc && root.svc.startupRequested ? "Starting fbittorrent…" : "fbittorrent stopped";wrapMode:Text.Wrap
               color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.title
             }
-            Ui.Button {id:startButton;anchors.horizontalCenter:parent.horizontalCenter;text:"Start";focusable:true;enabled:!!root.svc && !root.svc.startupRequested;onClicked:root.svc.startDaemon()}
+            Ui.Button {id:startButton;anchors.horizontalCenter:parent.horizontalCenter;text:"Start";focusable:true;enabled:!!root.svc && !root.svc.startupRequested && root.svc.backendState!=="protocol_mismatch";onClicked:root.svc.startDaemon()}
           }
           Loader {
             id:torrentsLoader

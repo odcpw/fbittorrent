@@ -202,6 +202,7 @@ Item {
     }
     reconnecting = c.reconnecting; instance = c.instance
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
+    if(c.protocolMismatch){startupRequested=false;actionStatus="";startupTimer.stop()}
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
     resultUnknown=Object.keys(c.actions).some(function(ref){return c.actions[ref].status==="no answer"})
     if(store.syncActions(c.actions))actionRevision++
@@ -319,6 +320,7 @@ Item {
     focusRetry.restart()
   }
   function startDaemon() {
+    if(client && client.protocolMismatch)return
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
     Quickshell.execDetached([bin,"up"])
@@ -358,7 +360,7 @@ Item {
   function clipboardSource(text,allowDuplicate) {
     var parsed=AddSource.parse(text),source=parsed ? parsed.source : null,hash=parsed ? parsed.hash : ""
     if (hash && store.torrents[hash] && !allowDuplicate) { actionStatus = "Already in your list: " + store.torrents[hash].name; noticeTimer.restart(); return null }
-    if (!source) { actionStatus = "Clipboard has no torrent"; noticeTimer.restart() }
+    if (!source) { actionStatus = AddSource.invalidMessage(text); noticeTimer.restart() }
     return source
   }
   onQuickVisibleChanged:if(client){if(quickVisible)checkSocket(true);client.visibility(popupOpen,dashboardVisible,detailTopics.concat(addTopics,logTopics,searchTopics,showsTopics,quickTopics,rssTopics),quickVisible)}

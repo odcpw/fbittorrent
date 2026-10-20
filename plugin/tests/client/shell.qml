@@ -203,6 +203,11 @@ ShellRoot {
     check("protocol",s.c.mode==="protocol_mismatch" && !s.c.online,"incompatible API major stays offline",s.c.mode)
     s=session();s.c.connected();s.reply({proto:1,caps:[],instance:"bad"})
     check("protocol",s.resets.length===1,"invalid hello shape resets session",s.c.lastError.message)
+    s=session();s.c.attempt();s.c.connected()
+    s.c.receive(JSON.stringify({ev:"error",error:{code:"proto_unsupported",message:"Update the plugin with setup --plugin=copy",retryable:false}}))
+    s.c.receive(JSON.stringify({ev:"bye",reason:"proto_unsupported"}));s.c.disconnected()
+    check("protocol",s.c.protocolMismatch && s.c.lastError && s.c.lastError.message.indexOf("setup --plugin=copy")>=0,"protocol error survives bye and transport close",s.c.lastError)
+    check("protocol",!s.c.attempt(),"protocol rejection never restarts or reconnects the daemon",s.c.mode)
     console.log("FBTQS-PASS protocol")
     s=session();s.hello();var optionalError=null
     var optional=s.c.request("imdb.lookup",{name:"Missing"},{quiet:true,callback:function(result,error){optionalError=error}})

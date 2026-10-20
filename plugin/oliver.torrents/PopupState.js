@@ -14,6 +14,7 @@ function networkName(network) {
 function warningBanner(warnings) {
   if(!warnings || !warnings.length)return ""
   var first=warnings[0],file={config:"config.toml",shows:"shows.json",rss:"rss.json"}[first.source] || first.source
+  if(first.source==="config" && /^(config\.toml|Unknown setting|Invalid config\.toml)/.test(first.message || ""))return first.message+" Keeping the last valid settings."
   return file+" is unreadable; "+(first.source==="config" ? "using the last valid settings" : "showing the last loaded list")+
     (warnings.length>1 ? " (+"+(warnings.length-1)+" more)" : "")+". Fix the file to clear this."
 }
@@ -21,12 +22,13 @@ function describe(s) {
   if(!s)return {message:"fbittorrent stopped",banner:"",urgent:false,dim:false}
   var client=s.client || {},summary=s.store.summary || {},daemon=summary.daemon || {},info=s.store.info || {},network=summary.network || s.store.network || {}
   var r={message:"",banner:"",urgent:false,dim:!s.online,idle:""}
-  if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
+  if(client.protocolMismatch)r.message=client.lastError ? client.lastError.message : "Update the plugin with fbittorrent setup --plugin=copy, then restart the shell."
+  else if(s.startupRequested)r.message="Starting…"+(s.torrents.length ? " checking "+s.torrents.length+" torrents" : "")
   else if(s.reconnecting){r.message="Reconnecting…";r.dim=true}
   else if(!s.online)r.message=!s.stoppedRecently && client.mode==="connecting" && s.now-client.started<2000 ? "Connecting…" : "fbittorrent stopped. Enter Start · w Open window"
   if(s.online && (s.backendState==="parked" || network.ready===false || network.state==="waiting")){
     var name=networkName(network)
-    r.banner="Waiting for "+(name==="ProtonVPN" ? "ProtonVPN ("+(network.interface || "proton0")+")" : name)+". Downloads resume when it connects.";r.urgent=true;r.dim=true
+    r.banner="Waiting for "+(name==="ProtonVPN" ? "ProtonVPN ("+(network.interface || "proton0")+")" : name)+". Connect it or change the VPN interface in Settings. Downloads resume when it connects.";r.urgent=true;r.dim=true
   } else if(s.online && s.backendState==="error"){r.banner=daemon.message || info.message || s.lastError || "Engine failed";r.urgent=true}
   else if(s.online && (info.upgrade_pending || daemon.upgrade_pending))r.banner="Update installed; restarts when idle"
   else if(s.online && daemon.warnings && daemon.warnings.length)r.banner=warningBanner(daemon.warnings)
@@ -36,7 +38,7 @@ function describe(s) {
   return r
 }
 function meta(t,parked) {
-  if(t.error)return t.error
+  if(Model.problem(t))return Model.problem(t)
   var parts=[Model.stateLabel(t)]
   if(!parked && t.progress!==undefined && t.progress!==null)parts.push(Model.percent(t.progress,t.state==="done" || t.state==="seeding"))
   if(t.dl_bps!==undefined)parts.push("↓ "+Model.rate(t.dl_bps))

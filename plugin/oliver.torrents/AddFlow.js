@@ -23,7 +23,7 @@ function create(service,changed,debug) {
       s.space={supported:true,path:path,pending:false,writable:result ? result.writable : false}
       if(result && result.free_bytes!==undefined)s.space.free_bytes=result.free_bytes
       if(failure)s.space.message=failure.message
-      else if(!s.space.writable)s.space.message="Folder is not writable"
+      else if(!s.space.writable)s.space.message=result.message || "Cannot write to this folder. Choose another download folder."
       publish();if(s.commitRequested)f.commit()
     }})
     publish()
@@ -119,7 +119,7 @@ function create(service,changed,debug) {
     settings(options)
     if(!source){publish();return true}
     var parsed=Source.normalize(source)
-    if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}
+    if(!parsed){error(Source.invalidMessage(source && (source.magnet || source.url || source.path)));return false}
     s.source=parsed.source;s.hash=parsed.hash;s.name=Model.sourceName(s.source)
     var existing=s.hash && service.store.torrents[s.hash]
     if(existing){if(existing.staged){adoptStage(existing);return true}s.name=existing.name;s.duplicate=true;s.phase="duplicate";publish();return true}
@@ -143,7 +143,7 @@ function create(service,changed,debug) {
     s.grabOp=op;s.grabArgs=Object.assign({},args);settings({})
     send(op,Object.assign({},args,{stage:true,seed:false}),s.origin,staged);publish();return true
   }
-  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error("Enter a magnet, HTTP URL or local .torrent path");return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
+  f.review=function(text){var parsed=Source.parse(text);if(!parsed){error(Source.invalidMessage(text));return false}s.phase="input";return f.open(parsed.source,{origin:s.origin,seed:s.seed,save_path:s.savePath,category:s.category,stopped:s.stopped})}
   f.existing=function(hash){
     if(s.visible)return false
     epoch++;reset();s.visible=true;s.hash=hash;s.phase="resolving";s.owned=true

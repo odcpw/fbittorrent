@@ -22,12 +22,15 @@ pub fn inspect(path: &Path) -> FreeSpaceResult {
     let mut result = FreeSpaceResult {
         free_bytes: None,
         writable: false,
+        message: None,
     };
     let Ok(path_c) = CString::new(path.as_os_str().as_bytes()) else {
         return result;
     };
-    if !std::fs::metadata(path).is_ok_and(|m| m.is_dir()) {
-        return result;
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir()=>{},
+        Ok(_)=>{result.message=Some("The destination is not a folder. Choose a download folder, then retry.".into());return result;},
+        Err(error)=>{result.message=Some(crate::user_messages::storage(&error.to_string()).unwrap_or("Cannot inspect the download folder. Choose another folder, then retry.").into());return result;},
     }
     // No write probe: creating/removing a file would alter a read operation.
     result.writable = unsafe {
@@ -38,6 +41,7 @@ pub fn inspect(path: &Path) -> FreeSpaceResult {
             libc::AT_EACCESS,
         ) == 0
     };
+    if !result.writable {result.message=Some(crate::user_messages::PERMISSION.into());}
     let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     if unsafe { libc::statvfs(path_c.as_ptr(), stats.as_mut_ptr()) } == 0 {
         let stats = unsafe { stats.assume_init() };
@@ -49,6 +53,7 @@ pub fn inspect(path: &Path) -> FreeSpaceResult {
         result.free_bytes = available(stats.f_bavail as i128, block_size as i128);
         if stats.f_flag & libc::ST_RDONLY != 0 {
             result.writable = false;
+            result.message=Some(crate::user_messages::PERMISSION.into());
         }
     }
     result
@@ -56,7 +61,8 @@ pub fn inspect(path: &Path) -> FreeSpaceResult {
 
 pub fn require_writable(path: &str) -> anyhow::Result<()> {
     let failure = valid_path(path).err().map(str::to_owned).or_else(|| {
-        (!inspect(Path::new(path)).writable).then(|| "download folder is not writable".into())
+        let result=inspect(Path::new(path));
+        (!result.writable).then(||result.message.unwrap_or_else(||crate::user_messages::PERMISSION.into()))
     });
     if let Some(message) = failure {
         return Err(

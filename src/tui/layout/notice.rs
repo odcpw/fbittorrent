@@ -3,6 +3,7 @@ use super::*;
 use std::borrow::Cow;
 impl TuiApp {
     pub(in crate::tui) fn torrent_reason(&self, row: &Torrent) -> String {
+        if let Some(message)=crate::user_messages::row(row) {return message.into();}
         let Some(code) = row.reason.as_deref() else {
             return format::state_word(row).to_lowercase();
         };
@@ -14,7 +15,7 @@ impl TuiApp {
             .unwrap_or("the VPN");
         format::reason(code)
             .replace("<interface>", interface)
-            .replace("<error>", row.error.as_deref().unwrap_or("unknown error"))
+            .replace("<error>", row.error.as_deref().unwrap_or("check Log and retry"))
     }
     pub(in crate::tui) fn view_selected_strip(&self, area: Rect, frame: &mut Frame) {
         let Some(t) = self.selected_torrent() else {
@@ -68,8 +69,9 @@ impl TuiApp {
             );
         }
         if let Some(network) = self.store.network.as_ref().filter(|n| !n.ready) {
-            return Some(network.message.as_str().into());
+            return Some(format!("{}. Connect it or change the VPN interface in Settings.",network.message).into());
         }
+        if let Some(warning)=self.store.summary.as_ref().and_then(|summary|summary.daemon.warnings.iter().find(|warning|warning.source=="config")) {return Some(format!("{} Keeping the last valid settings.",warning.message).into());}
         if let Some(notice) = self.connection_banner() {
             return Some(notice);
         }

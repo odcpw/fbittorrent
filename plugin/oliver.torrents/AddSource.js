@@ -44,3 +44,5 @@ function normalize(source) {
   return parsed && parsed.source[keys[0]]!==undefined ? parsed : null
 }
 function drop(urls,text) {return urls && urls.length===1 ? parse(String(urls[0])) : (!urls || !urls.length) ? parse(text) : null}
+
+function invalidMessage(input){return /^magnet:/i.test(String(input).trim()) ? "Invalid magnet link. Copy the full magnet link from its source and try again." : "Choose a magnet link, HTTP URL or readable .torrent file, then try again."}

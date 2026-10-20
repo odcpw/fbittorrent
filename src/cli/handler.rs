@@ -13,7 +13,7 @@ pub(super) fn source(source: &str) -> Result<Value> {
     } else if source.starts_with("http://") || source.starts_with("https://") {
         json!({"url":source})
     } else {
-        json!({"path":std::fs::canonicalize(local).map_err(|_|AppError::new(Code::Usage,"torrent source must be an accessible local file, magnet or HTTP URL"))?.to_string_lossy()})
+        json!({"path":std::fs::canonicalize(local).map_err(|_|AppError::new(Code::Usage,crate::user_messages::UNREADABLE_TORRENT))?.to_string_lossy()})
     })
 }
 
