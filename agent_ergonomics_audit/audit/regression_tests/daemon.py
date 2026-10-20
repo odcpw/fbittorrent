@@ -4997,6 +4997,7 @@ CASES["staged_not_busy"] = staged_not_busy
 from daemon_torznab import CASES as TORZNAB_CASES
 CASES.update((function.__name__,function) for function in TORZNAB_CASES)
 from daemon_watch import CASES as WATCH_CASES
+from daemon_watch_mp4 import CASES as MP4_CASES
 from daemon_remove_delay import CASES as REMOVE_DELAY_CASES
 CASES.update((function.__name__, function) for function in REMOVE_DELAY_CASES)
 from daemon_catalog import CASES as CATALOG_CASES
@@ -5004,6 +5005,7 @@ CASES.update((function.__name__,function) for function in CATALOG_CASES)
 from daemon_cli_catalogues import CASES as CLI_CATALOGUE_CASES
 CASES.update((function.__name__,function) for function in CLI_CATALOGUE_CASES)
 CASES.update((function.__name__,function) for function in WATCH_CASES)
+CASES.update((function.__name__,function) for function in MP4_CASES)
 from desktop_setup import CASES as DESKTOP_SETUP_CASES
 CASES.update((function.__name__, function) for function in DESKTOP_SETUP_CASES)
 from daemon_responsive import CASES as RESPONSIVE_CASES
