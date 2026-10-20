@@ -378,4 +378,3 @@ fn spawn_peer_adder(live: &Arc<TorrentStateLive>, mut peer_rx: PeerStream) {
         },
     );
 }
-
