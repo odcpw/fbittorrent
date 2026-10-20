@@ -147,7 +147,7 @@ impl Presence {
                 .ok_or_else(|| anyhow::anyhow!("pending reply lacks ref"))?,
         )
         .map_err(anyhow::Error::msg)?;
-        self.confirmations.wait(&reference, deadline, &self.closed)
+        self.confirmations.wait(&reference, (reply["saving"] != true).then_some(deadline), &self.closed)
     }
     pub(in crate::tui) fn next_updates(&self) -> Result<Option<Vec<Update>>> {
         let result=receive_batch(&self.updates.lock().unwrap_or_else(|error|error.into_inner()));

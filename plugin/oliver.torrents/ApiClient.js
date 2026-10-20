@@ -32,6 +32,7 @@ function create(io, options) {
   function changed() { if (o.changed) o.changed(c) }
   function deliver(frame, request) { if (o.frame) o.frame(frame, request) }
   function mutationResult(frame) {
+    var entry=c.awaiting[frame.ref]
     delete c.awaiting[frame.ref]
     var action=c.actions[frame.ref]
     if(!action)return
@@ -39,6 +40,7 @@ function create(io, options) {
     action.status=frame.outcome==="timeout" ? "no answer" : frame.outcome
     action.error=frame.error
     if(frame.error)c.lastError=frame.error
+    if(entry && entry.saving && entry.callback)entry.callback(frame.outcome==="done" ? frame.result || {} : null,frame.error || (frame.outcome==="done" ? null : {message:"Saving failed"}))
   }
   function fail(entry, failure, status) {
     if (entry.ref) c.actions[entry.ref] = Object.assign({},c.actions[entry.ref],{op:entry.op,status:status || "failed",error:failure})
@@ -328,11 +330,13 @@ function create(io, options) {
         // detects a lost owner; never resend a non-idempotent check.
         entry.deadline = Infinity
         c.actions[entry.ref].accepted = true
+        entry.saving = frame.result.saving === true
+        c.actions[entry.ref].saving = entry.saving
         c.awaiting[entry.ref] = entry
       }
     }
     if(frame.ok && !entry.internal && !entry.quiet)c.lastError=null
-    if (entry.callback && frame.ok) entry.callback(frame.result, null)
+    if (entry.callback && frame.ok && !entry.saving) entry.callback(frame.result, null)
     deliver(frame, entry); pump(); changed()
   }
   c.state = function() {

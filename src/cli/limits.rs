@@ -59,10 +59,12 @@ pub fn run(
     let (settings, running) = match api::client::Client::connect(cfg, json_mode) {
         Ok(client) => {
             if !api::ops::transfer::limits_patch(&args).is_empty() {
-                client.call("transfer.set_limits", serde_json::to_value(&args)?)?;
+                let reply = client.call("transfer.set_limits", serde_json::to_value(&args)?)?;
+                if reply["state"] == "pending" { super::native::await_mutation(&client, reply)?; }
             }
             if let Some(on) = alt {
-                client.call("transfer.set_alt", json!({"on":on == "on"}))?;
+                let reply = client.call("transfer.set_alt", json!({"on":on == "on"}))?;
+                if reply["state"] == "pending" { super::native::await_mutation(&client, reply)?; }
             }
             (client.call("app.settings.get", json!({}))?, true)
         }

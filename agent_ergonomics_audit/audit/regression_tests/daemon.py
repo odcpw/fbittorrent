@@ -1110,6 +1110,8 @@ class ApiConn:
             # behaviour cases need the confirmed result before their next step;
             # transport/deadline cases use confirm=False to inspect admission.
             if confirm and frame.get("result", {}).get("state") == "pending" and (
+                    frame["result"].get("saving") is True
+                    or
                     (op == "torrents.remove" and (args or {}).get("delete_files") is False)
                     or (op == "torrents.add" and "restore" in (args or {}).get("source", {}))):
                 reference = frame["result"]["ref"]

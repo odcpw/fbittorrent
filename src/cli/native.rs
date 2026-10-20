@@ -475,7 +475,8 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                         if chunk.is_empty() {
                             continue;
                         }
-                        let v = c.call("torrents.start", json!({"hashes":chunk}))?;
+                        let mut v = c.call("torrents.start", json!({"hashes":chunk}))?;
+                        if v["state"] == "pending" { v = await_mutation(&c, v)?; }
                         started.extend(
                             v["started"]
                                 .as_array()
@@ -528,7 +529,7 @@ fn bulk(c: &ApiClient, op: &str, hashes: &[String], extra: Value) -> Result<()> 
 fn await_move(c:&ApiClient,result:Value)->Result<Value> {
     let reference=result["ref"].as_str().context("move acknowledgement omitted ref")?;
     loop {
-        let unknown=||AppError::new(Code::Timeout,"move outcome is unknown after the owner connection closed").hint("fbittorrent list --json");
+        let unknown=||AppError::new(Code::Timeout,"accepted operation outcome is unknown after the owner connection closed").hint("fbittorrent list --json");
         if let Some(event)=c.event(Duration::from_millis(100)).map_err(|_|unknown())? {
             if event["ev"]=="mutation.result" && event["ref"]==reference {
                 if event["outcome"]=="done" {return Ok(event.get("result").cloned().unwrap_or(json!({"state":"done"})));}
@@ -539,6 +540,7 @@ fn await_move(c:&ApiClient,result:Value)->Result<Value> {
     }
 }
 pub(super) fn await_mutation(c: &ApiClient, result: Value) -> Result<Value> {
+    if result["saving"] == true { eprintln!("Saving…"); return await_move(c, result); }
     let reference = result["ref"]
         .as_str()
         .context("pending result omitted ref")?;
