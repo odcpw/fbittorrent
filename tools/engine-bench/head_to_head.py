@@ -194,7 +194,9 @@ class Match(Run):
             measured.update(first_piece_s=first,prefix_s=prefix,last_piece_s=last,playable_s=playable,app_ready_s=ready,
                 seed_cpu_s=proc(self.seed.pid)['cpu_s']-seed_before['cpu_s'] if seed_before else None)
             stats=self.stats()['torrents'][0] if seed_before else None
-            if client=='fbt' and stats:assert stats['uploaded_bytes']==0 and stats['unchokes']==0,stats
+            if stats:
+                assert stats['uploaded_bytes']==0,stats
+                if client=='fbt':assert stats['unchokes']==0,stats
             digest,video=verify_payload(self.sandbox.downloads,self.info)
             playable_file=self.sandbox.root/'playable-prefix.mkv'
             with video.open('rb') as source,playable_file.open('wb') as output:

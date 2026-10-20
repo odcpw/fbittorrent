@@ -125,7 +125,11 @@ class Qbittorrent:
         settings = dict(save_path=str(run.sandbox.downloads), temp_path_enabled=False,
             queueing_enabled=False, preallocate_all=False, incomplete_files_ext=False,
             dht=public, pex=public, lsd=False, upnp=False, random_port=True,
-            up_limit=1024, limit_lan_peers=True, dl_limit=4*1024**2 if public else 0,
+            # Its global rate limiter also budgets outgoing request messages.
+            # On a controlled local swarm all remote peers are seeds and the
+            # wire counter must prove zero payload upload. Exempt LAN protocol
+            # traffic so a 1 KiB/s cap does not turn into a download bottleneck.
+            up_limit=1024, limit_lan_peers=public, dl_limit=4*1024**2 if public else 0,
             max_connec=200, max_connec_per_torrent=100, encryption=2,
             enable_multi_connections_from_same_ip=True,
             current_network_interface='' if public else 'lo',
