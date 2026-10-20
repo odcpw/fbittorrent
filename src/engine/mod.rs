@@ -38,6 +38,7 @@ pub(crate) mod staging;
 pub(crate) mod pieces;
 mod bus;
 mod watch;
+pub(crate) mod playback;
 pub(crate) mod peers;
 mod tracker_edit;
 mod queue;

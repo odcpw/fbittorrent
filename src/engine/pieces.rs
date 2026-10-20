@@ -16,6 +16,10 @@ impl EngineDispatcher {
         let included=handle.only_files();
         let mut file_offsets=Vec::with_capacity(metadata.file_infos.len());
         let mut priority=std::collections::BTreeSet::new();
+        if let Some(range) = handle.metadata_priority() {
+            anyhow::ensure!(range.len() <= crate::api::LINE_OUT / 24, "piece priority snapshot exceeds the API frame limit");
+            priority.extend(range.map(u64::from));
+        }
         for (index,file) in metadata.info.iter_file_details_ext().enumerate() {
             file_offsets.push(file.offset);
             if included.as_ref().is_some_and(|files| !files.contains(&index)) || file.details.attrs().padding || file.pieces.is_empty() {continue;}

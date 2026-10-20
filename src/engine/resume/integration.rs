@@ -17,9 +17,11 @@ impl Inner {
         };
         let mut directories = std::collections::BTreeSet::new();
         let root=Path::new(&record.output_folder);
+        let mut sync = crate::durable_sync::SyncBatch::new().context("create completed payload sync batch")?;
         for stamp in files {
-            let file = rqbit_runtime::fs::File::open(&stamp.path).await?.into_std()?;
-            crate::durable_sync::sync_all(cx, &file).await?;
+            let file = rqbit_runtime::fs::File::open(&stamp.path).await
+                .with_context(||format!("open completed payload {}",stamp.path.display()))?.into_std()?;
+            sync = sync.file(cx, &file).await.with_context(||format!("sync completed payload {}",stamp.path.display()))?;
             let mut parent=stamp.path.parent();
             while let Some(path)=parent.filter(|path|path.starts_with(root)) {
                 directories.insert(path.to_path_buf()); parent=path.parent();
@@ -31,7 +33,7 @@ impl Inner {
         if let Some(parent)=root.parent(){directories.insert(parent.to_path_buf());}
         for path in directories {
             let directory = rqbit_runtime::fs::File::open(&path).await?.into_std()?;
-            crate::durable_sync::sync_all(cx, &directory).await?;
+            sync = sync.file(cx, &directory).await.with_context(||format!("sync completed directory {}",path.display()))?;
         }
         Ok(true)
     }

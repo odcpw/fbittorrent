@@ -194,6 +194,10 @@ pub struct FilesResult {
 pub struct OpenTargetResult {
     pub path: String,
     pub kind: TargetKind,
+    /// Verified, seek-aware media URL for an incomplete video. The filesystem
+    /// path remains available for reveal/move and completed-file opening.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -258,7 +258,7 @@ Item {
         var command=String(root.store.settings.open_command || "xdg-open")
         // Match Config::open: the owner-configured command is shell syntax;
         // the daemon-provided path remains a literal positional parameter.
-        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.path])
+        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.stream_url || result.path])
       }
     }})
   }

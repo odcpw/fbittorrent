@@ -12,6 +12,7 @@ pub(crate) mod rss;
 pub(crate) mod shows;
 pub(crate) mod staged_sources;
 pub(crate) mod watch;
+pub(crate) mod playback;
 pub(crate) mod history;
 pub(crate) mod config_cache;
 pub(crate) mod stats;
@@ -65,6 +66,7 @@ pub struct Daemon {
     pub(crate) imdb: crate::imdb::service::Service,
     pub(crate) search: crate::search::service::Service,
     pub(crate) watch: Mutex<watch::Watch>,
+    pub(crate) playback: playback::Service,
     network: RwLock<network_app::NetworkState>,
     stopping: AtomicBool,
 }
@@ -384,10 +386,12 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         undo: Arc::new(engine::undo::History::start(&crate::config::data_dir().join("engine"))?),
         search: Default::default(),
         watch: Mutex::new(watch::Watch::open(crate::config::data_dir().join("watch.json"))),
+        playback: Default::default(),
         resume: Arc::new(engine::resume::Store::open(&crate::config::data_dir().join("engine"))?),
         network: RwLock::new(network_state(&cfg)),
         stopping: AtomicBool::new(false),
     });
+    daemon.playback.init(Arc::downgrade(&daemon));
     let mut api = crate::api::server::Server::start(&directory, lock.clone(), daemon.clone())?;
     *daemon.event_bus.lock().unwrap()=api.event_bus();
     let rss_bus=api.event_bus();
@@ -421,6 +425,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     }));
     daemon.stopping.store(true, Ordering::Release);
     eprintln!("INFO daemon draining");
+    daemon.playback.stop();
     // The bus and service workers can already be borrowing the engine while
     // waiting for its ledger. Cancel those dispatches BEFORE joining them;
     // joining first can wait forever and never reach the engine's drain fuse.
@@ -460,6 +465,7 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
         "INFO daemon slot released elapsed_ms={}",
         began.elapsed().as_millis()
     );
+    daemon.watch.lock().unwrap().flush(Instant::now() + Duration::from_secs(1));
     let stats_saved=daemon.stats.lock().unwrap().save(Instant::now(),true);
     let drain_reason = if panicked.load(Ordering::Acquire) {
         StopReason::Panic
