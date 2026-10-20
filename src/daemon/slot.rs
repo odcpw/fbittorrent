@@ -30,6 +30,16 @@ pub enum State {
     Stopping,
 }
 
+/// Preserve the owner's transient state across CLI and API error boundaries.
+#[derive(Debug)]
+pub(crate) struct Unavailable(pub State);
+impl std::fmt::Display for Unavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "engine_unavailable state={} retryable=true", self.0.name())
+    }
+}
+impl std::error::Error for Unavailable {}
+
 impl State {
     pub fn name(self) -> &'static str {
         match self {
