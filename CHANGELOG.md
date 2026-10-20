@@ -51,6 +51,18 @@ restarts and resume when a required network interface returns.
   ([Input and credential hardening](https://github.com/odcpw/fbittorrent/commit/f5d17cd42a9a5bcd7c2e08d694630ce447f59ba6),
   [bound outbound traffic](https://github.com/odcpw/fbittorrent/commit/d5f2c4ecaf16eba24263ac803ad5083259dbd0a9))
 
+### Reliability
+
+- Ordered shutdown drains within its deadline under disk pressure: durable
+  checkpoint syncs are cancellable, workers release the engine before joining,
+  and completed payloads are certified before a dormant restore.
+- Runtime regions are admitted by memory pressure rather than a fixed count,
+  so 500 active torrents start.
+- Peers that only fetch metadata stay choked, so zero upload holds at magnet
+  resolution too.
+- `fbittorrent setup` installs the bar plugin from files embedded in the binary,
+  keeps one bar entry, and restarts the shell so the widget matches the daemon.
+
 ### Performance
 
 - Pushed state and socket wakeups replace idle UI polling. Subscribers share
