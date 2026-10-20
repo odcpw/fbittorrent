@@ -227,6 +227,13 @@ impl Inner {
                     _ = task_cancel.cancelled() => bail!("torrent restore cancelled"),
                     result = inner.resolve_record(&cx, &record) => result?,
                 };
+                // Resolve slow magnets independently, then bound the number
+                // of background admissions queued on the shared ledger. A
+                // foreground read/edit can interleave during a large restore.
+                let _admission = rqbit_runtime::select! {
+                    _ = task_cancel.cancelled() => bail!("torrent restore cancelled"),
+                    permit = inner.restore_admission.acquire(&cx, 1) => permit?,
+                };
                 let mut ledger = OwnedMutexGuard::lock(inner.ledger.clone(), &cx).await?;
                 cx.checkpoint()?;
                 if inner.stopping.load(Ordering::Acquire) { bail!("native engine is closing"); }

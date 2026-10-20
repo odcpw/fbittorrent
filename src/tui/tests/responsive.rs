@@ -8,6 +8,22 @@ fn draw(app: &TuiApp, width: u16, height: u16) {
     let mut frame = Frame::new(width, height, &mut pool);
     app.view(&mut frame);
 }
+
+#[test]
+fn unicode_names_keep_their_accents_and_joined_emoji_in_the_real_table() {
+    let mut app = fixture::app("torrents");
+    app.torrents[0].name = "Cafe\u{301} · 👩🏽‍💻 · 日本語.mkv".into();
+    for width in [40, 80, 120, 160] {
+        let text = super::golden::render(&app, width, 24);
+        let row = text.lines().find(|line| line.contains('▌')).unwrap();
+        assert!(row.contains("Caf"), "{width} columns: {row}");
+        if width >= 80 {
+            assert!(row.contains("Cafe\u{301}"), "{width} columns: {row}");
+            assert!(row.contains("👩🏽‍💻"), "{width} columns: {row}");
+            assert!(row.contains("日本語.mkv"), "{width} columns: {row}");
+        }
+    }
+}
 #[test]
 fn click_hits_rows_at_each_size() {
     use ftui::{MouseButton, MouseEvent, MouseEventKind};
