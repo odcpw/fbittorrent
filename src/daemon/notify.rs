@@ -278,7 +278,13 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
         }
         "open" | "default" | "folder" => {
             if let Some(target) = &n.target {
-                if n.kind == "torrent.playable" {request("torrents.open_target", json!({"hash":n.hash}), None)?;}
+                if n.kind == "torrent.playable" && action != "folder" {
+                    let target = request("torrents.open_target", json!({"hash":n.hash}), None)?;
+                    if let Some(url) = target["result"].get("stream_url").and_then(serde_json::Value::as_str) {
+                        run_action(shared, Command::new("xdg-open").arg(url))?;
+                        return Ok(());
+                    }
+                }
                 let path = if action == "folder" {
                     if target.is_dir() {
                         target

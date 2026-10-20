@@ -220,7 +220,7 @@ include!("live_limits.rs");
 include!("handle_lookup.rs");
 mod typed_seed {
     include!("typed_seed.rs");
-    mod check_reconciliation {
+    pub(super) mod check_reconciliation {
         include!("check_reconciliation.rs");
     }
 }

@@ -242,8 +242,21 @@ impl ChunkTracker {
             .iter()
             .filter_map(|p| Some((*p, file_infos.get(*p)?)))
             .filter(|(id, f)| self.per_file_bytes[*id] != f.len)
-            .flat_map(|(_id, f)| f.iter_piece_priorities())
-            .filter(|id| self.queue_pieces[*id])
+            .flat_map(|(_id, f)| {
+                let range = f.piece_range_usize();
+                // Same first/last/middle ordering, but skip empty bitmap words
+                // in the sequential middle instead of testing every old piece.
+                let middle_start = range.start.saturating_add(1).min(range.end);
+                let middle_end = range.end.saturating_sub(1).max(middle_start);
+                let ends = f
+                    .iter_piece_priorities()
+                    .take(2)
+                    .filter(|id| self.queue_pieces[*id]);
+                let middle = self.queue_pieces[middle_start..middle_end]
+                    .iter_ones()
+                    .map(move |id| id + middle_start);
+                ends.chain(middle)
+            })
             .filter_map(|id| id.try_into().ok())
             .filter_map(|id| self.lengths.validate_piece_index(id))
     }

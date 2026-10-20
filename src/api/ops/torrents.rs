@@ -667,10 +667,19 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             } else {
                 TargetKind::File
             };
+            let stream_url = {
+                let slot = daemon.slot.read().unwrap_or_else(|e| e.into_inner());
+                if let crate::daemon::slot::Slot::Running(app) = &slot.slot {
+                    app.dispatcher().incomplete_video(args.hash.as_str(), args.file.map(|i| i as usize))
+                        .map_err(engine_error)?.map(|video| daemon.playback.target(args.hash.as_str(), video, slot.engine_epoch))
+                        .transpose().map_err(engine_error)?
+                } else { None }
+            };
             daemon.watch.lock().unwrap().acknowledge(Some(args.hash.as_str()));
             Reply::TorrentsOpenTarget(OpenTargetResult {
                 path: path.to_string_lossy().into(),
                 kind,
+                stream_url,
             })
         }
         _ => {

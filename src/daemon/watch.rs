@@ -2,6 +2,7 @@
 mod duration;
 mod estimate;
 mod mp4;
+mod persistence;
 #[cfg(test)]
 mod tests;
 use crate::api::{self, Playable};
@@ -9,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{File, OpenOptions},
-    io::{Read, Write},
+    fs::OpenOptions,
+    io::Read,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -136,12 +137,13 @@ struct Row {
     movie: mp4::Movie,
 }
 pub(crate) struct Watch {
-    path: PathBuf,
+    persistence: persistence::Store,
     saved: BTreeMap<String, Saved>,
     rows: BTreeMap<String, Row>,
     next: Instant,
     fired: BTreeSet<String>,
     active: bool,
+    metadata: Vec<(String, usize, Option<std::ops::Range<u64>>)>,
 }
 impl Watch {
     pub fn open(path: PathBuf) -> Self {
@@ -173,52 +175,43 @@ impl Watch {
             BTreeMap::new()
         };
         Self {
-            path,
+            persistence: persistence::Store::new(path),
             saved,
             rows: BTreeMap::new(),
             next: Instant::now(),
             fired: BTreeSet::new(),
             active: false,
+            metadata: Vec::new(),
         }
     }
     pub fn due(&self) -> bool {
         Instant::now() >= self.next
     }
     pub fn needs_tick(&self) -> bool {
-        self.active
+        self.active || self.persistence.pending()
     }
-    fn save(&self) {
-        let result = || -> anyhow::Result<()> {
-            let parent = self.path.parent().unwrap();
-            std::fs::create_dir_all(parent)?;
-            let tmp = self
-                .path
-                .with_extension(format!("{}.tmp", std::process::id()));
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&tmp)?;
-            serde_json::to_writer(&mut f, &self.saved)?;
-            f.flush()?;
-            f.sync_all()?;
-            std::fs::rename(&tmp, &self.path)?;
-            File::open(parent)?.sync_all()?;
-            Ok(())
-        };
-        if let Err(e) = result() {
-            eprintln!("WARN saving watch history: {e}");
+    fn save(&mut self) {
+        match serde_json::to_vec(&self.saved) {
+            Ok(bytes) => self.persistence.queue(bytes),
+            Err(error) => eprintln!("WARN saving watch history: {error}"),
         }
+    }
+    pub(crate) fn flush(&mut self, deadline: Instant) {
+        self.persistence.flush(deadline);
     }
     pub fn sample(&mut self, samples: Vec<Sample>) -> Vec<Value> {
         self.sample_at(samples, Instant::now())
     }
+    pub(crate) fn metadata_demands(&self) -> &[(String, usize, Option<std::ops::Range<u64>>)] {
+        &self.metadata
+    }
     fn sample_at(&mut self, samples: Vec<Sample>, now: Instant) -> Vec<Value> {
+        self.persistence.poll();
         self.next = now + Duration::from_secs(1);
         self.active = samples.iter().any(|sample| sample.active);
         let mut dirty = false;
         let mut events = Vec::new();
+        self.metadata.clear();
         for s in samples {
             if !self.saved.contains_key(&s.hash) && self.saved.len() >= 32768 {
                 continue;
@@ -231,9 +224,19 @@ impl Watch {
             let mut movie = cached.map(|r| r.movie.clone()).unwrap_or_default();
             let inspected = s.prefix.min(MIB);
             let iso = iso_movie(&s.path);
+            let missing = std::cell::RefCell::new(None);
             let container_ready = !iso || s.verified.as_ref().is_some_and(|verified| {
-                movie.inspect(&s.path, s.size, |range| verified.contains(range))
+                movie.inspect(&s.path, s.size, |range| {
+                    let have = verified.contains(range.clone());
+                    if !have && missing.borrow().is_none() {
+                        *missing.borrow_mut() = Some(range);
+                    }
+                    have
+                })
             });
+            if iso {
+                self.metadata.push((s.hash.clone(), s.file as usize, missing.into_inner()));
+            }
             let seconds = if iso {
                 if container_ready { movie.duration() } else { None }
             } else if let Some(cached) =

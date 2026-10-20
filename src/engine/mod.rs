@@ -40,6 +40,7 @@ mod bus;
 #[cfg(test)]
 mod bus_receiving_tests;
 mod watch;
+pub(crate) mod playback;
 pub(crate) mod peers;
 mod tracker_edit;
 mod queue;

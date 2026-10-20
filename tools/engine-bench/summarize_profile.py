@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import struct
+from elf_symbols import FunctionRanges
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument("counters", type=Path)
@@ -60,12 +61,20 @@ for path, addresses in by_file.items():
         symbols[path] += sum(addresses.values())
         continue
     items = list(addresses)
+    bounds = FunctionRanges(path)
     for begin in range(0,len(items),1000):
         batch = items[begin:begin+1000]
         result = subprocess.check_output(["addr2line","-f","-C","-e",path,*map(hex,batch)],text=True).splitlines()
         for index, address in enumerate(batch):
             symbol = result[index*2]
-            if symbol == "??": symbol = Path(path).name + ":unresolved"
+            location = result[index*2+1]
+            if location.startswith("??:"):
+                # Stripped objects can resolve any PC after an exported symbol
+                # to that name, even outside its function. Require a bounded
+                # symbol before trusting attribution without DWARF line data.
+                symbol = bounds.containing(address) or Path(path).name + ":unresolved"
+            elif symbol == "??":
+                symbol = Path(path).name + ":unresolved"
             symbols[symbol] += addresses[address]
 total = sum(counts.values())
 allocation_file = args.counters.parent / "allocations.json.live"

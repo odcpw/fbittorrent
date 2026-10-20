@@ -76,3 +76,20 @@ activity, both crossings, silent magnitude changes and the arming race;
 `cargo test --locked -p fbittorrent receiving_payload_wakes_observer` uses a
 barrier on actual loopback peer storage to rule out completion or periodic
 sampling as a substitute for the event.
+
+# Verified container metadata demand (watch while downloading, 2026-10-20)
+
+`ManagedTorrent::prioritize_metadata` supplies one validated file-relative byte
+range to the existing streaming priority iterator, without opening payload files,
+creating a reader or changing the saved file selection. The range is represented
+by two piece indices, traversed lazily, and may be replaced or cleared. This lets
+the daemon first fetch an MP4 tail box header and then every piece of its complete
+moov, even when it spans many small pieces; first/last-piece priority alone missed
+the header. Existing verified reads and normal file ordering are unchanged.
+
+Tests: `cargo test --locked -p librqbit --no-default-features --features rust-tls
+ torrent_state::streaming::tests -- --nocapture`; app `daemon::watch` tests;
+`python3 agent_ergonomics_audit/audit/regression_tests/watch_player.py
+ target/stabilize-debug/debug/fbittorrent --case mp4_tail` exercises real magnet
+review, early readiness, full verified moov and actual mpv playback with 16 KiB
+pieces. The same runner covers seek, pause, slow peer, EOF and shutdown.
