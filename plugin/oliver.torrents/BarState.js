@@ -7,7 +7,7 @@ function describe(svc) {
   svc=svc || {}
   var status=svc.status || {}, summary=svc.store ? svc.store.summary : {}, counts=summary.counts || (svc.store ? svc.store.counts : {})
   var result={state:"stopped", glyph:Glyphs.download, tone:"dim", rate:"", turtle:summary.alt===true,
-    tooltip:"fbittorrent is not running · click to start"}
+    tooltip:"fbittorrent stopped · click to start"}
   if (!svc.online) {
     result.turtle=false
     if (svc.startupRequested) { result.state="starting"; result.tooltip="Starting fbittorrent…" }

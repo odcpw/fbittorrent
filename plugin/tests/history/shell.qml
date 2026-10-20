@@ -19,7 +19,7 @@ ShellRoot {
     var bounded=[];for(i=0;i<700;i++)bounded.push(i)
     plot.samples=bounded;check("chart stays bounded and ordered",plot.points.length===60 && plot.points[0]===640 && plot.points[59]===699,plot.points)
     plot.samples=[0,0,0];check("idle data is zero, without invented interpolation",plot.maximum===1 && plot.points.every(function(n){return n===0}),plot.points)
-    svc.online=false;check("offline does not show retained data as live",rates.history.length===0 && rates.rateText==="Offline",rates.rateText)
+    svc.online=false;check("stopped does not show retained data as live",rates.history.length===0 && rates.rateText==="Stopped",rates.rateText)
     svc.online=true;svc.status={dl:8192,up:0,history:[1,3,8]};check("data replacement updates immediately",rates.history.length===3 && rates.history[2]===8,rates.history)
     finish.start()
   }
