@@ -74,7 +74,9 @@ impl Daemon {
         let slot=self.slot.read().unwrap_or_else(|e|e.into_inner());
         let mut stats=self.stats.lock().unwrap();
         if let Slot::Running(app)=&slot.slot {stats.observe(slot.engine_epoch,app.dispatcher().transfer_totals());}
-        if let Err(error)=stats.save(Instant::now(),false){eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        if let Err(error)=stats.save_cancellable(Instant::now(),false,Some(&self.stopping)){
+            if !self.is_stopping() || !stats::checkpoint_deferred(&error) {eprintln!("ERROR stats save failed error={:?}",format!("{error:#}"));}
+        }
         (stats.session.clone(),stats.all_time.clone())
     }
 
@@ -207,7 +209,7 @@ impl Daemon {
         // The sampler waits up to a second; the first slot also wakes it.
         if let Some(bus)=self.event_bus.lock().unwrap().upgrade(){if initialized {bus.engine_changed(epoch,state);} else {bus.refresh();}}
         if let Slot::Running(app)=&mut old {
-            app.drain(Duration::from_secs(4));
+            slot::drain_engine(app, Duration::from_secs(4))?;
             self.stats.lock().unwrap().observe(old_epoch,app.dispatcher().transfer_totals());
         }
         Ok(old)
@@ -486,8 +488,12 @@ pub fn run_serve(mut cfg: Config, idle_exit_secs: Option<u64>, no_notify: bool) 
     drop(hook);
     let reason = reason?;
     if let Err(error)=stats_saved {
-        eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
-        if reason!=StopReason::Panic {return Err(error);}
+        if stats::checkpoint_deferred(&error) {
+            eprintln!("INFO stats retained previous durable checkpoint reason=shutdown_deadline");
+        } else {
+            eprintln!("ERROR stats drain save failed error={:?}",format!("{error:#}"));
+            if reason!=StopReason::Panic {return Err(error);}
+        }
     }
     eprintln!(
         "INFO daemon stopped reason={reason:?} code={}",

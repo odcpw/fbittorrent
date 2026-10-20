@@ -53,7 +53,7 @@ fn queue_maintenance_shutdown_is_quiet() {
         drop(ledger);
         println!("maintenance_keep_running={}", tick.await);
     });
-    assert!(app.drain(Duration::from_secs(2)));
+    crate::daemon::slot::drain_engine(&mut app, Duration::from_secs(2)).unwrap();
     drop(app);
     drop(InstanceLock::acquire_in(directory.join("runtime")).unwrap());
     std::fs::remove_dir_all(directory).unwrap();
@@ -87,6 +87,38 @@ fn quiesce_releases_observers_while_the_ledger_is_still_held() {
     });
     assert!(app.drain(Duration::from_secs(2)));
     drop(dispatcher);
+    drop(app);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn daemon_owner_rejects_a_failed_native_drain() {
+    use std::sync::mpsc;
+    let directory = review_directory("owner-drain-failure");
+    let mut app = test_app(&directory, &directory.join("downloads"), Ledger::default(), None);
+    let runtime = app.runtime.as_ref().unwrap();
+    let (entered, started) = mpsc::channel();
+    let (release, held) = mpsc::channel();
+    let (finished, complete) = mpsc::channel();
+    let work = task::spawn_blocking(runtime.cx(), move || {
+        entered.send(()).unwrap();
+        held.recv().unwrap();
+        finished.send(()).unwrap();
+    });
+    started.recv_timeout(Duration::from_secs(2)).unwrap();
+    let began = std::time::Instant::now();
+    let result = crate::daemon::slot::drain_engine(&mut app, Duration::from_millis(50));
+    let elapsed = began.elapsed();
+    // Reap our physically held work before assertions can unwind the fixture.
+    release.send(()).unwrap();
+    complete.recv_timeout(Duration::from_secs(2)).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !work.is_finished() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(result.unwrap_err().to_string().contains("did not drain"));
+    assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
     drop(app);
     std::fs::remove_dir_all(directory).unwrap();
 }

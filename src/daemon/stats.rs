@@ -7,6 +7,7 @@ use std::{
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::atomic::AtomicBool,
 };
 
 pub(crate) fn path() -> PathBuf {
@@ -20,6 +21,12 @@ pub(crate) fn read(path: &Path) -> Result<AllTimeTotals> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AllTimeTotals::default()),
         Err(error) => Err(error).context("reading statistics totals"),
     }
+}
+/// The last fully synced checkpoint stays valid when a stop interrupts the
+/// next temporary-file sync. A cancelled sync never reaches rename.
+pub(crate) fn checkpoint_deferred(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<std::io::Error>().is_some_and(|error|
+        matches!(error.kind(), std::io::ErrorKind::Interrupted | std::io::ErrorKind::TimedOut))
 }
 pub(crate) struct Stats {
     pub session: SessionTotals,
@@ -63,6 +70,9 @@ impl Stats {
         self.dirty |= delta != (0, 0, 0);
     }
     pub fn save(&mut self, now: Instant, drain: bool) -> Result<bool> {
+        self.save_cancellable(now, drain, None)
+    }
+    pub fn save_cancellable(&mut self, now: Instant, drain: bool, stop: Option<&AtomicBool>) -> Result<bool> {
         if !self.dirty
             || (!drain && now.saturating_duration_since(self.saved) < Duration::from_secs(30))
         {
@@ -75,6 +85,7 @@ impl Stats {
             .create(parent)?;
         let suffix = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
         let temporary = parent.join(format!(".stats-{}-{suffix}.tmp", std::process::id()));
+        let deadline = drain.then(|| Instant::now() + Duration::from_secs(1));
         let result = (|| -> Result<()> {
             let mut file = OpenOptions::new()
                 .write(true)
@@ -83,12 +94,12 @@ impl Stats {
                 .open(&temporary)?;
             serde_json::to_writer(&mut file, &self.all_time)?;
             file.write_all(b"\n")?;
-            file.sync_all()?;
+            crate::durable_sync::sync_all_until(&file, stop, deadline)?;
             fs::rename(&temporary, &self.path)?;
-            File::open(parent)?.sync_all()?;
+            crate::durable_sync::sync_all_until(&File::open(parent)?, stop, deadline)?;
             Ok(())
         })();
-        if result.is_err() {
+        if result.as_ref().err().is_some_and(|error| !checkpoint_deferred(error)) {
             let _ = fs::remove_file(&temporary);
         }
         result.context("saving statistics totals")?;
@@ -154,6 +165,10 @@ mod tests {
         restored.observe(3, (20, 7, 1));
         assert_eq!(restored.session.downloaded, 30);
         assert_eq!(restored.all_time.completed, 8);
+        let stopping = AtomicBool::new(true);
+        let cancelled = restored.save_cancellable(start + Duration::from_secs(62), false, Some(&stopping)).unwrap_err();
+        assert!(checkpoint_deferred(&cancelled));
+        assert_eq!(fs::read(&path).unwrap(), bytes, "cancelled checkpoint cannot replace acknowledged totals");
         // Failed atomic replacement leaves the previous file byte-for-byte intact.
         fs::set_permissions(&root, fs::Permissions::from_mode(0o500)).unwrap();
         assert!(

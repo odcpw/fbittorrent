@@ -371,12 +371,6 @@ impl AppEngine {
                 ));
             }
             if !drained {self.dispatcher.inner.resume.abandon_clean();}
-            if drained {
-                crate::native_runtime::log_teardown(format!(
-                    "INFO engine drained in {} ms",
-                    began.elapsed().as_millis()
-                ));
-            }
         }
         drained
     }
