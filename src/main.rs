@@ -20,6 +20,7 @@ mod durable_sync;
 mod network_app;
 mod outbound;
 mod public_text;
+mod user_messages;
 mod ipc;
 mod imdb;
 mod qbt;

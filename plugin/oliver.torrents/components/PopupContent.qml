@@ -40,6 +40,17 @@ PanelKeyCatcher {
     else for(var k=0;k<items.length;k++)entryModel.setProperty(k,"itemData",items[k])
     entries=items
   }
+  // Membership/state rebuilds use torrentsChanged; ordinary row updates must
+  // also replace the visible delegate snapshot (including a cleared error).
+  function refreshRows(first,last){
+    if(!owner.opened)return
+    for(var i=first;i<=last;i++){
+      var row=svc.torrentModel.get(i).uiTorrent
+      for(var j=0;j<entries.length;j++)if(!entries[j].header && entries[j].torrent.hash===row.hash)
+        entryModel.setProperty(j,"itemData",{header:false,torrent:row,index:entries[j].index})
+    }
+  }
+  Connections {target:svc.torrentModel;function onDataChanged(first,last,roles){root.refreshRows(first.row,last.row)}}
   implicitHeight:column.implicitHeight
   function registerConfirm(hash,strip){confirms[hash]=strip}
   function unregisterConfirm(hash,strip){if(confirms[hash]===strip)delete confirms[hash]}
@@ -121,7 +132,7 @@ PanelKeyCatcher {
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs
-          HeaderAction {host:root;index:0;iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
+          HeaderAction {host:root;index:0;objectName:"popup-add";iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
           HeaderAction {host:root;index:1;iconText:"▢";tooltipText:"Open window (w)";onClicked:root.dashboard()}
           HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.online && svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
           HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:svc.online ? "Stop fbittorrent (Q)" : "Start fbittorrent";enabled:!svc.startupRequested;onClicked:root.power()}

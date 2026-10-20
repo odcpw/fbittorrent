@@ -117,8 +117,20 @@ impl Config {
         }
         let raw = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
-        let cfg: Self = toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
-        cfg.validate()?;
+        let parsed: toml::Value=toml::from_str(&raw).map_err(|error:toml::de::Error| {
+            let line=error.span().map(|span|raw.as_bytes()[..span.start.min(raw.len())].iter().filter(|b|**b==b'\n').count()+1).unwrap_or(1);
+            crate::agent::AppError::new(crate::agent::Code::Usage,format!("config.toml has a syntax error near line {line}. Fix the file, then retry.")).hint(format!("Edit {}",path.display()))
+        })?;
+        if let Some(table)=parsed.as_table() {
+            let known=serde_json::to_value(Self::default()).unwrap();
+            for key in table.keys().filter(|key|known.get(key.as_str()).is_none()) {
+                if let Some(correct)=known.as_object().unwrap().keys().find(|correct|near_key(key,correct)) {
+                    return Err(crate::agent::AppError::new(crate::agent::Code::Usage,format!("Unknown setting {key:?} in config.toml. Use {correct:?}, then retry.")).into());
+                }
+            }
+        }
+        let cfg: Self = parsed.try_into().map_err(|_|crate::agent::AppError::new(crate::agent::Code::Usage,"config.toml has a setting with the wrong type. Check the setting values, then retry."))?;
+        cfg.validate().map_err(|error|crate::agent::AppError::new(crate::agent::Code::Usage,format!("Invalid config.toml setting: {error}. Fix the file, then retry.")))?;
         Ok(cfg)
     }
 
@@ -290,4 +302,23 @@ first_last=false
         assert_eq!(cfg.peer_port,16882);assert_eq!(cfg.save_path.as_deref(),Some("/tmp/private-fixture/downloads"));
         assert!(!toml::to_string(&cfg).unwrap().contains("engine"),"retired keys are dropped on the next save");
     }
+}
+
+// Recognize a one-character misspelling without rejecting unrelated keys left
+// by other tools. Values never enter the diagnostic (they may contain secrets).
+fn near_key(a:&str,b:&str)->bool {
+    if !a.is_ascii() || a.len()>128 || a.len().abs_diff(b.len())>1 {return false;}
+    let a=a.as_bytes();let b=b.as_bytes();
+    let prefix=a.iter().zip(b).take_while(|(a,b)|a==b).count();
+    let (a,b)=(&a[prefix..],&b[prefix..]);
+    if a.len()==b.len() {a.len()>=2 && a[0]==b[1] && a[1]==b[0] && a[2..]==b[2..] || !a.is_empty() && a[1..]==b[1..]}
+    else if a.len()>b.len() {a[1..]==*b}else{*a==b[1..]}
+}
+
+#[cfg(test)]
+#[test]
+fn misspelled_settings_are_recognized_without_values() {
+    for key in ["max_active_downlods","max_active_donwloads","max_active_download","max_activx_downloads"] {assert!(near_key(key,"max_active_downloads"),"{key}");}
+    assert!(!near_key("arbitrary_other_tool","max_active_downloads"));
+    assert!(!near_key("upload","upload"));
 }

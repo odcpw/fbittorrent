@@ -211,9 +211,19 @@ impl TuiApp {
                 format!(
                     "{} · {}",
                     format::state_cell(t).trim_end(),
-                    self.torrent_reason(t)
+                    if crate::user_messages::row(t).is_some() {format::state_word(t).into()}else{self.torrent_reason(t)}
                 ),
             )];
+            if let Some(message)=crate::user_messages::row(t) {
+                let width=rows[1].width.saturating_sub(1).max(1) as usize;
+                let mut line=String::new();
+                for word in message.split_whitespace() {
+                    if !line.is_empty() && dw(&line)+1+dw(word)>width {lines.push(Line::styled(std::mem::take(&mut line),th.err()));}
+                    if !line.is_empty() {line.push(' ');}
+                    line.push_str(word);
+                }
+                if !line.is_empty() {lines.push(Line::styled(line,th.err()));}
+            }
             if let Some(playable) = t.playable.as_ref() {
                 let ready = if !playable.ready { "Buffering" }
                     else if playable.stall_free==Some(true) || (playable.stall_free.is_none() && playable.buffered_s.is_some_and(|s|s>=120)) {"▶ Ready to watch"}
@@ -244,9 +254,6 @@ impl TuiApp {
             lines.push(kv("origin", t.origin.clone().unwrap_or_else(|| "unknown".into())));
             if let Some(detail)=self.store.details.values().find(|row|row.torrent.hash.as_str()==details.hash && row.torrent.size.is_some()) {
                 lines.push(kv("network",if detail.private {"Private torrent (no DHT, no PeX)"}else{"Public torrent"}.into()));
-            }
-            if let Some(error) = &t.error {
-                lines.push(Line::styled(error.clone(), th.err().bold()));
             }
             let height = lines.len().min(u16::MAX as usize) as u16;
             let sections = Flex::vertical()

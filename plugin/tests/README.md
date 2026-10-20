@@ -12,6 +12,16 @@ are required.
   `--installed` additionally checks current installed themes; `--refresh` explicitly
   copies them and the owner's current colors into `contracts/ui/themes/`.
 - `service-tests.py <debug-binary>`: an owned real daemon and two widget instances.
+- `idle_cost.py --binary <binary> --check-only --assert-quiet --output <json>`:
+  the installed bar with and without the plugin, stopped/idle/transferring, popup
+  closed/open. Rejects recurring maintenance ticks; the transfer is localhost
+  with client upload disabled. For CPU measurements omit `--check-only` and
+  `--assert-quiet`, and use the owner's release-lock/memory-scope wrapper. Two
+  reversed-order repeats default to 30-second windows, with no IPC during each
+  sample. CPU comes from per-thread scheduler runtime; voluntary context
+  switches are a sleep/wake-cycle proxy, not kernel wakeup tracepoints.
+- `run-qs.py idle_clock plugin/tests/idle-clock`: one-shot protocol/add/settings
+  deadlines, Undo expiry and cancellation, with no idle heartbeat.
 - `FBT_TEST_VISUAL=1 qs-visual.sh popup downloading --binary <debug-binary>`:
   actual native popup over a real local seed/client transfer, inside a private
   headless Sway compositor using pixman. No owner display socket is inherited.

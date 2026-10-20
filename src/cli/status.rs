@@ -51,6 +51,10 @@ fn collect(client:&Client,cfg:&Config)->Result<Value> {
     value["session"]=stats["session"].clone();
     value["connection"]=json!("api");value["backend"]=json!("native");value["engine"]=json!("native");
     if let Some(history)=summary.as_ref().and_then(|s|s.get("history")) {value["history"]=history.clone();}
+    if let Some(network)=summary.as_ref().and_then(|s|s.get("network")) {
+        value["network"]=network.clone();
+        if network["state"]=="waiting" {value["hint"]=json!(format!("{}. Connect it or change VPN interface in Settings.",network["message"].as_str().unwrap_or("Waiting for VPN")));}
+    }
     value["app_open"]=json!(summary.as_ref().is_some_and(|v|v["daemon"]["busy_reasons"].as_array()
         .is_some_and(|reasons|reasons.iter().any(|reason|reason=="interactive"))));
     value["dl"]=json!(transfer["dl_bps"].as_u64().unwrap_or(0));

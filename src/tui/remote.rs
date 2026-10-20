@@ -88,7 +88,7 @@ impl TuiApp {
         (torrent.state == api::TorrentState::Done || torrent.completed_at.is_some()) && !torrent.seed
     }
     pub(super) fn torrent_paused(&self, torrent: &Torrent) -> bool {
-        torrent.intent == api::Intent::Pause
+        torrent.intent == api::Intent::Pause || torrent.state==api::TorrentState::Error
     }
     pub(super) fn network_banner(&self) -> (bool, std::borrow::Cow<'_, str>) {
         if let Some(network) = &self.store.network {

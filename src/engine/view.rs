@@ -219,6 +219,7 @@ impl TorrentView {
         view.populate_stats(&stats, metadata.is_some());
         view.effective_download_limit_bps=handle.effective_download_bps();
         view.seeds = handle.live().map(|live| live.connected_seed_count() as u64);
+        if view.state==TorrentState::Stalled && handle.shared().tracker_stats.all_failed() {view.error=Some(crate::user_messages::TRACKERS.into());}
         if let Some(metadata) = metadata {
             view.piece_length = Some(u64::from(metadata.info.lengths().default_piece_length()));
             let content = if metadata.file_infos.len() == 1 {

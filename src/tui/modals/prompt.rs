@@ -98,7 +98,7 @@ impl TuiApp {
                 let raw=p.input.value().to_string();
                 let value = raw.trim().to_string();
                 let kind = p.kind.clone();
-                let (seq, fl, seed) = p.add_flags;
+                let (_, _, seed) = p.add_flags;
                 self.close_prompt();
                 if let PromptKind::SettingLimit(index)=kind{return self.apply_limit_input(index,&value);}
                 if kind==PromptKind::SettingPeerPort {return self.apply_peer_port_input(&value);}
@@ -114,11 +114,9 @@ impl TuiApp {
                 if value.is_empty() { return Cmd::none(); }
                 match kind {
                     PromptKind::AddMagnet => {
-                        let label = crate::magnet_name(&value).unwrap_or_else(|| value.chars().take(40).collect());
                         let mut opts = self.add_opts();
                         opts.seed = seed;
-                        let flags = format!("{}{}{}", if seq { "S" } else { "" }, if fl { "F" } else { "" }, if seed { "U" } else { "" });
-                        self.action(format!("added {label} [{flags}]"), move |c| c.add_url(&value, &opts))
+                        self.action_result(move |c| c.add_url(&value, &opts))
                     }
                     PromptKind::AddFeed => {
                         let name = crate::host_of(&value);

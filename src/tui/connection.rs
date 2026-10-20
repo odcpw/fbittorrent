@@ -59,15 +59,14 @@ impl TuiApp {
 
     pub(super) fn action<F>(&self, label: impl Into<String>, f: F) -> Cmd<Msg>
     where F: FnOnce(&Client) -> anyhow::Result<()> + Send + 'static {
-        let presence = self.presence.clone();
         let label = label.into();
-        Cmd::task(move || {
-            let c = Client::new(presence);
-            match f(&c) {
-                Ok(()) => Msg::ActionDone(Ok(label)),
-                Err(e) => Msg::ActionDone(Err(e.to_string())),
-            }
-        })
+        self.action_result(move |client|f(client).map(|()|label))
+    }
+
+    pub(super) fn action_result<F>(&self, f:F)->Cmd<Msg>
+    where F:FnOnce(&Client)->anyhow::Result<String>+Send+'static {
+        let presence=self.presence.clone();
+        Cmd::task(move ||Msg::ActionDone(f(&Client::new(presence)).map_err(|error|error.to_string())))
     }
 
     pub(super) fn add_opts(&self) -> AddOptions {
