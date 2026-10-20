@@ -163,7 +163,6 @@ def namespace_case(name,binary):
                     h.wait_for(resumed,'five-second sampler retries and downloads more bytes without start',timeout=15)
                 else:
                     c.call('torrents.start',dict(hashes=[item.info_hash]))
-                    case.check(True,'explicit start retries the disk-full record immediately','torrents.start acknowledged by the engine')
             h.stop_serve(p);seed.stop_serve(sp)
 
 

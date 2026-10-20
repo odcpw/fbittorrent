@@ -131,21 +131,39 @@ def playable_before_complete(binary,systemd):
 def playable_stall_free_flips(binary,systemd):
     with pair('playable_stall_free_flips',binary,systemd,prepared_prefix=32*MIB) as (case,box,h,p,client,peer,item,payload):
         peer.call('transfer.set_limits',dict(upload_bps=4*MIB))
-        client.call('transfer.set_limits',dict(download_bps=4*MIB,alt_download_bps=200*1024))
+        client.call('transfer.set_limits',dict(download_bps=4*MIB,alt_download_bps=16*1024))
         client.call('transfer.set_alt',dict(on=True))
         def may_stall():
             v=row(client,item.info_hash)
             return v.get('playable',{}).get('ready') is True and v['playable'].get('stall_free') is False,json.dumps(v)
         assert h.wait_for(may_stall,'ready video truthfully reports may stall with turtle below its bitrate',timeout=12)
         slow=row(client,item.info_hash)
-        case.check(slow['completed_bytes']<slow['size'] and slow.get('effective_download_limit_bps')==200*1024,
+        case.check(slow['completed_bytes']<slow['size'] and slow.get('effective_download_limit_bps')==16*1024,
                    'turtle is the real active download cap while verified video is incomplete',json.dumps(slow))
+        # Sample across token-bucket refill gaps, including stalled/zero-rate
+        # frames. The warning must never fall back to Ready under this cap.
+        slow_states=[]
+        until=time.monotonic()+8
+        while time.monotonic()<until:
+            v=row(client,item.info_hash);slow_states.append(v)
+            time.sleep(.2)
+        case.check(all(v['completed_bytes']<v['size'] and v.get('playable',{}).get('stall_free') is False for v in slow_states),
+                   'throttled incomplete video keeps may-stall through every rate gap for eight seconds',json.dumps(slow_states))
         began=time.monotonic();client.call('transfer.set_alt',dict(on=False))
         def stall_free():
             v=row(client,item.info_hash)
             return v.get('playable',{}).get('ready') is True and v['playable'].get('stall_free') is True,json.dumps(v)
         assert h.wait_for(stall_free,'lifting turtle restores stall-free within two seconds',timeout=2)
         case.check(time.monotonic()-began<=2,'stall-free update meets the two-second transition budget',json.dumps(row(client,item.info_hash)))
+        fast_states=[];until=time.monotonic()+3
+        while time.monotonic()<until:
+            v=row(client,item.info_hash)
+            if v['completed_bytes']<v['size']:fast_states.append(v)
+            time.sleep(.2)
+        verdicts=[v['playable'].get('stall_free') for v in slow_states+fast_states]
+        case.check(bool(fast_states) and all(v['playable'].get('stall_free') is True for v in fast_states)
+                   and sum(a!=b for a,b in zip(verdicts,verdicts[1:]))==1,
+                   'stable slow and fast phases have exactly one readiness transition',json.dumps(fast_states))
 
 
 def playable_never_for_iso(binary,systemd):

@@ -12,7 +12,7 @@ from fbtlog import Case,suite_status
 import private_net
 private_net.enter()
 with Case('qs_private_net','boundary') as case:
-    case.check(True,'network/mount namespaces are new, only lo exists, no external route',private_net.require())
+    private_net.require()
     env=dict(os.environ,FBT_PRIVATE_PARENT_NET=os.readlink('/proc/self/ns/net'))
     child=subprocess.run([sys.executable,'-c','import private_net; private_net.require()'],cwd=Path(__file__).parent,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     case.check(child.returncode!=0 and 'namespace was not created' in child.stderr,'forged active marker is rejected before any mount/interface mutation',child.stderr.strip())

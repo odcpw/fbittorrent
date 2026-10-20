@@ -115,7 +115,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "torrents.stop", mutating: true, idempotent: true, since: "P1-06",
         args: "`hashes: [hash]`", result: "`{state: \"done\", stopped: [hash]}`" },
     Operation { name: "torrents.remove", mutating: true, idempotent: false, since: "P1-06",
-        args: "`hashes: [hash]`, `delete_files: bool` (required)", result: "`{state: enum(done|pending), undo_until: ts?}` (pending when deleting files; `undo_until` only when files are kept)" },
+        args: "`hashes: [hash]`, `delete_files: bool` (required)", result: "`{state: enum(done|pending), undo_until: ts?}` (pending admission, then mutation.result; `undo_until` only when files are kept)" },
     Operation { name: "torrents.files", mutating: false, idempotent: false, since: "P1-06",
         args: "`hash: hash`", result: "`{files: [File]}`" },
     Operation { name: "torrents.set_files", mutating: true, idempotent: true, since: "P1-06",

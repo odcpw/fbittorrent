@@ -35,7 +35,7 @@ ShellRoot {
     console.log("FBTQS-PASS coalesced_renewal")
     stage="transient_retry"
     // A transient rejection of the current group must not silently lose it.
-    client.subscribeAll()
+    client.subscribeAll(true)
     while(index<writes.length){var old=writes[index++];if(old.op==="unsubscribe")reply(old,{state:"done"});else if(old.op==="subscribe")reply(old,null,{code:"busy",message:"transient budget",retryable:true});else reply(old,{})}
     var before=writes.length;clock=999;client.tick();require(writes.length===before,"retry respects its bounded delay")
     clock=1000;client.tick();require(writes.length>before && writes[writes.length-1].op==="subscribe","a rejected current base group is retried")

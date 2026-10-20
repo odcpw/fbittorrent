@@ -16,7 +16,7 @@ from fbtlog import Case,suite_status
 from tui_smoke import PaneUi
 from visual import Capture
 
-TOKENS=('0123456789abcdef0123456789abcdef','QUJDREVGR0hJSktMTU5PUFFS','shortkey-a','shortkey-b')
+TOKENS=('0123456789abcdef0123456789abcdef','QUJDREVGR0hJSktMTU5PUFFS','shortkey-a','shortkey-b','synthetic-user','synthetic-password')
 SECRETS=tuple(set(TOKENS+tuple(urllib.parse.quote(v,safe='') for v in TOKENS)))
 def clean(value):return all(secret not in str(value) for secret in SECRETS)
 
@@ -41,10 +41,10 @@ def run(binary):
         fixtures.path_shim('notify-send','exit 0',box.root)
         with fixtures.HttpFixture(box.root,{}) as http:
             a=http.base+'/'+TOKENS[0]+'/announce?passkey='+TOKENS[2]
-            b=http.base+'/'+TOKENS[1]+'/announce?token='+TOKENS[3]
+            b=http.base.replace('://','://'+TOKENS[4]+':'+TOKENS[5]+'@')+'/'+TOKENS[1]+'/announce?token='+TOKENS[3]
             for url,token,key in [(a,TOKENS[0],TOKENS[2]),(b,TOKENS[1],TOKENS[3])]:
                 path=urllib.parse.urlsplit(url).path
-                reason='denied '+token+' '+key+' at '+url
+                reason='denied '+token+' '+key+' at '+url+' related '+b
                 http.routes[path]=dict(base64=base64.b64encode(fixtures.bencode({'failure reason':reason})).decode())
             fixture=d.tracker_live_fixture(box,a,name='private-tracker-fixture.bin')
             native.prepare_imdb_fixture(box.env,['private-tracker-fixture.bin'])
@@ -64,7 +64,7 @@ def run(binary):
                                and len({row['url'].split('#')[0] for row in current})==1,
                                'identical redacted endpoints retain two distinct opaque removal identities',client.diagnostic(current))
                     client.call('torrents.add_tracker',dict(hash=hash_,url=first),error='invalid_args')
-                    client.call('torrents.add_tracker',dict(hash=hash_,url='ftp://tracker.invalid/'+TOKENS[0]),error='invalid_args')
+                    client.call('torrents.add_tracker',dict(hash=hash_,url='ftp://'+TOKENS[4]+':'+TOKENS[5]+'@tracker.invalid/'+TOKENS[0]),error='invalid_args')
                     topic='torrent:'+hash_+'.trackers'
                     client.call('subscribe',dict(topics=[topic,'log']))
                     def snapshot():

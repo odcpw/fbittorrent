@@ -49,15 +49,12 @@ def run(binary):
                 client.hello();row=client.call('torrents.get',dict(hash=leftover))['result']['torrent']
                 case.check(not row['staged'] and row['intent']=='run','a stage left by the old shell accepts one new review and Enter commits it',json.dumps(row))
             pid=q.child.pid;assert setup()['actions']==[] and q.child.pid==pid
-            case.check(True,'unchanged setup is idempotent and does not restart the shell',str(pid))
             dashboard.write_text(current+'\n// changed installed copy\n');fixtures.path_shim('omarchy-restart-shell','exit 7',box.root)
             setup(expected=1);assert not stamp.exists()
             restore_restart();setup();assert stamp.exists() and len(restarts)==2
-            case.check(True,'a failed restart reports failure and leaves the next setup retryable',str(restarts))
             setup('link');assert installed.is_symlink() and len(restarts)==3
             q.shell('summon','{}');q.wait(lambda:q.state()['code']=='')
             assert setup('link')['actions']==[]
-            case.check(True,'copy-to-link recreates the shell once, then an unchanged link is idempotent',str(restarts))
             assert process.child.poll() is None,'plugin reload never restarts the torrent daemon'
         finally:
             server.shutdown();server.server_close();thread.join(timeout=2);q.close()

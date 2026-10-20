@@ -5,6 +5,7 @@ import qs.Commons as Commons
 import qs.Ui as Ui
 import "../components" as Components
 import "../Model.js" as Model
+import "../TrackerText.js" as TrackerText
 
 FocusScope {
   id:root
@@ -17,7 +18,7 @@ FocusScope {
   readonly property bool editing:viewModel.modal==="add"
   readonly property bool dialogOpen:!!viewModel.modal
   readonly property bool narrow:width<Commons.Style.space(1050)
-  readonly property var viewState:({rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused})
+  function snapshot(){return {rss:viewModel,rssNarrow:narrow,focus:editing ? "rss-input" : viewModel.pane,cancelFocused:viewModel.modal==="remove" && removeConfirm.cancelFocused}}
   property string focusedModal:""
   signal changed()
   signal dismissRequested()
@@ -45,7 +46,7 @@ FocusScope {
     if(event.key===Qt.Key_End || event.text==="G"){flow.move(0,-1);return true}
     if(event.key===Qt.Key_PageDown){flow.move(10);return true}
     if(event.key===Qt.Key_PageUp){flow.move(-10);return true}
-    if(event.text==="m" || event.text==="M"){flow.read(event.text==="M");return true}
+    if(event.text==="m" || event.text==="M" || event.key===Qt.Key_Space){flow.read(event.text==="M");return true}
     if(event.text==="r" || event.text==="R"){flow.refresh(event.text==="R");return true}
     if(event.text==="n"){flow.addOpen();return true}
     if(event.text==="x" || event.text==="d"){flow.removeOpen();return true}
@@ -55,7 +56,6 @@ FocusScope {
   }
   Keys.priority:Keys.BeforeItem
   Keys.onPressed:function(event){if(root.handleKey(event))event.accepted=true}
-  onViewStateChanged:changed()
   Component.onCompleted:flow.mount()
   Component.onDestruction:flow.hide()
   onViewModelChanged:{if(focusedModal===viewModel.modal)return;focusedModal=viewModel.modal;if(viewModel.modal==="add")Qt.callLater(function(){url.text="";name.text="";url.forceActiveFocus()});else if(viewModel.modal==="remove")Qt.callLater(function(){removeConfirm.reset()});else Qt.callLater(function(){root.focusView();root.focusRequested()})}
@@ -88,7 +88,7 @@ FocusScope {
               borderSpec:Commons.Border.controlSpec(modelData.id===root.viewModel.feed ? "focus" : "normal",Commons.Color.foreground,Commons.Color.accent)
               Column {anchors.fill:parent;anchors.margins:Commons.Style.spacing.sm
                 Text {width:parent.width;text:modelData.name;textFormat:Text.PlainText;elide:Text.ElideRight;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
-                Text {width:parent.width;text:modelData.loading ? "Refreshing…" : modelData.error ? modelData.error : modelData.unread+" unread";textFormat:Text.PlainText;elide:Text.ElideRight;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.caption}
+                Text {width:parent.width;text:modelData.loading ? "Refreshing…" : modelData.error ? TrackerText.message(modelData.error,modelData.url) : modelData.unread+" unread";textFormat:Text.PlainText;elide:Text.ElideRight;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.caption}
               }
               MouseArea {anchors.fill:parent;onClicked:{root.focusView();root.flow.chooseFeed(modelData.id)} onDoubleClicked:{root.flow.pane="feeds";root.flow.chooseFeed(modelData.id);root.flow.activate()}}
             }
@@ -129,7 +129,7 @@ FocusScope {
         }
       }
     }
-    Components.KeyHint {Layout.fillWidth:true;text:root.viewModel.message || (root.currentFeed && root.currentFeed.error) || "Enter items / review · m/M read · r/R refresh · n add feed · x remove feed · u unread · ← feeds"}
+    Components.KeyHint {Layout.fillWidth:true;text:TrackerText.message(root.viewModel.message || (root.currentFeed && root.currentFeed.error),root.currentFeed ? root.currentFeed.url : "") || "Enter items / review · m/M read · r/R refresh · n add feed · x remove feed · u unread · ← feeds"}
   }
   Rectangle {anchors.fill:parent;visible:root.dialogOpen;color:Commons.Util.alpha(Commons.Color.background,0.8);MouseArea {anchors.fill:parent;onClicked:{}}}
   Components.PaneFrame {
@@ -139,7 +139,7 @@ FocusScope {
       Text {text:"Add RSS feed";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading}
       Ui.TextField {id:url;Layout.fillWidth:true;placeholderText:"Feed URL (http:// or https://)";maximumLength:4096}
       Ui.TextField {id:name;Layout.fillWidth:true;placeholderText:"Name (optional)";maximumLength:256}
-      Text {Layout.fillWidth:true;visible:!!root.viewModel.message;text:root.viewModel.message;textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
+      Text {Layout.fillWidth:true;visible:!!root.viewModel.message;text:TrackerText.message(root.viewModel.message,url.text);textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       RowLayout {Ui.Button {text:"Cancel";onClicked:root.flow.cancel()} Ui.Button {text:"Add feed";enabled:!!url.text.trim();onClicked:root.flow.add(url.text,name.text)}}
     }
     Components.ConfirmStrip {id:removeConfirm;anchors.fill:parent;visible:root.viewModel.modal==="remove";message:root.currentFeed ? "Remove feed “"+root.currentFeed.name+"”? Downloaded files are kept." : "";confirmText:"Remove feed";onCanceled:root.flow.cancel();onConfirmed:root.flow.remove()}

@@ -183,14 +183,19 @@ def notify_queue_bounded(binary,systemd):
 def notify_vpn_once_per_transition(binary,systemd):
     with owned('notify_vpn_once_per_transition',binary,systemd) as (case,box,h,p,client):
         began=time.monotonic()
-        for interface,ready in [('fbmissing0',False),('lo',True),('fbmissing0',False)]:
+        for index,(interface,ready) in enumerate([('fbmissing0',False),('lo',True),('fbmissing0',False)]):
             config(box,network_interface=interface)
             client.call('app.restart',dict(scope='engine'))
             h.wait_for(lambda:((value:=client.call('app.network')['result']['state'])['ready']==ready and value.get('selection')==interface,json.dumps(value)), 'new private network selection is visible')
+            # The child pool is concurrent. Observe each first notification
+            # before advancing so the argv log has a defined causal order.
+            if index<2: await_calls(h,box,index+1)
         elapsed=time.monotonic()-began
         await_calls(h,box,2);rows=observe(case,box)
         case.check(elapsed<=2 and len(rows)==2 and rows[0][-2]=='Waiting for fbmissing0' and rows[1][-2]=='VPN back; 0 downloads resumed',
                    'three real network transitions within two seconds produce at most two named notifications',json.dumps(dict(seconds=elapsed,calls=rows)))
+        h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='parked',json.dumps(info)),
+                   'the final missing interface has fully parked this owner before teardown')
 
 
 def notify_cli_policy(binary,systemd):

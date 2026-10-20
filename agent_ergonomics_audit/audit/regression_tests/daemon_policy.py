@@ -186,6 +186,8 @@ def idle_exit_mutation_keeps_alive(binary, systemd):
 
 def idle_exit_download_keeps_alive(binary, systemd):
     with d.Case('daemon', 'idle_exit_download_keeps_alive') as case, d.Sandbox() as seedbox, d.Sandbox() as box, d.Harness(case, binary, seedbox, systemd) as seedh, d.Harness(case, binary, box, systemd) as h:
+        seed = seedh.start_serve(idle_exit_secs=0)
+        if not (seedh.receive_ready() and seedh.wait_engine()): raise RuntimeError('private seed not ready')
         cfg = tomllib.loads((Path(seedbox.env['XDG_CONFIG_HOME']) / 'fbittorrent/config.toml').read_text())
         peer = socket.inet_aton('127.0.0.1') + struct.pack('>H', cfg['peer_port'])
         body = fixtures.bencode(dict(interval=1, peers=peer))
@@ -193,8 +195,6 @@ def idle_exit_download_keeps_alive(binary, systemd):
             payload = seedbox.downloads / 'idle-download.bin'
             payload.write_bytes(bytes(range(256)) * 32768)
             item = fixtures.torrent_fixture(seedbox.root, [payload], tracker=tracker.base + '/announce')
-            seed = seedh.start_serve(idle_exit_secs=0)
-            if not (seedh.receive_ready() and seedh.wait_engine()): raise RuntimeError('private seed not ready')
             with d.ApiConn(seedh) as seedclient:
                 hello(seedclient)
                 seedclient.call('torrents.add', dict(source=dict(path=str(item.torrent)), save_path=str(seedbox.downloads), seed=True))

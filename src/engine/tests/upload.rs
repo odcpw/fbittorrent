@@ -2,7 +2,7 @@ use librqbit::{create_torrent, spawn_utils::BlockingSpawner, CreateTorrentOption
 use std::time::Instant;
 // Real wire requests deliberately ignore the choke: permission must hold even
 // against a peer that requests pieces without waiting for our unchoke.
-fn requested_payload(addr: std::net::SocketAddr, hash: &str) -> usize {
+fn requested_payload(addr: std::net::SocketAddr, hash: &str, expected: &[u8]) -> usize {
     use std::io::{Read, Write};
     let mut peer = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
     peer.set_read_timeout(Some(Duration::from_millis(500)))
@@ -21,23 +21,24 @@ fn requested_payload(addr: std::net::SocketAddr, hash: &str) -> usize {
     assert_eq!(handshake.len(), 68);
     peer.write_all(&handshake).unwrap();
     let mut response = [0; 68];
-    if peer.read_exact(&mut response).is_err() {
-        return 0;
-    }
+    peer.read_exact(&mut response).expect("a failed/slow handshake cannot prove zero upload");
+    assert_eq!(&response[..20], &handshake[..20]);
+    assert_eq!(&response[28..48], &handshake[28..48]);
     peer.write_all(&[0, 0, 0, 1, 2]).unwrap(); // interested
     let mut request = vec![0, 0, 0, 13, 6];
     request.extend_from_slice(&0u32.to_be_bytes());
     request.extend_from_slice(&0u32.to_be_bytes());
     request.extend_from_slice(&16384u32.to_be_bytes());
-    if peer.write_all(&request).is_err() {
-        return 0;
-    }
+    peer.write_all(&request).expect("the verified-piece request must reach the socket");
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut payload = 0;
+    let mut closed = false;
     while Instant::now() < deadline {
         let mut prefix = [0; 4];
-        if peer.read_exact(&mut prefix).is_err() {
-            break;
+        match peer.read(&mut prefix[..1]) {
+            Ok(0) => { closed = true; break; } // Explicit closure after our complete request.
+            Ok(_) => peer.read_exact(&mut prefix[1..]).unwrap(),
+            Err(error) => panic!("slow/failed request response cannot prove zero upload: {error}"),
         }
         let len = u32::from_be_bytes(prefix) as usize;
         assert!(len <= 65536, "bounded peer frame");
@@ -45,15 +46,16 @@ fn requested_payload(addr: std::net::SocketAddr, hash: &str) -> usize {
             continue;
         }
         let mut frame = vec![0; len];
-        if peer.read_exact(&mut frame).is_err() {
-            break;
-        }
+        peer.read_exact(&mut frame).unwrap();
         if frame[0] == 7 {
             assert!(len >= 9);
+            assert_eq!(&frame[1..9], &[0; 8]);
+            assert_eq!(&frame[9..], expected, "positive control serves the actual verified block");
             payload += len - 9;
             break;
         }
     }
+    assert!(closed || payload > 0, "a response deadline cannot prove zero upload");
     payload
 }
 
@@ -128,18 +130,18 @@ fn upload_permission_blocks_payload_in_both_phases_and_allows_explicit_opt_in() 
         );
         let addr = dispatcher.inner.session.listen_addr().unwrap();
         let hash = handle.info_hash().as_string();
-        let off = requested_payload(addr, &hash);
+        let off = requested_payload(addr, &hash, &payload[..16384]);
         assert_eq!(off, 0, "default must refuse piece payload");
         let mut cfg = Config {
             upload: "on".into(),
             ..Default::default()
         };
         dispatcher.apply_settings(&cfg).unwrap();
-        let on = requested_payload(addr, &hash);
+        let on = requested_payload(addr, &hash, &payload[..16384]);
         assert_eq!(on, 16384, "on must serve verified data");
         handle.set_upload_enabled(Some(false));
         assert_eq!(
-            requested_payload(addr, &hash),
+            requested_payload(addr, &hash, &payload[..16384]),
             0,
             "per-torrent off overrides global on"
         );
@@ -147,13 +149,13 @@ fn upload_permission_blocks_payload_in_both_phases_and_allows_explicit_opt_in() 
         dispatcher.apply_settings(&cfg).unwrap();
         handle.set_upload_enabled(Some(true));
         assert_eq!(
-            requested_payload(addr, &hash),
+            requested_payload(addr, &hash, &payload[..16384]),
             16384,
             "explicit per-torrent on overrides global off"
         );
         handle.set_upload_enabled(None);
         assert_eq!(
-            requested_payload(addr, &hash),
+            requested_payload(addr, &hash, &payload[..16384]),
             0,
             "removing override restores default off"
         );

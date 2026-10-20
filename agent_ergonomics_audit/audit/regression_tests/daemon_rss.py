@@ -4,6 +4,7 @@ import os
 import time
 import daemon as d
 import fixtures
+from event_barriers import summary_samples
 
 
 def all_events(c):
@@ -46,7 +47,7 @@ def run(name,binary,systemd):
         items=c.call('rss.items',dict(feed=identity))['result']['items']
         case.check(count()==1 and len(items)==2 and all('size' not in row and 'published_at' not in row for row in items),'one feed fetch caches two items and omits unknown sizes/dates',json.dumps(dict(hits=count(),feed=feed,items=items)))
         if name=='rss_refresh_on_interactive':
-            stale();c.call('app.client',dict(interactive=True));time.sleep(.25)
+            stale();c.call('app.client',dict(interactive=True));summary_samples(c)
             case.check(count()==1,'bar presence does not schedule network work',str(http.requests))
             for lap in range(2):
                 with d.ApiConn(h) as opened:
@@ -55,7 +56,7 @@ def run(name,binary,systemd):
                         rows=c.call('rss.feeds')['result']['feeds']
                         return count()==2 and not rows[0]['loading'],json.dumps(dict(hits=count(),feeds=rows,frames=c.pushed))
                     h.wait_for(refreshed,'first stale interactive open refreshes once; fresh reconnect does not',timeout=3)
-                    time.sleep(.25)
+                    summary_samples(c)
                     case.check(count()==2,'no periodic or duplicate refresh follows an interactive open',str(http.requests))
             stale()
             with d.ApiConn(h) as opened:

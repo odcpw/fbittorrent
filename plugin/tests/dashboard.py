@@ -128,7 +128,7 @@ def socket_details(pid,snapshot):
 def run(binary):
     with Case('qs_dashboard','window_shell') as case,fixtures.Sandbox() as sandbox,daemon.Harness(case,binary,sandbox,False) as harness:
         import private_net
-        case.check(True,'kernel network/mount boundary contains all fixture traffic',private_net.describe())
+        private_net.require()
         process=harness.start_serve()
         if not(harness.receive_ready() and harness.wait_engine()):raise RuntimeError('owned dashboard daemon did not start')
         q=Session(case,sandbox)
@@ -145,11 +145,9 @@ def run(binary):
             keyboard=subprocess.Popen(['wtype','-s','80','-k','End','-s','30',' typed','-s','700'],env=q.env)
             try:
                 typed=q.wait(lambda:s if (s:=q.state())['view']['query']=='sintel typed' and s['view'].get('focus',s['view']['cursor'])=='query' else None)
-                case.check(True,'typing through wtype reaches the focused native search field',json.dumps(dict(state=typed,focus_steps=q.ipc('focusSteps'))))
             finally:keyboard.wait(timeout=3)
             q.keys(['-k','Tab'],lambda:q.state()['view']['window']['view']=='shows')
             q.keys(['-M','shift','-k','Tab','-m','shift'],lambda:q.state()['view']['window']['view']=='search')
-            case.check(True,'Tab and Shift+Tab cycle the four primary views',json.dumps(q.state()))
             q.keys(['-k','Escape'],lambda:q.state()['view']['query']=='')
             q.keys(['-k','Escape'],lambda:q.state()['view']['window']['visible'])
             case.check(q.state()['view']['window']['visible'],'Esc clears input then keeps the top-level window open',json.dumps(q.state()))
@@ -180,22 +178,20 @@ def run(binary):
                 hello=client.hello()['result']
                 info=client.call('app.info')['result']
                 case.check(info['clients']['bar']==1,'all dashboard cycles reuse one daemon bar connection',json.dumps(info['clients']))
-                if 'subscribe' not in hello['caps']:
-                    case.check(True,'daemon busy-reason acceptance remains pending the server capability','SKIP: no subscribe cap; UI/client visibility is proven, daemon idle policy is not')
-                else:
-                    client.call('subscribe',dict(topics=['summary'],interval_ms=250))
-                    def interactive(expected):
-                        deadline=time.monotonic()+5
-                        for frame in client.events():
-                            if frame.get('topic')=='summary' and frame.get('ev')=='state':
-                                reasons=frame['data']['daemon']['busy_reasons']
-                                if ('interactive' in reasons)==expected:return reasons
-                            if time.monotonic()>deadline:raise TimeoutError('summary interactive state did not follow visibility')
-                        raise EOFError('summary stream ended')
-                    q.shell('summon','{}')
-                    shown=interactive(True);case.check('interactive' in shown,'daemon busy_reasons includes visible dashboard',json.dumps(shown))
-                    q.shell('hide');hidden=interactive(False)
-                    case.check('interactive' not in hidden,'daemon busy_reasons clears after hiding dashboard',json.dumps(hidden))
+                if 'subscribe' not in hello['caps']:raise RuntimeError('daemon does not support its required summary subscriptions')
+                client.call('subscribe',dict(topics=['summary'],interval_ms=250))
+                def interactive(expected):
+                    deadline=time.monotonic()+5
+                    for frame in client.events():
+                        if frame.get('topic')=='summary' and frame.get('ev')=='state':
+                            reasons=frame['data']['daemon']['busy_reasons']
+                            if ('interactive' in reasons)==expected:return reasons
+                        if time.monotonic()>deadline:raise TimeoutError('summary interactive state did not follow visibility')
+                    raise EOFError('summary stream ended')
+                q.shell('summon','{}')
+                shown=interactive(True);case.check('interactive' in shown,'daemon busy_reasons includes visible dashboard',json.dumps(shown))
+                q.shell('hide');hidden=interactive(False)
+                case.check('interactive' not in hidden,'daemon busy_reasons clears after hiding dashboard',json.dumps(hidden))
 
         finally:
             q.close();harness.stop_serve(process);harness.lock_free()

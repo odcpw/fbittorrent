@@ -32,14 +32,25 @@ def download_cap_holds(binary,systemd):
         elapsed=time.monotonic()-started;rate=(prior-before['completed_bytes'])/elapsed
         case.check(49152<=rate<=81920,'real byte delta independently stays within ±25% over 20 seconds after five-second warmup',json.dumps(dict(bytes=prior-before['completed_bytes'],seconds=elapsed,bps=rate,states=states)))
         c.call('torrents.set_download_limit',dict(hashes=[pair.hash],bps=131072))
-        for sample in range(12):
-            row=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent'];states.append(row['state'])
-            case.check(row['state']=='downloading' and row.get('download_limit_bps')==131072 and row.get('effective_download_limit_bps')==131072,
-                       'mid-transfer bucket replacement stays live without checking',json.dumps(row))
-            time.sleep(.25)
+        def measure_live(bps, label):
+            low,high=bps*.75,bps*1.25
+            assert pair.h.wait_for(lambda:((r:=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent'])['state']=='downloading' and low<=r.get('dl_bps',0)<=high,json.dumps(r)),
+                                   label+' reaches its measured rate after the live change',timeout=10)
+            first=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent'];begin=time.monotonic()
+            previous=first['completed_bytes']
+            for second in range(12):
+                time.sleep(max(0,begin+second+1-time.monotonic()))
+                r=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent'];states.append(r['state'])
+                case.check(r['state']=='downloading' and r['completed_bytes']>=previous
+                           and r.get('download_limit_bps')==131072 and r.get('effective_download_limit_bps')==bps,
+                           label+' keeps the live handle and durable cap',json.dumps(r))
+                previous=r['completed_bytes']
+            elapsed=time.monotonic()-begin;rate=(previous-first['completed_bytes'])/elapsed
+            case.check(low<=rate<=high,label+' enforces actual completed-byte rate within 25 percent over 12 seconds',
+                       json.dumps(dict(bytes=previous-first['completed_bytes'],seconds=elapsed,measured_bps=rate,requested_bps=bps)))
+        measure_live(131072,'mid-transfer 128 KiB cap replacement')
         c.call('transfer.set_alt',dict(on=True))
-        row=c.call('torrents.get',dict(hash=pair.hash))['result']['torrent']
-        case.check(row.get('download_limit_bps')==131072 and row.get('effective_download_limit_bps')==32768,'selected global turtle cap composes below the per-torrent cap',json.dumps(row))
+        measure_live(32768,'32 KiB turtle composition')
         c.call('transfer.set_alt',dict(on=False))
         observed=[p.get('state') for f in c.pushed for p in list(f.get('changed',{}).values())+f.get('items',[])+f.get('added',[]) if 'state' in p]
         case.check(len(c.pushed)<=512 and 'checking' not in observed+states and c.call('app.info')['result']['engine_epoch']==epoch,

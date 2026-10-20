@@ -10,7 +10,7 @@ pub(in crate::tui) fn state_cell(row: &api::Torrent) -> &'static str {
 
 pub(in crate::tui) fn state_word(row: &api::Torrent) -> &'static str {
     if row.state==api::TorrentState::Error && row.reason.as_deref()==Some("missing_files") {return "Files missing";}
-    if let Some(p)=Some(row).filter(|r|r.state==api::TorrentState::Downloading).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
+    if let Some(p)=Some(row).filter(|r|matches!(r.state,api::TorrentState::Downloading|api::TorrentState::Stalled)).and_then(|r|r.playable.as_ref()).filter(|p|p.ready) {
         if p.stall_free!=Some(true) && !(p.stall_free.is_none() && p.buffered_s.is_some_and(|s|s>=120)) {return "Playable · may stall";}
     }
     let key=key(row);
@@ -77,6 +77,9 @@ mod watch_tests {
         let mut row:api::Torrent=serde_json::from_value(serde_json::json!({"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"Video.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fixture","added_at":1,"force":false,"playable":{"file":0,"prefix_bytes":33554432,"ready":true,"acked":false,"buffered_s":32,"stall_free":false}})).unwrap();
         assert_eq!(state_cell(&row).trim_end(),"▶ Ready");
         assert_eq!(state_word(&row),"Playable · may stall");
+        row.state=api::TorrentState::Stalled;
+        assert_eq!(state_word(&row),"Playable · may stall");
+        row.state=api::TorrentState::Downloading;
         row.playable.as_mut().unwrap().stall_free=Some(true);
         assert_eq!(state_word(&row),"Ready to watch");
         row.playable.as_mut().unwrap().stall_free=None;

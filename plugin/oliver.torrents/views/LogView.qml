@@ -15,20 +15,35 @@ FocusScope {
  property string source:""
  property string hashFilter:hash
  property bool follow:true
- readonly property var allEntries:service.logRevision>=0 ? service.store.logEntries("") : []
- readonly property var entries:LogModel.select(allEntries,level,source,hashFilter)
- readonly property var sources:[""].concat(LogModel.sources(allEntries))
+ property int lastVersion:-1
+ property string lastFilter:""
+ property var sourceRows:[]
+ readonly property var sources:[""].concat(sourceRows)
+ ListModel {id:logModel}
+ function refresh(){
+  if(!service || !service.store)return
+  var store=service.store,signature=JSON.stringify([level,source,hashFilter])
+  if(lastVersion===store.logVersion && lastFilter===signature)return
+  if(lastFilter!==signature || lastVersion!==store.logVersion-1){
+   logModel.clear();LogModel.select(store.logEntries(""),level,source,hashFilter).forEach(function(row){logModel.append({entry:row})})
+  }else{
+   var removed=store.logDelta.removed
+   while(logModel.count && removed.indexOf(logModel.get(0).entry.seq)>=0)logModel.remove(0)
+   LogModel.select(store.logDelta.added,level,source,hashFilter).forEach(function(row){logModel.append({entry:row})})
+  }
+  sourceRows=store.logSources();lastVersion=store.logVersion;lastFilter=signature;Qt.callLater(scrollEnd);changed()
+ }
+ Connections {target:root.service;function onLogRevisionChanged(){root.refresh()}}
  readonly property int count:list.count
  signal changed()
- function rendered(){var result=[];for(var i=0;i<list.contentItem.children.length;i++){var child=list.contentItem.children[i];if(child.modelData && child.text)result.push({seq:child.modelData.seq,text:child.text})}return result}
+ function rendered(){var result=[];for(var i=0;i<list.contentItem.children.length;i++){var child=list.contentItem.children[i];if(child.entry && child.text)result.push({seq:child.entry.seq,text:child.text})}return result}
  function scrollEnd(){if(follow)list.positionViewAtEnd()}
  onHashChanged:hashFilter=hash
- onEntriesChanged:{Qt.callLater(scrollEnd);changed()}
- onLevelChanged:changed()
- onSourceChanged:changed()
- onHashFilterChanged:changed()
+ onLevelChanged:refresh()
+ onSourceChanged:refresh()
+ onHashFilterChanged:refresh()
  onConsumingChanged:service.logConsumer(consumer,consuming)
- Component.onCompleted:service.logConsumer(consumer,consuming)
+ Component.onCompleted:{service.logConsumer(consumer,consuming);refresh()}
  Component.onDestruction:service.logConsumer(consumer,false)
  ColumnLayout {
   anchors.fill:parent;anchors.margins:root.consumer==="global-log" ? Commons.Style.spacing.panelPadding : 0;spacing:Commons.Style.spacing.sm
@@ -52,14 +67,14 @@ FocusScope {
    Ui.Button {text:root.follow ? "Following" : "Follow newest";focusable:true;onClicked:{root.follow=true;root.scrollEnd()}}
   }
   ListView {
-   id:list;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;spacing:Commons.Style.spacing.sm;model:root.entries
+   id:list;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;spacing:Commons.Style.spacing.sm;model:logModel
    onCountChanged:Qt.callLater(root.scrollEnd)
    onMovementStarted:root.follow=false
    ScrollBar.vertical:ScrollBar {}
    delegate:Text {
-    required property var modelData
+    required property var entry
     width:ListView.view.width
-    text:Model.when(modelData.ts)+" · "+modelData.level+" · "+modelData.source+"\n"+modelData.message
+    text:Model.when(entry.ts)+" · "+entry.level+" · "+entry.source+"\n"+entry.message
     textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body
    }
    MouseArea {anchors.fill:parent;acceptedButtons:Qt.NoButton;onWheel:function(wheel){if(wheel.angleDelta.y>0)root.follow=false;wheel.accepted=false}}

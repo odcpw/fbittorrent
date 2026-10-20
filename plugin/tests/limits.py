@@ -75,7 +75,6 @@ def run(binary):
                 harness.notify.close()
                 process = start(harness)
                 q.wait(lambda: popup(q)['online'] and popup(q)['turtle'] and popup(q)['bar']['turtle'])
-                case.check(True, 'bar and popup recover the persisted turtle mode after daemon restart', json.dumps(popup(q)))
             finally:
                 q.close()
         harness.stop_serve(process)

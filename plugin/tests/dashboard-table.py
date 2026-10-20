@@ -48,7 +48,8 @@ def click_row(q,index,button='button1',times=1):
 
 def functional(binary):
     with Case('qs_dashboard_table','table_actions') as case,running(binary,'paused',case) as (sandbox,harness,client,row):
-        for name in ('xdg-open','wl-copy'):fixtures.path_shim(name,'exit 0',sandbox.root)
+        fixtures.path_shim('xdg-open','exit 0',sandbox.root)
+        fixtures.path_shim('wl-copy','cat > "$XDG_RUNTIME_DIR/copied-text"',sandbox.root)
         cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent/imdb'
         for directory in ('by-id','by-name-v2'):(cache/directory).mkdir(parents=True,exist_ok=True)
         ident='tt1234001'
@@ -76,11 +77,9 @@ def functional(binary):
                     q.keys(['-k','Return'],lambda:view(q).get('details',{}).get('visible'))
                     image=case.path.with_name('dashboard-'+str(width)+'.png')
                     q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
-                    case.check(True,'capture native dashboard and details at '+str(width)+' px',str(image))
                     q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
             image=case.path.with_suffix('.before-click.png');q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
             click=click_row(q,0,times=2)
-            case.check(True,'send two native pointer clicks to the first visible row',json.dumps(dict(click=click,point=q.ipc('rowPoint',0))))
             wait_view(q,lambda s:s.get('details'))
             case.check(view(q)['cursor']==row['hash'],'native double-click is Enter on the same hash',json.dumps(click))
             q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
@@ -100,7 +99,6 @@ def functional(binary):
             q.keys(['S'],lambda:view(q).get('sort',{}).get('reverse') is True)
             prefs=Path(sandbox.env['XDG_STATE_HOME'])/'fbittorrent/dashboard.json'
             q.wait(lambda:prefs.exists() and json.loads(prefs.read_text()).get('sort')==dict(key='name',reverse=True))
-            case.check(True,'typed sort and direction are atomically persisted after debounce',prefs.read_text())
             q.keys(['/fixture'],lambda:view(q).get('query')=='fixture')
             q.keys(['-k','Escape'],lambda:view(q).get('query')=='')
             q.keys(['p'],lambda:json.loads(q.ipc('confirmed',row['hash']))['intent']=='run')
@@ -111,14 +109,14 @@ def functional(binary):
                        'table u opens Details without enabling upload',q.ipc('detailTexts'))
             q.keys(['u'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'])
             q.keys(['u'],lambda:not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'])
-            case.check(True,'Details u explicitly opts in and back out of upload',json.dumps(client.call('torrents.get',dict(hash=row['hash']))))
             q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
             shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
             case.check(client.call('torrents.open_target',dict(hash=row['hash']))['ok'],'a genuine local payload exists before the open action',row['content_path'])
             q.keys(['o'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
-            q.keys(['y'],lambda:(sandbox.root/'shims/wl-copy.log').exists())
+            copied_text=Path(sandbox.env['XDG_RUNTIME_DIR'])/'copied-text'
+            q.keys(['y'],lambda:copied_text.exists() and copied_text.read_text()=='magnet:?xt=urn:btih:'+row['hash'])
             copied=[json.loads(line) for line in (sandbox.root/'shims/wl-copy.log').read_text().splitlines()]
-            case.check(any('magnet:?xt=urn:btih:'+row['hash'] in call for call in copied),'y copies this hash as a magnet through argv',json.dumps(copied))
+            case.check(all(call==['--'] for call in copied) and copied_text.read_text()=='magnet:?xt=urn:btih:'+row['hash'],'y copies the exact magnet through stdin without exposing it in argv',json.dumps(copied))
             q.keys(['-k','Escape'],lambda:bool(view(q).get('window',{}).get('visible')))
             image=case.path.with_suffix('.png');q.ipc('grab',image);q.wait(lambda:image.is_file() and image.stat().st_size>0)
             q.keys(['q'],lambda:q.state()['view'] is None)
@@ -131,13 +129,10 @@ def functional(binary):
         try:
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
             state=wait_view(q,lambda s:s.get('sort')==dict(key='name',reverse=True))
-            case.check(True,'new service restores sort from the same private XDG state',json.dumps(state['sort']))
             q.keys(['j'],lambda:view(q).get('cursor')==row['hash'])
             q.keys(['i'],lambda:'imdb.com' in (sandbox.root/'shims/xdg-open.log').read_text())
             q.keys(['w'],lambda:'wikipedia.org' in (sandbox.root/'shims/xdg-open.log').read_text())
-            case.check(True,'i and w launch encoded IMDb/Wikipedia URLs through the private recording shim',(sandbox.root/'shims/xdg-open.log').read_text())
             q.keys(['f'],lambda:any(show['imdb']==ident for show in client.call('shows.list')['result']['shows']))
-            case.check(True,'f follows the selected torrent through the real Shows service with cache-only title resolution',json.dumps(client.call('shows.list')))
             q.keys(['/quit'],lambda:view(q).get('query')=='quit')
             q.keys(['-M','ctrl','q','-m','ctrl'],lambda:not q.state()['online'])
             case.check(not q.state()['pending'],'Ctrl+Q shuts down the real daemon; shutdown bye confirms the correlated action',json.dumps(q.state()))

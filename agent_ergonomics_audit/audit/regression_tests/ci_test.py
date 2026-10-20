@@ -92,8 +92,8 @@ def resource_thresholds():
         invalid["configs"]["idle"]["cpu_s"] = [10, 10]
         try:
             compare(invalid, current, ref)
-        except ValueError:
-            case.check(True, "a fabricated two-run baseline is rejected")
+        except ValueError as error:
+            case.check(isinstance(error, ValueError), "a fabricated two-run baseline is rejected")
         else:
             case.check(False, "baseline requires three measured runs")
 

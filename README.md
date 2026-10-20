@@ -152,9 +152,9 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `modal:log` | Last | `End` | — | — |  |
 | `modal:log` | Files | `[` | — | — |  |
 | `modal:log` | Next tab | `]` | — | — |  |
-| `screen:torrents` | Copy magnet | `y` | — | — |  |
+| `screen:torrents` | Copy magnet | `y` | `y` | — |  |
 | `screen:torrents` | Rename | `N` | `N` | — |  |
-| `screen:torrents` | Undo removal | `U` | — | — |  |
+| `screen:torrents` | Undo removal | `U` | `U` | — |  |
 | `screen:torrents` | Sort | `s` | `s` | — |  |
 | `screen:torrents` | Reverse sort | `S` | `S` | — |  |
 | `screen:torrents` | Previous details tab | — | `[` | — |  |
@@ -175,6 +175,10 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:torrents` | IMDb | `i` | `i` | — |  |
 | `screen:torrents` | Wikipedia | `w` | `w` | — |  |
 | `screen:torrents` | Follow show | `f`, `F` | `f` | — |  |
+| `screen:torrents` | Select all visible | — | `Ctrl+A` | — |  |
+| `screen:torrents` | Filter torrents | — | `/` | — |  |
+| `screen:torrents` | Parent pane | — | `h`, `←` | — |  |
+| `screen:torrents` | Child pane | — | `l`, `→` | — |  |
 | `screen:search` | Browse grid/rows | — | `v` | — | Browse lists only. |
 | `screen:search` | Sort results | `s` | `s` | — |  |
 | `screen:search` | Reverse results sort | `S` | `S` | — |  |
@@ -208,18 +212,20 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:rss` | Child pane | `l`, `→` | `l`, `→` | — |  |
 | `screen:rss` | Open/download | `Enter` | `Enter` | — |  |
 | `screen:rss` | New feed | `n` | `n` | — |  |
-| `screen:rss` | Remove feed | `x` | `x` | — |  |
+| `screen:rss` | Remove feed | `x` | `x`, `d` | — |  |
 | `screen:rss` | Refresh | `r` | `r` | — |  |
-| `screen:rss` | Reload saved feeds | `R` | `R` | — |  |
+| `screen:rss` | Reload saved feeds | `R` | — | — |  |
 | `screen:rss` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
 | `screen:rss` | All read | `M` | `M` | — |  |
-| `screen:rss` | IMDb | `i` | `i` | — |  |
-| `pane:rss.items` | Follow show | `f`, `F` | `f`, `F` | — |  |
+| `screen:rss` | IMDb | `i` | — | — |  |
+| `pane:rss.items` | Follow show | `f`, `F` | — | — |  |
+| `screen:rss` | Refresh all feeds | — | `R` | — |  |
+| `screen:rss` | Toggle unread filter | — | `u` | — |  |
 | `screen:shows` | Sort releases | `s` | — | — |  |
 | `screen:shows` | Reverse releases sort | `S` | — | — |  |
 | `pane:shows.releases` | Copy magnet | `y` | — | — |  |
 | `screen:shows` | Show quality | `=` | `=` | — |  |
-| `screen:shows` | Inbox filters | `F` | — | — |  |
+| `screen:shows` | Inbox filters | `F` | `F` | — |  |
 | `screen:shows` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `screen:shows` | Previous | `k`, `↑` | `k`, `↑` | — |  |
 | `screen:shows` | First | `g`, `Home` | `g`, `Home` | — |  |
@@ -229,15 +235,15 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:shows` | Parent pane | `h`, `←` | `h`, `←` | — |  |
 | `screen:shows` | Child pane | `l`, `→` | `l`, `→` | — |  |
 | `screen:shows` | Open/download | `Enter` | `Enter` | — |  |
-| `screen:shows` | Follow show | `n` | `n` | — |  |
-| `screen:shows` | Unfollow | `x` | `x` | — |  |
+| `screen:shows` | Follow show | `n` | `n`, `+` | — |  |
+| `screen:shows` | Unfollow | `x` | `x`, `d` | — |  |
 | `screen:shows` | Refresh | `r` | `r` | — |  |
 | `screen:shows` | Check selected show | `R` | `R` | — |  |
 | `screen:shows` | Mark read/unread | `m`, `Space` | `m`, `Space` | — |  |
 | `screen:shows` | All read | `M` | `M` | — |  |
-| `screen:shows` | IMDb | `i` | `i` | — |  |
-| `screen:shows` | Wikipedia | `w` | `w` | — |  |
-| `screen:shows` | EZTV | `O` | `O` | — |  |
+| `screen:shows` | IMDb | `i` | — | — |  |
+| `screen:shows` | Wikipedia | `w` | — | — |  |
+| `screen:shows` | EZTV | `O` | — | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
 | `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
 | `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |

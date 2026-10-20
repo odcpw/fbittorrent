@@ -31,13 +31,13 @@ def matrix(binary):
     p2 += [('qml_' + name, [python, 'plugin/tests/run-qs.py', name.replace('-', '_'), 'plugin/tests/' + name])
            for name in ('popup-state', 'table', 'add-flow', 'clipboard-flow', 'details-flow',
                         'folder-picker', 'settings-flow', 'shows-flow', 'shows-quality',
-                        'rss-flow', 'cleanup-flow', 'pieces', 'piece-completion', 'review-rows', 'row-refresh')]
+                        'rss-flow', 'cleanup-flow', 'pieces', 'piece-completion', 'review-rows', 'row-refresh', 'stop-confirm')]
     ui = [('window', [*dashboard, '--binary', binary])]
     ui += [(name, [*dashboard, '--' + name, '--binary', binary])
            for name in ('add-sheet', 'destination-picker', 'details', 'search',
                         'preferences', 'grid', 'pieces', 'rss', 'recheck', 'journeys')]
     ui += [('owner_' + case, [*dashboard, '--owner-review', '--binary', binary, '--case', case])
-           for case in ('search', 'rows', 'pieces', 'popup', 'review')]
+           for case in ('search', 'rows', 'pieces', 'popup', 'review', 'stop')]
     ui += [('table', [python, 'plugin/tests/dashboard-table.py', '--binary', binary]),
            ('table_fixture', [python, 'plugin/tests/dashboard-table.py', '--binary', binary, '--fixture-cli']),
            ('table_profile', [python, 'plugin/tests/dashboard-table.py', '--binary', binary, '--profile'])]

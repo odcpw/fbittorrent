@@ -14,10 +14,6 @@ impl EngineDispatcher {
                 let Ok(handle) = self.inner.handle(&record.hash) else {
                     continue;
                 };
-                let stats = handle.stats();
-                if stats.finished || matches!(stats.state, TorrentStatsState::Error) {
-                    continue;
-                }
                 let Some(metadata) = handle.metadata.load_full() else {
                     continue;
                 };
@@ -32,6 +28,10 @@ impl EngineDispatcher {
                 ) else {
                     continue;
                 };
+                let stats = handle.stats();
+                if stats.finished || matches!(stats.state, TorrentStatsState::Error) {
+                    continue;
+                }
                 let file = &metadata.file_infos[index];
                 let Some(bits) = handle.have_pieces_snapshot() else {
                     continue;
@@ -52,6 +52,7 @@ impl EngineDispatcher {
                     .map(|s| s.download_speed.mbps * 1024.0 * 1024.0)
                     .filter(|v| v.is_finite() && *v >= 0.0)
                     .map(|v| v as u64);
+                let active = !handle.is_paused();
                 result.push(Sample {
                     hash: record.hash.clone(),
                     name: record.name.clone(),
@@ -59,9 +60,12 @@ impl EngineDispatcher {
                     path: handle.output_folder().join(&file.relative_filename),
                     size: file.len,
                     prefix,
+                    verified_bytes: stats.progress_bytes,
                     last,
                     dl_bps: rate,
-                    downloading: !handle.is_paused() && rate.is_some_and(|v| v > 0),
+                    downloading: active && rate.is_some_and(|v| v > 0),
+                    active,
+                    download_limit: handle.effective_download_bps(),
                 });
             }
             Ok(result)

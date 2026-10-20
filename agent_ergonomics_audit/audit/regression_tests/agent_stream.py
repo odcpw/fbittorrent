@@ -71,13 +71,13 @@ def subscribed(h,client):
 
 def events_follow_completion(binary,systemd):
     with owned('events_follow_completion',binary,systemd) as (case,box,h,p,client),d.Sandbox() as source,d.Harness(case,binary,source) as seed:
+        sp=seed.start_serve()
+        if not(seed.receive_ready() and seed.wait_engine()):raise RuntimeError('private peer not ready')
         cfg=tomllib.loads((Path(source.env['XDG_CONFIG_HOME'])/'fbittorrent/config.toml').read_text())
         body=fixtures.bencode(dict(interval=1,peers=socket.inet_aton('127.0.0.1')+struct.pack('>H',cfg['peer_port'])))
         with fixtures.HttpFixture(source.root,{'/announce':dict(base64=base64.b64encode(body).decode())}) as tracker:
             payload=source.downloads/'stream-complete.bin';payload.write_bytes(os.urandom(65536))
             item=fixtures.torrent_fixture(source.root,[payload],tracker=tracker.base+'/announce')
-            sp=seed.start_serve()
-            if not(seed.receive_ready() and seed.wait_engine()):raise RuntimeError('private peer not ready')
             try:
                 with d.ApiConn(seed) as peer,follow(case,box,binary,'--kinds','torrent.completed') as (reader,path):
                     peer.hello();peer.call('torrents.add',dict(source=dict(path=str(item.torrent)),save_path=str(source.downloads),seed=True))
@@ -141,11 +141,17 @@ def events_down_exit_4(binary,systemd):
 
 def api_list_matches(binary,systemd):
     with owned('api_list_matches',binary,systemd) as (case,box,h,p,client):
-        fixture(client,box,stopped=True,name='shape-proof')
+        item=fixture(client,box,stopped=True,name='shape-proof')
         frame=json.loads(cli(case,box,binary,'api','torrents.list','--json'))
         case.check(frame.get('id')==2 and frame.get('ok') is True,'raw API success preserves the exact wire envelope',json.dumps(frame))
         normal=json.loads(cli(case,box,binary,'list','--json'))['torrents']
-        case.check(normal==frame['result']['torrents'],'CLI list rows are the API torrent objects, field for field',json.dumps(dict(cli=normal,api=frame['result']['torrents'])))
+        from owner_torrent_facts import assert_fixture_rows
+        # Both projections are checked against generated metainfo, actual source
+        # file length and the sandbox destination. Neither is the other's oracle.
+        for surface,rows in [('raw API',frame['result']['torrents']),('CLI list',normal)]:
+            expected=assert_fixture_rows(rows,item,box.downloads)
+            case.check(all(rows[0][key]==value for key,value in expected.items()),
+                       surface+' reports independent owner identity, size and destination',json.dumps(dict(expected=expected,actual=rows)))
         hello=json.loads(cli(case,box,binary,'api','hello','--json'))
         case.check(hello.get('ok') is True and hello.get('id')==1,'raw hello uses the real first handshake once',json.dumps(hello))
         error=json.loads(cli(case,box,binary,'api','torrents.get','--arg','hash=bad','--json',code=2))

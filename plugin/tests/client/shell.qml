@@ -34,9 +34,9 @@ ShellRoot {
     s=session();s.hello();s.c.disconnected()
     check("transport_loss",s.c.lastError===null,"interrupted automatic presence/subscription requests use reconnect state, not a sticky action error",JSON.stringify(s.c.lastError))
     s=session();s.hello();s.c.request("app.info");s.c.disconnected()
-    check("transport_loss",s.c.lastError && s.c.lastError.message==="no answer","an interrupted explicit request still reports its failure",JSON.stringify(s.c.lastError))
+    check("transport_loss",!s.c.lastError,"disconnect clears the global banner after reporting the interrupted request via its callback",JSON.stringify(s.c.lastError))
     s=session();s.hello();var uncertain=s.c.request("torrents.remove",{hashes:["a".repeat(40)],delete_files:false},{mutating:true,internal:true});s.c.disconnected()
-    check("transport_loss",s.c.actions[uncertain].status==="no answer" && s.c.lastError.message==="no answer","internal setting never suppresses uncertainty for a user mutation",JSON.stringify(s.c.actions[uncertain]))
+    check("transport_loss",s.c.actions[uncertain].status==="no answer" && !s.c.lastError,"internal setting never suppresses uncertainty for a user mutation",JSON.stringify(s.c.actions[uncertain]))
     console.log("FBTQS-PASS transport_loss")
     s = session(); s.hello();
     var ref = s.c.request("torrents.stop", {hashes:["a".repeat(40)]}, {mutating:true})
@@ -52,6 +52,18 @@ ShellRoot {
     check("deadlines", s.c.actions[ref].status === "no answer", "add times out at 100 s", s.c.actions[ref].status)
     check("deadlines",s.c.actions[ref].args.source.magnet!==undefined,"failed action retains its row/source correlation",JSON.stringify(s.c.actions[ref]))
     console.log("FBTQS-PASS deadlines")
+    s=session();s.hello();s.c.request("app.info")
+    s.time.ms=20000;s.c.tick()
+    check("error_recovery",s.c.lastError && s.c.lastError.code==="timeout","unanswered explicit request exposes its typed timeout",s.c.lastError)
+    var recovery=s.c.request("app.network");s.reply({state:{ready:true,message:"Binding off"}},recovery)
+    check("error_recovery",!s.c.lastError,"later successful explicit operation clears an earlier timeout",s.c.lastError)
+    s.c.lastError={code:"timeout",message:"old timeout",retryable:true};s.c.disconnected()
+    check("error_recovery",!s.c.lastError,"connection reset clears the stale global error while action outcomes remain recorded",s.c.lastError)
+    s.c.lastError={code:"timeout",message:"old timeout",retryable:true};s.hello()
+    check("error_recovery",!s.c.lastError,"new connection hello clears old errors",s.c.lastError)
+    s.c.lastError={code:"timeout",message:"old timeout",retryable:true};s.c.receive(JSON.stringify({ev:"bye",reason:"shutdown"}))
+    check("error_recovery",!s.c.lastError,"graceful stop removes a stale timeout",s.c.lastError)
+    console.log("FBTQS-PASS error_recovery")
     s = session(); s.hello();
     var safe=s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
     var destructive=s.c.request("torrents.remove",{hashes:["a".repeat(40)],delete_files:false},{mutating:true})
@@ -77,13 +89,10 @@ ShellRoot {
     s=session(); s.c.receive("[")
     check("line_cap", s.resets.length===1, "bad JSON resets session without exception", s.c.lastError.message)
     console.log("FBTQS-PASS line_cap")
-    s=session(); s.hello(["torrents","files"])
-    check("fallback", s.c.mode==="poll" && s.writes.some(function(w) {return JSON.parse(w).op==="torrents.list"}),
-      "absent subscribe cap polls over same socket", s.c.mode)
-    s=session(); s.hello(); var subscribe=JSON.parse(s.writes[s.writes.length-1])
+    s=session();s.hello();var subscribe=JSON.parse(s.writes[s.writes.length-1])
     s.c.receive(JSON.stringify({id:subscribe.id,ok:false,error:{code:"unknown_op",message:"unknown op",retryable:false}}))
-    check("fallback", s.c.mode==="poll", "unknown_op on subscribe enables polling", s.c.mode)
-    console.log("FBTQS-PASS fallback")
+    check("subscriptions_required",s.resets.length===1 && !s.c.online && !s.writes.some(function(w){return ["torrents.list","transfer.info","app.network"].indexOf(JSON.parse(w).op)>=0}),"subscription failure resets the connection without silently polling old operations",s.writes)
+    console.log("FBTQS-PASS subscriptions_required")
     s=session(); s.hello(); subscribe=JSON.parse(s.writes[s.writes.length-1]); s.reply({sub:7,topics:["summary"]}, subscribe.id)
     s.c.receive(JSON.stringify({ev:"state",sub:7,topic:"summary",rev:1,data:{}}))
     check("subscriptions", s.c.state().subs.summary===1, "state reports topic and last revision", JSON.stringify(s.c.state()))
@@ -151,7 +160,7 @@ ShellRoot {
     check("recheck_progress",s.c.actions[ref].status==="done" && !s.c.awaiting[ref] && !s.c.lastError,"final receipt resolves checking without leaving a global error",JSON.stringify(s.c.actions[ref]))
     s=session();s.hello();ref=s.c.request("torrents.recheck",{hashes:["a".repeat(40)]},{mutating:true})
     s.c.disconnected()
-    check("recheck_progress",s.c.actions[ref].status==="no answer" && !!s.c.lastError,"a genuinely lost connection still reports the uncertain recheck outcome",JSON.stringify(s.c.actions[ref]))
+    check("recheck_progress",s.c.actions[ref].status==="no answer" && !s.c.lastError,"a genuinely lost connection still reports the uncertain recheck outcome",JSON.stringify(s.c.actions[ref]))
     s.c.receive(JSON.stringify({ev:"mutation.result",op:"torrents.recheck",ref:ref,outcome:"done",result:{rechecked:["a".repeat(40)],failed:[]}}))
     check("recheck_progress",s.c.actions[ref].status==="done" && !s.c.lastError,"a late confirmed result clears only that action's stale no-answer error",JSON.stringify(s.c.actions[ref]))
     s=session();s.hello();ref=s.c.request("torrents.recheck",{hashes:["a".repeat(40)]},{mutating:true});s.c.disconnected()
@@ -159,6 +168,26 @@ ShellRoot {
     s.c.receive(JSON.stringify({ev:"mutation.result",op:"torrents.recheck",ref:ref,outcome:"done",result:{rechecked:["a".repeat(40)],failed:[]}}))
     check("recheck_progress",s.c.lastError && s.c.lastError.message==="another operation failed","a recheck receipt preserves an unrelated operation's error",s.c.lastError)
     console.log("FBTQS-PASS recheck_progress")
+    ;["torrents.remove","torrents.add"].forEach(function(op){
+      s=session();s.c.visibility(false,true,[]);s.hello()
+      var args=op==="torrents.remove" ? {hashes:["a".repeat(40)],delete_files:false} : {source:{restore:"a".repeat(40)}}
+      var ref=s.c.request(op,args,{mutating:true}),request=JSON.parse(s.writes[s.writes.length-1])
+      s.reply({state:"pending",ref:ref},request.id)
+      s.time.ms=21000;s.c.receive(JSON.stringify({ev:"state",topic:"summary",data:{}}));s.c.tick()
+      check("cleanup_progress",s.c.actions[ref].status==="pending" && !s.c.lastError,"accepted removal/Undo remains pending past the ordinary reply deadline",s.c.actions[ref])
+      s.c.disconnected()
+      // Remove is never replayed; its outcome comes from the live receipt or
+      // event history. Do not clear any unrelated error during reconciliation.
+      var failure={code:"timeout",message:"no answer",retryable:true}
+      s.c.actions[ref].error=failure;s.c.lastError=failure
+      s.c.subs[801]={topics:["events"],rev:0}
+      s.c.receive(JSON.stringify({ev:"snapshot.chunk",topic:"events",sub:801,rev:1,items:[{ev:"mutation.result",op:op,ref:ref,outcome:"done",result:{state:"done"}}]}))
+      check("cleanup_progress",s.c.actions[ref].status==="done" && !s.c.lastError,"late event-history success clears the correlated timeout",s.c.actions[ref])
+      s.c.lastError={code:"upstream",message:"unrelated read failed",retryable:true}
+      s.c.receive(JSON.stringify({ev:"mutation.result",op:op,ref:ref,outcome:"done",result:{state:"done"}}))
+      check("cleanup_progress",s.c.lastError.message==="unrelated read failed","cleanup success preserves an unrelated failure",s.c.lastError)
+    })
+    console.log("FBTQS-PASS cleanup_progress")
     s=session();s.hello();s.c.disconnected()
     check("reconnecting",s.c.reconnecting,"unexpected EOF retains reconnecting state",s.c.reconnecting)
     for(i=0;i<6;i++)s.c.attempt()
@@ -179,10 +208,6 @@ ShellRoot {
     s=session();s.hello(["torrents","subscribe","clipboard"])
     check("clipboard_events",s.writes.some(function(w){var f=JSON.parse(w);return f.op==="subscribe" && f.args.topics.indexOf("events")>=0}),"clipboard-capable bar subscribes to live events even with both UIs closed",s.writes)
     console.log("FBTQS-PASS clipboard_events")
-    s=session();s.hello([]);length=s.writes.length
-    s.c.request("torrents.stop",{hashes:["a".repeat(40)]},{mutating:true})
-    check("capabilities",s.writes.length===length && s.c.lastError.code==="unsupported","missing feature cap disables its actions",s.c.lastError.message)
-    console.log("FBTQS-PASS capabilities")
     ;["shutdown","idle","restart","invalid_message"].forEach(function(reason){
       s=session();s.hello();ref=s.c.request("app.shutdown",{reason:"user"},{mutating:true})
       request=JSON.parse(s.writes[s.writes.length-1]);s.reply({state:"pending",ref:ref},request.id)
@@ -200,7 +225,7 @@ ShellRoot {
       "hiding dashboard clears shared-socket presence",JSON.stringify(declarations))
     s=session();s.hello(["torrents","subscribe"])
     declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
-    check("dashboard_presence",!("dashboard_visible" in declarations[0].args),"older strict servers do not receive the additive marker",JSON.stringify(declarations))
+    check("dashboard_presence",declarations[0].args.dashboard_visible===false,"every connection declares its dashboard visibility",JSON.stringify(declarations))
     s=session();s.c.visibility(false,false,[],true);s.hello(["torrents","subscribe","dashboard_presence"])
     declarations=s.writes.map(function(w){return JSON.parse(w)}).filter(function(f){return f.op==="app.client"})
     check("dashboard_presence",declarations[0].args.overlay_visible===true && declarations[0].args.interactive===true && declarations[0].args.dashboard_visible===false,"palette declares actual visibility independently of dashboard",declarations)

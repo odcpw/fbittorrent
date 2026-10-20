@@ -195,6 +195,7 @@ include!("queue.rs");
 include!("persistence.rs");
 include!("transfer.rs");
 include!("live_limits.rs");
+include!("handle_lookup.rs");
 mod typed_seed {
     include!("typed_seed.rs");
     mod check_reconciliation {

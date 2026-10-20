@@ -106,7 +106,6 @@ class PaneUi(native.AttachedTui):
 @contextmanager
 def owned_fixture(binary,setup):
     private_net.require()
-    setup.check(True,'fixture sockets and DNS cannot leave the private network',private_net.describe())
     with ExitStack() as stack:
         sandbox=stack.enter_context(fixtures.Sandbox())
         h=stack.enter_context(d.Harness(setup,binary,sandbox))
@@ -351,7 +350,7 @@ def peer_port(binary,setup,sandbox,h,ui,process,torrent):
             case.check([frame['state']for frame in changed]==['starting','running'],
                        'the setting produces exactly the two engine.changed phases, without a second client-requested restart',json.dumps(changed))
             with socket.create_connection(('127.0.0.1',port),timeout=1):
-                case.check(True,'the real engine peer listener accepts TCP on the chosen port',f'127.0.0.1:{port}')
+                pass
             ui.press('q','q detaches after the engine restart while the owner survives',lambda pane:ui.done.exists()and ui.done.read_text()=='0'and process.child.poll()is None)
         ui.case=setup
 

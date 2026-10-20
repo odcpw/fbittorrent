@@ -219,12 +219,11 @@ impl EngineDispatcher {
             }
         }
         if let EngineOp::Delete { files, .. } = &op {
-            let mut dormant_files=HashMap::new();
+            let mut declared_files=HashMap::new();
             if *files {
                 for record in ledger.records.iter().filter(|record|hashes.contains(&record.hash)) {
-                    if self.inner.handle(&record.hash).is_err() {
-                        dormant_files.insert(record.hash.clone(),self.inner.dormant_delete_plan(record)?);
-                    }
+                    let prepared = self.inner.dormant_delete_plan(record)?.prepare(cx).await?;
+                    declared_files.insert(record.hash.clone(), prepared);
                 }
             }
             let replacement = Ledger {
@@ -244,9 +243,10 @@ impl EngineDispatcher {
                 if let Ok(handle) = self.inner.handle(&hash) {
                     self.inner
                         .session
-                        .delete(cx, TorrentIdOrHash::Id(handle.id()), *files)
+                        .delete(cx, TorrentIdOrHash::Id(handle.id()), false)
                         .await?;
-                } else if let Some(plan)=dormant_files.remove(&hash) {
+                }
+                if let Some(plan) = declared_files.remove(&hash) {
                     plan.execute(cx).await?;
                 }
                 let _ = rqbit_runtime::fs::remove_file(self.inner.torrent_path(&hash)?).await;

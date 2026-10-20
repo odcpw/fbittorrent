@@ -65,7 +65,7 @@ ShellRoot {
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
   function texts(item){var out=[];if(typeof item.text==="string" && item.visible)out.push(item.text);for(var i=0;i<item.children.length;i++)out=out.concat(texts(item.children[i]));return out}
   function tableRows(item){
-    if(item.hasCursor!==undefined && item.torrent!==undefined)return [{hash:item.torrent.hash,texts:texts(item)}]
+    if(item.hasCursor!==undefined && item.torrent!==undefined)return item.visible ? [{hash:item.torrent.hash,texts:texts(item)}] : []
     var out=[];for(var i=0;i<item.children.length;i++)out=out.concat(tableRows(item.children[i]));return out
   }
   IpcHandler {
@@ -119,7 +119,7 @@ ShellRoot {
     }
     function gridState():string {
       var view=dashboard.item ? dashboard.item.search : null
-      return JSON.stringify(view ? {grid:view.gridShowing ? view.viewState.grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
+      return JSON.stringify(view ? {grid:view.gridShowing ? view.snapshot().grid : null,query:view.queryTarget.text,mode:view.viewModel.mode,label:view.viewModel.label,phase:view.viewModel.phase,total:view.viewModel.total,cursor:view.viewModel.cursor,pool:service.browsePosters ? service.browsePosters.state() : null} : {})
     }
     function eventTrace():string{return JSON.stringify(service.store.events)}
     function searchFocus():string {

@@ -128,17 +128,10 @@ impl Shared {
                     return;
                 }
             }
-            if matches!(&job.request.call, Call::TorrentsRemove { args } if args.delete_files) {
-                let pending = Reply::TorrentsRemove(RemoveResult {
-                    status: MutationResult::Pending {
-                        reference: MutationRef::new(&reference).unwrap(),
-                    },
-                    undo_until: None,
-                });
-                if self.begin_confirmation(&job, pending, Confirmation::Worker, true) {
-                    let result = ops::torrents::dispatch(&self.daemon, &job.request.call);
-                    self.confirm((job.connection.number, job.generation), result);
-                }
+            if matches!(&job.request.call, Call::TorrentsRemove { .. })
+                || matches!(&job.request.call, Call::TorrentsAdd { args } if matches!(args.source, AddSource::Restore(_))) {
+                let result = ops::torrents::dispatch(&self.daemon, &job.request.call);
+                self.confirm((job.connection.number, job.generation), result);
                 return;
             }
         }

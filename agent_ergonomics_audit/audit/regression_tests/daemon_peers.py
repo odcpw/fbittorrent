@@ -11,10 +11,13 @@ import fixtures
 
 
 class Swarm:
-    def __init__(self,case,binary,systemd,*,payload_bytes=8*1024*1024+16384*2,upload_bps=65536,leecher_bps=None):
+    def __init__(self,case,binary,systemd,*,payload_bytes=8*1024*1024+16384*2,upload_bps=65536,
+                 leecher_prefill_bytes=1,leecher_upload_bps=None,
+                 leecher_download_bps=None,observer_download_bps=None):
         self.case,self.binary,self.systemd=case,binary,systemd
         self.payload_bytes,self.upload_bps=payload_bytes,upload_bps
-        self.leecher_bps=leecher_bps
+        self.leecher_prefill_bytes,self.leecher_upload_bps=leecher_prefill_bytes,leecher_upload_bps
+        self.leecher_download_bps,self.observer_download_bps=leecher_download_bps,observer_download_bps
         self.stack=ExitStack();self.nodes=[]
 
     def __enter__(self):
@@ -38,20 +41,22 @@ class Swarm:
                 box,h,_,client,_=self.nodes[index]
                 metainfo=fixtures.torrent_fixture(box.root,[payload],tracker=http.base+'/'+path)
                 self.hash=metainfo.info_hash
+                down=self.leecher_download_bps if index==1 else self.observer_download_bps if index==2 else None
+                if down is not None:
+                    client.call('transfer.set_limits',dict(download_bps=down))
                 # This owned swarm deliberately includes an uploading leecher.
                 # Upload is off by default, so give both payload sources an
                 # explicit opt-in; the observing client retains upload off.
-                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index in (0,1),stopped=index==1 and self.leecher_bps is not None))
+                client.call('torrents.add',dict(source=dict(path=str(metainfo.torrent)),save_path=str(box.downloads),seed=index in (0,1)))
                 if index==0:
                     h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent'])['state']=='seeding',json.dumps(row)),'local seed verifies real payload')
                     d.DaemonContract.throttle(client,self.hash,self.upload_bps)
                 if index==1:
-                    if self.leecher_bps is not None:
-                        # Reserve real seed bandwidth for the observer instead
-                        # of assuming fairness between competing TCP requests.
-                        client.call('torrents.set_download_limit',dict(hashes=[self.hash],bps=self.leecher_bps))
-                        client.call('torrents.start',dict(hashes=[self.hash]))
-                    h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent']).get('completed_bytes',0)>0 and row['state']=='downloading',json.dumps(row)),'incomplete local leecher receives actual payload')
+                    wait_options={'timeout':20} if self.leecher_prefill_bytes>1 else {}
+                    h.wait_for(lambda:((row:=client.call('torrents.get',dict(hash=self.hash))['result']['torrent']).get('completed_bytes',0)>=self.leecher_prefill_bytes and row['state']=='downloading',json.dumps(row)),
+                               f'incomplete local leecher verifies at least {self.leecher_prefill_bytes} real payload bytes',**wait_options)
+                    if self.leecher_upload_bps is not None:
+                        d.DaemonContract.throttle(client,self.hash,self.leecher_upload_bps)
             self.box,self.h,self.p,self.client,_=self.nodes[2]
             return self
         except BaseException:
@@ -98,7 +103,11 @@ def peers_local_swarm(binary,systemd):
 
 
 def peer_rates_move(binary,systemd):
-    with d.Case('daemon','peer_rates_move') as case,Swarm(case,binary,systemd,leecher_bps=32768) as swarm:
+    # Balance the two consumers against the 64 KiB/s producer and retain real
+    # checked bytes on the uploading leecher throughout the rate window.
+    with d.Case('daemon','peer_rates_move') as case,Swarm(case,binary,systemd,
+            leecher_prefill_bytes=256*1024,leecher_upload_bps=32768,
+            leecher_download_bps=32768,observer_download_bps=32768) as swarm:
         if not swarm.h.wait_for(swarm.observe,'actual seed and leecher bitfields arrive before rate observations',timeout=20):return
         c=swarm.client;topic='torrent:'+swarm.hash+'.peers'
         c.call('subscribe',dict(topics=[topic]))
@@ -106,7 +115,8 @@ def peer_rates_move(binary,systemd):
         def rates():
             peers=c.call('torrents.peers',dict(hash=swarm.hash)).get('result',{}).get('peers',[])
             moving=[p for p in peers if p.get('downloaded',0)>previous.get(p['addr'],p.get('downloaded',0)) and p.get('dl_bps',0)>0]
-            return bool(moving),json.dumps(peers)
+            row=c.call('torrents.get',dict(hash=swarm.hash)).get('result',{}).get('torrent',{})
+            return bool(moving),json.dumps(dict(peers=peers,torrent=row))
         swarm.h.wait_for(rates,'successive real byte counters produce positive per-peer rates after at least one second',timeout=12)
         frames=list(c.pushed);c.pushed.clear();deadline=time.monotonic()+8
         while not any(f.get('ev')=='delta' and any(p.get('dl_bps',0)>0 for p in f.get('changed',{}).values()) for f in frames) and time.monotonic()<deadline:
@@ -121,7 +131,12 @@ def peer_rates_move(binary,systemd):
 def tui_peers_tab(binary, systemd):
     """Real peers over the TUI's one connection, visible-only topic and rate updates."""
     import native
-    with d.Case('daemon', 'tui_peers_tab') as case, Swarm(case, binary, systemd, payload_bytes=32*1024*1024, upload_bps=262144) as swarm:
+    # Reserve verified bytes and keep both consumers below the producer's
+    # shared cap, so neither request queue starves the other during resizing.
+    with d.Case('daemon', 'tui_peers_tab') as case, Swarm(case, binary, systemd,
+            payload_bytes=32*1024*1024, upload_bps=262144,
+            leecher_prefill_bytes=2*1024*1024,leecher_upload_bps=131072,
+            leecher_download_bps=131072,observer_download_bps=65536) as swarm:
         if not swarm.h.wait_for(swarm.observe, 'actual seed and leecher arrive before opening the TUI', timeout=20):
             return
         topic='torrent:'+swarm.hash+'.peers'

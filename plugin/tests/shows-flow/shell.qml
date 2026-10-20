@@ -14,7 +14,7 @@ ShellRoot {
   assertThat(Object.keys(store.topics[topic]).length===2,"the inbox keeps identical episode keys from different shows")
   store.apply({ev:"delta",sub:1,rev:4,topic:topic,removed:["tt1/S01E01"],changed:{"tt2/S01E01":{read:true}}})
   assertThat(!store.topics[topic]["tt1/S01E01"] && store.topics[topic]["tt2/S01E01"].read,"inbox removals and updates use show/episode identity")
-  var calls=[],service={showsTopics:[],store:{topics:{shows:{tt1:{imdb:"tt1",title:"One",unread:1}},"shows.releases:inbox":{"tt1/S01E01":{show_imdb:"tt1",key:"S01E01",title:"Episode",read:false,transfer:"none"}}},mutations:{},settings:{}},client:{caps:["shows","rss","staging"],request:function(){return 1}},now:0,notes:[]}
+  var calls=[],service={showsTopics:[],store:{torrents:{},topics:{shows:{tt1:{imdb:"tt1",title:"One",unread:1}},"shows.releases:inbox":{"tt1/S01E01":{show_imdb:"tt1",key:"S01E01",title:"Episode",read:false,transfer:"none"}}},mutations:{},settings:{}},client:{caps:["shows","rss","staging"],request:function(){return 1}},now:0,notes:[]}
   service.mutate=function(op,args,cap,done){calls.push({op:op,args:args,done:done});return "ref-"+calls.length}
   service.notify=function(message){service.notes.push(message)}
   service.addFlow=Add.create(service,function(){},false)

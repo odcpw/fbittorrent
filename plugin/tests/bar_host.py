@@ -25,7 +25,6 @@ def run(binary,baseline):
                 result=subprocess.run([str(binary),*command,'--json'],env=q.env,capture_output=True,text=True,timeout=6)
                 assert result.returncode==0,(result.stdout,result.stderr)
                 current=q.wait(lambda:s if (s:=q.state()).get('view',{}).get('window',{}).get('visible') and not s['opened'] else None)
-                case.check(True,' '.join(command)+' opens only the dashboard and closes the prior popup',json.dumps(current))
             h.stop_serve(process);q.wait(lambda:not q.state()['online']);assert q.state()['appearance']['tone']!='normal';q.wait(lambda:not q.state()['visible'],timeout=12)
             case.check(q.state()['appearance']['tone']!='normal','stopping the owned daemon unlights and hides the default widget',json.dumps(q.state()))
         finally:q.close()

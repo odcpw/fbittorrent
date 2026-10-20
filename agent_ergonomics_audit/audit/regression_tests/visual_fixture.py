@@ -28,7 +28,6 @@ def stop_owned(harness,process):
 @contextmanager
 def running(binary,state,case):
     private_net.require()
-    case.check(True,'private network and DNS contain every fixture socket',private_net.describe())
     if state in ('ready','may-stall'):
         from daemon_watch import pair,row,MIB
         with pair('visual_watch',binary,False,case_override=case) as (_,box,h,p,client,peer,item,payload):
@@ -75,7 +74,6 @@ def running(binary,state,case):
         if state=='table-200':
             import table_fixture
             table_fixture.add_paused(client,sandbox)
-        case.check(True,'real fixture daemon is available for isolated UI',json.dumps(dict(state=state,row=row)))
         yield sandbox,harness,client,row
 
 

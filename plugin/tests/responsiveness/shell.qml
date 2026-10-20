@@ -38,9 +38,12 @@ ShellRoot {
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var child=find(item.children[i],name);if(child)return child}return null}
   function readySample(withData){
     if(!pending)return false
-    var d=dashboard.item,v=service.dashboardState || {},spec=pending.spec
+    var d=dashboard.item,spec=pending.spec
     if(spec.kind==="popup")return !!content && widget.opened && content.delegateCount>0
     if(!d || !d.perfWindow.visible)return false
+    // Production snapshots are now created on demand. Inspect current state
+    // for these predicates rather than waiting on a previously cached snapshot.
+    var v=(spec.kind==="rows" || spec.kind==="filter" || spec.kind==="review") ? (JSON.parse(service.stateJson()).view || {}) : {}
     if(spec.kind==="open")return true
     if(spec.kind==="rows")return v.rows===spec.count
     if(spec.kind==="view")return d.currentView===spec.view && (spec.view==="torrents" ? !!d.torrents : spec.view==="search" ? !!d.search : spec.view==="shows" ? !!d.shows : spec.view==="rss" ? !!d.rss : spec.view==="settings" ? !!d.settingsSheet : !!d.logView)
@@ -66,7 +69,7 @@ ShellRoot {
     var sample={name:pending.name,ms:Date.now()-pending.at,frame_at:Date.now(),spec:pending.spec,
       publications:stats.calls-pending.publications,publication_ms:stats.ms-pending.publicationMs,
       api_frames:service.perfFrames-pending.frames,row_syncs:service.perfSyncRows-pending.rowSyncs,
-      rows:d && d.torrents ? d.torrents.viewState.rows : 0}
+      rows:d && d.torrents ? d.torrents.snapshot().rows : 0}
     if(feedback){samples.push(Object.assign({},sample,{name:pending.name+"_frame"}));pending.feedback=true}
     if(!complete)return
     if(pending.spec.kind==="open"){

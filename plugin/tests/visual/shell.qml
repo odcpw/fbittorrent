@@ -66,6 +66,12 @@ ShellRoot {
     }
     function offer():string {return JSON.stringify(service.clipboardOffer)}
     function clickPower():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;var button=root.find(widget.popupItem(),"popup-power");if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
+    function clickStopChoice(choice:string):bool {
+      if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || ["Cancel","Stop"].indexOf(choice)<0)return false
+      var popup=widget.popupItem(),strip=popup ? popup.currentStrip() : null
+      function find(item){if(!item)return null;if(item.text===choice && typeof item.clicked==="function")return item;for(var i=0;i<item.children.length;i++){var result=find(item.children[i]);if(result)return result}return null}
+      var button=find(strip);if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true
+    }
     function clickClipboard(action:string):bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || ["add","dismiss"].indexOf(action)<0)return false;var button=root.find(widget.popupItem(),"clipboard-"+action);if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
     function clickTurtle():bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1")return false;var button=root.find(widget.popupItem(),"popup-turtle");if(!button)return false;input.mouseClick(button,button.width/2,button.height/2,Qt.LeftButton);return true}
     function groups():string {return JSON.stringify(widget.popupItem() ? widget.popupItem().sections.map(function(g){return {key:g.key,count:g.rows.length}}) : [])}

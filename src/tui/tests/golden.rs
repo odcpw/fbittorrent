@@ -1,4 +1,4 @@
-//! Behavioural surface checks at useful terminal sizes; historical captures stay as references.
+//! Behavioural surface checks at useful terminal sizes; no unchecked snapshot files.
 use super::*;
 
 #[path = "fixture.rs"]
@@ -32,33 +32,6 @@ fn frame_text(frame: &Frame) -> String {
         text.push('\n');
     }
     text
-}
-
-pub(super) fn compare(path: &str, expected: &str, actual: &str) -> Result<(), String> {
-    if expected == actual { Ok(()) } else { Err(unified_diff(path, expected, actual)) }
-}
-
-/// One valid unified hunk, bounded by three unchanged context lines. Frames
-/// have fixed row counts, but handling both lengths also explains missing rows.
-fn unified_diff(path: &str, expected: &str, actual: &str) -> String {
-    let old: Vec<_> = expected.lines().collect();
-    let new: Vec<_> = actual.lines().collect();
-    let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-    let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev())
-        .take_while(|(a, b)| a == b).count();
-    let start = prefix.saturating_sub(3);
-    let context = suffix.min(3);
-    let old_end = old.len() - suffix;
-    let new_end = new.len() - suffix;
-    let mut diff = format!("--- {path}\n+++ actual\n@@ -{},{} +{},{} @@\n",
-        start + 1, old_end + context - start, start + 1, new_end + context - start);
-    for (mark, lines) in [
-        (' ', &old[start..prefix]), ('-', &old[prefix..old_end]),
-        ('+', &new[prefix..new_end]), (' ', &old[old_end..old_end + context]),
-    ] {
-        for line in lines { diff.push(mark); diff.push_str(line); diff.push('\n'); }
-    }
-    diff
 }
 
 fn assert_render(surface: &str, width: u16, height: u16) {
@@ -151,15 +124,6 @@ fn cell_text_preserves_wide_and_combining_characters() {
 }
 
 #[test]
-fn one_character_label_change_produces_a_unified_diff() {
-    let expected = "border\nSearch\nborder\n";
-    let actual = "border\nSearci\nborder\n";
-    let diff = compare("search-80x24.txt", expected, actual).unwrap_err();
-    assert_eq!(diff, "--- search-80x24.txt\n+++ actual\n@@ -1,3 +1,3 @@\n border\n-Search\n+Searci\n border\n");
-    assert!(compare("search-80x24.txt", expected, expected).is_ok());
-}
-
-#[test]
 fn footer_overflow_80x24() {
     let app=fixture::app("torrents");
     let enabled=app.footer_labels();
@@ -172,17 +136,17 @@ fn footer_overflow_80x24() {
 }
 
 #[test]
-fn watch_ready_and_may_stall_goldens() {
+fn watch_ready_and_may_stall_are_truthful() {
     for (name,stall,buffer,finish) in [("watch-ready",true,240,42),("watch-may-stall",false,30,1080)] {
         let mut app=fixture::app("torrents");
         let row:crate::api::Torrent=serde_json::from_value(serde_json::json!({"hash":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"Watch fixture.mkv","state":"downloading","intent":"run","staged":false,"checked":true,"seed":false,"upload_policy":"off","save_path":"/tmp/fbt-fixture","added_at":1792281600,"force":false,"size":67108864,"completed_bytes":41943040,"progress":0.625,"dl_bps":1048576,"playable":{"file":0,"ready":true,"prefix_bytes":41943040,"acked":false,"stall_free":stall,"buffered_s":buffer,"finishes_in_s":finish}})).unwrap();
         app.torrents[0]=row.clone();app.store.torrents.insert(row.hash.to_string(),row.clone());
         let _=app.open_details(&row);
-        let actual=render(&app,80,24);let path=format!("src/tui/tests/golden/{name}-80x24.txt");
+        let actual=render(&app,80,24);
         assert!(actual.contains(if stall {"Ready to watch"}else{"may stall"}));
         assert!(actual.contains(if stall {"4m00s buffered"}else{"30s buffered"}));
         assert!(actual.contains(if stall {"finishes in 42s"}else{"finishes in 18m00s"}));
-        println!("{path}: truthful watch detail at 80x24; synthetic rendering only");
+        println!("{name}: truthful watch detail at 80x24; synthetic rendering only");
     }
 }
 

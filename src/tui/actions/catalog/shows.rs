@@ -7,7 +7,7 @@ pub(super) const ACTIONS: &[Action] = &[
     action!("shows.copy_magnet",Scope::Pane(Screen::Shows,Pane::Releases),&[KeyChord::plain(KeyCode::Char('y'))],"Copy magnet",90,
         |a|a.selected_episode().is_some(),Some(|a|a.copy_episode_magnet()),T,None,None,None),
     action!("shows.quality",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('='))],"Show quality",45,|a|a.release_show().is_some(),Some(|a|a.open_show_quality()),TD,None,None,None),
-    action!("shows.filters",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('F'))],"Inbox filters",95,|_|true,Some(|a|a.open_show_filters()),T,None,None,None),
+    action!("shows.filters",Scope::Screen(Screen::Shows),&[KeyChord::plain(KeyCode::Char('F'))],"Inbox filters",95,|_|true,Some(|a|a.open_show_filters()),TD,None,None,None),
     action!(
         "shows.next",
         Scope::Screen(Screen::Shows),
@@ -134,7 +134,7 @@ pub(super) const ACTIONS: &[Action] = &[
         |_| true,
         Some(|a| a.on_shows_action(Intent::New)),
         TD,
-        None,
+        Some(&[KeyChord::plain(KeyCode::Char('n')),KeyChord::plain(KeyCode::Char('+'))]),
         None,
         None
     ),
@@ -147,7 +147,7 @@ pub(super) const ACTIONS: &[Action] = &[
         |a| a.selected_show().is_some(),
         Some(|a| a.on_shows_action(Intent::Remove)),
         TD,
-        None,
+        Some(&[KeyChord::plain(KeyCode::Char('x')),KeyChord::plain(KeyCode::Char('d'))]),
         None,
         None
     ),
@@ -211,7 +211,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |a| a.release_show().is_some(),
         Some(|a| a.on_shows_action(Intent::Imdb)),
-        TD,
+        T,
         None,
         None,
         None
@@ -224,7 +224,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |a| a.release_show().is_some(),
         Some(|a| a.on_shows_action(Intent::Wiki)),
-        TD,
+        T,
         None,
         None,
         None
@@ -237,7 +237,7 @@ pub(super) const ACTIONS: &[Action] = &[
         90,
         |a| a.release_show().is_some(),
         Some(|a| a.on_shows_action(Intent::Source)),
-        TD,
+        T,
         None,
         None,
         None

@@ -2,7 +2,8 @@
 """Command orchestration only: all app checks live in the existing harnesses.
 
 Each failed case gets one serial retry in a fresh process/sandbox/log directory.
-Both attempts remain available. A successful retry is FLAKY, not FAIL.
+Both attempts remain available. Timing retry successes are FLAKY; safety failures
+remain FAIL, and an explicit opt-out is SKIP rather than passed coverage.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from gate_safety import strict_check, strict_rust_test
 
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = ROOT / 'agent_ergonomics_audit/audit/regression_tests'
@@ -29,7 +31,7 @@ WORKER_FAILURE = re.compile(r'thread .*panicked|obligation.*leak|closing native 
 # q_detaches includes a real loopback download that keeps moving after detach.
 FAST = {
     'native': ['q_detaches', 'q_confirms'],
-    'daemon': ['api_torrent_operations', 'mutation_magnets_and_file_removal', 'daemon_api_probe',
+    'daemon': ['zero_upload', 'api_torrent_operations', 'mutation_magnets_and_file_removal', 'daemon_api_probe',
                'add_starts_unit_no_launcher', 'down_stops',
                'idle_exit_bar_does_not', 'dashboard_bar_presence',
                'idle_exit_disabled_shutdown_drains', 'search_dedupe_and_repair',
@@ -176,6 +178,14 @@ def cases(mode, binary, env, registry):
                 command += ['--jobs', '1', '--systemd' if name in registry['daemon'].SYSTEMD_CASES else '--no-systemd']
             timeout = 720 if name == 'rev_soak_10min' and opted_in(env, 'SOAK') else float(env.get('FBT_GATE_CASE_TIMEOUT_SECS', '180'))
             result.append(Check(suite + '/' + name, command, case=True, timeout=timeout))
+    # These drive the actual plugin client on a private headless compositor.
+    result.append(python_check('plugin_stop_rule','plugin/tests/stop_policy.py',
+                              '--binary',str(binary),'--case','power','--log-root','{logs}'))
+    if mode == 'full':
+        result += [python_check('plugin_glance_policy','plugin/tests/stop_policy.py',
+                                '--binary',str(binary),'--case','glance','--log-root','{logs}'),
+                   python_check('plugin_default_idle','plugin/tests/stop_policy.py',
+                                '--binary',str(binary),'--case','default_delay','--log-root','{logs}')]
     return result
 
 
@@ -200,6 +210,7 @@ def python_check(name, path, *args):
     bootstrap = ('import sys,runpy;from pathlib import Path;'
                  'sys.path.insert(0,sys.argv[1]);import fbtlog;'
                  'fbtlog.LOG_ROOT=Path(sys.argv[2]);sys.argv=sys.argv[3:];'
+                 'sys.path.insert(0,str(Path(sys.argv[0]).parent));'
                  'runpy.run_path(sys.argv[0],run_name="__main__")')
     return Check(name, [PYTHON, '-B', '-c', bootstrap, str(HARNESS), '{logs}', str(ROOT / path), *args])
 
@@ -226,6 +237,7 @@ def run_once(check, logs, env, attempt):
     check.seconds += time.monotonic() - started
     check.log = str(log)
     ok = code == 0
+    skipped = False
     if check.case:
         # A harness crash or missing final is a failure even if a wrapper exits 0.
         finals = []
@@ -237,7 +249,12 @@ def run_once(check, logs, env, attempt):
                 finals += [row for row in rows if row.get('final')]
         except (ValueError, OSError, AttributeError): ok = False
         ok &= bool(finals)
-    check.status = ('PASS' if attempt == 1 else 'FLAKY') if ok else 'FAIL'
+        skipped = bool(finals) and all(row.get('status') == 'skip' for row in finals)
+    if ok and skipped:
+        check.status = 'FAIL' if strict_check(check.name) else 'SKIP'
+        check.detail = 'coverage skipped; no passed case' if not strict_check(check.name) else 'safety coverage was not executed'
+        return check.status == 'SKIP'
+    check.status = ('PASS' if attempt == 1 else 'FAIL' if strict_check(check.name) else 'FLAKY') if ok else 'FAIL'
     return ok
 
 
@@ -312,7 +329,9 @@ def rust_tests(mode, logs, env):
             check.seconds += retry.seconds
         # A failing named test explains its own panic. Unattributed worker
         # panics on an otherwise-green suite must never be called a pass.
-        check.status = 'FLAKY' if all(retries) and ('test result: FAILED.' in body or unfinished) else 'FAIL'
+        safety_failed = any(strict_rust_test(name) for name in failures)
+        check.status = 'FLAKY' if not safety_failed and all(retries) and ('test result: FAILED.' in body or unfinished) else 'FAIL'
+        if safety_failed: check.detail += '; safety failure retained despite retry'
     elif not ok or worker_failure:
         # Compiler/transport failure or an un-attributed background panic has
         # no narrower case to replay. Retry this stage once, with serial tests.
@@ -320,13 +339,15 @@ def rust_tests(mode, logs, env):
         passed = run_once(check, logs, env, 2)
         retried = Path(check.log).read_text()
         passed &= bool(re.search(r'^test result: ok\. [1-9][0-9]* passed;', retried, re.M))
-        check.status = 'FLAKY' if passed and not WORKER_FAILURE.search(retried) else 'FAIL'
+        check.status = 'FLAKY' if passed and not worker_failure and not WORKER_FAILURE.search(retried) else 'FAIL'
     return check
 
 
 def full_checks(env, binary):
     return [python_check('resource_controls', 'agent_ergonomics_audit/audit/regression_tests/resources_test.py'),
             python_check('logging', 'agent_ergonomics_audit/audit/regression_tests/fbtlog_test.py'),
+            python_check('reality_controls','agent_ergonomics_audit/audit/regression_tests/test_reality_controls.py'),
+            python_check('owner_facts_controls','agent_ergonomics_audit/audit/regression_tests/owner_torrent_facts_test.py'),
             python_check('qml_logging', 'plugin/tests/qs-log.py', '--self-test'),
             Check('hygiene', ['bash', 'scripts/check-gitignore.sh']),
             Check('licences', ['bash', 'scripts/check-nova3-licences.sh']),
@@ -337,6 +358,8 @@ def full_checks(env, binary):
             python_check('tui_controls', 'agent_ergonomics_audit/audit/regression_tests/tui_smoke_test.py', str(binary)),
             python_check('ci_gates', 'agent_ergonomics_audit/audit/regression_tests/ci_test.py'),
             python_check('gate_controls', 'scripts/gate_test.py'),
+            python_check('safety_controls', 'scripts/gate_safety_test.py'),
+            python_check('upload_probe_controls', 'agent_ergonomics_audit/audit/regression_tests/upload_wire_test.py'),
             *optional_checks(env, binary)]
 
 
@@ -357,17 +380,18 @@ def resource_checks(env):
 def summary(checks, elapsed, logs, mode):
     groups = {}
     for check in checks:
+        if check.status == 'FLAKY' and strict_check(check.name): check.status = 'FAIL'
         group = check.name.split('/')[0]
         if group in ('logging', 'qml_logging', 'ci_gates', 'gate_controls', 'widget_online'): group = 'gate_controls'
         if group in ('hygiene', 'licences', 'widget_model'): group = 'hygiene'
         if group == 'tui_controls': group = 'tui_smoke'
         if group == 'upgrade_fixtures': group = 'daemon'
         if group in ('qs_store', 'qs_smoke', 'qs_palette', 'visual', 'widget', 'vpn'): group = 'optional'
-        counts = groups.setdefault(group, dict(PASS=0, FLAKY=0, FAIL=0, **{'NOT RUN': 0}))
+        counts = groups.setdefault(group, dict(PASS=0, FLAKY=0, FAIL=0, SKIP=0, **{'NOT RUN': 0}))
         counts[check.status] += 1
-    print('\nGate          PASS  FLAKY  FAIL  NOT RUN')
+    print('\nGate          PASS  FLAKY  FAIL  SKIP  NOT RUN')
     for name, counts in groups.items():
-        print(f'{name:13} {counts["PASS"]:4}  {counts["FLAKY"]:5}  {counts["FAIL"]:4}  {counts["NOT RUN"]:7}')
+        print(f'{name:13} {counts["PASS"]:4}  {counts["FLAKY"]:5}  {counts["FAIL"]:4}  {counts["SKIP"]:4}  {counts["NOT RUN"]:7}')
     problems = [check for check in checks if check.status in ('FAIL', 'FLAKY')]
     for check in problems[:6]:
         detail = check.detail if len(check.detail) <= 180 else check.detail[:180] + '... (see logs)'
@@ -419,7 +443,7 @@ def main():
         if not run_checks([build], logs, env): return summary(checks, time.monotonic()-started, logs, args.mode)
         binary = artifacts(Path(build.log), test=False)
         env['FBT_BINARY'] = env['FBT_BIN'] = str(binary)
-        sway = headless_sway(env) if args.mode == 'full' else env.get('FBT_TEST_SWAY')
+        sway = headless_sway(env)
         if sway: env['FBT_TEST_SWAY'] = sway
         selected = cases(args.mode, binary, env, registry)
         checks[2:] = selected

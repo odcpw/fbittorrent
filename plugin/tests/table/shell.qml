@@ -9,7 +9,7 @@ import "Plugin/Glyphs.js" as Glyphs
 ShellRoot {
   id:root
   ProgressRule {id:progressProbe;visible:false}
-  ListModel {id:rows;dynamicRoles:true}
+  ListModel {id:rows;dynamicRoles:false}
   ListModel {id:batchMirror;dynamicRoles:true}
   property bool batching:false
   property int moves:0
@@ -38,7 +38,7 @@ ShellRoot {
   }
   Component.onCompleted: {
     var first={hash:"a".repeat(40),name:"First",state:"downloading",added_at:1,progress:0.2,dl_bps:4200000,ul_bps:32000,size:4096,intent:"run",seed:false}
-    var second={hash:"b".repeat(40),name:"Second",state:"paused",added_at:2,progress:0.5,size:8192,intent:"pause",seed:false}
+    var second={hash:"b".repeat(40),name:"Second",state:"paused",added_at:2,intent:"pause",seed:false}
     service.store.apply({id:1,ok:true,result:{torrents:[first,second]}},{op:"torrents.list"})
     service.store.syncModel(rows,"added",false)
     table.stateFilter="paused"
@@ -56,7 +56,8 @@ ShellRoot {
       if(root.phase===0){root.phase=1
       check("native_proxy","filter and map Qt source indexes","only paused hash b",{count:table.count,hash:table.hashAt(0)},table.count===1 && table.hashAt(0)===second.hash)
       table.stateFilter="ready"
-      second.playable={ready:true,acked:false}
+      check("late_metadata","initial unknown size/progress remain absent in the published row","unknown values",rows.get(service.store.modelIndex(second.hash)).uiTorrent,rows.get(service.store.modelIndex(second.hash)).uiTorrent.progress===undefined && rows.get(service.store.modelIndex(second.hash)).uiTorrent.size===undefined)
+      second.progress=0.5;second.size=8192;second.playable={ready:true,acked:false}
       service.store.apply({id:2,ok:true,result:{torrents:[first,second]}},{op:"torrents.list"});service.store.syncModel(rows,"added",false)
       return
       }
@@ -65,7 +66,7 @@ ShellRoot {
         console.log("FBTQS-PASS native_proxy")
         var controls=root.controlCounts(table)
         check("cell_cost","inspect actual table controls and rendered roles","one progress renderer per delegate; paused state and 50% remain visible",{controls:controls,progress:table.progress(second.hash),state:table.stateText(second.hash)},controls.rows>0 && controls.progress===controls.rows && table.progress(second.hash)===0.5 && table.stateText(second.hash)==="Paused")
-        console.log("FBTQS-PASS cell_cost")
+        console.log("FBTQS-PASS cell_cost");console.log("FBTQS-PASS late_metadata")
         ;[900,1099,1100,1399,1400,1599,1600,1920].forEach(function(width){
           var columns=TableLayout.columns(width,width-TableLayout.chrome(width),1),name=columns[2].width
           check("width_geometry","logical window "+width,"NAME >= 210; ordered fixed columns match the tier",{width:width,name:name,columns:columns},name>=210 && columns[6].hidden===(width<1600))

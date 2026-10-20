@@ -74,10 +74,11 @@ def run(args):
         # the installed plugin. No timers or synthetic models drive the timings.
         source=box.root/'instrumented-plugin';shutil.copytree(args.plugin_source,source)
         path=source/'Dashboard.qml';text=path.read_text().replace('  id:root\n','  id:root\n  readonly property var perfWindow:window\n  property var perfPublish:({calls:0,ms:0})\n',1)
-        method='publishNow' if '  function publishNow() {' in text else 'publish'
         # Deferred publication can run during destruction. Preserve the production
-        # disposal guard before entering the extra measurement helper.
-        text=text.replace('  function '+method+'() {','  function '+method+'() {if(disposing)return;var at=Date.now();try{return publishMeasured()}finally{perfPublish.calls++;perfPublish.ms+=Date.now()-at}}\n  function publishMeasured() {',1);path.write_text(text)
+        # disposal guard and the on-demand inspection argument in the wrapper.
+        signature='  function publishNow(inspect) {'
+        assert text.count(signature)==1,'publication instrumentation must wrap the current function'
+        text=text.replace(signature,'  function publishNow(inspect) {if(disposing)return;var at=Date.now();try{return publishMeasured(inspect)}finally{perfPublish.calls++;perfPublish.ms+=Date.now()-at}}\n  function publishMeasured(inspect) {',1);path.write_text(text)
         path=source/'Service.qml';text=path.read_text().replace('  id: root\n','  id: root\n  property int perfSyncRows:0\n  property int perfFrames:0\n',1)
         text=text.replace('  function syncRows() {','  function syncRows() {\n    perfSyncRows++')
         text=text.replace('  function applyFrame(frame, request) {','  function applyFrame(frame, request) {\n    perfFrames++');path.write_text(text)
@@ -194,7 +195,6 @@ def run(args):
                           shell_memory=[line for line in Path(f'/proc/{q.child.pid}/status').read_text().splitlines() if line.startswith(('VmHWM:','VmRSS:'))])
             args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(result,indent=2)+'\n')
             print(json.dumps({k:v for k,v in result.items() if k not in ('samples','transfer_samples')},indent=2),flush=True)
-            case.check(True,'all measured interactions reach an actual presented frame',str(args.output))
         except BaseException:
             print('Last state:',q.state(),flush=True);traceback.print_exc();raise
         finally:

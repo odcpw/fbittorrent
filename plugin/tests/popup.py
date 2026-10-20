@@ -24,7 +24,6 @@ def keys(q,args,predicate):
     except TimeoutError as e:raise TimeoutError(json.dumps(dict(args=args,cursor=cursor(q),state=json.loads(q.ipc("state"))))) from e
     finally:child.wait(timeout=3)
 def peek(client,op,args):return client.response(client.send(op,args))
-def snapshot(case,q):case.check(True,'record cursor and connection state',json.dumps(dict(cursor=cursor(q),state=json.loads(q.ipc('state')))))
 def run(binary):
     with Case(SUITE,'fixture') as setup,running(binary,'paused',setup) as (sandbox,harness,client,row):
         fixtures.path_shim('xdg-open','exit 0',sandbox.root)
@@ -34,27 +33,27 @@ def run(binary):
             q.wait(lambda:json.loads(q.ipc('state'))['online']);q.ipc('open');q.wait(lambda:cursor(q)['opened']);q.ipc('expand','paused')
             q.wait(lambda:cursor(q)['rows']==1)
             with Case(SUITE,'w_001') as c:
-                keys(q,['j'],lambda:cursor(q)['active']);c.check(cursor(q)['hints'],'first movement reveals key hints',q.ipc('cursor'));snapshot(c,q)
+                keys(q,['j'],lambda:cursor(q)['active']);c.check(cursor(q)['hints'],'first movement reveals key hints',q.ipc('cursor'))
             with Case(SUITE,'w_002') as c:
-                keys(q,['k'],lambda:cursor(q)['section']=='header');keys(q,['j'],lambda:cursor(q)['section']=='rows');c.check(cursor(q)['row']==0,'j/k cross header and first row',q.ipc('cursor'));snapshot(c,q)
+                keys(q,['k'],lambda:cursor(q)['section']=='header');keys(q,['j'],lambda:cursor(q)['section']=='rows');c.check(cursor(q)['row']==0,'j/k cross header and first row',q.ipc('cursor'))
             with Case(SUITE,'w_003') as c:
-                keys(q,['k'],lambda:cursor(q)['section']=='header');keys(q,['l'],lambda:cursor(q)['header']==1);keys(q,['h'],lambda:cursor(q)['header']==0);keys(q,['j'],lambda:cursor(q)['section']=='rows');snapshot(c,q)
+                keys(q,['k'],lambda:cursor(q)['section']=='header');keys(q,['l'],lambda:cursor(q)['header']==1);keys(q,['h'],lambda:cursor(q)['header']==0);keys(q,['j'],lambda:cursor(q)['section']=='rows')
             with Case(SUITE,'w_004') as c:
                 shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
-                keys(q,['-k','Return'],lambda:(sandbox.root/'shims/xdg-open.log').exists());c.check(True,'Enter opens the real file through recorded argv', (sandbox.root/'shims/xdg-open.log').read_text());snapshot(c,q)
+                keys(q,['-k','Return'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
             with Case(SUITE,'w_005') as c:
-                keys(q,['p'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['intent']=='run');c.check(True,'p sends start and waits for confirmed intent',str(client.call('torrents.get',dict(hash=row['hash']))));snapshot(c,q)
+                keys(q,['p'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['intent']=='run')
                 # Keep this row paused for the remaining confirmation tests.
                 client.call('torrents.stop',dict(hashes=[row['hash']]));q.wait(lambda:json.loads(q.ipc('state'))['rows']==1)
             with Case(SUITE,'w_006') as c:
                 keys(q,['u'],lambda:not cursor(q)['opened']);text=q.log.read_text()
-                c.check('FBTVISUAL-SUMMON oliver.torrents '+json.dumps(dict(view='torrents',hash=row['hash']),separators=(',',':')) in text and not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['seed'],'u opens this torrent in Details and leaves seeding off',text);snapshot(c,q);q.ipc('open');q.wait(lambda:cursor(q)['opened'])
+                c.check('FBTVISUAL-SUMMON oliver.torrents '+json.dumps(dict(view='torrents',hash=row['hash']),separators=(',',':')) in text and not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['seed'],'u opens this torrent in Details and leaves seeding off',text);q.ipc('open');q.wait(lambda:cursor(q)['opened'])
             with Case(SUITE,'w_007') as c:
-                keys(q,['d'],lambda:cursor(q)['confirming'] and cursor(q)['confirmFocused']=='cancel');keys(q,['-k','Return'],lambda:not cursor(q)['confirming']);c.check(client.call('torrents.get',dict(hash=row['hash']))['ok'],'remove strip starts Cancel-focused; Enter cancels',q.ipc('cursor'));snapshot(c,q)
+                keys(q,['d'],lambda:cursor(q)['confirming'] and cursor(q)['confirmFocused']=='cancel');keys(q,['-k','Return'],lambda:not cursor(q)['confirming']);c.check(client.call('torrents.get',dict(hash=row['hash']))['ok'],'remove strip starts Cancel-focused; Enter cancels',q.ipc('cursor'))
             with Case(SUITE,'w_008') as c:
-                keys(q,['x'],lambda:cursor(q)['confirming']);keys(q,['-k','Escape'],lambda:not cursor(q)['confirming']);c.check(cursor(q)['opened'],'Esc cancels only the inline strip',q.ipc('cursor'));snapshot(c,q)
+                keys(q,['x'],lambda:cursor(q)['confirming']);keys(q,['-k','Escape'],lambda:not cursor(q)['confirming']);c.check(cursor(q)['opened'],'Esc cancels only the inline strip',q.ipc('cursor'))
             with Case(SUITE,'w_009') as c:
-                keys(q,['-k','Delete'],lambda:cursor(q)['confirming']);keys(q,['y'],lambda:peek(client,'torrents.get',dict(hash=row['hash']))['ok'] is False);c.check(Path(row['content_path']).exists(),'y confirms removal and keeps payload',row['content_path']);snapshot(c,q)
+                keys(q,['-k','Delete'],lambda:cursor(q)['confirming']);keys(q,['y'],lambda:peek(client,'torrents.get',dict(hash=row['hash']))['ok'] is False);c.check(Path(row['content_path']).exists(),'y confirms removal and keeps payload',row['content_path'])
             with Case(SUITE,'w_010') as c:
                 if 'limits' in client.call('app.info')['result']['caps']:
                     before=client.call('app.settings.get')['result']['alt_limits_on']
@@ -63,15 +62,14 @@ def run(binary):
                 else:
                     keys(q,['z'],lambda:'limits' in json.loads(q.ipc('state'))['action'])
                     c.check('limits' in json.loads(q.ipc('state'))['action'],'z is explicit unsupported when the real daemon lacks limits',q.ipc('state'))
-                snapshot(c,q)
             with Case(SUITE,'w_011') as c:
-                keys(q,['w'],lambda:not cursor(q)['opened']);c.check(True,'w requests dashboard and closes popup (visual host intentionally has no dashboard)',q.ipc('cursor'));snapshot(c,q);q.ipc('open')
+                keys(q,['w'],lambda:not cursor(q)['opened']);q.ipc('open')
             with Case(SUITE,'w_012') as c:
-                keys(q,['t'],lambda:not cursor(q)['opened']);c.check('FBTVISUAL-BLOCKED' in q.log.read_text(),'t reaches only the explicit TUI launcher; recording host blocks execution',str(q.log));snapshot(c,q);q.ipc('open')
+                keys(q,['t'],lambda:not cursor(q)['opened']);c.check('FBTVISUAL-BLOCKED' in q.log.read_text(),'t reaches only the explicit TUI launcher; recording host blocks execution',str(q.log));q.ipc('open')
             with Case(SUITE,'w_013') as c:
                 before=client.call('torrents.list',{})['result']['torrents'];keys(q,['a'],lambda:'Popup offer' in q.ipc('offer'))
                 c.check(client.call('torrents.list',{})['result']['torrents']==before,'a shows dn name before any add',q.ipc('offer'))
-                keys(q,['-k','Return'],lambda:len(client.call('torrents.list',{})['result']['torrents'])>len(before));c.check(True,'Enter accepts the offered magnet exactly once',str(client.call('torrents.list',{})));snapshot(c,q)
+                keys(q,['-k','Return'],lambda:len(client.call('torrents.list',{})['result']['torrents'])>len(before))
                 client.call('torrents.remove',dict(hashes=['b'*40],delete_files=False))
             with Case(SUITE,'w_014') as c:
                 # A fresh empty payload is incomplete, so Space has a meaningful start/stop control.
@@ -81,9 +79,9 @@ def run(binary):
                 if not cursor(q)['active']:keys(q,['j'],lambda:cursor(q)['active'])
                 if cursor(q)['section']!='rows':keys(q,['j'],lambda:cursor(q)['section']=='rows')
                 keys(q,['-k','space'],lambda:client.call('torrents.get',dict(hash=torrent.info_hash))['result']['torrent']['intent']=='run')
-                c.check((sandbox.root/'shims/xdg-open.log').read_text()==before,'Space sends a mutation and never opens a file',q.ipc('cursor'));snapshot(c,q)
+                c.check((sandbox.root/'shims/xdg-open.log').read_text()==before,'Space sends a mutation and never opens a file',q.ipc('cursor'))
             with Case(SUITE,'w_015') as c:
-                keys(q,['q'],lambda:not cursor(q)['opened']);c.check(client.call('app.info')['ok'],'q closes only the popup; daemon stays alive',q.ipc('cursor'));snapshot(c,q)
+                keys(q,['q'],lambda:not cursor(q)['opened']);c.check(client.call('app.info')['ok'],'q closes only the popup; daemon stays alive',q.ipc('cursor'))
         finally:q.close()
     with Case(SUITE,'w_016') as c,running(binary,'downloading',c) as (sandbox,harness,client,row):
         q=Capture(c,sandbox,'owner')
@@ -92,10 +90,9 @@ def run(binary):
             keys(q,['Q'],lambda:cursor(q)['stopping'] and cursor(q)['confirmFocused']=='cancel');keys(q,['-k','Return'],lambda:not cursor(q)['stopping'])
             c.check(client.call('app.info')['ok'],'Q offers Cancel-first shutdown; Enter cancels',q.ipc('cursor'))
             q.ipc('clickPower');q.wait(lambda:cursor(q)['stopping'] and cursor(q)['confirmFocused']=='cancel')
-            c.check(True,'actual hero button click offers the same Cancel-focused strip',q.ipc('cursor'))
             keys(q,['y'],lambda:not (Path(sandbox.env['XDG_RUNTIME_DIR'])/'fbittorrent/api.sock').exists());q.wait(lambda:not json.loads(q.ipc('state'))['online']);q.ipc('close');q.wait(lambda:not cursor(q)['visible'],timeout=12)
             status=subprocess.run([str(binary),'status','--json'],env=sandbox.env,capture_output=True,text=True,timeout=5)
-            c.check(json.loads(status.stdout).get('running') is False,'Stop drains daemon; status running false and icon absent after stopped-recently',status.stdout);snapshot(c,q)
+            c.check(json.loads(status.stdout).get('running') is False,'Stop drains daemon; status running false and icon absent after stopped-recently',status.stdout)
         finally:q.close()
     return suite_status(SUITE)
 if __name__=='__main__':

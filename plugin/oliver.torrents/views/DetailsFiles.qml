@@ -12,6 +12,7 @@ ColumnLayout {
   required property var flow
   required property var torrent
   property int revision:service.detailRevision
+  readonly property var rows:revision>=0 ? flow.files : []
   readonly property bool editing:filterInput.activeFocus
   function focusFilter(){filterInput.forceActiveFocus()}
   function endFilter(){service.cancelFocusTarget(filterInput);filterInput.focus=false;root.forceActiveFocus()}
@@ -31,7 +32,7 @@ ColumnLayout {
   ListView {
     id:list
     Layout.fillWidth:true;Layout.fillHeight:true;clip:true
-    model:root.revision>=0 ? root.flow.files : []
+    model:root.rows
     currentIndex:root.revision>=0 ? root.flow.cursor : 0
     onCurrentIndexChanged:positionViewAtIndex(currentIndex,ListView.Contain)
     delegate:Rectangle {

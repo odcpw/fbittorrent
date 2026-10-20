@@ -96,7 +96,13 @@ Column {
     ScrollBar.vertical:ScrollBar {policy:ScrollBar.AsNeeded}
     delegate:TorrentTableRow {
       required property var model
-      width:list.width;host:root;torrent:model
+      // A pooled delegate can remain attached to the proxy's content item.
+      // Hide it immediately, before its old role bindings lose their hash.
+      property bool pooled:false
+      ListView.onPooled:pooled=true
+      ListView.onReused:pooled=false
+      visible:!pooled && !!model.hash
+      width:list.width;host:root;torrent:model.uiTorrent
       selected:!!root.selection[model.hash]
     }
   }

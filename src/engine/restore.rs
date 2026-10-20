@@ -76,15 +76,12 @@ impl Inner {
         failure.map_or(Ok(()), Err)
     }
     pub(super) fn handle(&self, hash: &str) -> Result<Arc<ManagedTorrent>> {
-        self.session
-            .with_torrents(|torrents| {
-                for (_, handle) in torrents {
-                    if handle.info_hash().as_string() == hash {
-                        return Some(handle.clone());
-                    }
-                }
-                None
-            })
+        // Samples look up every record. Parse once instead of allocating a
+        // hexadecimal string for every candidate in each session scan.
+        let key = crate::api::validation::lower_hex(hash, 40)
+            .then(|| TorrentIdOrHash::parse(hash).ok())
+            .flatten();
+        key.and_then(|key| self.session.get(key))
             .ok_or_else(|| anyhow!("torrent not found: {hash}"))
     }
     pub(super) async fn resolve_record(

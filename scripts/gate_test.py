@@ -19,6 +19,17 @@ import gate
 
 
 class GateTests(unittest.TestCase):
+    def test_python_entrypoint_keeps_its_sibling_imports(self):
+        with tempfile.TemporaryDirectory(prefix='fbt-python-entry-') as directory:
+            root=Path(directory)
+            (root/'sibling.py').write_text('VALUE="actual sibling module"\n')
+            script=root/'journey.py'
+            script.write_text('from sibling import VALUE\nassert VALUE=="actual sibling module"\nprint(VALUE)\n')
+            check=gate.python_check('entrypoint',str(script))
+            self.assertTrue(gate.run_checks([check],root/'logs',dict(os.environ)))
+            self.assertEqual(check.status,'PASS')
+            self.assertIn('actual sibling module',Path(check.log).read_text())
+
     def test_release_wrapper_reuses_an_inherited_lock(self):
         with tempfile.NamedTemporaryFile(prefix='fbt-gate-lock-') as lock, patch.object(gate, 'RELEASE_LOCK', lock.name):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -248,7 +259,7 @@ sys.exit(subprocess.call([*runner,str(root/'tests'),*args]))
     def test_build_abort_never_uses_stale_success(self):
         with tempfile.TemporaryDirectory(prefix='fbt-gate-control-') as temporary:
             root = Path(temporary); scripts = root / 'scripts'; scripts.mkdir()
-            for name in ('gate.py', 'gate-fast.sh'): shutil.copy2(gate.ROOT / 'scripts' / name, scripts / name)
+            for name in ('gate.py', 'gate_safety.py', 'gate-fast.sh'): shutil.copy2(gate.ROOT / 'scripts' / name, scripts / name)
             harness = root / 'agent_ergonomics_audit/audit/regression_tests'; harness.mkdir(parents=True)
             for name in ('daemon', 'native', 'agent_contract', 'tui_smoke', 'tui_journey'):
                 (harness / (name + '.py')).write_text('SYSTEMD_CASES=set()\n')

@@ -16,7 +16,7 @@ function describe(svc) {
     return result
   }
   result.tone="normal"
-  var active=(counts.downloading || 0)+(counts.metadata || 0)+(counts.checking || 0)+(counts.stalled || 0)
+  var active=Model.activeCount(counts)
   var error=svc.store && svc.store.firstError ? svc.store.firstError() : null
   var ready=svc.client && svc.client.caps.indexOf("watch")>=0 ? (summary.top || []).find(function(t) {
     return t.playable && t.playable.ready && t.playable.acked===false
@@ -34,16 +34,16 @@ function describe(svc) {
     result.tooltip="Waiting for ProtonVPN" + (counts.waiting_vpn>0 ? " · " + counts.waiting_vpn + " downloads waiting" : "")
   } else if (ready) {
     result.state="ready"; result.glyph=Glyphs.ready; result.tone="normal"
-    result.tooltip="Ready to watch: " + ready.name; result.rate=Model.barRate(dl,true)
+    result.tooltip="Ready to watch: " + ready.name; result.rate=Model.rate(dl,true)
   } else if (active>0) {
     result.state="downloading"; result.tone="normal"
     var words=[]
     ;["downloading","metadata","checking","stalled","queued"].forEach(function(kind) {if (counts[kind]>0) words.push(counts[kind]+" "+kind)})
-    result.tooltip="↓ " + Model.barRate(dl,false) + " ↑ " + Model.barRate(ul,false) + " · " + words.join(" · ")
-    result.rate=Model.barRate(dl,true)
+    result.tooltip="↓ " + Model.rate(dl,false) + " ↑ " + Model.rate(ul,false) + " · " + words.join(" · ")
+    result.rate=Model.rate(dl,true)
   } else if (counts.seeding>0) {
     result.state="seeding"; result.glyph=Glyphs.upload; result.tone="normal"
-    result.tooltip="↑ " + Model.barRate(ul,false) + " · " + counts.seeding + " uploading"; result.rate=Model.barRate(ul,true)
+    result.tooltip="↑ " + Model.rate(ul,false) + " · " + counts.seeding + " uploading"; result.rate=Model.rate(ul,true)
   } else {
     result.state="idle"
     var remaining=summary.daemon && summary.daemon.idle_exit_in_s

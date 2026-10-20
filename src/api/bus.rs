@@ -1,6 +1,7 @@
 //! Subscription owner. One sampler serves every connection; snapshots and
 //! revisions are serialized here, while socket writes use the server's outbox.
 mod summary;
+mod clocks;
 pub(crate) use summary::counts as summary_counts;
 
 use super::{
@@ -17,6 +18,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use std::{
+    cell::OnceCell,
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -124,6 +126,7 @@ impl EventRing {
 }
 struct Sample {
     topics: BTreeSet<Topic>,
+    summary_cache: OnceCell<Value>,
     history:Vec<u64>,stats:Value,
     epoch: u64,
     state: String,
@@ -165,6 +168,11 @@ impl Sample {
         }
     }
     fn summary(&self) -> Value {
+        // A sample is immutable while fanned out to subscribers. Count and
+        // project its rows once, even when several bars share the same tick.
+        self.summary_cache.get_or_init(|| self.build_summary()).clone()
+    }
+    fn build_summary(&self) -> Value {
         let counts = summary_counts(&self.rows);
         let top = summary::top(&self.rows);
         let mut result = json!({"counts":counts,"alt":self.settings["alt_limits_on"].as_bool().unwrap_or(false),"limits":ops::transfer::limits_from_settings(&self.settings),"network":{"state":if self.network["ready"]==true {"ready"}else{"waiting"},"message":self.network["message"]},"daemon":self.daemon,"top":top,"disk":self.disk});
@@ -398,7 +406,7 @@ impl Bus {
         if !self.daemon.is_stopping() { self.daemon.inhibitor.observe(&rows); }
         if let Slot::Running(app)=&slot.slot {
             let mut watch=self.daemon.watch.lock().unwrap();
-            if watch.due() {
+            if watch.due() || !watch.needs_tick() {
                 completions.extend(watch.sample(app.dispatcher().watch_samples().map_err(ops::engine_error)?));
             }
         } else {
@@ -466,7 +474,9 @@ impl Bus {
         let mut effective = cfg;
         effective.idle_exit_secs = self.daemon.idle_exit_secs();
         effective.notify &= !self.daemon.no_notify;
-        let settings = serde_json::to_value(ops::settings::view(&effective)).unwrap();
+        let settings = if topics.contains(&Topic::Settings) || topics.contains(&Topic::Summary) {
+            serde_json::to_value(ops::settings::view(&effective)).unwrap()
+        } else { Value::Null };
         let mut show_releases=BTreeMap::new();
         for id in topics.iter().filter_map(|t|if let Topic::ShowReleases(id)=t{Some(id)}else{None}) {
             show_releases.insert(id.clone(),serde_json::to_value(self.daemon.shows.releases((id!="inbox").then_some(id.as_str()),id=="inbox",None,&rows).map_err(ops::shows::failure)?).unwrap());
@@ -482,11 +492,11 @@ impl Bus {
             if rows.iter().any(|r|&r.hash==hash) {trackers.insert(hash.to_string(),serde_json::to_value(ops::trackers::read(&self.daemon,hash)?).unwrap());}
         }
         let (session,all_time)=self.daemon.statistics();
-        let (history,stats)={let mut ring=self.daemon.history.lock().unwrap();
-            ring.record(Instant::now(),rows.iter().filter_map(|r|r.dl_bps).sum(),rows.iter().filter_map(|r|r.ul_bps).sum());
+        let (history,stats)={let ring=self.daemon.history.lock().unwrap();
             (ring.download(60),if topics.contains(&Topic::Stats){json!(SampledStats {history:ring.snapshot(),session:Some(session),all_time:Some(all_time)})}else{Value::Null})};
         Ok(Sample {
             topics: topics.iter().cloned().collect(),
+            summary_cache: OnceCell::new(),
             history,stats,
             peers,trackers,
             shows:if topics.contains(&Topic::Shows){serde_json::to_value(self.daemon.shows.list().map_err(ops::shows::failure)?).unwrap()}else{json!([])},
@@ -498,7 +508,9 @@ impl Bus {
             state,
             rows,
             completions,
-            logs: serde_json::to_value(self.daemon.logs.all()).unwrap(),
+            logs: if topics.contains(&Topic::Log) {
+                serde_json::to_value(self.daemon.logs.all()).unwrap()
+            } else { Value::Null },
             searches,
             files,
             pieces,
@@ -514,6 +526,7 @@ impl Bus {
         let mut seen_generation = 0;
         let mut identity = None;
         let mut previous_rows: BTreeMap<String, Torrent> = BTreeMap::new();
+        let mut active_work = false;
         let mut ready_seen = false;
         let mut dirty = true;
         let mut generation_threads = Vec::new();
@@ -611,7 +624,7 @@ impl Bus {
                 .filter(|s| s.active)
                 .flat_map(|s| s.topics.iter())
                 .any(|t| t.due <= Instant::now());
-            if self.daemon.watch.lock().unwrap().due() || self.daemon.history.lock().unwrap().due(Instant::now()) { dirty = true; }
+            if self.clocks_due(active_work) { dirty = true; }
             if !dirty && !due {
                 dirty = self.wake.wait(Duration::from_millis(100));
                 continue;
@@ -627,6 +640,7 @@ impl Bus {
                 .collect();
             match self.sample(&topics) {
                 Ok(sample) => {
+                    active_work = clocks::active_work(&sample.rows);
                     let mut r = self.registry.lock().unwrap();
                     let restored_baseline = !ready_seen;
                     if !matches!(sample.state.as_str(), "starting" | "stopping") {

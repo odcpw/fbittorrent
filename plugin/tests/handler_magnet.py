@@ -76,7 +76,6 @@ def run(binary,early=False):
             pressed=time.monotonic();subprocess.run(['wtype','-k','Return'],env=q.env,check=True,timeout=3)
             if early:
                 q.wait(lambda:not sheet().get('visible') and not c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['staged'])
-                case.check(True,'Download commits and closes while metadata is still withheld',json.dumps(sheet()))
                 http.release.set()
             samples=[]
             def downloading():
@@ -108,8 +107,6 @@ def run(binary,early=False):
                 q.keys(['u'],lambda:c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']['upload_enabled'] is enabled)
                 current=c.call('torrents.get',dict(hash=source.info_hash))['result']['torrent']
                 case.check(current['seed'] is enabled,'Details explicitly changes effective Upload to '+('on' if enabled else 'off'),json.dumps(current))
-            case.check(True,'Details overrides global Upload on with off/on/off',json.dumps(current))
-            case.check(True,'one handler review and one Enter commit; sheet stays closed while real bytes download',json.dumps(dict(click_to_sheet_ms=click_ms,enter_to_downloading_ms=download_ms,enter_to_bytes_ms=first_bytes_ms,samples=samples,handler=json.loads(out))))
             print(json.dumps(dict(click_to_sheet_ms=click_ms,enter_to_downloading_ms=download_ms,enter_to_bytes_ms=first_bytes_ms,host_cpu_busy_pct=cpu_busy)),flush=True)
         except Exception:
             print(json.dumps(q.state()),flush=True)
