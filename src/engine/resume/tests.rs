@@ -41,7 +41,7 @@ fn write_snapshot(store: &Store, record: &Record, metadata: &[u8]) {
     bytes.extend(bits);
     bytes.extend_from_slice(&crc(&bytes).to_be_bytes());
     atomic_write(&store.path(&record.hash).unwrap(), &bytes).unwrap();
-    atomic_write(&store.directory.join("CLEAN"), b"clean-v1\n").unwrap();
+    atomic_write(&store.directory.join("CLEAN"), store.boot_marker.as_ref().unwrap()).unwrap();
 }
 #[test]
 fn clean_authority_is_single_use_and_stamps_selection_and_bits_are_checked() {
@@ -179,5 +179,22 @@ fn snapshot_checksum_rejects_payload_or_header_corruption() {
         assert!(format!("{:#}", store.load(&root, &record).err().unwrap())
             .contains("checksum mismatch"));
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_different_boot_never_trusts_even_valid_unchanged_payload() {
+    let (root, record, metadata) = local();
+    let store = Store::open(&root).unwrap();
+    write_snapshot(&store, &record, &metadata);
+    let marker = store.directory.join("CLEAN");
+    std::fs::write(&marker, b"boot-v2 00000000-0000-0000-0000-000000000000\n").unwrap();
+    let store = Store::open(&root).unwrap();
+    assert!(!marker.exists(), "untrusted token is still consumed");
+    assert!(store.prepare(&root, &[record.clone()]).unwrap().take(&record.hash).is_none());
+    // Current boot still supports the no-read process restart optimization.
+    write_snapshot(&store, &record, &metadata);
+    let store = Store::open(&root).unwrap();
+    assert!(store.prepare(&root, &[record.clone()]).unwrap().take(&record.hash).is_some());
     std::fs::remove_dir_all(root).unwrap();
 }

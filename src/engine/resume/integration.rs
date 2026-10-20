@@ -41,9 +41,6 @@ impl Store {
         let _io = self.io.lock().unwrap();
         self.clean.store(false, Ordering::Release);
         let _ = std::fs::remove_file(self.directory.join("CLEAN"));
-        if let Ok(file) = std::fs::File::open(&self.directory) {
-            let _ = file.sync_all();
-        }
     }
 }
 
@@ -53,7 +50,9 @@ impl Store {
     pub(crate) fn preserve_parked_clean(&self) -> Result<()> {
         let _io = self.io.lock().unwrap();
         if self.clean.load(Ordering::Acquire) {
-            atomic_write(&self.directory.join("CLEAN"), b"clean-v1\n")?;
+            if let Some(marker) = &self.boot_marker {
+                atomic_write(&self.directory.join("CLEAN"), marker)?;
+            }
         }
         Ok(())
     }
