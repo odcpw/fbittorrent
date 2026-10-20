@@ -7,6 +7,7 @@
 //! [`PRESENCE_TTL`]. Either way 'Files missing' is derived from the disk, never
 //! guessed, and a listing never creates or hashes payload.
 use super::*;
+use std::borrow::Cow;
 use std::os::unix::fs::MetadataExt;
 use std::sync::Mutex as StdMutex;
 use std::time::Instant;
@@ -38,6 +39,19 @@ pub(super) struct SavedInfo {
     pub total_length: u64,
 }
 
+/// Normal API selections are sorted already: borrow them without allocating.
+/// Saved records may contain unordered/duplicate indices, so sort only that
+/// case. File order remains metainfo order and out-of-range ids stay ignored.
+fn sorted_selection(ids: Option<&[usize]>) -> Option<Cow<'_, [usize]>> {
+    ids.map(|ids| {
+        if ids.is_sorted() { Cow::Borrowed(ids) } else {
+            let mut sorted = ids.to_vec();
+            sorted.sort_unstable();
+            Cow::Owned(sorted)
+        }
+    })
+}
+
 impl SavedInfo {
     fn parse(bytes: &[u8]) -> Result<Self> {
         let torrent = librqbit::torrent_from_bytes(bytes)?;
@@ -64,6 +78,7 @@ impl SavedInfo {
 
     /// The saved file list and librqbit's selected byte total for a record.
     pub(super) fn selection(&self, record: &Record) -> (Vec<TorrentFile>, u64) {
+        let selection = sorted_selection(record.only_files.as_deref());
         let mut selected_end = 0;
         let mut selected_bytes = 0;
         let files = self
@@ -71,7 +86,7 @@ impl SavedInfo {
             .iter()
             .enumerate()
             .map(|(index, file)| {
-                let selected = record.only_files.as_ref().is_none_or(|ids| ids.contains(&index));
+                let selected = selection.as_ref().is_none_or(|ids| ids.binary_search(&index).is_ok());
                 // Match librqbit's compute_selected_pieces / hns.total(): the
                 // union of non-padding selected files' pieces, not file sizes.
                 // Metainfo order gives increasing ranges; count shared boundary
@@ -98,8 +113,9 @@ impl SavedInfo {
 
     /// Every selected, non-padding file is a regular file of its full length.
     fn present(&self, record: &Record) -> bool {
+        let selection = sorted_selection(record.only_files.as_deref());
         self.files.iter().enumerate().all(|(index, file)| {
-            let selected = record.only_files.as_ref().is_none_or(|ids| ids.contains(&index));
+            let selected = selection.as_ref().is_none_or(|ids| ids.binary_search(&index).is_ok());
             !selected
                 || file.padding
                 || std::fs::metadata(Path::new(&record.output_folder).join(&file.path))
@@ -195,9 +211,10 @@ impl SavedCache {
         }
         let missing = handle.metadata.load_full().is_some_and(|metadata| {
             let have = handle.stats().file_progress;
+            let selected = sorted_selection(selection.as_deref());
             metadata.file_infos.iter().enumerate().any(|(index, file)| {
                 let bytes = have.get(index).copied().unwrap_or(0);
-                selection.as_ref().is_none_or(|ids| ids.contains(&index))
+                selected.as_ref().is_none_or(|ids| ids.binary_search(&index).is_ok())
                     && !file.attrs.padding
                     && bytes > 0
                     && match std::fs::metadata(folder.join(&file.relative_filename)) {
@@ -234,6 +251,43 @@ mod tests {
         let mut record = super::super::tests::review_record(&hash, &root.join("downloads"));
         record.completion_on = 1;
         (root, record)
+    }
+
+    #[test]
+    fn saved_selection_preserves_sparse_unordered_and_shared_piece_semantics() {
+        let (root, mut record) = fixture("selection");
+        let info = SavedInfo {
+            files: vec![
+                SavedFile { name: "a".into(), path: "a".into(), len: 3, padding: false, pieces: 0..1 },
+                SavedFile { name: "b".into(), path: "b".into(), len: 4, padding: false, pieces: 0..2 },
+                SavedFile { name: "pad".into(), path: "pad".into(), len: 1, padding: true, pieces: 1..2 },
+                SavedFile { name: "c".into(), path: "c".into(), len: 6, padding: false, pieces: 2..4 },
+            ], piece_length: 4, total_length: 14,
+        };
+        for (name, bytes) in [("a", 3), ("b", 4), ("c", 6)] {
+            std::fs::write(root.join("downloads").join(name), vec![0; bytes]).unwrap();
+        }
+        for (ids, priorities, bytes) in [
+            (None, vec![1, 1, 1, 1], 14),
+            (Some(vec![]), vec![0, 0, 0, 0], 0),
+            (Some(vec![3]), vec![0, 0, 0, 1], 6),
+            (Some(vec![2]), vec![0, 0, 1, 0], 0),
+            (Some(vec![1, 3]), vec![0, 1, 0, 1], 14),
+            (Some(vec![3, 1, 1, usize::MAX]), vec![0, 1, 0, 1], 14),
+        ] {
+            record.only_files = ids;
+            let (files, total) = info.selection(&record);
+            assert_eq!(files.iter().map(|file| file.priority).collect::<Vec<_>>(), priorities);
+            assert_eq!(files.iter().map(|file| file.name.as_str()).collect::<Vec<_>>(), ["a", "b", "pad", "c"]);
+            assert_eq!(total, bytes);
+            assert!(info.present(&record), "padding and out-of-range ids do not require files");
+        }
+        std::fs::remove_file(root.join("downloads/b")).unwrap();
+        record.only_files = Some(vec![3, 3, usize::MAX]);
+        assert!(info.present(&record), "unselected files do not affect presence");
+        record.only_files = Some(vec![3, 1]);
+        assert!(!info.present(&record), "missing selected files remain visible");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
