@@ -148,12 +148,18 @@ class Match(Run):
                 try:child.wait(2)
                 except subprocess.TimeoutExpired as error:errors.append(error)
             for stream in self.handles:stream.close()
-            if not self.owners.survivors():self.sandbox.temporary.cleanup()
+            remaining=self.owners.survivors()
+            if not remaining:self.sandbox.temporary.cleanup()
             else:self.sandbox.temporary._finalizer.detach() # retain isolation for owned survivors
+            # Retain failure cleanup evidence too: absence of a successful
+            # result must never hide which children needed emergency cleanup.
+            (self.output/'teardown.json').write_text(json.dumps(dict(shutdown_ms=shutdown_ms,
+                survivors=len(remaining),emergency_cleanup=bool(survivors),
+                qualified=not errors and original is None,
+                children=[{'pid':child.pid,'returncode':child.returncode} for child in self.children])))
             if errors:
                 if original:errors.insert(0,original)
                 raise BaseExceptionGroup('client comparison teardown failed',errors)
-            (self.output/'teardown.json').write_text(json.dumps(dict(shutdown_ms=shutdown_ms,survivors=0,emergency_cleanup=False)))
 
     def download(self,name,client,size,files,peers,recheck=False):
         with self.setup_match(name,client,size,files,peers) as torrent:

@@ -17,7 +17,7 @@ for path in sorted(a.directory.glob('*/result.json')):
     if row['instrumented']:continue
     assert not (path.parent/'failure.json').exists(),path
     teardown=json.loads((path.parent/'teardown.json').read_text())
-    assert teardown['survivors']==0 and not teardown['emergency_cleanup'],path
+    assert teardown['qualified'] and teardown['survivors']==0 and not teardown['emergency_cleanup'],path
     key=(row['bytes'],row['files'],row['peers'])
     groups.setdefault(key,{}).setdefault(row['client'],[]).append(row)
 expected={(WORKLOADS[w][0],WORKLOADS[w][1],n) for w in arguments['workloads'] for n in arguments['seeds']}

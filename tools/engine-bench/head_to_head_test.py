@@ -93,7 +93,11 @@ class ComparisonControls(unittest.TestCase):
                 with run.setup_match('fail','fbt',1024,1,1):pass
             self.assertFalse(run.owners.survivors())
             self.assertFalse(run.sandbox.root.exists())
-            self.assertFalse((run.output/'teardown.json').exists())
+            import json
+            teardown=json.loads((run.output/'teardown.json').read_text())
+            self.assertFalse(teardown['qualified'])
+            self.assertTrue(teardown['emergency_cleanup'])
+            self.assertEqual(teardown['survivors'],0)
             self.assertTrue(all(p.poll() is not None for p in run.children))
 
 
