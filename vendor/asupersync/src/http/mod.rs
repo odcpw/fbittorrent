@@ -27,6 +27,34 @@ pub mod h2;
 #[cfg(test)]
 mod h1_h2_header_conformance_test;
 
+/// Native HTTP/3 API surface (T4.1).
+///
+/// This module intentionally exports Tokio-free HTTP/3 primitives from
+/// `h3_native` under a feature boundary (`http3`) so users can adopt HTTP/3
+/// contracts without enabling parked compatibility wrappers.
+#[cfg(feature = "http3")]
+pub mod h3 {
+    pub use super::h3_native::{
+        H3ConnectionConfig, H3ConnectionState, H3ControlState, H3EndpointRole, H3Frame,
+        H3NativeError as H3Error, H3PseudoHeaders, H3QpackMode, H3RequestHead,
+        H3RequestStreamState, H3ResponseHead, H3Settings, H3UniStreamType, QpackFieldPlan,
+        UnknownSetting, qpack_decode_field_section, qpack_encode_field_section,
+        qpack_encode_request_field_section, qpack_encode_response_field_section,
+        qpack_encode_trailer_field_section, qpack_plan_to_header_fields,
+        qpack_static_plan_for_request, qpack_static_plan_for_response,
+        validate_request_pseudo_headers, validate_response_pseudo_headers,
+    };
+    pub use super::h3_quic::{
+        H3_REQUEST_CANCELLED, NativeH3Event, NativeH3Session, NativeH3SessionError,
+    };
+    pub(crate) use super::h3_quic::{
+        NativeH3ResponseWriter, NativeH3WriteEvent, h3_data_frame_wire_len,
+    };
+}
+#[cfg(feature = "extended-network")]
+pub mod h3_native;
+#[cfg(feature = "http3")]
+pub mod h3_quic;
 pub mod pool;
 
 /// High-level pooled [`Client`] facade.
@@ -48,4 +76,18 @@ pub use h1::{
 /// [`Client::default_for_runtime`](client::Client::default_for_runtime).
 pub use client::Client;
 
+// Keep both names for the same native HTTP/3 error inside its feature boundary.
+#[cfg(feature = "extended-network")]
+pub use h3_native::H3NativeError as H3Error;
+#[cfg(feature = "extended-network")]
+pub use h3_native::{
+    H3ConnectionConfig, H3ConnectionState, H3ControlState, H3EndpointRole,
+    H3Frame as NativeH3Frame, H3NativeError, H3PseudoHeaders, H3QpackMode, H3RequestHead,
+    H3RequestStreamState, H3ResponseHead, H3Settings as NativeH3Settings, H3UniStreamType,
+    QpackFieldPlan, UnknownSetting, qpack_decode_field_section, qpack_encode_field_section,
+    qpack_encode_request_field_section, qpack_encode_response_field_section,
+    qpack_encode_trailer_field_section, qpack_plan_to_header_fields, qpack_static_plan_for_request,
+    qpack_static_plan_for_response, validate_request_pseudo_headers,
+    validate_response_pseudo_headers,
+};
 pub use pool::{Pool, PoolConfig, PoolKey, PoolStats, PooledConnectionMeta, PooledConnectionState};

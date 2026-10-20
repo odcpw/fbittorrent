@@ -5,13 +5,44 @@
 
 #![allow(clippy::unused_async)]
 
+/// ATP (Asupersync Transfer Protocol) - Self-contained data movement layer.
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+pub mod atp;
+/// ATP UDP socket capability boundary.
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+#[path = "atp/udp/mod.rs"]
+pub mod atp_udp;
 /// DNS resolution with caching and Happy Eyeballs support.
 pub mod dns;
 /// Happy Eyeballs v2 (RFC 8305) concurrent dual-stack connection racing.
 pub mod happy_eyeballs;
+/// Native QUIC protocol core codecs and types (Tokio-free, runtime-agnostic).
+#[cfg(feature = "extended-network")]
+pub mod quic_core;
+/// Native QUIC transport state machines (TLS, recovery, streams).
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+pub mod quic_native;
 /// STUN protocol for NAT traversal and ICE candidate gathering.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stun;
+/// Native QUIC API surface (T4.1).
+///
+/// This module intentionally aliases the Tokio-free native QUIC stack so users
+/// can enable `feature = "quic"` and import `asupersync::net::quic::*` through
+/// a stable feature boundary while T4.2/T4.3 continue transport hardening.
+#[cfg(all(feature = "quic", not(target_arch = "wasm32")))]
+pub mod quic {
+    /// Native QUIC connection type.
+    pub type QuicConnection = super::quic_native::NativeQuicConnection;
+    /// Native QUIC configuration type.
+    pub type QuicConfig = super::quic_native::NativeQuicConnectionConfig;
+    /// Native QUIC error type.
+    pub type QuicError = super::quic_native::NativeQuicConnectionError;
+    /// Native QUIC stream alias used for send-side operations.
+    pub type SendStream = super::quic_native::QuicStream;
+    /// Native QUIC stream alias used for recv-side operations.
+    pub type RecvStream = super::quic_native::QuicStream;
+}
 mod resolve;
 pub mod sys;
 /// TCP networking primitives.
@@ -20,6 +51,12 @@ pub mod sys;
 /// but native socket entry points fail fast with `io::ErrorKind::Unsupported`.
 pub mod tcp;
 mod udp;
+#[cfg(all(feature = "extended-services", unix, not(target_arch = "wasm32")))]
+pub(crate) use udp::Armed;
+/// Fallback-aware reactor registration shared by every fd-backed async handle
+/// in the crate (sockets here, child-process pipes in `crate::process`).
+#[cfg(all(feature = "extended-services", not(target_arch = "wasm32")))]
+pub(crate) use udp::ReactorRegistration;
 /// Unix domain socket networking primitives (includes `UnixListener`, `UnixStream`).
 #[cfg(unix)]
 pub mod unix;
@@ -28,7 +65,32 @@ pub mod websocket;
 /// MessagePort-based coordination utilities for browser worker runtimes.
 pub mod worker_channel;
 
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+pub use atp::protocol::{
+    AtpFrameCodec, Frame as AtpFrame, FrameError, FrameHeader, FrameType, ProtocolVersion,
+    SessionTranscript, TranscriptHash, TranscriptHasher, VarInt, VarIntError,
+};
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+pub use atp_udp::{
+    ATP_UDP_DEFAULT_BATCH_SIZE, ATP_UDP_DEFAULT_MAX_PACKET_SIZE, AtpUdpPacket, AtpUdpPressure,
+    AtpUdpReceivedPacket, AtpUdpRecvBatch, AtpUdpSocket, AtpUdpSocketConfig, AtpUdpSocketProfile,
+    LabAtpUdpNetwork, LabAtpUdpNetworkSocket, LabAtpUdpSocket, LabUdpEvent, LabUdpLinkPolicy,
+    LabUdpLinkStats,
+};
 pub use happy_eyeballs::{HappyEyeballsConfig, connect as happy_eyeballs_connect};
+#[cfg(all(feature = "quic", not(target_arch = "wasm32")))]
+pub use quic::{
+    QuicConfig, QuicConnection, QuicError, RecvStream as QuicRecvStream,
+    SendStream as QuicSendStream,
+};
+#[cfg(all(feature = "extended-network", not(target_arch = "wasm32")))]
+pub use quic_native::{
+    AckEvent, AckRange, CryptoLevel, FlowControlError, FlowCredit, KeyUpdateEvent,
+    NativeQuicConnection, NativeQuicConnectionConfig, NativeQuicConnectionError, PacketNumberSpace,
+    QuicConnectionState, QuicStream, QuicStreamError, QuicTlsError, QuicTlsMachine,
+    QuicTransportMachine, RttEstimator, SentPacketMeta, StreamDirection, StreamId, StreamRole,
+    StreamTable, StreamTableError, TransportError,
+};
 pub use resolve::{lookup_all, lookup_one};
 #[cfg(not(target_arch = "wasm32"))]
 pub use stun::{IceCandidate, IceCandidateType, StunClient, StunError, StunMessageType};

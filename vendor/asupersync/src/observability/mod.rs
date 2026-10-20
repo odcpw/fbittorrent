@@ -51,6 +51,8 @@ pub mod diagnostics;
 pub mod entry;
 #[cfg(test)]
 pub mod head_based_sampling_audit_test;
+#[cfg(feature = "metrics")]
+pub mod histogram_conformance;
 pub mod level;
 pub mod metrics;
 #[cfg(test)]
@@ -60,8 +62,117 @@ pub mod multi_runtime_subscriber_audit_test;
 pub mod network_diagnostics;
 pub mod network_truth;
 pub mod obligation_tracker;
+#[cfg(feature = "metrics")]
+pub mod otel;
+#[cfg(test)]
+pub mod otel_conformance_tests;
+#[cfg(test)]
+pub mod otel_sampling_strategy_audit_test;
+#[cfg(feature = "metrics")]
+pub mod otel_structured_concurrency;
+#[cfg(test)]
+pub mod otlp_attribute_size_cap_audit_test;
+// br-asupersync-5z2scg.1.3: private, native-only owned OTLP message staging.
+// Signal adapters may construct these finite models inside the crate, but the
+// model types remain private; external SDK adapters and dependency cutover are
+// separate compatibility decisions.
+#[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+#[allow(dead_code)]
+// The owned schema deliberately spells its internal contract as crate-visible.
+// This crate-private staging boundary keeps the effective API private while
+// avoiding a misleading mass rewrite of generated-shaped declarations to `pub`.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) mod otlp_proto;
+// br-asupersync-lf1a77: stale OTLP audit files that depended on removed
+// synthetic HTTP/span APIs remain tracked in-place, but their invariants are
+// normalized into compiled production-seam tests and the OTLP inventory artifact
+// before re-entry.
+#[cfg(test)]
+pub mod otlp_add_attributes_missing_api_audit_test;
+#[cfg(test)]
+pub mod otlp_clock_skew_handling_audit_test;
+#[cfg(test)]
+pub mod otlp_collector_oom_recovery_audit_test;
+#[cfg(test)]
+pub mod otlp_compression_audit_test;
+#[cfg(test)]
+pub mod otlp_compression_negotiation_audit_test;
+#[cfg(test)]
+pub mod otlp_dst_clock_jump_audit_test;
+#[cfg(test)]
+pub mod otlp_empty_key_attribute_audit_test;
+#[cfg(test)]
+pub mod otlp_graceful_shutdown_audit_test;
+#[cfg(test)]
+pub mod otlp_high_frequency_span_audit_test;
+#[cfg(test)]
+pub mod otlp_metrics_collection_interval_audit_test;
+#[cfg(test)]
+pub mod otlp_network_partition_audit_test;
+#[cfg(test)]
+pub mod otlp_partial_success_audit_test;
+#[cfg(test)]
+pub mod otlp_resource_attributes_inheritance_audit_test;
+#[cfg(test)]
+pub mod otlp_resource_detection_priority_audit_test;
+#[cfg(test)]
+pub mod otlp_retry_after_audit_test;
+#[cfg(test)]
+pub mod otlp_runtime_drop_deadlock_audit_test;
+#[cfg(test)]
+pub mod otlp_session_resumption_audit_test;
+#[cfg(test)]
+pub mod otlp_span_deduplication_audit_test;
+#[cfg(test)]
+pub mod otlp_span_event_timestamping_audit_test;
+#[cfg(test)]
+pub mod otlp_tail_based_sampling_audit_test;
+#[cfg(feature = "metrics")]
+pub mod otlp_trace_exporter;
+#[cfg(test)]
+pub mod otlp_trace_state_propagation_audit_test;
+#[cfg(test)]
+pub mod otlp_unexpected_status_audit_test;
+#[cfg(test)]
+pub mod otlp_upgrade_required_audit_test;
 pub mod performance_budget_monitor;
 pub mod pressure_governor;
+// br-asupersync-5z2scg.8.3.1.2: this private candidate syntax layer is
+// intentionally staged before its parser consumer. It does not replace the
+// incumbent regex dependency or enlarge the public API.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_syntax;
+// br-asupersync-5z2scg.8.3.2.2: retained-table-backed, UTF-8-safe semantic
+// normalization for candidate regex character classes. This remains private
+// staging code and carries no dependency-removal or matcher authority.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_semantics;
+// br-asupersync-5z2scg.8.3.2.3: retained-table-backed simple folding and
+// zero-width boundary semantics. This private staging layer deliberately
+// leaves matcher integration and terminal cross-target conformance to R3.2.4.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_boundaries;
+// br-asupersync-5z2scg.8.3.3.1: versioned, deterministic Thompson IR schema,
+// checked resource accounting, and structural validation. Diagnostic JSON has
+// no persistence contract; lowering, execution, and cutover remain downstream.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_ir;
+// br-asupersync-5z2scg.8.3.3.2: checked iterative lowering for atoms,
+// concatenation, and ordered alternation. Capture/repetition remain fail-closed
+// for R3.3.3; matcher execution, production wiring, and cutover remain absent.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_lowering;
+// br-asupersync-5z2scg.8.3.4.1: strictly safe, bounded whole-haystack
+// execution over validated Thompson IR. Leftmost search, capture propagation,
+// production privacy wiring, and dependency exit remain downstream.
+#[cfg(feature = "metrics")]
+#[allow(dead_code)]
+pub(crate) mod regex_vm;
 pub mod resource_accounting;
 #[cfg(all(test, feature = "metrics"))]
 pub mod resource_attribute_merging_audit_test;
@@ -157,6 +268,46 @@ pub use network_truth::{
 pub use obligation_tracker::{
     ObligationInfo, ObligationStateInfo, ObligationSummary, ObligationTracker,
     ObligationTrackerConfig, TypeSummary,
+};
+#[cfg(feature = "metrics")]
+pub use otel::{
+    CardinalityOverflow, ExportError, InMemoryExporter, InMemoryLogsExporter,
+    LoadSheddingLogsExporter, LogAttributes, LogsExporter, LogsSnapshot, MetricsConfig,
+    MetricsExporter, MetricsSnapshot, MultiExporter, MultiLogsExporter, NullExporter,
+    NullLogsExporter, OTLP_LOGS_MAX_ATTRIBUTE_VALUE_BYTES, OTLP_LOGS_MAX_ATTRIBUTES,
+    OTLP_LOGS_SCHEMA_URL, OTLP_LOGS_SCOPE_NAME, OtelMetrics, OtlpLogRecord, OtlpLogsHttpExporter,
+    SamplingConfig, StdoutExporter, log_level_to_otlp_severity,
+};
+#[cfg(all(feature = "metrics", not(target_arch = "wasm32")))]
+pub use otel::{
+    OWNED_OTLP_DEFAULT_LOG_RECORDS_PER_REQUEST, OWNED_OTLP_DEFAULT_METRICS_PER_REQUEST,
+    OWNED_OTLP_DEFAULT_REQUEST_BYTES, OWNED_OTLP_DEFAULT_SPANS_PER_REQUEST,
+    OWNED_OTLP_LOGS_VERSION, OWNED_OTLP_MAX_ATTRIBUTE_BYTES, OWNED_OTLP_MAX_ATTRIBUTE_KEY_BYTES,
+    OWNED_OTLP_MAX_ATTRIBUTE_VALUE_BYTES, OWNED_OTLP_MAX_ATTRIBUTES,
+    OWNED_OTLP_MAX_EVENT_NAME_BYTES, OWNED_OTLP_MAX_EVENTS_PER_SPAN, OWNED_OTLP_MAX_LINKS_PER_SPAN,
+    OWNED_OTLP_MAX_LOG_BODY_DEPTH, OWNED_OTLP_MAX_LOG_BODY_ITEMS,
+    OWNED_OTLP_MAX_LOG_BODY_NODES_PER_REQUEST, OWNED_OTLP_MAX_LOG_COLLECTION_BYTES,
+    OWNED_OTLP_MAX_LOG_EVENT_NAME_BYTES, OWNED_OTLP_MAX_LOG_RECORDS_PER_COLLECTION,
+    OWNED_OTLP_MAX_LOG_SCHEMA_URL_BYTES, OWNED_OTLP_MAX_LOG_SCOPE_FIELD_BYTES,
+    OWNED_OTLP_MAX_LOG_SEVERITY_TEXT_BYTES, OWNED_OTLP_MAX_POINTS_PER_METRIC,
+    OWNED_OTLP_MAX_SPAN_NAME_BYTES, OWNED_OTLP_MAX_SPANS_PER_COLLECTION,
+    OWNED_OTLP_MAX_TRACE_COLLECTION_BYTES, OWNED_OTLP_MAX_TRACE_STATE_BYTES,
+    OWNED_OTLP_METRICS_VERSION, OWNED_OTLP_TRACES_VERSION, OtlpHttpConfig, OtlpHttpConfigBuilder,
+    OtlpHttpExporter, OtlpLogBody, OtlpLogKeyValueInput, OtlpLogRecordInput, OtlpTlsPolicy,
+    OtlpTraceEventInput, OtlpTraceLinkInput, OtlpTraceSpanInput, OtlpTraceStatus,
+    OwnedOtlpLogCollection, OwnedOtlpLogConfig, OwnedOtlpLogError, OwnedOtlpLogs, OwnedOtlpMetrics,
+    OwnedOtlpMetricsConfig, OwnedOtlpMetricsError, OwnedOtlpSpanKind, OwnedOtlpStatusCode,
+    OwnedOtlpTraceCollection, OwnedOtlpTraceConfig, OwnedOtlpTraceError, OwnedOtlpTraces,
+};
+#[cfg(feature = "metrics")]
+pub use otel_structured_concurrency::{
+    EntityId, OtelStructuredConcurrencyConfig, SpanStorage, SpanType,
+};
+#[cfg(feature = "metrics")]
+pub use otlp_trace_exporter::{
+    LoadSheddingTraceExporter, OTLP_TAIL_SAMPLING_E2E_BEAD_ID, OTLP_TAIL_SAMPLING_SCOPE_BEAD_ID,
+    OTLP_TAIL_SAMPLING_SCOPE_CONTRACT_VERSION, OtlpSpan, OtlpTailSamplingScope,
+    OtlpTailSamplingSupportClass, SpanBatch, TraceExporter, otlp_tail_based_sampling_scope,
 };
 pub use performance_budget_monitor::{
     BudgetAlert, BudgetDirection, BudgetEvaluation, BudgetSample, BudgetSeverity,

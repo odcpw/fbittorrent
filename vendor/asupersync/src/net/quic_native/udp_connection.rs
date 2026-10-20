@@ -1,0 +1,1275 @@
+//! Authenticated single-connection native QUIC over a real UDP endpoint.
+//!
+//! This module owns the production composition seam between the wire-driven
+//! rustls handshake, handshake-derived 1-RTT packet protection, the real UDP
+//! endpoint, and the application-facing [`QuicConnection`]. It deliberately
+//! remains caller-driven: no executor, background task, or ambient listener is
+//! created.
+//!
+//! # Caller-driven waits (GH#67)
+//!
+//! [`NativeQuicUdpConnection::drive_io_once`] bounds its receive wait with
+//! [`timeout`] over [`QuicUdpEndpoint::receive_batch`]. Under the documented
+//! composition — a plain executor such as `futures_lite::block_on` plus an
+//! explicit [`Cx`] that carries no runtime drivers — both halves of that wait
+//! park the calling thread: the timeout's `Sleep` registers with the
+//! process-global fallback timer, and the socket's readiness interest
+//! registers with the process-global fallback I/O driver owned by `net::udp`,
+//! whose pump thread wakes the waiter when a datagram arrives. A quiet
+//! connection therefore costs ~0 CPU between wakeups instead of re-polling in
+//! a hot loop until the timeout fires. Under a runtime whose `Cx` carries I/O
+//! and timer drivers, the same wait uses those drivers instead.
+
+use std::fmt;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+
+use crate::bytes::BytesMut;
+use crate::cx::Cx;
+use crate::net::atp::quic::{AtpPacketProtection, AtpPacketProtectionConfig};
+use crate::net::quic_core::{ConnectionId, ProtectedHeaderPrefix, TransportParameters};
+use crate::time::timeout;
+
+use super::connection::{NativeQuicConnectionConfig, NativeQuicConnectionError};
+use super::connection_manager::{
+    ConnectionRouterError, PROTECTED_1RTT_MAX_PACKET_BYTES, assemble_protected_1rtt_packet,
+    generate_congestion_admitted_1rtt_frames, is_ack_eliciting, protected_1rtt_packet_len,
+    unprotect_1rtt_packet,
+};
+use super::endpoint::{
+    OutgoingPacket, QuicUdpEndpoint, QuicUdpEndpointConfig, QuicUdpEndpointError, ReceivedPacket,
+};
+use super::endpoint_api::QuicConnection;
+use super::handshake_driver::{
+    QuicHandshakeDriver, client_handshake_over_udp, server_handshake_over_udp_with_early_data,
+};
+use super::managed_endpoint::{ManagedEndpointConfig, ManagedEndpointError, ManagedQuicEndpoint};
+use super::streams::{StreamRole, StreamWindows};
+use super::transport::PacketNumberSpace;
+
+const RECEIVE_BATCH_SIZE: usize = 32;
+const MAX_PACKETS_PER_FLUSH: usize = 64;
+pub(crate) const FINAL_HANDSHAKE_FLIGHT_RESEND_INTERVAL: Duration = Duration::from_millis(750);
+
+/// Progress made by one bounded live-UDP drive operation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeQuicUdpIoProgress {
+    /// Early 1-RTT packets retained during server handshake completion and
+    /// replayed into the authenticated application-data path.
+    pub early_packets_replayed: usize,
+    /// Authenticated 1-RTT packets delivered to the connection state machine.
+    pub packets_received: usize,
+    /// Protected 1-RTT packets sent after receive processing.
+    pub packets_sent: usize,
+    /// Packets ignored before application delivery.
+    pub packets_dropped: usize,
+    /// Retained final handshake flights retransmitted after stale long-header traffic.
+    pub handshake_flights_retransmitted: usize,
+    /// Whether the bounded receive window elapsed without a UDP batch.
+    pub receive_timed_out: bool,
+}
+
+/// Errors from the authenticated single-connection UDP owner.
+#[derive(Debug)]
+pub enum NativeQuicUdpConnectionError {
+    /// The explicit capability context was cancelled.
+    Cancelled,
+    /// The real TLS/QUIC handshake failed.
+    Handshake(super::tls::QuicTlsError),
+    /// The native connection state machine rejected an operation.
+    Transport(NativeQuicConnectionError),
+    /// The real UDP endpoint failed.
+    Endpoint(QuicUdpEndpointError),
+    /// The completed handshake did not install all required state.
+    HandshakeIncomplete(&'static str),
+    /// TLS selected a protocol other than the required application protocol.
+    AlpnMismatch {
+        /// Required ALPN.
+        expected: Vec<u8>,
+        /// Negotiated ALPN, or `None` when the peer selected none.
+        negotiated: Option<Vec<u8>>,
+    },
+    /// TLS-authenticated QUIC transport parameters were missing or invalid.
+    TransportParameters(String),
+    /// The packet-protection or packet-assembly boundary failed.
+    Packet(String),
+    /// A UDP batch reported partial failure.
+    BatchSend(String),
+}
+
+impl fmt::Display for NativeQuicUdpConnectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => write!(f, "native QUIC UDP operation cancelled"),
+            Self::Handshake(error) => write!(f, "native QUIC handshake failed: {error}"),
+            Self::Transport(error) => write!(f, "native QUIC transport failed: {error}"),
+            Self::Endpoint(error) => write!(f, "native QUIC UDP endpoint failed: {error}"),
+            Self::HandshakeIncomplete(reason) => {
+                write!(f, "native QUIC handshake handoff incomplete: {reason}")
+            }
+            Self::AlpnMismatch {
+                expected,
+                negotiated,
+            } => write!(
+                f,
+                "native QUIC ALPN mismatch: expected {:?}, negotiated {:?}",
+                String::from_utf8_lossy(expected),
+                negotiated.as_deref().map(String::from_utf8_lossy)
+            ),
+            Self::TransportParameters(reason) => {
+                write!(f, "native QUIC transport parameters invalid: {reason}")
+            }
+            Self::Packet(reason) => write!(f, "native QUIC packet failed: {reason}"),
+            Self::BatchSend(reason) => write!(f, "native QUIC UDP batch failed: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for NativeQuicUdpConnectionError {}
+
+impl From<NativeQuicConnectionError> for NativeQuicUdpConnectionError {
+    fn from(value: NativeQuicConnectionError) -> Self {
+        match value {
+            NativeQuicConnectionError::Cancelled => Self::Cancelled,
+            other => Self::Transport(other),
+        }
+    }
+}
+
+impl From<QuicUdpEndpointError> for NativeQuicUdpConnectionError {
+    fn from(value: QuicUdpEndpointError) -> Self {
+        match value {
+            QuicUdpEndpointError::Cancelled => Self::Cancelled,
+            other => Self::Endpoint(other),
+        }
+    }
+}
+
+impl From<ConnectionRouterError> for NativeQuicUdpConnectionError {
+    fn from(value: ConnectionRouterError) -> Self {
+        match value {
+            ConnectionRouterError::Cancelled => Self::Cancelled,
+            other => Self::Packet(other.to_string()),
+        }
+    }
+}
+
+/// One authenticated native QUIC connection bound to its real UDP socket.
+///
+/// The handle is intentionally not split: application stream state, packet
+/// protection, connection IDs, timers, and UDP ownership cannot outlive or
+/// silently detach from one another. Callers queue/read streams through
+/// [`Self::connection_mut`], then call [`Self::flush`] and
+/// [`Self::drive_io_once`] from their structured-concurrency scope.
+/// [`Self::into_managed`] transfers this complete owner into a managed endpoint
+/// without repeating the handshake or detaching its packet protection.
+pub struct NativeQuicUdpConnection {
+    connection: QuicConnection,
+    endpoint: QuicUdpEndpoint,
+    protection: AtpPacketProtection,
+    local_cid: ConnectionId,
+    peer_cid: ConnectionId,
+    peer_addr: SocketAddr,
+    negotiated_alpn: Vec<u8>,
+    final_handshake_flight: Vec<OutgoingPacket>,
+    early_one_rtt_packets: Vec<ReceivedPacket>,
+    last_final_flight_retransmit: Option<Instant>,
+    clock_origin: Instant,
+}
+
+/// Crate-private ownership transfer after the managed endpoint's preflight.
+///
+/// Keep the complete application handle and its original recovery clock. These
+/// parts are moved, never reconstructed from handshake flags or cloned keys.
+/// The retained packet vectors keep their existing order and timestamps.
+pub(crate) struct NativeQuicUdpHandoffParts {
+    pub(crate) connection: QuicConnection,
+    pub(crate) endpoint: QuicUdpEndpoint,
+    pub(crate) protection: AtpPacketProtection,
+    pub(crate) local_cid: ConnectionId,
+    pub(crate) peer_cid: ConnectionId,
+    pub(crate) peer_addr: SocketAddr,
+    pub(crate) negotiated_alpn: Vec<u8>,
+    pub(crate) final_handshake_flight: Vec<OutgoingPacket>,
+    pub(crate) early_one_rtt_packets: Vec<ReceivedPacket>,
+    pub(crate) last_final_flight_retransmit: Option<Instant>,
+    pub(crate) clock_origin: Instant,
+}
+
+/// TLS-derived application ownership independent of the socket that drove it.
+/// Only the completed-driver validator below creates these parts; managed
+/// admission keeps its original UDP endpoint throughout the handshake.
+pub(crate) struct AuthenticatedQuicParts {
+    pub(crate) connection: QuicConnection,
+    pub(crate) protection: AtpPacketProtection,
+    pub(crate) peer_cid: ConnectionId,
+    pub(crate) negotiated_alpn: Vec<u8>,
+    pub(crate) final_handshake_flight: Vec<OutgoingPacket>,
+}
+
+/// A refused managed handoff, retaining the original authenticated UDP owner.
+///
+/// No connection, socket, queued stream data, packet-protection state, or
+/// retained handshake/early packets are discarded by a preflight refusal.
+/// Recover the owner with [`Self::into_connection`] to continue driving it or
+/// retry the handoff with a suitable context and configuration.
+#[derive(Debug)]
+pub struct ManagedQuicHandoffError {
+    error: ManagedEndpointError,
+    connection: Box<NativeQuicUdpConnection>,
+}
+
+impl ManagedQuicHandoffError {
+    pub(crate) fn new(error: ManagedEndpointError, connection: NativeQuicUdpConnection) -> Self {
+        Self {
+            error,
+            connection: Box::new(connection),
+        }
+    }
+
+    /// The typed reason the managed endpoint refused the handoff.
+    #[must_use]
+    pub fn error(&self) -> &ManagedEndpointError {
+        &self.error
+    }
+
+    /// Inspect the original owner without consuming the refusal.
+    #[must_use]
+    pub fn connection(&self) -> &NativeQuicUdpConnection {
+        &self.connection
+    }
+
+    /// Recover the original authenticated UDP owner.
+    #[must_use]
+    pub fn into_connection(self) -> NativeQuicUdpConnection {
+        *self.connection
+    }
+
+    /// Recover both the refusal reason and the original owner.
+    #[must_use]
+    pub fn into_parts(self) -> (ManagedEndpointError, NativeQuicUdpConnection) {
+        (self.error, *self.connection)
+    }
+}
+
+impl fmt::Display for ManagedQuicHandoffError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "native QUIC managed handoff refused: {}", self.error)
+    }
+}
+
+impl std::error::Error for ManagedQuicHandoffError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+impl fmt::Debug for NativeQuicUdpConnection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NativeQuicUdpConnection")
+            .field("role", &self.connection.role())
+            .field("local_addr", &self.endpoint.local_addr())
+            .field("peer_addr", &self.peer_addr)
+            .field("local_cid", &self.local_cid)
+            .field("peer_cid", &self.peer_cid)
+            .field(
+                "negotiated_alpn",
+                &String::from_utf8_lossy(&self.negotiated_alpn),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl NativeQuicUdpConnection {
+    /// Transfer this authenticated connection and its socket to a managed driver.
+    ///
+    /// The handoff preserves the whole application handle, verified TLS state,
+    /// packet-protection provider, negotiated transport parameters and ALPN,
+    /// distinct local/peer connection IDs, original recovery clock, retained
+    /// final handshake flight, and early application packets in their order.
+    /// It performs no network I/O and starts no background task. Drive the
+    /// returned endpoint from the caller's structured-concurrency scope.
+    ///
+    /// The supplied configuration controls managed scheduling and lifecycle.
+    /// Its UDP and connection templates do not reconfigure the already bound
+    /// socket or replace the authenticated connection's negotiated state.
+    ///
+    /// # Errors
+    ///
+    /// Returns the original owner with a typed reason when managed preflight
+    /// refuses the context, configuration, role, clock, or connection state.
+    pub fn into_managed(
+        self,
+        cx: &Cx,
+        config: ManagedEndpointConfig,
+    ) -> Result<ManagedQuicEndpoint, ManagedQuicHandoffError> {
+        ManagedQuicEndpoint::from_authenticated_connection(cx, self, config)
+    }
+
+    /// The exact configuration retained by the already bound UDP endpoint.
+    pub(crate) fn udp_config(&self) -> &QuicUdpEndpointConfig {
+        self.endpoint.config()
+    }
+
+    pub(crate) fn into_managed_parts(self) -> NativeQuicUdpHandoffParts {
+        let Self {
+            connection,
+            endpoint,
+            protection,
+            local_cid,
+            peer_cid,
+            peer_addr,
+            negotiated_alpn,
+            final_handshake_flight,
+            early_one_rtt_packets,
+            last_final_flight_retransmit,
+            clock_origin,
+        } = self;
+        NativeQuicUdpHandoffParts {
+            connection,
+            endpoint,
+            protection,
+            local_cid,
+            peer_cid,
+            peer_addr,
+            negotiated_alpn,
+            final_handshake_flight,
+            early_one_rtt_packets,
+            last_final_flight_retransmit,
+            clock_origin,
+        }
+    }
+
+    pub(crate) fn from_managed_parts(parts: NativeQuicUdpHandoffParts) -> Self {
+        let NativeQuicUdpHandoffParts {
+            connection,
+            endpoint,
+            protection,
+            local_cid,
+            peer_cid,
+            peer_addr,
+            negotiated_alpn,
+            final_handshake_flight,
+            early_one_rtt_packets,
+            last_final_flight_retransmit,
+            clock_origin,
+        } = parts;
+        Self {
+            connection,
+            endpoint,
+            protection,
+            local_cid,
+            peer_cid,
+            peer_addr,
+            negotiated_alpn,
+            final_handshake_flight,
+            early_one_rtt_packets,
+            last_final_flight_retransmit,
+            clock_origin,
+        }
+    }
+
+    /// Complete a client handshake over `endpoint` and bind its authenticated
+    /// state directly to a live application-data connection.
+    pub async fn connect(
+        cx: &Cx,
+        endpoint: QuicUdpEndpoint,
+        peer_addr: SocketAddr,
+        mut driver: QuicHandshakeDriver,
+        initial_dcid: ConnectionId,
+        local_cid: ConnectionId,
+        connection_config: NativeQuicConnectionConfig,
+        required_alpn: &[u8],
+    ) -> Result<Self, NativeQuicUdpConnectionError> {
+        if cx.checkpoint().is_err() {
+            return Err(NativeQuicUdpConnectionError::Cancelled);
+        }
+        let mut endpoint = endpoint;
+        if let Err(error) = client_handshake_over_udp(
+            cx,
+            &mut endpoint,
+            peer_addr,
+            &mut driver,
+            initial_dcid,
+            local_cid,
+        )
+        .await
+        {
+            return if cx.checkpoint().is_err() {
+                Err(NativeQuicUdpConnectionError::Cancelled)
+            } else {
+                Err(NativeQuicUdpConnectionError::Handshake(error))
+            };
+        }
+        Self::from_completed_handshake(
+            cx,
+            endpoint,
+            peer_addr,
+            driver,
+            local_cid,
+            connection_config,
+            required_alpn,
+            StreamRole::Client,
+            Vec::new(),
+        )
+    }
+
+    /// Complete a server handshake over `endpoint` and bind its authenticated
+    /// state directly to a live application-data connection.
+    ///
+    /// `initial_dcid` is the destination CID from the client's Initial packet;
+    /// a multi-connection listener is responsible for inspecting and routing
+    /// that first datagram before calling this single-connection API.
+    pub async fn accept(
+        cx: &Cx,
+        endpoint: QuicUdpEndpoint,
+        mut driver: QuicHandshakeDriver,
+        initial_dcid: ConnectionId,
+        local_cid: ConnectionId,
+        connection_config: NativeQuicConnectionConfig,
+        required_alpn: &[u8],
+    ) -> Result<Self, NativeQuicUdpConnectionError> {
+        if cx.checkpoint().is_err() {
+            return Err(NativeQuicUdpConnectionError::Cancelled);
+        }
+        let mut endpoint = endpoint;
+        let (peer_addr, early_one_rtt_packets) = match server_handshake_over_udp_with_early_data(
+            cx,
+            &mut endpoint,
+            &mut driver,
+            initial_dcid,
+            local_cid,
+        )
+        .await
+        {
+            Ok(peer_addr) => peer_addr,
+            Err(error) => {
+                return if cx.checkpoint().is_err() {
+                    Err(NativeQuicUdpConnectionError::Cancelled)
+                } else {
+                    Err(NativeQuicUdpConnectionError::Handshake(error))
+                };
+            }
+        };
+        Self::from_completed_handshake(
+            cx,
+            endpoint,
+            peer_addr,
+            driver,
+            local_cid,
+            connection_config,
+            required_alpn,
+            StreamRole::Server,
+            early_one_rtt_packets,
+        )
+    }
+
+    fn from_completed_handshake(
+        cx: &Cx,
+        endpoint: QuicUdpEndpoint,
+        peer_addr: SocketAddr,
+        driver: QuicHandshakeDriver,
+        local_cid: ConnectionId,
+        connection_config: NativeQuicConnectionConfig,
+        required_alpn: &[u8],
+        role: StreamRole,
+        early_one_rtt_packets: Vec<ReceivedPacket>,
+    ) -> Result<Self, NativeQuicUdpConnectionError> {
+        let parts = Self::finish_authenticated_handshake(
+            cx,
+            driver,
+            connection_config,
+            required_alpn,
+            role,
+        )?;
+        Ok(Self {
+            connection: parts.connection,
+            endpoint,
+            protection: parts.protection,
+            local_cid,
+            peer_cid: parts.peer_cid,
+            peer_addr,
+            negotiated_alpn: parts.negotiated_alpn,
+            final_handshake_flight: parts.final_handshake_flight,
+            early_one_rtt_packets,
+            last_final_flight_retransmit: None,
+            clock_origin: Instant::now(),
+        })
+    }
+
+    pub(crate) fn finish_authenticated_handshake(
+        cx: &Cx,
+        mut driver: QuicHandshakeDriver,
+        connection_config: NativeQuicConnectionConfig,
+        required_alpn: &[u8],
+        role: StreamRole,
+    ) -> Result<AuthenticatedQuicParts, NativeQuicUdpConnectionError> {
+        if !driver.is_complete() || !driver.one_rtt_keys_installed() {
+            return Err(NativeQuicUdpConnectionError::HandshakeIncomplete(
+                "TLS did not complete with installed 1-RTT keys",
+            ));
+        }
+        let negotiated_alpn = match driver.negotiated_alpn().map(<[u8]>::to_vec) {
+            Some(negotiated) if negotiated == required_alpn => negotiated,
+            negotiated => {
+                return Err(NativeQuicUdpConnectionError::AlpnMismatch {
+                    expected: required_alpn.to_vec(),
+                    negotiated,
+                });
+            }
+        };
+        let peer_cid = driver.peer_connection_id().ok_or(
+            NativeQuicUdpConnectionError::HandshakeIncomplete(
+                "peer connection ID was not authenticated",
+            ),
+        )?;
+
+        let local_parameters = TransportParameters::decode(driver.local_transport_parameters())
+            .map_err(|error| {
+                NativeQuicUdpConnectionError::TransportParameters(format!(
+                    "local decode failed: {error}"
+                ))
+            })?;
+        let peer_parameter_bytes = driver.peer_transport_parameters().ok_or(
+            NativeQuicUdpConnectionError::HandshakeIncomplete(
+                "peer transport parameters were not authenticated",
+            ),
+        )?;
+        let peer_parameters =
+            TransportParameters::decode(peer_parameter_bytes).map_err(|error| {
+                NativeQuicUdpConnectionError::TransportParameters(format!(
+                    "peer decode failed: {error}"
+                ))
+            })?;
+        let bound =
+            bind_transport_parameters(connection_config, &local_parameters, &peer_parameters);
+
+        let mut connection = match role {
+            StreamRole::Client => QuicConnection::client(bound.config),
+            StreamRole::Server => QuicConnection::server(bound.config),
+        };
+        connection
+            .inner_mut()
+            .set_negotiated_idle_timeout(&local_parameters, &peer_parameters);
+        connection.inner_mut().set_remote_stream_limits(
+            local_parameters.initial_max_streams_bidi.unwrap_or(0),
+            local_parameters.initial_max_streams_uni.unwrap_or(0),
+        );
+        connection
+            .inner_mut()
+            .set_initial_stream_windows(bound.send_windows, bound.recv_windows);
+        connection.begin_handshake(cx)?;
+        connection.mark_handshake_keys_available(cx)?;
+        connection.mark_app_keys_available(cx)?;
+        if role == StreamRole::Client {
+            // Reaching here means rustls/WebPKI completed the client handshake
+            // for its configured ServerName and roots.
+            connection.record_verified_server_identity();
+        }
+        connection.confirm_handshake(cx)?;
+
+        // DATAGRAM admission must know this connection's exact packet budget
+        // before the first flush (GH#66).
+        connection.inner_mut().set_one_rtt_frame_budget(
+            PROTECTED_1RTT_MAX_PACKET_BYTES.saturating_sub(protected_1rtt_packet_len(peer_cid, 0)),
+        );
+        let final_handshake_flight = driver.take_final_flight();
+        let protection = AtpPacketProtection::from_provider(
+            Box::new(driver.into_provider()),
+            AtpPacketProtectionConfig::default(),
+        );
+        Ok(AuthenticatedQuicParts {
+            connection,
+            protection,
+            peer_cid,
+            negotiated_alpn,
+            final_handshake_flight,
+        })
+    }
+
+    /// Application-facing QUIC stream/datagram handle.
+    #[must_use]
+    pub fn connection(&self) -> &QuicConnection {
+        &self.connection
+    }
+
+    /// Application-facing mutable QUIC stream/datagram handle.
+    pub fn connection_mut(&mut self) -> &mut QuicConnection {
+        &mut self.connection
+    }
+
+    /// UDP socket address owned by this connection.
+    #[must_use]
+    pub fn local_addr(&self) -> SocketAddr {
+        self.endpoint.local_addr()
+    }
+
+    /// Authenticated peer UDP address.
+    #[must_use]
+    pub fn peer_addr(&self) -> SocketAddr {
+        self.peer_addr
+    }
+
+    /// Connection ID the peer uses as its short-header destination.
+    #[must_use]
+    pub fn local_connection_id(&self) -> ConnectionId {
+        self.local_cid
+    }
+
+    /// Authenticated peer source CID retained from the handshake.
+    #[must_use]
+    pub fn peer_connection_id(&self) -> ConnectionId {
+        self.peer_cid
+    }
+
+    /// Exact ALPN admitted before application state was exposed.
+    #[must_use]
+    pub fn negotiated_alpn(&self) -> &[u8] {
+        &self.negotiated_alpn
+    }
+
+    /// Protect and send a bounded batch of queued application frames.
+    pub async fn flush(&mut self, cx: &Cx) -> Result<usize, NativeQuicUdpConnectionError> {
+        if cx.checkpoint().is_err() {
+            return Err(NativeQuicUdpConnectionError::Cancelled);
+        }
+        let now = Instant::now();
+        let now_micros = self.instant_micros(now);
+        let max_frame_bytes = PROTECTED_1RTT_MAX_PACKET_BYTES
+            .saturating_sub(protected_1rtt_packet_len(self.peer_cid, 0));
+        self.connection
+            .inner_mut()
+            .set_one_rtt_frame_budget(max_frame_bytes);
+        let mut packets = Vec::new();
+
+        for _ in 0..MAX_PACKETS_PER_FLUSH {
+            let frames = generate_congestion_admitted_1rtt_frames(
+                cx,
+                self.connection.inner_mut(),
+                max_frame_bytes,
+            )?;
+            if frames.is_empty() {
+                break;
+            }
+            let mut payload = BytesMut::new();
+            super::connection::NativeQuicConnection::encode_frames(&frames, &mut payload)?;
+            let assembled = assemble_protected_1rtt_packet(
+                cx,
+                self.peer_cid,
+                self.connection.inner_mut(),
+                &mut self.protection,
+                &frames,
+                payload.as_ref(),
+                now_micros,
+                frames.iter().any(is_ack_eliciting),
+            )
+            .await;
+            let data = match assembled {
+                Ok(data) => data,
+                Err(error) => {
+                    self.connection
+                        .inner_mut()
+                        .on_generated_frames_dropped(&frames)?;
+                    return Err(error.into());
+                }
+            };
+            packets.push(OutgoingPacket {
+                dst_addr: self.peer_addr,
+                data,
+                send_time: Some(now),
+            });
+        }
+
+        if packets.is_empty() {
+            return Ok(0);
+        }
+        let expected = packets.len();
+        let report = self.endpoint.send_batch(cx, &packets).await?;
+        if report.packets_processed != expected || report.error.is_some() {
+            return Err(NativeQuicUdpConnectionError::BatchSend(
+                report.error.unwrap_or_else(|| {
+                    format!(
+                        "sent {} of {expected} protected packets",
+                        report.packets_processed
+                    )
+                }),
+            ));
+        }
+        Ok(expected)
+    }
+
+    /// Receive at most one bounded UDP batch, deliver authenticated 1-RTT
+    /// payloads, service a due loss timer, and flush resulting ACK/application
+    /// frames. A quiet timeout is reported as progress rather than an error so
+    /// callers can compose their own explicit drive loop and cancellation scope.
+    pub async fn drive_io_once(
+        &mut self,
+        cx: &Cx,
+        receive_timeout: Duration,
+    ) -> Result<NativeQuicUdpIoProgress, NativeQuicUdpConnectionError> {
+        if cx.checkpoint().is_err() {
+            return Err(NativeQuicUdpConnectionError::Cancelled);
+        }
+        let mut progress = NativeQuicUdpIoProgress::default();
+        let received = if self.early_one_rtt_packets.is_empty() {
+            let bounded_wait = self.receive_wait_duration(cx, receive_timeout)?;
+            if bounded_wait.is_zero() {
+                progress.receive_timed_out = true;
+                self.service_due_loss_timer(cx)?;
+                progress.packets_sent = self.flush(cx).await?;
+                return Ok(progress);
+            }
+            match timeout(
+                cx.now(),
+                bounded_wait,
+                self.endpoint.receive_batch(cx, RECEIVE_BATCH_SIZE),
+            )
+            .await
+            {
+                Ok(Ok(packets)) => packets,
+                Ok(Err(error)) => return Err(error.into()),
+                Err(_) => {
+                    progress.receive_timed_out = true;
+                    self.service_due_loss_timer(cx)?;
+                    progress.packets_sent = self.flush(cx).await?;
+                    return Ok(progress);
+                }
+            }
+        } else {
+            let early = std::mem::take(&mut self.early_one_rtt_packets);
+            progress.early_packets_replayed = early.len();
+            early
+        };
+
+        for packet in received {
+            if packet.src_addr != self.peer_addr {
+                progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                continue;
+            }
+            if packet.data.first().is_some_and(|byte| byte & 0x80 != 0) {
+                progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                if !self.final_handshake_flight.is_empty()
+                    && self.last_final_flight_retransmit.is_none_or(|last| {
+                        packet.receive_time.saturating_duration_since(last)
+                            >= FINAL_HANDSHAKE_FLIGHT_RESEND_INTERVAL
+                    })
+                {
+                    let report = self
+                        .endpoint
+                        .send_batch(cx, &self.final_handshake_flight)
+                        .await?;
+                    if report.packets_processed != self.final_handshake_flight.len()
+                        || report.error.is_some()
+                    {
+                        return Err(NativeQuicUdpConnectionError::BatchSend(
+                            report.error.unwrap_or_else(|| {
+                                "final handshake flight was only partially retransmitted"
+                                    .to_string()
+                            }),
+                        ));
+                    }
+                    progress.handshake_flights_retransmitted =
+                        progress.handshake_flights_retransmitted.saturating_add(1);
+                    self.last_final_flight_retransmit = Some(packet.receive_time);
+                }
+                continue;
+            }
+
+            // Only the header-protection-invariant prefix is readable before
+            // the peer's HP key unmasks the packet number (RFC 9001 §5.4);
+            // `unprotect_1rtt_packet` does the unmask + AEAD in RFC order.
+            let Ok(ProtectedHeaderPrefix::Short { dst_cid, .. }) =
+                ProtectedHeaderPrefix::decode(&packet.data, self.local_cid.len())
+            else {
+                progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                continue;
+            };
+            if dst_cid != self.local_cid {
+                progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                continue;
+            }
+            let unprotected =
+                match unprotect_1rtt_packet(cx, self.local_cid, &mut self.protection, &packet.data)
+                    .await
+                {
+                    Ok(unprotected) => unprotected,
+                    Err(ConnectionRouterError::Cancelled) => {
+                        return Err(NativeQuicUdpConnectionError::Cancelled);
+                    }
+                    Err(_) => {
+                        progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                        continue;
+                    }
+                };
+            let header = unprotected.header;
+            let plaintext = unprotected.plaintext;
+            self.connection
+                .inner_mut()
+                .on_datagram_received(cx, packet.data.len() as u64)?;
+            let now_micros = self.instant_micros(packet.receive_time);
+            if let Err(error) = self.connection.inner_mut().process_packet_payload(
+                cx,
+                PacketNumberSpace::ApplicationData,
+                header.packet_number,
+                &plaintext,
+                now_micros,
+            ) {
+                if error.is_stream_reassembly_backpressure() {
+                    // Do not ACK or park ahead of the packet that fills the
+                    // hole. Reliable frames can return under a fresh number.
+                    progress.packets_dropped = progress.packets_dropped.saturating_add(1);
+                    continue;
+                }
+                return Err(error.into());
+            }
+            progress.packets_received = progress.packets_received.saturating_add(1);
+        }
+
+        self.service_due_loss_timer(cx)?;
+        progress.packets_sent = self.flush(cx).await?;
+        Ok(progress)
+    }
+
+    fn instant_micros(&self, instant: Instant) -> u64 {
+        instant
+            .checked_duration_since(self.clock_origin)
+            .unwrap_or(Duration::ZERO)
+            .as_micros()
+            .min(u128::from(u64::MAX)) as u64
+    }
+
+    fn receive_wait_duration(
+        &mut self,
+        cx: &Cx,
+        requested: Duration,
+    ) -> Result<Duration, NativeQuicUdpConnectionError> {
+        let now = Instant::now();
+        let now_micros = self.instant_micros(now);
+        let Some(deadline_micros) = self
+            .connection
+            .inner_mut()
+            .pto_deadline_micros(cx, now_micros)?
+        else {
+            return Ok(requested);
+        };
+        Ok(requested.min(Duration::from_micros(
+            deadline_micros.saturating_sub(now_micros),
+        )))
+    }
+
+    fn service_due_loss_timer(&mut self, cx: &Cx) -> Result<(), NativeQuicUdpConnectionError> {
+        let now_micros = self.instant_micros(Instant::now());
+        let Some(deadline) = self
+            .connection
+            .inner_mut()
+            .pto_deadline_micros(cx, now_micros)?
+        else {
+            return Ok(());
+        };
+        if deadline <= now_micros {
+            self.connection.inner_mut().on_loss_timeout_expired(
+                cx,
+                PacketNumberSpace::ApplicationData,
+                now_micros,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Connection configuration after the authenticated transport parameters of
+/// both endpoints have been applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BoundTransportParameters {
+    /// Stream counts, connection-level limits and the DATAGRAM cap, each the
+    /// smaller of the configured value and the negotiated one. `send_window`
+    /// and `recv_window` stay the configured per-stream caps.
+    config: NativeQuicConnectionConfig,
+    /// Per-type initial send windows: the peer's `initial_max_stream_data_*`
+    /// values capped by `config.send_window` (RFC 9000 §18.2).
+    send_windows: StreamWindows,
+    /// Per-type initial receive windows: this endpoint's
+    /// `initial_max_stream_data_*` values capped by `config.recv_window`.
+    recv_windows: StreamWindows,
+}
+
+/// Bind both endpoints' transport parameters onto the connection configuration.
+///
+/// Stream windows are kept per stream type. A locally opened bidirectional
+/// stream sends against the peer's `initial_max_stream_data_bidi_remote` and
+/// receives against the local `initial_max_stream_data_bidi_local`; a
+/// peer-opened bidirectional stream uses the mirrored pair; unidirectional
+/// streams use `initial_max_stream_data_uni` on their data-carrying side. A
+/// parameter an endpoint omits is zero for that type only, so a peer that does
+/// not advertise a unidirectional window still gets its full bidirectional
+/// windows.
+fn bind_transport_parameters(
+    mut config: NativeQuicConnectionConfig,
+    local: &TransportParameters,
+    peer: &TransportParameters,
+) -> BoundTransportParameters {
+    config.max_local_bidi = config
+        .max_local_bidi
+        .min(peer.initial_max_streams_bidi.unwrap_or(0));
+    config.max_local_uni = config
+        .max_local_uni
+        .min(peer.initial_max_streams_uni.unwrap_or(0));
+    config.connection_send_limit = config
+        .connection_send_limit
+        .min(peer.initial_max_data.unwrap_or(0));
+    config.connection_recv_limit = config
+        .connection_recv_limit
+        .min(local.initial_max_data.unwrap_or(0));
+
+    let send_cap = config.send_window;
+    let send_windows = StreamWindows {
+        local_bidi: send_cap.min(peer.initial_max_stream_data_bidi_remote.unwrap_or(0)),
+        remote_bidi: send_cap.min(peer.initial_max_stream_data_bidi_local.unwrap_or(0)),
+        uni: send_cap.min(peer.initial_max_stream_data_uni.unwrap_or(0)),
+    };
+    let recv_cap = config.recv_window;
+    let recv_windows = StreamWindows {
+        local_bidi: recv_cap.min(local.initial_max_stream_data_bidi_local.unwrap_or(0)),
+        remote_bidi: recv_cap.min(local.initial_max_stream_data_bidi_remote.unwrap_or(0)),
+        uni: recv_cap.min(local.initial_max_stream_data_uni.unwrap_or(0)),
+    };
+    config.max_datagram_frame_size = config.max_datagram_frame_size.min(
+        peer.max_datagram_frame_size
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(0),
+    );
+    BoundTransportParameters {
+        config,
+        send_windows,
+        recv_windows,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytes::Bytes;
+    use crate::net::atp::protocol::quic_frames::QuicFrame;
+    use crate::net::atp::protocol::varint::VarInt;
+    use crate::net::quic_native::connection::NativeQuicConnection;
+    use crate::net::quic_native::connection_manager::{ConnectionRouter, RoutingResult};
+    use crate::net::quic_native::handshake_driver::tests::{
+        CA_CERT_PEM, LEAF_CERT_PEM, leaf_key, parse_one_cert,
+    };
+    use crate::net::quic_native::handshake_driver::{client_config, server_config};
+    use crate::net::quic_native::{QuicConnectionState, StreamId};
+    use futures_lite::future::{block_on, zip};
+    use rustls::pki_types::ServerName;
+
+    /// A peer that omits `initial_max_stream_data_uni` (as the managed-quiet
+    /// loopback pair does) must keep full bidirectional windows. The previous
+    /// binding took the minimum over all three per-type parameters with an
+    /// omitted one counted as zero, which left every stream with zero send
+    /// credit and failed the first `write_stream` with `Flow(Exhausted)`.
+    #[test]
+    fn bind_transport_parameters_keeps_bidi_windows_when_uni_is_omitted() {
+        let config = NativeQuicConnectionConfig {
+            max_local_bidi: 4,
+            max_local_uni: 4,
+            send_window: 1 << 18,
+            recv_window: 1 << 18,
+            connection_send_limit: 1 << 20,
+            connection_recv_limit: 1 << 20,
+            ..NativeQuicConnectionConfig::default()
+        };
+        let peer = TransportParameters {
+            initial_max_data: Some(1 << 19),
+            initial_max_stream_data_bidi_local: Some(1_000),
+            initial_max_stream_data_bidi_remote: Some(2_000),
+            initial_max_stream_data_uni: None,
+            initial_max_streams_bidi: Some(2),
+            ..TransportParameters::default()
+        };
+        let local = TransportParameters {
+            initial_max_data: Some(1 << 21),
+            initial_max_stream_data_bidi_local: Some(3_000),
+            initial_max_stream_data_bidi_remote: Some(1 << 20),
+            initial_max_stream_data_uni: None,
+            initial_max_streams_bidi: Some(4),
+            ..TransportParameters::default()
+        };
+
+        let bound = bind_transport_parameters(config, &local, &peer);
+
+        // Send side: a locally opened bidi stream sends against the peer's
+        // `bidi_remote`, a peer-opened one against the peer's `bidi_local`.
+        assert_eq!(
+            bound.send_windows,
+            StreamWindows {
+                local_bidi: 2_000,
+                remote_bidi: 1_000,
+                uni: 0,
+            }
+        );
+        // Receive side mirrors the mapping and is capped by the configured
+        // window: the local `bidi_remote` of 1 MiB clamps to 256 KiB.
+        assert_eq!(
+            bound.recv_windows,
+            StreamWindows {
+                local_bidi: 3_000,
+                remote_bidi: 1 << 18,
+                uni: 0,
+            }
+        );
+        assert_eq!(bound.config.send_window, 1 << 18);
+        assert_eq!(bound.config.recv_window, 1 << 18);
+        assert_eq!(bound.config.max_local_bidi, 2);
+        assert_eq!(bound.config.connection_send_limit, 1 << 19);
+        assert_eq!(bound.config.connection_recv_limit, 1 << 20);
+        assert_eq!(bound.config.max_datagram_frame_size, 0);
+
+        // The windows reach the stream table: a client opening stream 0 gets
+        // the peer's `bidi_remote` credit, not zero.
+        let mut connection = QuicConnection::client(bound.config);
+        connection
+            .inner_mut()
+            .set_initial_stream_windows(bound.send_windows, bound.recv_windows);
+        let cx = Cx::for_testing();
+        connection.begin_handshake(&cx).unwrap();
+        connection.mark_handshake_keys_available(&cx).unwrap();
+        connection.mark_app_keys_available(&cx).unwrap();
+        // The production handoff records the rustls-verified server identity
+        // before confirming; a client cannot confirm without it.
+        connection.record_verified_server_identity();
+        connection.confirm_handshake(&cx).unwrap();
+        let stream = connection.open_bidi_stream(&cx).unwrap();
+        assert_eq!(stream, StreamId(0));
+        assert_eq!(
+            connection
+                .inner()
+                .streams()
+                .stream_send_credit_remaining(stream),
+            2_000
+        );
+        assert_eq!(
+            connection
+                .inner()
+                .streams()
+                .stream(stream)
+                .unwrap()
+                .recv_credit
+                .limit(),
+            3_000
+        );
+    }
+
+    fn assert_reassembly_recovered(cx: &Cx, connection: &mut NativeQuicConnection) {
+        assert_eq!(connection.state(), QuicConnectionState::Established);
+        assert_eq!(connection.datagrams_received(), 1);
+        assert_eq!(connection.recv_datagram().as_deref(), Some(&b"once"[..]));
+        assert!(connection.recv_datagram().is_none());
+        let mut received = Vec::new();
+        while received.len() < 2 {
+            let bytes = connection.read_stream_bytes(cx, StreamId(0), 2).unwrap();
+            assert!(!bytes.is_empty());
+            received.extend_from_slice(&bytes);
+        }
+        assert_eq!(received, b"hx");
+        assert!(!connection.is_stream_read_eof(StreamId(0)).unwrap());
+        assert_eq!(
+            connection
+                .streams()
+                .stream(StreamId(0))
+                .unwrap()
+                .recv_offset,
+            2
+        );
+    }
+
+    #[test]
+    fn reassembly_backpressure_recovers_in_udp_owner_and_authenticated_router() {
+        block_on(async {
+            for routed in [false, true] {
+                let cx = Cx::for_testing();
+                let config = NativeQuicConnectionConfig::default();
+                let parameters = TransportParameters {
+                    initial_max_data: Some(config.connection_recv_limit),
+                    initial_max_stream_data_bidi_local: Some(config.recv_window),
+                    initial_max_stream_data_bidi_remote: Some(config.recv_window),
+                    initial_max_stream_data_uni: Some(config.recv_window),
+                    initial_max_streams_bidi: Some(config.max_local_bidi),
+                    max_datagram_frame_size: Some(1200),
+                    ..TransportParameters::default()
+                };
+                let mut parameters_bytes = Vec::new();
+                parameters.encode(&mut parameters_bytes).unwrap();
+                let client_socket = QuicUdpEndpoint::bind(
+                    &cx,
+                    "127.0.0.1:0".parse().unwrap(),
+                    QuicUdpEndpointConfig::default(),
+                )
+                .await
+                .unwrap();
+                let server_socket = QuicUdpEndpoint::bind(
+                    &cx,
+                    "127.0.0.1:0".parse().unwrap(),
+                    QuicUdpEndpointConfig::default(),
+                )
+                .await
+                .unwrap();
+                let address = server_socket.local_addr();
+                let alpn = b"reassembly-test";
+                let client_tls =
+                    client_config(vec![parse_one_cert(CA_CERT_PEM)], vec![alpn.to_vec()]).unwrap();
+                let server_tls = server_config(
+                    vec![parse_one_cert(LEAF_CERT_PEM)],
+                    leaf_key(),
+                    vec![alpn.to_vec()],
+                )
+                .unwrap();
+                let initial_cid = ConnectionId::new(b"initial").unwrap();
+                let server_cid = ConnectionId::new(b"server").unwrap();
+                let (client, server) = zip(
+                    NativeQuicUdpConnection::connect(
+                        &cx,
+                        client_socket,
+                        address,
+                        QuicHandshakeDriver::client(
+                            client_tls,
+                            ServerName::try_from("localhost").unwrap(),
+                            parameters_bytes.clone(),
+                        )
+                        .unwrap(),
+                        initial_cid,
+                        ConnectionId::new(b"client").unwrap(),
+                        config,
+                        alpn,
+                    ),
+                    NativeQuicUdpConnection::accept(
+                        &cx,
+                        server_socket,
+                        QuicHandshakeDriver::server(server_tls, parameters_bytes).unwrap(),
+                        initial_cid,
+                        server_cid,
+                        config,
+                        alpn,
+                    ),
+                )
+                .await;
+                let mut client = client.unwrap();
+                let mut server = server.unwrap();
+                assert!(server.early_one_rtt_packets.is_empty());
+                let id = StreamId(0);
+                let connection = server.connection.inner_mut();
+                connection.accept_remote_stream(&cx, id).unwrap();
+                // Seed only the bounded capacity precondition. All three
+                // admission/recovery packets use real TLS keys and UDP below.
+                for fragment in 0..4095u64 {
+                    connection
+                        .receive_stream_bytes(
+                            &cx,
+                            id,
+                            1 + fragment * 2,
+                            Bytes::from_static(b"x"),
+                            false,
+                        )
+                        .unwrap();
+                }
+                connection
+                    .generate_frames(&cx, PacketNumberSpace::ApplicationData, 65535)
+                    .unwrap();
+                let overflow = vec![
+                    QuicFrame::Datagram {
+                        data: Bytes::from_static(b"once"),
+                    },
+                    QuicFrame::Stream {
+                        stream_id: VarInt(id.0),
+                        offset: Some(VarInt(8191)),
+                        data: Bytes::from_static(b"z"),
+                        fin: true,
+                    },
+                ];
+                let repair = vec![QuicFrame::Stream {
+                    stream_id: VarInt(id.0),
+                    offset: Some(VarInt(0)),
+                    data: Bytes::from_static(b"h"),
+                    fin: false,
+                }];
+                let mut packets = Vec::new();
+                for frames in [&overflow, &repair, &overflow] {
+                    let mut payload = BytesMut::new();
+                    NativeQuicConnection::encode_frames(frames, &mut payload).unwrap();
+                    let data = assemble_protected_1rtt_packet(
+                        &cx,
+                        server_cid,
+                        client.connection.inner_mut(),
+                        &mut client.protection,
+                        frames,
+                        &payload,
+                        1,
+                        true,
+                    )
+                    .await
+                    .unwrap();
+                    packets.push(OutgoingPacket {
+                        dst_addr: address,
+                        data,
+                        send_time: None,
+                    });
+                }
+                let sent = client.endpoint.send_batch(&cx, &packets).await.unwrap();
+                assert_eq!(sent.packets_processed, 3);
+                assert!(sent.error.is_none());
+                if routed {
+                    let (mut router, mut endpoint, early) =
+                        ConnectionRouter::from_authenticated_parts(
+                            server.into_managed_parts(),
+                            config,
+                            1,
+                            None,
+                            Instant::now(),
+                        );
+                    assert!(early.is_empty());
+                    let mut outcomes = Vec::new();
+                    while outcomes.len() < 3 {
+                        let packets = timeout(
+                            crate::time::wall_now(),
+                            Duration::from_secs(10),
+                            endpoint.receive_batch(&cx, 3 - outcomes.len()),
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap();
+                        for packet in packets {
+                            outcomes.push(router.route_packet(&cx, packet).await.unwrap());
+                        }
+                    }
+                    assert!(matches!(&outcomes[0], RoutingResult::Drop { reason }
+                        if reason == "stream reassembly backpressure"));
+                    assert!(matches!(&outcomes[1], RoutingResult::Routed { .. }));
+                    assert!(matches!(&outcomes[2], RoutingResult::Routed { .. }));
+                    let connection = router.connection_mut_for_testing(&cx, server_cid).unwrap();
+                    assert_reassembly_recovered(&cx, connection);
+                    let frames = connection
+                        .generate_frames(&cx, PacketNumberSpace::ApplicationData, 65535)
+                        .unwrap();
+                    assert!(frames.iter().any(|frame| matches!(frame,
+                        QuicFrame::Ack { largest_acknowledged, first_ack_range, ack_ranges, .. }
+                            if largest_acknowledged.value() == 2 && first_ack_range.value() == 1 && ack_ranges.is_empty()
+                    )), "only packets 1 and 2 were admitted");
+                } else {
+                    let mut received = 0;
+                    let mut dropped = 0;
+                    for _ in 0..3 {
+                        let progress = server
+                            .drive_io_once(&cx, Duration::from_secs(10))
+                            .await
+                            .unwrap();
+                        received += progress.packets_received;
+                        dropped += progress.packets_dropped;
+                        if received + dropped == 3 {
+                            break;
+                        }
+                    }
+                    assert_eq!((received, dropped), (2, 1));
+                    assert_reassembly_recovered(&cx, server.connection.inner_mut());
+                }
+            }
+        });
+    }
+}
