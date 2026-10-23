@@ -24,11 +24,12 @@ ColumnLayout {
     if(event.key===Qt.Key_Space){flow.toggle();return true}
     if(event.text==="a" || event.text==="n"){flow.setFiles(event.text==="a",true);return true}
     if(event.text==="o"){flow.openFile();return true}
+    if(event.text==="O"){service.openFolder(torrent.hash);return true}
     return false
   }
   spacing:Commons.Style.spacing.sm
   Ui.TextField {id:filterInput;Layout.fillWidth:true;text:root.revision>=0 ? root.flow.query : "";placeholderText:"/ filter files…";maximumLength:200;onTextEdited:root.flow.filter(text);Keys.onPressed:function(event){if(event.key===Qt.Key_Escape || event.key===Qt.Key_Return){root.endFilter();event.accepted=true}}}
-  Components.KeyHint {Layout.fillWidth:true;text:root.torrent.state==="metadata" ? "resolving metadata…" : root.torrent.state==="checking" ? "Checking files; selection is locked" : "Space toggle · a include filtered · n skip filtered · o open"}
+  Components.KeyHint {Layout.fillWidth:true;text:root.torrent.state==="metadata" ? "resolving metadata…" : root.torrent.state==="checking" ? "Checking files; selection is locked" : "Space toggle · a include filtered · n skip filtered · o file · O folder"}
   ListView {
     id:list
     Layout.fillWidth:true;Layout.fillHeight:true;clip:true

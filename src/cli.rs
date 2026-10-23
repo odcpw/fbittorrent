@@ -204,8 +204,16 @@ pub(super) enum Cmd {
     Noupload { selectors: Vec<String> },
     /// Add whatever magnet/URL is on the Wayland clipboard
     AddClipboard,
-    /// Open the file (single-file torrent) or folder in the desktop
-    Open { selector: String },
+    /// Open the selected media file in a player, or reveal its download folder
+    Open {
+        selector: String,
+        /// Reveal the download folder in the file manager
+        #[arg(long, conflicts_with="file")]
+        folder: bool,
+        /// Open a specific file by its API file index
+        #[arg(long)]
+        file: Option<u64>,
+    },
     /// RSS feeds
     #[command(subcommand)]
     Rss(RssCmd),
@@ -375,6 +383,17 @@ pub(super) enum ShowsCmd {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_preserves_selector_and_adds_folder_and_file_options() {
+        assert!(matches!(Cli::try_parse_from(["fbittorrent", "open", "movie"]).unwrap().cmd,
+            Some(Cmd::Open { folder: false, file: None, .. })));
+        assert!(matches!(Cli::try_parse_from(["fbittorrent", "open", "--folder", "movie"]).unwrap().cmd,
+            Some(Cmd::Open { folder: true, file: None, .. })));
+        assert!(matches!(Cli::try_parse_from(["fbittorrent", "open", "movie", "--file", "3"]).unwrap().cmd,
+            Some(Cmd::Open { folder: false, file: Some(3), .. })));
+        assert!(Cli::try_parse_from(["fbittorrent", "open", "movie", "--folder", "--file", "3"]).is_err());
+    }
 
     #[test]
     fn only_current_native_commands_and_add_options_are_exposed() {

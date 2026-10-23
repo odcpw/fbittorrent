@@ -16,6 +16,7 @@ import daemon_notify as notify
 import daemon_watch as watch
 import fixtures
 from journey_support import JourneySession
+from open_support import allow_open
 import grid
 from fbtlog import Case,suite_status
 
@@ -25,6 +26,7 @@ def run(binary):
     with Case('qs_journey_w1','w1_find_watch') as case,daemon.Sandbox() as box,daemon.Sandbox() as seedbox,ExitStack() as stack:
         # All provider/IMDb/browse/tracker traffic remains within the network namespace.
         notify.shims(box,action="open");notify.config(box,notify=True)
+        fixtures.path_shim('mpv','exit 0',box.root)
         directory=box.root/'imdb-http';shutil.copytree(fixtures.HERE/'fixtures/imdb',directory)
         cache=Path(box.env['XDG_CACHE_HOME'])/'fbittorrent'
         (cache/'title.ratings.tsv').write_bytes((directory/'ratings.tsv').read_bytes())
@@ -56,6 +58,7 @@ def run(binary):
             assert seed.wait_for(lambda:((r:=watch.row(peer,torrent.info_hash))['state']=='seeding',json.dumps(r)),'private video seed completes verification')
             peer.call('transfer.set_limits',dict(upload_bps=2*MIB))
             q=JourneySession(case,box)
+            allow_open(box,binary)
             def view():return q.state().get('view') or {}
             def add():return view().get('add') or {}
             def row():return watch.row(c,torrent.info_hash)
@@ -88,12 +91,18 @@ def run(binary):
             q.wait(lambda:row().get('playable',{}).get('ready') is True,timeout=35)
             q.wait(lambda:view().get('stateLabel')=='Ready to watch',timeout=8)
             ready=row();case.check(ready['state'] in ['downloading','stalled'] and ready['completed_bytes']<ready['size'] and ready['playable']['ready'],'Ready to watch appears while real video bytes are still downloading',json.dumps(ready))
-            target=str(box.downloads/'Sintel.mkv')
-            q.wait(lambda:any(target in call for call in notify.calls(box,'xdg-open')),timeout=5)
-            opened=len(notify.calls(box,'xdg-open'))
-            case.check(notify.calls(box,'xdg-open')[-1]==[target],'the ready notification Open action requests the literal video path',notify.calls(box,'xdg-open'))
-            press(['o'],lambda:len(notify.calls(box,'xdg-open'))>opened)
-            case.check(notify.calls(box,'xdg-open')[-1]==[target] and row()['completed_bytes']<row()['size'],'dashboard o requests the same ready video while its transfer continues',notify.calls(box,'xdg-open'))
+            def video_call():
+                calls=notify.calls(box,'mpv')
+                if not calls or len(calls[-1])!=1:return False
+                url=urllib.parse.urlsplit(calls[-1][0])
+                return url.scheme=='http' and url.hostname=='127.0.0.1' and url.port is not None and url.path.startswith('/media/') and bool(url.path.removeprefix('/media/'))
+            q.wait(video_call,timeout=5)
+            opened=len(notify.calls(box,'mpv'))
+            case.check(video_call(),'the ready notification launches the selected loopback video stream in mpv',notify.calls(box,'mpv'))
+            press(['o'],lambda:len(notify.calls(box,'mpv'))>opened)
+            case.check(video_call() and notify.calls(box,'fbittorrent')[-1]==['--no-start','--json','open',torrent.info_hash]
+                       and row()['completed_bytes']<row()['size'],'dashboard o launches the selected stream while its transfer continues',notify.calls(box,'mpv'))
+            case.check(not notify.calls(box,'xdg-open'),'media playback never invokes the browser opener',notify.calls(box,'xdg-open'))
             case.check(any(('-A' in call or '--action' in call) and 'Open' in ' '.join(call) for call in notify.calls(box)),'ready notification offers Open',notify.calls(box))
             # M2 demo: live Settings, responsive details, empty-query poster grid, detach.
             press([','],lambda:view().get('window',{}).get('view')=='settings')

@@ -48,7 +48,7 @@ def write(config):
     hostile=deepcopy(error);hostile['error']='<b>Broken & waiting</b>'
     add('error-plain-text','error','error','urgent','Broken & waiting',counts=dict(error=1,total=1),rows=[hostile])
     add('stopped-by-user','stopped_recently','download','dim','fbittorrent stopped',online=False,stoppedRecently=True,byeReason='user')
-    add('turtle','downloading','download','normal','turtle limits on',counts=dict(downloading=1,total=1),alt=True,dl_bps=4200000)
+    add('legacy-alt','downloading','download','normal','1 downloading',counts=dict(downloading=1,total=1),alt=True,dl_bps=4200000)
     add('reconnecting','reconnecting','checking','dim','Reconnecting',online=False,reconnecting=True)
     add('starting','starting','download','dim','Starting',online=False,startupRequested=True)
     (config/'Icons.json').write_text(json.dumps(profiles))

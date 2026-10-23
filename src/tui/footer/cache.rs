@@ -75,6 +75,8 @@ impl TuiApp {
             matches!(entry.source, browse::Source::Site(_)).hash(&mut hash);
         }
         if let Some(files) = &self.files {
+            self.can_open_file().hash(&mut hash);
+            self.files_editable().hash(&mut hash);
             files
                 .list
                 .borrow()

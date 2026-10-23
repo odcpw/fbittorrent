@@ -58,7 +58,7 @@ impl TuiApp {
         if matches!(intent,actions::Intent::Left|actions::Intent::Right){
             let selected=self.settings.as_ref().unwrap().list.borrow().selected().unwrap_or(0);
             if selected==settings_fields::PORT_ROW{return self.edit_peer_port();}
-            if (4..=7).contains(&selected){return self.edit_limit(selected-4);}
+            if (4..=5).contains(&selected){return self.edit_limit(selected-4);}
             if selected==settings_fields::DESTINATION_ROW{return self.edit_destination();}
             if selected==settings_fields::IDLE_ROW{return self.edit_idle_exit();}
         }

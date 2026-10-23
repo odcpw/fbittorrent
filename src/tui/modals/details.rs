@@ -237,7 +237,7 @@ impl TuiApp {
                     let steady=crate::daemon::watch::estimate_rate(t.size.unwrap_or(0),t.dl_bps.unwrap_or(0));
                     if steady {" · rate estimate: keeps up with a 2 h video"}else{" · rate estimate: may stall for a 2 h video"}
                 }else{""};
-                lines.push(kv("ready", format!("{ready}{buffer}{finish}{estimate} · (o) Open")));
+                lines.push(kv("ready", format!("{ready}{buffer}{finish}{estimate} · (o) Open file · (O) Open folder")));
             }
             lines.extend([
                 kv("progress", metrics.progress()),

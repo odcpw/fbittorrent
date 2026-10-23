@@ -46,6 +46,7 @@ print(sys.argv[3],flush=True)
 ''')
     fixtures.path_shim('notify-send', 'exec '+shlex.join([sys.executable,str(program),str(state),str(delay),action]), box.root)
     fixtures.path_shim('xdg-open', 'exit 0', box.root)
+    fixtures.path_shim('mpv', 'exit 0', box.root)
 
 
 def calls(box, name='notify-send'):
@@ -141,6 +142,12 @@ def action_case(binary,systemd,action):
                        'the same notification action refuses an executable-suffix payload')
             case.check(len(calls(box))==2 and calls(box,'xdg-open')==opened,
                        'blocked payload still notifies but never reaches the desktop opener',json.dumps(calls(box,'xdg-open')))
+            _,video=complete(client,box,index=2,extension='mkv')
+            h.wait_for(lambda:(bool(calls(box,'mpv')),json.dumps(calls(box,'mpv'))),
+                       'completed video notification launches the media player')
+            played=observe(case,box,'mpv')
+            case.check(len(played)==1 and played[0][-1]==str(video) and calls(box,'xdg-open')==opened,
+                       'video opens in the player with its literal path and never reaches the browser opener',json.dumps(played))
 
 
 def notify_action_open(binary,systemd): action_case(binary,systemd,'open')

@@ -12,7 +12,7 @@ impl TuiApp {
             s.network.state != crate::api::NetworkReadiness::Waiting,
             |n| n.ready,
         );
-        let status = if parked {
+        if parked {
             if width < 100 || s.network.message.is_empty() || s.network.message == "ready" {
                 "Waiting for VPN".into()
             } else {
@@ -47,11 +47,6 @@ impl TuiApp {
             }
         } else {
             format!("↓ {}  ↑ {}", format::rate(s.dl_bps), format::rate(s.ul_bps))
-        };
-        if s.alt {
-            format!("󰢃 Turtle {status}")
-        } else {
-            status
         }
     }
 }

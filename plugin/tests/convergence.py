@@ -114,29 +114,27 @@ def settings(binary, focused=False, race=False):
                           lambda pane: 'Upload: on' in pane and matches(pane, local), timeout=2)
         q.native_hook('close')
         q.compositor.ipc('[title="^fbittorrent$"] focus')
-        assert q.ipc('focusSetting', 'alt_download_limit_bps') == 'true'
+        assert q.ipc('focusSetting', 'download_limit_bps') == 'true'
         refs = q.state()['mutationRefs']
         q.keys(['-M', 'ctrl', 'a', '-m', 'ctrl', '128K', '-k', 'Return'],
-               lambda: q.state()['settings'].get('alt_download_limit_bps') == 131072)
+               lambda: q.state()['settings'].get('download_limit_bps') == 131072)
         case.check(q.state()['mutationRefs'] == refs+1, 'one dashboard Apply sends one mutation', str(q.state()['mutationRefs']-refs))
-        assert ui.observe('dashboard changes turtle cap beneath the TUI draft',
+        assert ui.observe('dashboard changes the download cap beneath the TUI draft',
                           'the confirmed cap updates while the local queue edit survives',
-                          lambda pane: any('Turtle download limit' in line and '131072' in line for line in pane.splitlines())
+                          lambda pane: any('Download limit' in line and '131072' in line for line in pane.splitlines())
                           and matches(pane, local), timeout=2)
         assert q.ipc('popup') == 'true'
         q.wait(lambda: q.state()['opened'] and q.state()['popup'])
         refs = q.state()['mutationRefs']
-        assert q.ipc('turtle') == 'true'
-        q.wait(lambda: q.state()['popup']['turtle'] is True and q.state()['appearance']['turtle'] is True, timeout=2)
-        case.check(q.state()['mutationRefs'] == refs+1, 'one popup turtle click sends one mutation', str(q.state()['mutationRefs']-refs))
-        assert ui.observe('popup turtle change reaches the TUI header', 'the same daemon reports Turtle on',
-                          lambda pane: 'Turtle' in pane.splitlines()[0], timeout=2)
+        assert q.ipc('turtle') == 'false'
+        case.check(q.state()['mutationRefs'] == refs and 'turtle' not in q.state()['appearance'],
+                   'removed popup control sends no mutation or indicator',json.dumps(q.state()['appearance']))
         assert ui.press('Enter', 'save only the TUI local field', lambda pane: '[Settings]' not in pane, literal=False)
         observed = q.wait(lambda: s if (s := q.state())['settings']['max_active_downloads'] == local else None, timeout=2)
         current = h.cli('settings')
         case.check(current['max_active_downloads'] == local and current['upload'] == 'on'
-                   and current['alt_download_limit_bps'] == 131072 and current['alt_limits_on'] is True,
-                   'TUI save preserves simultaneous CLI upload, dashboard cap and popup turtle changes', json.dumps(current))
+                   and current['download_limit_bps'] == 131072,
+                   'TUI save preserves simultaneous CLI upload and dashboard cap changes', json.dumps(current))
         h.cli('settings', '--upload', 'off')
         q.wait(lambda: q.state()['settings']['upload'] == 'off')
         case.check(process.child.poll() is None, 'all surfaces still share the original daemon', str(h.daemon_pid()))

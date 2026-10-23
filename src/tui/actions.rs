@@ -153,6 +153,7 @@ pub(super) enum Intent {
     Remove,
     DeleteFiles,
     Open,
+    OpenFolder,
     Imdb,
     Wiki,
     Follow,

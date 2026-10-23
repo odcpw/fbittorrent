@@ -120,6 +120,8 @@ Item {
   property bool stoppedRecently: false
   property string byeReason: ""
   property bool startupRequested: false
+  property bool shutdownRequested: false
+  property string shutdownError:""
   property var clipboardOffer: null
   property var clipboardFlow:null
   property var settingsFlow:null
@@ -212,6 +214,7 @@ Item {
       status = Model.apiStatus(store,c.online)
     }
     clientReconnecting = c.reconnecting; instance = c.instance
+    if(!c.online)shutdownRequested=false
     if (c.online && startupRequested) { startupRequested=false; actionStatus=""; startupTimer.stop() }
     if(c.protocolMismatch){startupRequested=false;actionStatus="";startupTimer.stop()}
     var nextPending=c.state().pending;if(!Store.equal(pending,nextPending))pending=nextPending
@@ -221,6 +224,7 @@ Item {
     if(connectionReset || (lastError && !errorText)){lastMessageText="";lastMessageAt=0;toast=null;toastTimer.stop();actionStatus=""}
     if(errorText && errorText!==lastError)lastMessageAt=Date.now()
     lastError=errorText
+    if(connectionReset && shutdownError)notify(shutdownError)
     backendState = c.online && c.hello ? (store.summary.daemon ? store.summary.daemon.state : store.info.state || c.hello.state) : c.mode
   }
   function applyFrame(frame, request) {
@@ -265,22 +269,21 @@ Item {
     return row ? mutate("torrents.set_seed", {hashes:[hash], on:!row.upload_enabled}) : false
   }
   function remove(hash, deleteFiles) { return mutate("torrents.remove", {hashes:[hash], delete_files:!!deleteFiles}) }
-  function openTarget(hash, file) {
-    var args = {hash:hash}
-    if (file !== undefined) args.file = file
-    return client.request("torrents.open_target", args, {callback:function(result) {
-      if(result && result.path){
-        var command=String(root.store.settings.open_command || "xdg-open")
-        // Match Config::open: the owner-configured command is shell syntax;
-        // the daemon-provided path remains a literal positional parameter.
-        Commons.Util.execArgv(["sh","-c",'exec '+command+' "$1"',"fbittorrent-open",result.stream_url || result.path])
-      }
-    }})
+  function openTarget(hash, file, folder) {
+    if(!client || !online || shutdownRequested || !store.torrents[hash])return false
+    if(contentOpen.running){notify("Opening…");return false}
+    // The CLI owns readiness, playback acknowledgement and player selection.
+    // Observe its result; detached execution would lose launcher/file errors.
+    // env gives even a missing binary an observable exit/stderr result.
+    var argv=["/usr/bin/env",bin,"--no-start","--json","open"]
+    if(folder)argv.push("--folder")
+    else if(file!==undefined)argv.push("--file",String(file))
+    argv.push(hash)
+    contentOpen.command=argv;contentOpen.running=true;return true
   }
+  function openFolder(hash){return openTarget(hash,undefined,true)}
   readonly property string diskBanner: {var confirmed=status;return online ? PopupState.diskBanner(store.summary.disk) : ""}
-  readonly property bool turtleOn: {var confirmed=status;return online && store.summary.alt===true}
-  function toggleTurtle(){return setTurtle(!turtleOn)}
-  function setTurtle(on) { return mutate("transfer.set_alt", {on:on}, "limits") }
+  readonly property bool alternateLimitsOn: {var confirmed=status;return online && store.summary.alt===true}
   function recheck(hash) {
     var active=pendingAction(hash)
     if(active && active.op==="torrents.recheck"){notify("Checking files…");return false}
@@ -291,7 +294,16 @@ Item {
   function needsStopConfirm(){return status.loaded!==true || Number(status.active)>0 || Number(status.seeding)>0 || transferring}
   function shutdownPrompt(){return "Stop fbittorrent? Transfers pause until it starts again."}
   readonly property string idleLabel:{var confirmed=status;return PopupState.idle(store.summary.daemon,online)}
-  function quit() { return mutate("app.shutdown", {reason:"user"}) }
+  function quit() {
+    if(!online || shutdownRequested)return false
+    shutdownError="";shutdownRequested=true
+    var failed=false
+    var ref=mutate("app.shutdown",{reason:"user"},null,function(result,failure){
+      if(failure){failed=true;root.shutdownRequested=false;root.shutdownError="Could not stop: "+failure.message;root.notify(root.shutdownError)}
+    })
+    if(!ref || failed){shutdownRequested=false;return false}
+    return ref
+  }
   function dismissClipboard(hash) { return mutate("app.clipboard.dismiss", {hash:hash}, "clipboard") }
   function cancelFocusTarget(target){if(windowFocus && windowFocus.target===target){windowFocus=null;focusRetry.stop()}}
   function cancelWindowFocus(window) {
@@ -333,6 +345,8 @@ Item {
     focusRetry.restart()
   }
   function startDaemon() {
+    if(shutdownRequested){notify("Stop is still pending");return false}
+    shutdownError=""
     if(client && client.protocolMismatch)return
     if (startupRequested) return
     startupRequested=true; actionStatus="Starting fbittorrent…"; noticeTimer.stop(); startupTimer.restart()
@@ -363,7 +377,7 @@ Item {
   }
   function stateJson() { if(testHooks && dashboardOwner)dashboardOwner.publishNow(true);var state=client ? client.state() : {online:false,instance:"",subs:{},pending:[],view:null};state.view=dashboardState;return JSON.stringify(state) }
   function toggleTorrent(t) { var current=t ? store.torrents[t.hash] : null; return current ? (Model.isStopped(current) ? resume(current.hash) : pause(current.hash)) : false }
-  function openTorrent(t) { return t ? openTarget(t.hash) : false }
+  function openTorrent(t,folder) { return t ? openTarget(t.hash,undefined,folder) : false }
   function openTorrentDetails(t) {return !!(t && shell && shell.summon("oliver.torrents",JSON.stringify({view:"torrents",hash:t.hash})))}
   property bool clipboardTooLarge: false
   function addFromClipboard() {
@@ -445,6 +459,17 @@ Item {
   Timer { id: noticeTimer; interval: 3000; onTriggered: root.actionStatus="" }
   Timer { id: ipcClaim; interval: 0; onTriggered: if (!root.ipcOwner && root.widgets.length) root.ipcOwner = root.widgets[0] }
   Timer { id: stoppedTimer; interval: 10000; onTriggered: root.stoppedRecently = false }
+  Process {
+    id:contentOpen
+    stdout:StdioCollector {id:contentOpenOutput}
+    stderr:StdioCollector {id:contentOpenError}
+    onExited:function(code){
+      if(code===0)return
+      var message=contentOpenError.text.trim()
+      try{var result=JSON.parse(contentOpenOutput.text);if(typeof result.error==="string")message=result.error;else if(result.error && result.error.message)message=result.error.message}catch(error){}
+      root.notify("Could not open: "+(message || "launcher exited "+code))
+    }
+  }
   Process {
     id:copyOut
     property string value:""

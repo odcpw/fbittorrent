@@ -6,10 +6,9 @@
 function describe(svc) {
   svc=svc || {}
   var status=svc.status || {}, summary=svc.store ? svc.store.summary : {}, counts=summary.counts || (svc.store ? svc.store.counts : {})
-  var result={state:"stopped", glyph:Glyphs.download, tone:"dim", rate:"", turtle:summary.alt===true,
+  var result={state:"stopped", glyph:Glyphs.download, tone:"dim", rate:"",
     tooltip:"fbittorrent stopped · click to start"}
   if (!svc.online) {
-    result.turtle=false
     if (svc.startupRequested) { result.state="starting"; result.tooltip="Starting fbittorrent…" }
     else if (svc.reconnecting) { result.state="reconnecting"; result.glyph=Glyphs.checking; result.tooltip="Reconnecting to fbittorrent…" }
     else if (svc.stoppedRecently) { result.state="stopped_recently"; result.tooltip=svc.byeReason==="idle" ? "fbittorrent stopped (idle)" : "fbittorrent stopped" }
@@ -56,7 +55,6 @@ function describe(svc) {
   // or cached detail rows after the peer pane has been hidden.
   var peerRows=(summary.top || []).filter(function(t){return t.peers!==undefined || t.seeds!==undefined})
   if(peerRows.length)result.tooltip+="\n"+peerRows.slice(0,3).map(function(t){return String(t.name).slice(0,60)+": "+Model.peerCount(t,false)}).join("\n")
-  if (result.turtle) result.tooltip+=" · turtle limits on"
   result.tooltip=Model.plainTip(result.tooltip)
   return result
 }

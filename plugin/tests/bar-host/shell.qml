@@ -54,7 +54,7 @@ ShellRoot {
       feedback:{error:service.lastError,action:service.actionStatus,notice:service.lastMessageText,backend:service.backendState},
       renderedWindow:dashboard.item ? root.texts(dashboard.item.windowContent) : [],
       rendered:dashboard.item ? root.texts(dashboard.item.currentView==="torrents" ? dashboard.item.torrents : dashboard.item.currentView==="rss" ? dashboard.item.rss : dashboard.item.currentView==="shows" ? dashboard.item.shows : null) : [],
-      popup:popup ? {turtle:popup.turtleOn,rows:popup.rows,sections:popup.sections,cursor:popup.cursor(),texts:root.texts(popup)} : null}
+      popup:popup ? {rows:popup.rows,sections:popup.sections,cursor:popup.cursor(),texts:root.texts(popup)} : null}
   }
   IpcHandler {
     target:"fbt-dashboard"

@@ -11,14 +11,16 @@ from dashboard import Session
 import daemon
 import fixtures
 from fbtlog import Case,suite_status
+from open_support import allow_open
 
 def run(binary):
     with Case('qs_overview','move_and_cap') as case,daemon.Sandbox() as box,daemon.Harness(case,binary,box) as h:
-        source=box.root/'source';source.mkdir();payload=source/'daemon-fixture.bin';payload.write_bytes(b'owned move fixture'*32768)
+        source=box.root/'source';source.mkdir();payload=source/'daemon-fixture.txt';payload.write_bytes(b'owned move fixture'*32768)
         digest=hashlib.sha256(payload.read_bytes()).hexdigest();fixture=fixtures.torrent_fixture(box.root,[payload])
         destination=box.root/'new folder # literal';destination.mkdir();collision=box.root/'collision';collision.mkdir()
         unrelated=collision/payload.name;unrelated.write_bytes(b'keep unrelated bytes')
         final=box.root/'TUI destination';final.mkdir();fixtures.path_shim('xdg-open','exit 0',box.root)
+        fixtures.path_shim('mpv','exit 0',box.root)
         process=h.start_serve();h.receive_ready();h.wait_engine();q=None;tui_pid=None;socket=box.root/'ui.sock'
         def tmux(*args,check=True):return subprocess.run(['tmux','-S',str(socket),*args],env=box.env,check=check,capture_output=True,text=True,timeout=4).stdout
         try:
@@ -27,6 +29,7 @@ def run(binary):
                 def row():return c.call('torrents.get',dict(hash=fixture.info_hash))['result']['torrent']
                 assert h.wait_for(lambda:(row()['state']=='done',json.dumps(row())),'private fixture finishes verification')
                 initial=row();q=Session(case,box)
+                allow_open(box,binary)
                 def view():return q.state().get('view') or {}
                 def detail():return view().get('details') or {}
                 def action():return detail().get('action') or {}
@@ -53,6 +56,10 @@ def run(binary):
                 press(['o'],lambda:(box.root/'shims/xdg-open.log').exists())
                 opened=json.loads((box.root/'shims/xdg-open.log').read_text().splitlines()[-1])
                 case.check(opened==[str(moved)],'Open content uses the new path literally',opened)
+                before=len((box.root/'shims/xdg-open.log').read_text().splitlines())
+                press(['O'],lambda:len((box.root/'shims/xdg-open.log').read_text().splitlines())>before)
+                folder=json.loads((box.root/'shims/xdg-open.log').read_text().splitlines()[-1])
+                case.check(folder==[str(destination)],'O reveals the moved download folder literally',folder)
                 c.call('app.settings.set',dict(download_limit_bps=32768,alt_download_limit_bps=16384))
                 press(['c'],lambda:action().get('modal')=='limit');press(['64K','-k','Return'],lambda:not action() and row().get('download_limit_bps')==65536)
                 q.wait(lambda:detail().get('overview',{}).get('effective')=='32.8 KB/s')
@@ -60,12 +67,12 @@ def run(binary):
                 c.call('transfer.set_alt',dict(on=True));q.wait(lambda:detail().get('overview',{}).get('effective')=='16.4 KB/s')
                 press(['c'],lambda:action().get('modal')=='limit');press(['-M','ctrl','a','-m','ctrl','none','-k','Return'],lambda:not action() and 'download_limit_bps' not in row())
                 q.wait(lambda:detail().get('overview',{}).get('cap')=='Unlimited')
-                case.check(row()['state']=='done' and row()['checked'],'clearing the torrent cap retains the active turtle global cap',json.dumps(detail().get('overview')))
+                case.check(row()['state']=='done' and row()['checked'],'clearing the torrent cap retains the active legacy API global cap',json.dumps(detail().get('overview')))
                 q.shell('hide');q.wait(lambda:q.state().get('view') is None)
                 tmux('new-session','-d','-s','fbt-fbt-p7-02-ss9','-x','120','-y','40',shlex.join([str(binary),'tui']))
                 tui_pid=int(tmux('display-message','-p','-t','fbt-fbt-p7-02-ss9','#{pane_pid}').strip())
                 def pane():return tmux('capture-pane','-p','-t','fbt-fbt-p7-02-ss9')
-                h.wait_for(lambda:('daemon-fixture.bin' in pane(),pane()),'private TUI attaches to the same owner')
+                h.wait_for(lambda:('daemon-fixture.txt' in pane(),pane()),'private TUI attaches to the same owner')
                 tmux('send-keys','-t','fbt-fbt-p7-02-ss9','Enter');h.wait_for(lambda:('[Overview]' in pane(),pane()),'TUI opens Overview')
                 tmux('send-keys','-t','fbt-fbt-p7-02-ss9','-l','c');h.wait_for(lambda:('Download cap' in pane(),pane()),'TUI cap editor opens')
                 tmux('send-keys','-t','fbt-fbt-p7-02-ss9','-l','128K');tmux('send-keys','-t','fbt-fbt-p7-02-ss9','Enter')

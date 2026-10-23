@@ -259,6 +259,8 @@ pub struct OpenTargetArgs {
     pub hash: Hash,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folder: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

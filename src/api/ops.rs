@@ -125,7 +125,7 @@ pub const TABLE: &[Operation] = &[
     Operation { name: "torrents.set_upload_limit", mutating: true, idempotent: true, since: "P1-06",
         args: "`hashes: [hash]`, `bps: bps?` (≥ 16384, or `null` for unlimited)", result: "`{state: enum(done|pending)}` (pending until P6-07)" },
     Operation { name: "torrents.open_target", mutating: false, idempotent: false, since: "P1-06",
-        args: "`hash: hash`, `file: u64?`", result: "`{path: str, kind: enum(file|folder), stream_url: str?}`" },
+        args: "`hash: hash`, `file: u64?`, `folder: bool?` (default false; mutually exclusive with file)", result: "`{path: str, kind: enum(file|folder), stream_url: str?}` (folder requests never return a stream URL)" },
     Operation { name: "subscribe", mutating: false, idempotent: false, since: "P1-08",
         args: "`topics: [str]` (1..16), `interval_ms: u64?` (250..10000; applies to every topic of the call and is ignored by the \"on change\" topics of A.7; when omitted, each topic uses its A.7 default), `since_seq: u64?` (only with the `events` topic, A.7)", result: "`{sub: u64, topics: [str]}`" },
     Operation { name: "unsubscribe", mutating: false, idempotent: false, since: "P1-08",

@@ -11,7 +11,7 @@ ColumnLayout {
   readonly property var flow:service.overviewFlow
   readonly property string status:service.overviewRevision>=0 ? flow.status(torrent.hash) : ""
   readonly property bool busy:service.overviewRevision>=0 && (flow.busy(torrent.hash) || service.rowPending(torrent.hash))
-  readonly property var effective:{var confirmed=service.settingsRevision;return Overview.effectiveCap(torrent,service.store.settings,service.turtleOn)}
+  readonly property var effective:{var confirmed=service.settingsRevision;return Overview.effectiveCap(torrent,service.store.settings,service.alternateLimitsOn)}
   readonly property var state:({cap:capField.value,effective:effectiveField.value,status:status})
   Layout.fillWidth:true
   RowLayout {

@@ -40,7 +40,7 @@ FocusScope {
       Text {text:"Download cap";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading;font.bold:true}
       Text {Layout.fillWidth:true;text:root.row.name || "";textFormat:Text.PlainText;elide:Text.ElideRight;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       Ui.TextField {id:limit;Layout.fillWidth:true;maximumLength:16;placeholderText:"Bytes/s, K or M; empty or none = unlimited"}
-      Text {Layout.fillWidth:true;text:root.model.message || "Minimum finite cap: 16K/s. The active global or turtle limit may be lower.";textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
+      Text {Layout.fillWidth:true;text:root.model.message || "Minimum finite cap: 16K/s. The active global limit may be lower.";textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body}
       RowLayout {Ui.Button {text:"Cancel (Esc)";onClicked:root.flow.cancel()} Item {Layout.fillWidth:true} Ui.Button {text:"Apply (Enter)";onClicked:root.flow.limit(limit.text)}}
     }
   }

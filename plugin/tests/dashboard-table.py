@@ -12,6 +12,7 @@ import time
 from dashboard import Session,ROOT
 from journey_support import JourneySession
 import fixtures
+from open_support import allow_open,add_text_torrent,calls,launcher_calls,blocked_payload_error
 from fbtlog import Case,suite_status
 from visual_fixture import running
 
@@ -49,6 +50,7 @@ def click_row(q,index,button='button1',times=1):
 def functional(binary):
     with Case('qs_dashboard_table','table_actions') as case,running(binary,'paused',case) as (sandbox,harness,client,row):
         fixtures.path_shim('xdg-open','exit 0',sandbox.root)
+        fixtures.path_shim('mpv','exit 0',sandbox.root)
         fixtures.path_shim('wl-copy','cat > "$XDG_RUNTIME_DIR/copied-text"',sandbox.root)
         cache=Path(sandbox.env['XDG_CACHE_HOME'])/'fbittorrent/imdb'
         for directory in ('by-id','by-name-v2'):(cache/directory).mkdir(parents=True,exist_ok=True)
@@ -57,6 +59,7 @@ def functional(binary):
         key=re.sub(r'[^a-z0-9]','_',row['name'].lower())[:120]
         (cache/'by-name-v2'/f'{key}.json').write_text(json.dumps(dict(id=ident)))
         q=JourneySession(case,sandbox)
+        allow_open(sandbox,binary)
         try:
             q.compositor.ipc('output * mode 1920x1080')
             q.wait(lambda:q.ipc('ready')=='true');q.shell('summon','{"view":"torrents"}')
@@ -111,8 +114,26 @@ def functional(binary):
             q.keys(['u'],lambda:not client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['upload_enabled'])
             q.keys(['-k','Escape'],lambda:not view(q).get('details',{}).get('visible'))
             shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
-            case.check(client.call('torrents.open_target',dict(hash=row['hash']))['ok'],'a genuine local payload exists before the open action',row['content_path'])
-            q.keys(['o'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
+            before=launcher_calls(sandbox)
+            q.keys(['o'],lambda:blocked_payload_error((view(q).get('toast') or {}).get('text','')))
+            case.check(launcher_calls(sandbox)==before,'o refuses the existing .bin payload without invoking an opener or player',view(q).get('toast'))
+            before=len(calls(sandbox,'xdg-open'))
+            q.keys(['O'],lambda:len(calls(sandbox,'xdg-open'))>before)
+            folder=calls(sandbox,'xdg-open')[-1]
+            case.check(folder==[str(Path(row['content_path']).parent)],'O opens the containing download folder',folder)
+            document,payload=add_text_torrent(sandbox,client)
+            q.wait(lambda:(json.loads(q.ipc('confirmed',document.info_hash)) or {}).get('state')=='done')
+            q.shell('summon',json.dumps(dict(view='torrents',hash=document.info_hash)))
+            q.wait(lambda:view(q).get('cursor')==document.info_hash)
+            before=len(calls(sandbox,'xdg-open'));players=launcher_calls(sandbox)
+            q.keys(['o'],lambda:len(calls(sandbox,'xdg-open'))>before)
+            case.check(calls(sandbox,'xdg-open')[-1]==[str(payload)]
+                       and all(launcher_calls(sandbox)[name]==players[name] for name in ('mpv','ffplay','vlc')),
+                       'o opens a real safe .txt document literally without invoking a media player',calls(sandbox,'xdg-open'))
+            client.call('torrents.remove',dict(hashes=[document.info_hash],delete_files=False))
+            q.wait(lambda:not json.loads(q.ipc('confirmed',document.info_hash)))
+            q.shell('summon',json.dumps(dict(view='torrents',hash=row['hash'])))
+            q.wait(lambda:view(q).get('cursor')==row['hash'])
             copied_text=Path(sandbox.env['XDG_RUNTIME_DIR'])/'copied-text'
             q.keys(['y'],lambda:copied_text.exists() and copied_text.read_text()=='magnet:?xt=urn:btih:'+row['hash'])
             copied=[json.loads(line) for line in (sandbox.root/'shims/wl-copy.log').read_text().splitlines()]

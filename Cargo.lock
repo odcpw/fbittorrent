@@ -1319,6 +1319,7 @@ dependencies = [
  "rqbit-runtime",
  "serde",
  "serde_json",
+ "shlex",
  "toml",
  "tracing",
  "unicode-width",

@@ -639,7 +639,26 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             Reply::TorrentsSetUploadLimit(MutationResult::Done)
         }
         Call::TorrentsOpenTarget { args } => {
-            let EngineResult::OpenTarget(mut path) = execute(
+            let row = list(daemon)?.into_iter().find(|t| t.hash == args.hash)
+                .ok_or_else(|| error(NotFound, "torrent not found", None))?;
+            if args.folder {
+                if row.staged { return Err(error(InvalidState, "torrent is staged", None)); }
+                let root = Path::new(&row.save_path);
+                let path = match files(daemon, &args.hash) {
+                    Ok(entries) => folder_path(root, &entries)?,
+                    Err(_) if row.content_path.is_none() => root.to_path_buf(),
+                    Err(failure) => return Err(failure),
+                };
+                if !path.is_dir() { return Err(error(InvalidState, "download folder is missing", None)); }
+                let owned = std::fs::canonicalize(root).ok().zip(std::fs::canonicalize(&path).ok())
+                    .is_some_and(|(root, path)| path.starts_with(root));
+                if !owned { return Err(error(InvalidState, "download folder is outside the torrent destination", None)); }
+                return Ok(Reply::TorrentsOpenTarget(OpenTargetResult {
+                    path: path.to_string_lossy().into(), kind: TargetKind::Folder, stream_url: None,
+                }));
+            }
+            // Retain the engine's staged/missing-files checks and observations.
+            let EngineResult::OpenTarget(engine_path) = execute(
                 daemon,
                 EngineOp::OpenTarget {
                     hash: args.hash.to_string(),
@@ -648,40 +667,25 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             else {
                 unreachable!("typed target result")
             };
-            if args.file.is_none() {
-                if let Some(video)=daemon.watch.lock().unwrap().target(args.hash.as_str()) {path=video;}
-            }
-            if let Some(index) = args.file {
-                let entries = files(daemon, &args.hash)?;
-                let entry = entries.get(index as usize).ok_or_else(|| {
-                    error(InvalidArgs, "file index is out of range", Some("file"))
-                })?;
-                let row = list(daemon)?
-                    .into_iter()
-                    .find(|t| t.hash == args.hash)
-                    .ok_or_else(|| error(NotFound, "torrent not found", None))?;
-                path = Path::new(&row.save_path).join(&entry.path);
-                if !path.is_file() {
-                    return Err(error(InvalidState, "downloaded file is missing", None));
-                }
-            }
-            let kind = if path.is_dir() {
-                TargetKind::Folder
-            } else {
-                TargetKind::File
-            };
+            let entries = files(daemon, &args.hash)?;
+            let entry = open_file(&entries, args.file)?;
+            let selected_path = payload_path(Path::new(&row.save_path), &entry.path)?;
+            let path = if entries.len() == 1 { engine_path } else { selected_path };
             let stream_url = {
                 let slot = daemon.slot.read().unwrap_or_else(|e| e.into_inner());
                 if let crate::daemon::slot::Slot::Running(app) = &slot.slot {
-                    app.dispatcher().incomplete_video(args.hash.as_str(), args.file.map(|i| i as usize))
+                    app.dispatcher().incomplete_video(args.hash.as_str(), Some(entry.index as usize))
                         .map_err(engine_error)?.map(|video| daemon.playback.target(args.hash.as_str(), video, slot.engine_epoch))
                         .transpose().map_err(engine_error)?
                 } else { None }
             };
+            if stream_url.is_none() {
+                if !path.is_file() { return Err(error(InvalidState, "downloaded file is missing", None)); }
+            }
             daemon.watch.lock().unwrap().acknowledge(Some(args.hash.as_str()));
             Reply::TorrentsOpenTarget(OpenTargetResult {
                 path: path.to_string_lossy().into(),
-                kind,
+                kind: TargetKind::File,
                 stream_url,
             })
         }
@@ -693,6 +697,78 @@ pub fn dispatch(daemon: &Daemon, call: &Call) -> ApiResult<Reply> {
             ))
         }
     })
+}
+
+fn open_file(entries: &[File], index: Option<u64>) -> ApiResult<&File> {
+    if let Some(index) = index {
+        return entries.iter().find(|entry| entry.index == index)
+            .ok_or_else(|| error(ErrorCode::InvalidArgs, "file index is out of range", Some("file")));
+    }
+    let video = crate::daemon::watch::largest_video(entries.iter().enumerate()
+        .filter(|(_, f)| f.included).map(|(i, f)| (i, Path::new(&f.path), f.size)));
+    video.map(|i| &entries[i]).or_else(|| (entries.len() == 1).then(|| &entries[0]))
+        .ok_or_else(|| error(ErrorCode::InvalidState, "no playable media file; open the folder or choose a file", None))
+}
+
+fn payload_path(root: &Path, relative: &str) -> ApiResult<std::path::PathBuf> {
+    if relative.is_empty() || !Path::new(relative).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(error(ErrorCode::InvalidState, "invalid torrent file path", None));
+    }
+    Ok(root.join(relative))
+}
+
+fn folder_path(root: &Path, entries: &[File]) -> ApiResult<std::path::PathBuf> {
+    let mut common: Option<std::path::PathBuf> = None;
+    for entry in entries {
+        let path = payload_path(root, &entry.path)?;
+        let parent = path.parent().unwrap_or(root);
+        if let Some(common) = &mut common {
+            while !parent.starts_with(common.as_path()) {
+                if !common.pop() { return Err(error(ErrorCode::InvalidState, "invalid torrent folder", None)); }
+            }
+        } else { common = Some(parent.to_path_buf()); }
+    }
+    Ok(common.unwrap_or_else(|| root.to_path_buf()))
+}
+
+#[cfg(test)]
+mod open_tests {
+    use super::*;
+
+    fn entry(index: u64, path: &str, size: u64, included: bool) -> File {
+        File { index, path: path.into(), size, progress: 1.0, included, sort_key: path.into(), ready: None }
+    }
+
+    #[test]
+    fn media_selection_is_independent_of_watch_cache_and_respects_selection() {
+        let entries = [entry(0, "Show/Readme.txt", 100, true), entry(1, "Show/Episode.mkv", 500, true),
+            entry(2, "Show/Skipped.mkv", 1000, false), entry(3, "Show/Trailer.mp4", 50, true)];
+        assert_eq!(open_file(&entries, None).unwrap().index, 1);
+        assert_eq!(open_file(&entries, Some(3)).unwrap().index, 3);
+        assert_eq!(open_file(&entries, Some(99)).unwrap_err().code, ErrorCode::InvalidArgs);
+        let documents = [entry(0, "a.txt", 1, true), entry(1, "b.txt", 1, true)];
+        assert_eq!(open_file(&documents, None).unwrap_err().code, ErrorCode::InvalidState);
+        assert!(open_file(&[], None).is_err());
+        assert_eq!(open_file(&documents[..1], None).unwrap().path, "a.txt");
+    }
+
+    #[test]
+    fn folder_targets_are_containing_directories_inside_the_destination() {
+        let root = Path::new("/private/downloads");
+        for (paths, expected) in [
+            (vec!["movie.mkv"], "/private/downloads"),
+            (vec!["Movie/movie.mkv"], "/private/downloads/Movie"),
+            (vec!["Show/ep1.mkv", "Show/sub/ep2.mkv"], "/private/downloads/Show"),
+            (vec!["one/ep1.mkv", "two/ep2.mkv"], "/private/downloads"),
+            (vec![], "/private/downloads"),
+        ] {
+            let entries: Vec<_> = paths.iter().enumerate().map(|(i, p)| entry(i as u64, p, 1, true)).collect();
+            assert_eq!(folder_path(root, &entries).unwrap(), Path::new(expected));
+        }
+        for path in ["../escape/movie.mkv", "/outside/movie.mkv", "Show/../../movie.mkv", ""] {
+            assert!(folder_path(root, &[entry(0, path, 1, true)]).is_err(), "{path}");
+        }
+    }
 }
 
 /// Validate before acknowledging a URL task. The actual download stays in the

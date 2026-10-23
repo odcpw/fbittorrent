@@ -326,12 +326,6 @@ impl Watch {
             self.save();
         }
     }
-    pub fn target(&self, hash: &str) -> Option<PathBuf> {
-        self.rows
-            .get(hash)
-            .filter(|r| r.value.ready)
-            .map(|r| r.path.clone())
-    }
     pub fn file_ready(&self, hash: &str, index: u64) -> Option<bool> {
         self.rows
             .get(hash)

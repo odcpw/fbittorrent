@@ -111,7 +111,7 @@ fn removal_undo_requires_confirmed_keep_files_receipt_and_expires() {
     assert!(!matches!(key(&mut app,'U'),Cmd::Task(..)));
 }
 #[test]
-fn top_bar_uses_idle_vpn_unread_and_errors_without_hiding_turtle() {
+fn top_bar_uses_idle_vpn_unread_and_errors_without_retired_limits_mode() {
     let mut app=fixture::app("torrents");
     let mut state=summary();let mut counts=serde_json::to_value(&state.counts).unwrap();
     for count in counts.as_object_mut().unwrap().values_mut() {*count=serde_json::json!(0);}
@@ -129,7 +129,7 @@ fn top_bar_uses_idle_vpn_unread_and_errors_without_hiding_turtle() {
     app.sync_activity_label();assert_eq!(app.activity_text.as_deref(),Some("Waiting for VPN"));
     app.store.summary.as_mut().unwrap().alt=true;
     let pane=super::golden::render(&app,120,30);let header=pane.lines().next().unwrap();
-    assert!(header.contains("Waiting for VPN")&&header.contains("Turtle"),"{header}");
+    assert!(header.contains("Waiting for VPN")&&!header.contains("Turtle"),"{header}");
     app.store.summary.as_mut().unwrap().network.state=api::NetworkReadiness::Ready;
     app.store.summary.as_mut().unwrap().daemon.idle_exit_in_s=None;
     app.store.summary.as_mut().unwrap().counts.error=2;

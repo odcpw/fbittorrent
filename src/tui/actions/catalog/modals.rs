@@ -1,5 +1,9 @@
 use super::*;
 pub(super) const ACTIONS: &[Action] = &[
+    action!("files.open",Scope::Modal(ModalKind::Files),&[KeyChord::plain(KeyCode::Char('o'))],"Open file",20,
+        TuiApp::can_open_file,Some(|a|a.on_files_action(Intent::Open)),T,None,None,None),
+    action!("files.open_folder",Scope::Modal(ModalKind::Files),&[KeyChord::plain(KeyCode::Char('O'))],"Open folder",21,
+        |a|a.files.is_some()&&a.selected_torrent().is_some(),Some(|a|a.on_files_action(Intent::OpenFolder)),T,None,None,None),
     action!(
         "files.close",
         Scope::Modal(ModalKind::Files),

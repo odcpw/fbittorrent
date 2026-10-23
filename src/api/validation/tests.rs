@@ -1,6 +1,19 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn open_target_folder_defaults_and_conflicts_are_additive() {
+    let hash = "0123456789abcdef0123456789abcdef01234567";
+    let old = json!({"hash":hash,"file":0});
+    let parsed: OpenTargetArgs = serde_json::from_value(old.clone()).unwrap();
+    assert!(!parsed.folder);
+    assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+    for args in [json!({"hash":hash}), json!({"hash":hash,"folder":false}), json!({"hash":hash,"folder":true})] {
+        assert!(serde_json::from_value::<Request>(json!({"id":1,"op":"torrents.open_target","args":args})).is_ok());
+    }
+    assert!(serde_json::from_value::<Request>(json!({"id":1,"op":"torrents.open_target","args":{"hash":hash,"folder":true,"file":0}})).is_err());
+}
+
 fn list() -> Value {
     include_str!("../../../contracts/ipc/v1/torrents.ndjson")
         .lines()

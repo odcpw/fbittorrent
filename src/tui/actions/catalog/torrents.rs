@@ -125,7 +125,7 @@ pub(super) const ACTIONS: &[Action] = &[
         "torrents.open",
         Scope::Screen(Screen::Torrents),
         &[KeyChord::plain(KeyCode::Char('o'))],
-        "Open",
+        "Open file",
         20,
         |a| a.selected_torrent().is_some(),
         Some(|a| a.on_torrents_action(Intent::Open)),
@@ -134,6 +134,8 @@ pub(super) const ACTIONS: &[Action] = &[
         Some(&[KeyChord::plain(KeyCode::Char('o')), KeyChord::plain(KeyCode::Enter)]),
         Some("Popup: Enter opens the file (exception 1).")
     ),
+    action!("torrents.open_folder",Scope::Screen(Screen::Torrents),&[KeyChord::plain(KeyCode::Char('O'))],"Open folder",35,
+        |a|a.selected_torrent().is_some(),Some(|a|a.on_torrents_action(Intent::OpenFolder)),TDP,None,None,None),
     action!(
         "torrents.pause",
         Scope::Screen(Screen::Torrents),

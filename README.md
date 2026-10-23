@@ -46,7 +46,9 @@ Search providers are local Python programs; install sources you trust.
 
 **The bar icon is lit exactly while the daemon runs.** The popup power button,
 `fbittorrent down`, or uppercase **Q** stops the daemon and all transfers. The
-UIs ask for confirmation when transfers are active; `down` stops directly.
+UIs ask for confirmation when transfers are active; confirming Stop closes the
+desktop interface immediately while the daemon drains. The TUI closes after the
+shutdown request is acknowledged. `down` stops directly.
 Closing a UI window, lowercase **q** or Ctrl+C in the UI never stops transfers.
 By default the daemon exits after five idle minutes: transfers, interactive
 windows, searches and pending operations keep it alive. The bar alone does not;
@@ -71,7 +73,13 @@ torrents still stop unless individually opted in. CLI `add --upload` explicitly 
 
 Streaming priority is automatic. A verified video prefix produces **Ready to
 watch** or **Playable · may stall** according to the known buffer and transfer
-rate. **o** opens it in the configured player.
+rate. **o** opens it in the configured player; **O** opens its folder in the
+file manager. Streaming URLs go to a media player rather than the browser.
+The default `open_command = "xdg-open"` (or `"auto"`) selects an installed
+`mpv`, `ffplay` or `vlc` for media. An explicit player command may include quoted
+arguments, for example `open_command = "mpv --keep-open=yes"`. Folder opening
+always uses the desktop file manager. CLI equivalents are `open HASH`,
+`open --file INDEX HASH` and `open --folder HASH`.
 Checking Shows or RSS never downloads a release automatically; review and
 Download are deliberate, and inbox read state is separate from transfer state.
 
@@ -84,7 +92,7 @@ In Torrents, **Enter** opens Details, **[ / ]** change its tab, **p / Space**
 pause/resume, **u** opens Upload details, **d** removes while keeping files and
 **D** explicitly deletes files. Confirmation starts on Cancel. In dashboard
 Torrents, **U** undoes a keep-files removal within its ten-second window.
-**z** toggles turtle limits. Popup **w** opens the dashboard; **t** opens the TUI.
+Popup **w** opens the dashboard; **t** opens the TUI.
 
 The [M2 demo](docs/M2-demo.md) walks through search → review → watch, the Shows
 inbox and cleanup. [Owner checks](docs/OWNER-CHECKS.md) collect the remaining
@@ -100,7 +108,6 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | --- | --- | --- | --- | --- | --- |
 | `modal:clipboard` | Add offered magnet | — | `y` | `y` |  |
 | `modal:clipboard` | Dismiss offered magnet | — | `Esc` | `Esc` |  |
-| `global` | Turtle limits | `z` | `z` | `z` |  |
 | `global` | Torrents | `1` | `1` | — |  |
 | `global` | Search | `2` | `2` | — |  |
 | `global` | Shows | `3` | `3` | — |  |
@@ -136,7 +143,8 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `modal:files` | Overview | `[` | — | — |  |
 | `modal:details` | Move… | `m` | `m` | — |  |
 | `modal:details` | Download cap… | `c` | `c` | — |  |
-| `modal:details` | Open | `o` | — | — |  |
+| `modal:details` | Open file | `o` | — | — |  |
+| `modal:details` | Open folder | `O` | — | — |  |
 | `modal:details` | Pause/resume | `p` | — | — |  |
 | `modal:details` | Upload on/off | `u` | `u` | — |  |
 | `modal:details` | Remove | `d` | — | — |  |
@@ -169,7 +177,8 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:torrents` | Page down | `PgDn` | `PgDn` | — |  |
 | `screen:torrents` | Page up | `PgUp` | `PgUp` | — |  |
 | `screen:torrents` | Details | `Enter` | `Enter` | — |  |
-| `screen:torrents` | Open | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
+| `screen:torrents` | Open file | `o` | `o` | `o`, `Enter` | Popup: Enter opens the file (exception 1). |
+| `screen:torrents` | Open folder | `O` | `O` | `O` |  |
 | `screen:torrents` | Pause/resume | `p`, `Space` | `p`, `Space` | `p`, `Space` |  |
 | `screen:torrents` | Upload details | `u` | `u` | `u` |  |
 | `screen:torrents` | Remove, keep files | `d`, `x`, `Delete` | `d`, `x`, `Delete` | `d`, `x`, `Delete` |  |
@@ -250,6 +259,8 @@ catalogue, also available as [keymap.json](plugin/oliver.torrents/keymap.json) o
 | `screen:shows` | Wikipedia | `w` | — | — |  |
 | `screen:shows` | EZTV | `O` | — | — |  |
 | `screen:shows` | Undo read | `u` | `u` | — |  |
+| `modal:files` | Open file | `o` | — | — |  |
+| `modal:files` | Open folder | `O` | — | — |  |
 | `modal:files` | Close | `Esc`, `h`, `q`, `Enter` | — | — |  |
 | `modal:files` | Next | `j`, `↓` | `j`, `↓` | — |  |
 | `modal:files` | Previous | `k`, `↑` | `k`, `↑` | — |  |
@@ -314,7 +325,7 @@ an authenticated local SOCKS5h proxy owned by the daemon. An unavailable tunnel
 fails closed; there is no fallback to the normal route. Saved download intent
 resumes when it returns. Changing the binding cancels running search jobs; run
 the query again with the new route. With no binding, the normal route is used.
-Turtle limits are separate from upload permission.
+Speed limits are separate from upload permission.
 
 | What | Default location |
 |---|---|

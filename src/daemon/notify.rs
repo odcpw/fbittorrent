@@ -277,25 +277,17 @@ fn deliver(shared: &Shared, n: &Notice) -> anyhow::Result<()> {
             )?;
         }
         "open" | "default" | "folder" => {
-            if let Some(target) = &n.target {
-                if n.kind == "torrent.playable" && action != "folder" {
-                    let target = request("torrents.open_target", json!({"hash":n.hash}), None)?;
-                    if let Some(url) = target["result"].get("stream_url").and_then(serde_json::Value::as_str) {
-                        run_action(shared, Command::new("xdg-open").arg(url))?;
-                        return Ok(());
-                    }
+            if n.target.is_some() {
+                // Resolve the current location and use the same player policy as
+                // the other UIs. A notification may outlive a move or removal;
+                // its old path must not launch a replacement file or a browser.
+                let mut command = Command::new(std::env::current_exe()?);
+                command.args(["--no-start", "open"]);
+                if action == "folder" {
+                    command.arg("--folder");
                 }
-                let path = if action == "folder" {
-                    if target.is_dir() {
-                        target
-                    } else {
-                        target.parent().unwrap_or(target)
-                    }
-                } else {
-                    target.as_path()
-                };
-                crate::public_text::openable_payload(path)?;
-                run_action(shared, Command::new("xdg-open").arg(path))?;
+                command.arg(&n.hash);
+                run_action(shared, &mut command)?;
             }
         }
         "window" | "log" => {

@@ -3,8 +3,9 @@ use super::*;
 
 impl TuiApp {
     pub(super) fn selected_torrent(&self) -> Option<&Torrent> {
-        if let Some(details) = &self.details {
-            self.torrents.iter().find(|t| t.hash.as_str() == details.hash)
+        if let Some(hash) = self.files.as_ref().map(|files|files.hash.as_str())
+            .or_else(||self.details.as_ref().map(|details|details.hash.as_str())) {
+            self.torrents.iter().find(|t| t.hash.as_str() == hash)
         } else { self.tor_list.borrow().selected().and_then(|i| self.torrents.get(i)) }
     }
 
@@ -39,7 +40,10 @@ impl TuiApp {
                     &format!("DELETE '{}' AND ITS FILES? y/N", short(&t.name, 50)), true);
             },
             actions::Intent::Open => if let Some(t) = self.selected_torrent().cloned() {
-                return self.action("open requested",move|client|client.open(&t));
+                return self.action("file open requested",move|client|client.open(t.hash.as_str(),None,false));
+            },
+            actions::Intent::OpenFolder => if let Some(t) = self.selected_torrent().cloned() {
+                return self.action("folder open requested",move|client|client.open(t.hash.as_str(),None,true));
             },
             actions::Intent::Imdb => if let Some(t) = self.selected_torrent() {
                 let name = t.name.clone();

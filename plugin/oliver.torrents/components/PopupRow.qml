@@ -39,7 +39,8 @@ CursorSurface {
       Row {
         opacity:root.actionsVisible ? 1 : 0;enabled:root.actionsVisible && !root.pending;spacing:Style.spacing.xxs
         PanelActionButton {iconText:Model.isStopped(root.torrent) ? Glyphs.play : Glyphs.paused;tooltipText:root.torrent.state==="error" ? "Retry (p)" : "Pause/resume (p)";onClicked:svc.toggleTorrent(root.torrent)}
-        PanelActionButton {iconText:Glyphs.folder;tooltipText:"Open (o)";onClicked:svc.openTorrent(root.torrent)}
+        PanelActionButton {iconText:Glyphs.play;tooltipText:"Open file (o)";onClicked:svc.openTorrent(root.torrent)}
+        PanelActionButton {iconText:Glyphs.folder;tooltipText:"Open folder (O)";onClicked:svc.openTorrent(root.torrent,true)}
         PanelActionButton {iconText:Glyphs.trash;tooltipText:"Remove, keep files (d)";onClicked:host.requestRemoval(root.torrent)}
       }
     }

@@ -11,6 +11,7 @@ from visual import Capture,ROOT
 from visual_fixture import running
 import fixtures
 from fbtlog import Case,suite_status
+from open_support import allow_open,add_text_torrent,calls,launcher_calls,blocked_payload_error
 
 SUITE='qs_widget'
 # Preserve failures before fbtlog initializes this run's suite.
@@ -27,8 +28,10 @@ def peek(client,op,args):return client.response(client.send(op,args))
 def run(binary):
     with Case(SUITE,'fixture') as setup,running(binary,'paused',setup) as (sandbox,harness,client,row):
         fixtures.path_shim('xdg-open','exit 0',sandbox.root)
+        fixtures.path_shim('mpv','exit 0',sandbox.root)
         fixtures.path_shim('wl-paste','printf %s '+"'magnet:?xt=urn:btih:"+'b'*40+"&dn=Popup%20offer'",sandbox.root)
         q=Capture(setup,sandbox,'owner')
+        allow_open(sandbox,binary)
         try:
             q.wait(lambda:json.loads(q.ipc('state'))['online']);q.ipc('open');q.wait(lambda:cursor(q)['opened']);q.ipc('expand','paused')
             q.wait(lambda:cursor(q)['rows']==1)
@@ -40,7 +43,27 @@ def run(binary):
                 keys(q,['k'],lambda:cursor(q)['section']=='header');keys(q,['l'],lambda:cursor(q)['header']==1);keys(q,['h'],lambda:cursor(q)['header']==0);keys(q,['j'],lambda:cursor(q)['section']=='rows')
             with Case(SUITE,'w_004') as c:
                 shutil.copyfile(sandbox.root/'pristine/UI fixture.bin',Path(row['content_path']))
-                keys(q,['-k','Return'],lambda:(sandbox.root/'shims/xdg-open.log').exists())
+                before=launcher_calls(sandbox)
+                keys(q,['o'],lambda:blocked_payload_error(' '.join(json.loads(q.ipc('activity'))['texts'])))
+                c.check(launcher_calls(sandbox)==before,'o refuses the existing .bin payload visibly without invoking an opener or player',q.ipc('activity'))
+                before=len(calls(sandbox,'xdg-open'))
+                keys(q,['O'],lambda:len(calls(sandbox,'xdg-open'))>before)
+                folder=calls(sandbox,'xdg-open')[-1]
+                c.check(folder==[str(Path(row['content_path']).parent)],'O reveals the download folder using the desktop file manager',folder)
+                document,payload=add_text_torrent(sandbox,client)
+                q.wait(lambda:(json.loads(q.ipc('confirmed',document.info_hash)) or {}).get('state')=='done')
+                q.ipc('expand','done');q.wait(lambda:document.info_hash in cursor(q)['hashes'])
+                keys(q,['j'],lambda:cursor(q)['hashes'][cursor(q)['row']]==document.info_hash)
+                before=len(calls(sandbox,'xdg-open'));players=launcher_calls(sandbox)
+                keys(q,['-k','Return'],lambda:len(calls(sandbox,'xdg-open'))>before)
+                c.check(calls(sandbox,'xdg-open')[-1]==[str(payload)]
+                        and all(launcher_calls(sandbox)[name]==players[name] for name in ('mpv','ffplay','vlc')),
+                        'Enter opens a genuine safe .txt document literally without invoking a media player',calls(sandbox,'xdg-open'))
+                before=len(calls(sandbox,'xdg-open'))
+                keys(q,['o'],lambda:len(calls(sandbox,'xdg-open'))>before)
+                c.check(calls(sandbox,'xdg-open')[-1]==[str(payload)],'lowercase o also opens the selected safe document',calls(sandbox,'xdg-open'))
+                client.call('torrents.remove',dict(hashes=[document.info_hash],delete_files=False))
+                q.wait(lambda:cursor(q)['hashes']==[row['hash']])
             with Case(SUITE,'w_005') as c:
                 keys(q,['p'],lambda:client.call('torrents.get',dict(hash=row['hash']))['result']['torrent']['intent']=='run')
                 # Keep this row paused for the remaining confirmation tests.
@@ -55,13 +78,13 @@ def run(binary):
             with Case(SUITE,'w_009') as c:
                 keys(q,['-k','Delete'],lambda:cursor(q)['confirming']);keys(q,['y'],lambda:peek(client,'torrents.get',dict(hash=row['hash']))['ok'] is False);c.check(Path(row['content_path']).exists(),'y confirms removal and keeps payload',row['content_path'])
             with Case(SUITE,'w_010') as c:
-                if 'limits' in client.call('app.info')['result']['caps']:
-                    before=client.call('app.settings.get')['result']['alt_limits_on']
-                    keys(q,['z'],lambda:client.call('app.settings.get')['result']['alt_limits_on'] is not before)
-                    c.check(json.loads(q.ipc('state'))['turtle'] is not before,'z toggles the real daemon limits and confirmed popup state',q.ipc('state'))
-                else:
-                    keys(q,['z'],lambda:'limits' in json.loads(q.ipc('state'))['action'])
-                    c.check('limits' in json.loads(q.ipc('state'))['action'],'z is explicit unsupported when the real daemon lacks limits',q.ipc('state'))
+                before=client.call('app.settings.get')['result']['alt_limits_on']
+                serial=cursor(q)['keySerial']
+                keys(q,['z'],lambda:cursor(q)['keySerial']>serial)
+                state=json.loads(q.ipc('state'))
+                c.check(client.call('app.settings.get')['result']['alt_limits_on'] is before
+                        and q.ipc('clickTurtle')=='false' and 'turtle' not in state['bar'],
+                        'retired z leaves settings unchanged and the popup has no mode button or bar indicator',json.dumps(state))
             with Case(SUITE,'w_011') as c:
                 keys(q,['w'],lambda:not cursor(q)['opened']);q.ipc('open')
             with Case(SUITE,'w_012') as c:

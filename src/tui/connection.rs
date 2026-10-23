@@ -66,7 +66,7 @@ impl TuiApp {
     pub(super) fn action_result<F>(&self, f:F)->Cmd<Msg>
     where F:FnOnce(&Client)->anyhow::Result<String>+Send+'static {
         let presence=self.presence.clone();
-        Cmd::task(move ||Msg::ActionDone(f(&Client::new(presence)).map_err(|error|error.to_string())))
+        Cmd::task(move ||Msg::ActionDone(f(&Client::new(presence)).map_err(|error|format!("{error:#}"))))
     }
 
     pub(super) fn add_opts(&self) -> AddOptions {

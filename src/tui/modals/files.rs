@@ -27,6 +27,11 @@ impl TuiApp {
     }
 
     pub(super) fn files_editable(&self)->bool {self.files.as_ref().is_some_and(|m|!m.loading&&!m.saving)}
+    pub(super) fn can_open_file(&self)->bool {
+        self.selected_torrent().is_some() && self.files.as_ref().is_some_and(|m|
+            !m.loading && m.error.is_empty() && m.list.borrow().selected()
+                .and_then(|i|m.files.get(i)).is_some_and(|file|file.index>=0))
+    }
     pub(super) fn set_file_prio(&mut self, hash: String, ids: Vec<i64>, prio: i64) -> Cmd<Msg> {
         if !self.files_editable(){return Cmd::none();}
         self.files.as_mut().unwrap().saving=true;
@@ -58,6 +63,12 @@ impl TuiApp {
             actions::Intent::Up => m.list.borrow_mut().select_previous(),
             actions::Intent::First => m.list.borrow_mut().select(if n > 0 { Some(0) } else { None }),
             actions::Intent::Last => m.list.borrow_mut().select(n.checked_sub(1)),
+            actions::Intent::Open if self.can_open_file() => if let Some(file) = cur {
+                return self.action("file open requested",move|client|client.open(&hash,Some(file.index as u64),false));
+            },
+            actions::Intent::OpenFolder if self.selected_torrent().is_some() => {
+                return self.action("folder open requested",move|client|client.open(&hash,None,true));
+            },
             actions::Intent::Toggle => if let Some(f) = cur {
                 let prio = if f.priority == 0 { 1 } else { 0 };
                 return self.set_file_prio(hash, vec![f.index], prio);
@@ -126,7 +137,7 @@ impl TuiApp {
             ])
             },frame);
         let selected:i64=m.files.iter().filter(|f|f.priority>0).map(|f|f.size).sum();
-        let controls = if m.saving {"Saving file selection… · Esc close"}else{"Space include/skip · a/n all/none · Esc close"};
+        let controls = if m.saving {"Saving file selection… · o file · O folder · Esc close"}else{"Space include/skip · a/n all/none · o file · O folder · Esc close"};
         let foot = format!("{}/{} · {} · {controls}",
             m.files.iter().filter(|f| f.priority > 0).count(), m.files.len(), human_bytes(selected));
         Paragraph::new(foot).style(bg.fg(th.dim)).wrap(WrapMode::None).render(rows[2], frame);

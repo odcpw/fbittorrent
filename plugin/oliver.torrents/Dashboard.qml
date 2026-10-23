@@ -64,7 +64,7 @@ Item {
     if(!window.visible)svc.dashboardState=null
     if(!svc.testHooks || inspect!==true)return
     svc.dashboardState=window.visible ? {window:{visible:true,width:window.width,height:window.height,view:currentView},
-      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,turtle:svc.turtleOn,cursor:"view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
+      clipboard:svc.clipboardOffer ? {hash:svc.clipboardOffer.hash,name:svc.clipboardOffer.name} : null,diskBanner:svc.diskBanner,cursor:"view",selection:selectedHash ? [selectedHash] : [],filter:filter,query:query} : null
     if(window.visible && currentView==="torrents" && torrents)svc.dashboardState=Object.assign({},svc.dashboardState,torrents.snapshot())
     if(window.visible && currentView==="search" && search)svc.dashboardState=Object.assign({},svc.dashboardState,search.snapshot())
     if(window.visible && currentView==="rss" && rss)svc.dashboardState=Object.assign({},svc.dashboardState,rss.snapshot())
@@ -123,7 +123,8 @@ Item {
     if(shell && typeof shell.hide==="function")shell.hide("oliver.torrents")
   }
   function textEditing(){var item=window.contentItem.Window.window.activeFocusItem;return !!item && item.cursorPosition!==undefined && item.readOnly!==true}
-  function requestStop(){if(!svc || !svc.online)return;if(svc.needsStopConfirm()){stopConfirm.selectedIndex=0;stopConfirm.opened=true;stopConfirm.forceActiveFocus()}else svc.quit()}
+  function stop(){if(svc && svc.quit())dismiss();else Qt.callLater(focusView)}
+  function requestStop(){if(!svc || !svc.online || svc.shutdownRequested)return;if(svc.needsStopConfirm()){stopConfirm.selectedIndex=0;stopConfirm.opened=true;stopConfirm.forceActiveFocus()}else stop()}
   function openSettings(){if(currentView!=="settings")settingsReturnView=currentView;currentView="settings";publish();Qt.callLater(focusView)}
   function selectView(index) {if(views[index]==="settings"){openSettings();return}currentView=views[index];publish();Qt.callLater(focusView);if(currentView==="search")Qt.callLater(function(){if(root.search)root.search.focusQuery()})}
   function cycleView(direction) {selectView((Math.max(0,views.indexOf(currentView))+direction+4)%4)}
@@ -185,7 +186,6 @@ Item {
         if(event.text===","){root.openSettings();event.accepted=true;return}
         if(event.text==="L"){root.selectView(5);event.accepted=true;return}
         if(event.text==="?"){root.helpOpen=true;event.accepted=true;return}
-        if(event.text==="z" && !(event.modifiers & (Qt.ControlModifier|Qt.AltModifier))){root.svc.toggleTurtle();event.accepted=true;return}
         if(event.text==="a"){root.svc.addClipboardSheet();event.accepted=true;return}
         if(event.key===Qt.Key_Escape) {
           if(root.query!==""){root.query="";event.accepted=true}
@@ -214,7 +214,6 @@ Item {
           Layout.margins:Commons.Style.spacing.panelPadding
           Text {text:"fbittorrent";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading;font.bold:true}
           Item {Layout.fillWidth:true}
-          Ui.Button {objectName:"dashboard-turtle";visible:!!root.svc && root.svc.hasCap("limits");text:Glyphs.turtle+" Turtle "+(root.svc && root.svc.turtleOn ? "on" : "off")+" (z)";onClicked:root.svc.toggleTurtle()}
           Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
           Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
         }
@@ -310,7 +309,7 @@ Item {
       DropArea {anchors.fill:parent;onEntered:function(drag){drag.accepted=(drag.hasUrls && drag.urls.length===1) || drag.hasText} onDropped:function(drop){if(root.acceptDrop(drop.urls,drop.text))drop.acceptProposedAction();else drop.accepted=false}}
       Loader {id:settingsLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.svc.online && root.currentView==="settings";onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.SettingsSheet {service:root.svc;onDismissed:root.selectView(root.views.indexOf(root.settingsReturnView))}}
       Loader {id:helpLoader;anchors.fill:parent;active:window.visible && !!root.svc && root.helpOpen;onLoaded:{root.publish();Qt.callLater(root.focusView)} sourceComponent:Views.HelpOverlay {service:root.svc;onDismissed:root.helpOpen=false}}
-      Ui.ConfirmDialog {id:stopConfirm;Keys.priority:Keys.BeforeItem;Keys.onPressed:function(event){stopConfirm.handleKey(event);event.accepted=true} anchors.fill:parent;z:1000;selectedIndex:0;cancelText:"Cancel";confirmText:"Stop";message:root.svc ? root.svc.shutdownPrompt() : "";onOpenedChanged:root.publish();onSelectedIndexChanged:root.publish();onCanceled:{opened=false;Qt.callLater(root.focusView)} onConfirmed:{opened=false;root.svc.quit()}}
+      Ui.ConfirmDialog {id:stopConfirm;Keys.priority:Keys.BeforeItem;Keys.onPressed:function(event){stopConfirm.handleKey(event);event.accepted=true} anchors.fill:parent;z:1000;selectedIndex:0;cancelText:"Cancel";confirmText:"Stop";message:root.svc ? root.svc.shutdownPrompt() : "";onOpenedChanged:root.publish();onSelectedIndexChanged:root.publish();onCanceled:{opened=false;Qt.callLater(root.focusView)} onConfirmed:{opened=false;root.stop()}}
       Loader {id:addSheet;anchors.fill:parent;focus:true;onLoaded:root.focusView();onActiveChanged:if(!active && root.svc){root.svc.cancelWindowFocus(window);Qt.callLater(root.focusAfterAdd)} active:window.visible && !!root.svc && !!root.svc.addFlow && root.svc.addRevision>=0 && root.svc.addFlow.snapshot().visible;sourceComponent:Views.AddSheet {service:root.svc;onChanged:root.publish()}}
     }
   }

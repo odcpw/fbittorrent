@@ -29,22 +29,6 @@
       "scope": "modal:clipboard"
     },
     {
-      "id": "limits.toggle",
-      "keys": {
-        "dashboard": [
-          "z"
-        ],
-        "popup": [
-          "z"
-        ],
-        "tui": [
-          "z"
-        ]
-      },
-      "label": "Turtle limits",
-      "scope": "global"
-    },
-    {
       "id": "screen.torrents",
       "keys": {
         "dashboard": [
@@ -522,7 +506,19 @@
           "o"
         ]
       },
-      "label": "Open",
+      "label": "Open file",
+      "scope": "modal:details"
+    },
+    {
+      "id": "details.open_folder",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "O"
+        ]
+      },
+      "label": "Open folder",
       "scope": "modal:details"
     },
     {
@@ -969,8 +965,24 @@
           "o"
         ]
       },
-      "label": "Open",
+      "label": "Open file",
       "note": "Popup: Enter opens the file (exception 1).",
+      "scope": "screen:torrents"
+    },
+    {
+      "id": "torrents.open_folder",
+      "keys": {
+        "dashboard": [
+          "O"
+        ],
+        "popup": [
+          "O"
+        ],
+        "tui": [
+          "O"
+        ]
+      },
+      "label": "Open folder",
       "scope": "screen:torrents"
     },
     {
@@ -2122,6 +2134,30 @@
       },
       "label": "Undo read",
       "scope": "screen:shows"
+    },
+    {
+      "id": "files.open",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "o"
+        ]
+      },
+      "label": "Open file",
+      "scope": "modal:files"
+    },
+    {
+      "id": "files.open_folder",
+      "keys": {
+        "dashboard": null,
+        "popup": null,
+        "tui": [
+          "O"
+        ]
+      },
+      "label": "Open folder",
+      "scope": "modal:files"
     },
     {
       "id": "files.close",

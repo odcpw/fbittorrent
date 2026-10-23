@@ -5,7 +5,7 @@ pub(super) const ACTIONS: &[Action] = &[
         Scope::Global,
         &[KeyChord::plain(KeyCode::Char('v'))],
         "Card",
-        20,
+        40,
         |a| a.hovered_title().is_some(),
         Some(TuiApp::toggle_poster),
         T,

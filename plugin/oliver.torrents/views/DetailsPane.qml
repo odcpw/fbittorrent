@@ -37,5 +37,5 @@ ColumnLayout {
   Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && root.tab==="log";visible:active;sourceComponent:LogView {service:root.service;hash:root.flow.hash;consumer:"detail-log"}}
   Loader {Layout.fillWidth:true;Layout.fillHeight:true;active:!!root.torrent && ["overview","files","trackers","pieces","log"].indexOf(root.tab)<0;visible:active;sourceComponent:DetailCollection {service:root.service;flow:root.flow}}
 
-  Components.KeyHint {Layout.fillWidth:true;text:"[ / ] tabs · h table · Esc back"}
+  Components.KeyHint {Layout.fillWidth:true;text:"o file · O folder · [ / ] tabs · h table · Esc back"}
 }

@@ -3933,11 +3933,11 @@ def tui_single_connection(binary, systemd):
                 ui.assert_pane(target,"api-add.bin")
                 case.check(len(source.requests)==1,"one Enter fetches metainfo only once",str(source.requests))
             # Selection is preserved by hash when the API read inserts the new row.
-            expected_target=client.call("torrents.open_target",dict(hash=fixture.info_hash))["result"]["path"]
-            ui.keys(target,"o")
+            expected_target=client.call("torrents.open_target",dict(hash=fixture.info_hash,folder=True))["result"]["path"]
+            ui.keys(target,"O")
             opener=sandbox.root / "shims/xdg-open.log"
             harness.wait_for(lambda:(opener.exists() and json.loads(opener.read_text().splitlines()[-1])==[expected_target],opener.read_text() if opener.exists() else "opener not called"),
-                             "o resolves its real target through API v1 before invoking the private opener")
+                             "O resolves its real folder through API v1 before invoking the private opener")
             ui.keys(target,"d")
             ui.assert_pane(target,"Remove 'two-files' (keep files)? y/N")
             ui.keys(target,"y")

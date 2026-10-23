@@ -21,6 +21,9 @@ from daemon_policy import hello,subscribe,idle_exit
 
 
 def stopped(case,q,dashboard,phase):
+    # Accepted Stop closes its initiating popup. Explicitly reopen that stopped
+    # observer to verify its empty state; opening a popup must never start up.
+    q.ipc('open')
     def empty():
         state=json.loads(q.ipc('activity'))
         return state if not json.loads(q.ipc('state'))['online'] and state['model']==state['rows']==0 and 'fbittorrent stopped' in ' '.join(state['texts']) else None
@@ -84,6 +87,9 @@ def power(binary,plugin_source=None):
             case.check(q.ipc('clickPower')=='true','reopen real power confirmation')
             q.wait(lambda:json.loads(q.ipc('cursor')).get('stopping'))
             case.check(q.ipc('clickStopChoice','Stop')=='true','explicit Stop clicks the actual confirmation button')
+            closed=q.wait(lambda:state if not (state:=json.loads(q.ipc('state')))['opened'] else None)
+            case.check(closed['lastClose']==dict(online=True,pending=True),
+                       'accepted Stop closes its popup before any daemon bye without closing observers',json.dumps(closed))
             terminal=next(frame for frame in c.events() if frame.get('ev')=='bye')
             pair.p.wait(timeout=10,code=0)
             q.wait(lambda:not json.loads(q.ipc('state'))['online'])

@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import struct
 import subprocess
 import time
@@ -67,7 +68,10 @@ class Player:
         self.child = None; self.connection = None; self.file = None
         self.pid = None
         self.events = []; self.request = 0
-        self.argv = ['mpv', '--no-config', '--hwdec=no', '--vo=null', '--ao=null',
+        player = shutil.which('mpv')
+        if not player:
+            raise RuntimeError('real headless playback requires mpv')
+        self.argv = [str(Path(player).resolve()), '--no-config', '--hwdec=no', '--vo=null', '--ao=null',
             '--idle=yes', '--keep-open=no', '--cache=yes', '--cache-secs=4',
             '--demuxer-max-bytes=8MiB', '--terminal=no', '--log-file=' + str(self.log),
             '--input-ipc-server=' + str(self.ipc)]

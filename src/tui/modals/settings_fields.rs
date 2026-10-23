@@ -1,23 +1,20 @@
 //! Draft settings fields and a minimal API patch preserve concurrent edits.
 use super::*;
-const LIMIT_NAMES: [&str; 4] = [
+const LIMIT_NAMES: [&str; 2] = [
     "Download limit",
     "Upload limit",
-    "Turtle download limit",
-    "Turtle upload limit",
 ];
-pub(super) const SETTINGS_ROWS: usize = 13;
-pub(super) const DESTINATION_ROW: usize = 9;
-pub(super) const PORT_ROW: usize = 8;
-pub(super) const UPLOAD_ROW: usize = 10;
-pub(super) const IDLE_ROW: usize = 11;
-pub(super) const CLIPBOARD_ROW: usize = 12;
+pub(super) const SETTINGS_ROWS: usize = 11;
+pub(super) const DESTINATION_ROW: usize = 7;
+pub(super) const PORT_ROW: usize = 6;
+pub(super) const UPLOAD_ROW: usize = 8;
+pub(super) const IDLE_ROW: usize = 9;
+pub(super) const CLIPBOARD_ROW: usize = 10;
 pub(super) fn limit(cfg: &Config, index: usize) -> Option<u32> {
     match index {
         0 => cfg.download_limit_bps,
         1 => cfg.upload_limit_bps,
-        2 => cfg.alt_download_limit_bps,
-        _ => cfg.alt_upload_limit_bps,
+        _ => None,
     }
 }
 pub(super) fn rate_text(value: Option<u32>) -> String {
@@ -41,8 +38,6 @@ pub(super) fn settings_patch(original: &Config, draft: &Config) -> serde_json::V
         "reduce_motion",
         "download_limit_bps",
         "upload_limit_bps",
-        "alt_download_limit_bps",
-        "alt_upload_limit_bps",
     ] {
         if original[key] != draft[key] {
             patch.insert(key.into(), draft[key].clone());
@@ -155,6 +150,7 @@ impl TuiApp {
     }
 
     pub(super) fn edit_limit(&mut self, index: usize) -> Cmd<Msg> {
+        if index >= LIMIT_NAMES.len() { return Cmd::none(); }
         let value = self.settings.as_ref().and_then(|m| limit(&m.cfg, index));
         self.open_prompt(
             PromptKind::SettingLimit(index),
@@ -171,14 +167,14 @@ impl TuiApp {
         Cmd::none()
     }
     pub(super) fn apply_limit_input(&mut self, index: usize, value: &str) -> Cmd<Msg> {
+        if index >= LIMIT_NAMES.len() { return Cmd::none(); }
         match parse_rate(value) {
             Ok(value) => {
                 if let Some(modal) = self.settings.as_mut() {
                     match index {
                         0 => modal.cfg.download_limit_bps = value,
                         1 => modal.cfg.upload_limit_bps = value,
-                        2 => modal.cfg.alt_download_limit_bps = value,
-                        _ => modal.cfg.alt_upload_limit_bps = value,
+                        _ => unreachable!("only ordinary limit fields are editable"),
                     };
                     modal.error.clear();
                 }

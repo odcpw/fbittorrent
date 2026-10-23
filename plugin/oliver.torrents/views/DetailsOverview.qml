@@ -39,7 +39,8 @@ ScrollView {
     Components.DetailField {Layout.fillWidth:true;visible:!!root.torrent.content_path;label:"Content";value:root.torrent.content_path || ""}
     RowLayout {
       Ui.Button {text:"Copy path";onClicked:root.service.copyText(root.torrent.save_path)}
-      Ui.Button {text:"Open content";onClicked:root.service.openTarget(root.torrent.hash)}
+      Ui.Button {text:"Open file (o)";onClicked:root.service.openTarget(root.torrent.hash)}
+      Ui.Button {text:"Open folder (O)";onClicked:root.service.openFolder(root.torrent.hash)}
     }
     Components.OverviewActions {id:actions;service:root.service;torrent:root.torrent}
     Components.DetailField {Layout.fillWidth:true;label:"Hash";value:root.torrent.hash}

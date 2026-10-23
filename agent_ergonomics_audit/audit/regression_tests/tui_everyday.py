@@ -56,11 +56,13 @@ def main():
                     ui.tmux('resize-window','-t',target,'-x','80','-y','24')
                     assert ui.assert_pane(target,'Idle · UI open')
                     assert ui.assert_pane(target,'3 Shows (2)')
-                    ui.keys(target,'z')
-                    on=ui.assert_pane(target,'󰢃 Turtle',timeout=1)
-                    assert on
-                    ui.keys(target,'z')
-                    assert h.wait_for(lambda:('󰢃 Turtle' not in ui.capture(target).splitlines()[0],ui.capture(target)),'existing turtle indicator clears by push within one second',timeout=1)
+                    c.call('transfer.set_limits',dict(download_bps=65536,upload_bps=0))
+                    ui.keys(target,'z');ui.keys(target,'F6',literal=False)
+                    assert ui.assert_pane(target,'65536 B/s')
+                    settings=c.call('app.settings.get')['result'];pane=ui.capture(target)
+                    case.check(settings.get('download_limit_bps')==65536 and not settings['alt_limits_on'] and 'Turtle' not in pane,
+                               'ordinary limits follow shared settings and retired z does not change them',json.dumps(settings)+'\n'+pane)
+                    ui.keys(target,'Escape',literal=False)
                     ui.keys(target,'s');assert ui.assert_pane(target,'Sorted by name')
                     ui.keys(target,'S');assert ui.assert_pane(target,'Sorted by name ↓')
                     ui.keys(target,'y')
@@ -101,17 +103,24 @@ def main():
                         rows=c.call('shows.list')['result']['shows'];return rows[0].get('quality')=='2160p',json.dumps(rows)
                     assert h.wait_for(quality,'TUI quality prompt persists the selected show override')
                     ui.keys(target,',');assert ui.assert_pane(target,'Download settings')
-                    # Select destination (row 9), edit a draft then cancel the entire form.
-                    for _ in range(9):ui.keys(target,'Down',literal=False)
+                    def settings_row(label):
+                        for _ in range(24):
+                            pane=ui.capture(target)
+                            if any('▌' in line and label in line for line in pane.splitlines()):return
+                            ui.keys(target,'Down',literal=False)
+                        raise AssertionError('Settings field not found: '+label+'\n'+ui.capture(target))
+                    # Select by field name; removing a setting must not retarget edits.
+                    settings_row('Download destination')
                     ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False)
                     destination=box.root/'new downloads';destination.mkdir()
                     ui.keys(target,str(destination));ui.keys(target,'Enter',literal=False)
                     ui.keys(target,'Escape',literal=False)
                     case.check(c.call('app.settings.get')['result']['save_path']==str(box.downloads),'Esc discards destination draft in the real daemon','original destination retained')
                     ui.keys(target,'F6',literal=False);assert ui.assert_pane(target,'Download settings')
-                    for _ in range(9):ui.keys(target,'Down',literal=False)
+                    settings_row('Download destination')
                     ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False);ui.keys(target,str(destination));ui.keys(target,'Enter',literal=False)
-                    ui.keys(target,'Down',literal=False);ui.keys(target,'Down',literal=False);ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False);ui.keys(target,'300');ui.keys(target,'Enter',literal=False)
+                    settings_row('Idle exit')
+                    ui.keys(target,'Right',literal=False);ui.keys(target,'C-a',literal=False);ui.keys(target,'300');ui.keys(target,'Enter',literal=False)
                     ui.keys(target,'Enter',literal=False)
                     def saved():
                         s=c.call('app.settings.get')['result'];return s['save_path']==str(destination) and s['upload']=='off' and s['idle_exit_secs']==300,json.dumps(s)

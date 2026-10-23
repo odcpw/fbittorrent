@@ -11,6 +11,7 @@ import "Reference"
 ShellRoot {
   id:root
   property var captures: ({})
+  property var lastClose:null
   property var facade: QtObject {
     function serviceFor(id) {return service}
     function summon(id,args) {console.log("FBTVISUAL-SUMMON "+id+" "+args);return false}
@@ -54,6 +55,7 @@ ShellRoot {
     return null
   }
   TestCase {id:input;name:"PopupPointer";when:false}
+  Connections {target:widget;function onOpenedChanged(){if(!widget.opened)root.lastClose={online:service.online,pending:service.shutdownRequested}}}
   function find(item,name){if(!item)return null;if(item.objectName===name)return item;for(var i=0;i<item.children.length;i++){var value=find(item.children[i],name);if(value)return value}return null}
   IpcHandler {
     target:"fbt-visual"
@@ -83,7 +85,7 @@ ShellRoot {
     function groups():string {return JSON.stringify(widget.popupItem() ? widget.popupItem().sections.map(function(g){return {key:g.key,count:g.rows.length}}) : [])}
     function cursor():string {var c=widget.popupItem() ? widget.popupItem().cursor() : {};c.opened=widget.opened;c.visible=widget.visible;return JSON.stringify(c)}
     function expand(group:string):bool {if(Quickshell.env("FBT_TEST_HOOKS")!=="1" || !widget.popupItem())return false;var item=widget.popupItem();for(var i=0;i<item.sections.length;i++)if(item.sections[i].key===group){if(!item.sections[i].open)item.toggleGroup(item.sections[i]);return true}return false}
-    function state():string {return JSON.stringify({idle:widget.popupItem() ? widget.popupItem().presentation.idle : "",banner:widget.popupItem() ? widget.popupItem().presentation.banner : "",turtle:service.turtleOn,bar:BarState.describe(service),popupTurtle:widget.popupItem() ? widget.popupItem().turtleOn : false,online:service.online,rows:service.torrents.length,error:service.lastError,action:service.actionStatus,opened:widget.opened,mode:service.client ? service.client.mode : "",geometry:widget.geometry()})}
+    function state():string {return JSON.stringify({idle:widget.popupItem() ? widget.popupItem().presentation.idle : "",banner:widget.popupItem() ? widget.popupItem().presentation.banner : "",bar:BarState.describe(service),online:service.online,rows:service.torrents.length,error:service.lastError,action:service.actionStatus,opened:widget.opened,lastClose:root.lastClose,mode:service.client ? service.client.mode : "",geometry:widget.geometry()})}
     function useRuntimeDir(path:string):string {return service.useRuntimeDir(path)}
     function open():void {reference.close();widget.open()}
     function close():void {reference.close();widget.close()}

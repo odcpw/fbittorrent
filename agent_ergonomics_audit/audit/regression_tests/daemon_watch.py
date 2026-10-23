@@ -92,9 +92,11 @@ def playable_before_complete(binary,systemd):
         output,_=waiter.communicate(timeout=5)
         answer=json.loads(output)
         case.check(waiter.returncode==0 and answer['playable'] is True and answer['complete'] is False and answer['torrents'][0]['open_target']==str(box.downloads/'Fixture.mkv'),'wait --until playable exits 0 before completion',output)
-        h.wait_for(lambda:(any(str(box.downloads/'Fixture.mkv') in call for call in notify.calls(box,'xdg-open')),json.dumps(notify.calls(box,'xdg-open'))),'notification Open invokes xdg-open with the video file')
+        target=client.call('torrents.open_target',dict(hash=item.info_hash))['result']
+        playback_target=target.get('stream_url',target['path'])
+        h.wait_for(lambda:(any(playback_target in call for call in notify.calls(box,'mpv')),json.dumps(notify.calls(box,'mpv'))),'notification Open invokes the player with the verified media target')
         h.wait_for(lambda:((v:=row(client,item.info_hash))['playable']['acked'],json.dumps(v)),'notification Open acknowledges ready state in the shared model')
-        notify.observe(case,box);notify.observe(case,box,'xdg-open')
+        notify.observe(case,box);notify.observe(case,box,'mpv')
         peer.call('transfer.set_limits',dict(upload_bps=MIB//2))
         h.wait_for(lambda:((v:=row(client,item.info_hash))['playable'].get('stall_free') is False,json.dumps(v)),'slower-than-playback link truthfully flips stall_free false',timeout=12)
         peer.call('transfer.set_limits',dict(upload_bps=4*MIB))

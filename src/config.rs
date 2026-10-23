@@ -95,19 +95,74 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+fn executable_on_path(program: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::env::var_os("PATH").is_some_and(|paths| std::env::split_paths(&paths).any(|dir| {
+        std::fs::metadata(dir.join(program)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }))
+}
+
+fn launch_open(args: &[String], target: &std::ffi::OsStr) -> Result<std::process::Child> {
+    use std::os::unix::process::CommandExt;
+    let mut child = std::process::Command::new(&args[0]).args(&args[1..]).arg(target)
+        // Players outlive the CLI/TUI without retaining JSON pipes or its group.
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null()).process_group(0).spawn()
+        .with_context(|| format!("could not launch {}", args[0]))?;
+    // Catch bad executables, flags and immediate desktop-opener failures before
+    // reporting a successful handoff. Playback after startup remains the player's.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            anyhow::ensure!(status.success(), "{} failed to open the target ({status})", args[0]);
+            return Ok(child);
+        }
+        if std::time::Instant::now() >= deadline { return Ok(child); }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 impl Config {
-    /// The command is an explicit local user preference. Pass the target as a
-    /// separate, quoted positional argument so filenames never become code.
+    /// The player command accepts quoted arguments, never shell programs.
+    /// Generic desktop openers must not send HTTP media streams to a browser.
     pub fn open_target(&self, target: impl AsRef<std::ffi::OsStr>) -> Result<std::process::Child> {
         self.validate()?;
-        Ok(std::process::Command::new("sh")
-            .arg("-c").arg(format!("exec {} \"$1\"", self.open_command))
-            .arg("fbittorrent-open").arg(target)
-            // A player outlives the CLI/TUI. Inheriting their pipes delays EOF
-            // for JSON callers and lets player output corrupt the TUI frame.
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null()).spawn()?)
+        let target = target.as_ref();
+        let path = std::path::Path::new(target);
+        if path.is_dir() { return self.open_folder(path); }
+        let stream = target.to_str().is_some_and(|s| s.starts_with("http://") || s.starts_with("https://"));
+        if !stream {
+            crate::public_text::openable_payload(path)?;
+            anyhow::ensure!(path.is_file(), "downloaded file is missing: {}", path.display());
+        }
+        let media = stream || crate::daemon::watch::video(path) || path.extension().is_some_and(|ext| {
+            ["mp3", "flac", "ogg", "opus", "wav", "m4a", "aac"].iter().any(|v| ext.eq_ignore_ascii_case(v))
+        });
+        let args = self.open_arguments(media, executable_on_path)?;
+        // Absolute paths cannot be interpreted as player command-line options.
+        let target = if !stream && !path.is_absolute() { std::env::current_dir()?.join(path).into_os_string() } else { target.to_owned() };
+        launch_open(&args, &target)
+    }
+
+    /// Folders always go to the file manager, regardless of the player setting.
+    pub fn open_folder(&self, path: impl AsRef<std::path::Path>) -> Result<std::process::Child> {
+        let path = path.as_ref();
+        anyhow::ensure!(path.is_dir(), "download folder is missing: {}", path.display());
+        let path = if path.is_absolute() { path.to_path_buf() } else { std::env::current_dir()?.join(path) };
+        launch_open(&["xdg-open".into()], path.as_os_str())
+    }
+
+    fn open_arguments(&self, media: bool, available: impl Fn(&str) -> bool) -> Result<Vec<String>> {
+        let args = shlex::split(&self.open_command).context("open_command: unmatched quote or invalid escape")?;
+        let program = args.first().filter(|p| !p.is_empty()).context("open_command: must name a program")?;
+        let generic = std::path::Path::new(program).file_name().is_some_and(|p| p == "xdg-open") || program == "auto";
+        if generic && media {
+            let player = ["mpv", "ffplay", "vlc"].into_iter().find(|p| available(p))
+                .context("no media player found; install mpv or ffplay, or set open_command to a player")?;
+            return Ok(vec![player.into()]);
+        }
+        if program == "auto" { return Ok(vec!["xdg-open".into()]); }
+        Ok(args)
     }
 
     pub fn load() -> Result<Self> {
@@ -146,6 +201,7 @@ impl Config {
         anyhow::ensure!(self.timeout_secs > 0, "timeout_secs: must be positive");
         anyhow::ensure!(matches!(self.handler.as_str(), "add" | "confirm"), "handler: must be add or confirm");
         anyhow::ensure!(!self.open_command.trim().is_empty(), "open_command: must not be empty");
+        anyhow::ensure!(shlex::split(&self.open_command).is_some_and(|args| args.first().is_some_and(|p| !p.is_empty())), "open_command: must name a program with valid quoted arguments");
         anyhow::ensure!(!self.show_quality.trim().is_empty(), "show_quality: must not be empty");
         anyhow::ensure!(self.save_path.as_ref().is_none_or(|p| !p.trim().is_empty()), "save_path: must not be empty");
         for (key, limit) in [
@@ -210,17 +266,81 @@ mod tests {
 
     #[test]
     fn open_command_keeps_arguments_and_literal_target() {
-        let root = std::env::temp_dir().join(format!("fbt-settings-open-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("fbt settings open {}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let script = root.join("player.py");
         let output = root.join("arguments.json");
         std::fs::write(&script, format!("import json,sys\nopen({:?}, 'w').write(json.dumps(sys.argv[1:]))\n", output.to_string_lossy())).unwrap();
-        let cfg = Config { open_command: format!("python3 {} --keep-open=yes",script.display()), ..Config::default() };
+        let cfg = Config { open_command: format!("python3 '{}' --keep-open=yes --title 'a title ; $(touch escaped)'",script.display()), ..Config::default() };
         let target = root.join("video ; $(touch escaped).mkv");
+        std::fs::write(&target, b"fixture").unwrap();
         assert!(cfg.open_target(&target).unwrap().wait().unwrap().success());
         let observed: Vec<String> = serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
-        assert_eq!(observed, ["--keep-open=yes".to_owned(), target.to_string_lossy().into_owned()]);
+        assert_eq!(observed, ["--keep-open=yes".to_owned(), "--title".into(), "a title ; $(touch escaped)".into(), target.to_string_lossy().into_owned()]);
         println!("configured player receives flags and one literal target argument: {observed:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn media_uses_a_player_for_generic_desktop_settings() {
+        for command in ["xdg-open", "/usr/bin/xdg-open", "auto"] {
+            let cfg = Config { open_command: command.into(), ..Config::default() };
+            assert_eq!(cfg.open_arguments(true, |p| p == "mpv" || p == "ffplay").unwrap(), ["mpv"]);
+            assert_eq!(cfg.open_arguments(true, |p| p == "ffplay").unwrap(), ["ffplay"]);
+            assert!(cfg.open_arguments(true, |_| false).unwrap_err().to_string().contains("no media player"));
+        }
+        let cfg = Config { open_command: "'/path with spaces/player' --title 'literal $HOME'".into(), ..Config::default() };
+        assert_eq!(cfg.open_arguments(true, |_| false).unwrap(), ["/path with spaces/player", "--title", "literal $HOME"]);
+        assert_eq!(Config::default().open_arguments(false, |_| false).unwrap(), ["xdg-open"]);
+    }
+
+    #[test]
+    fn launch_errors_and_unsafe_payloads_are_not_reported_as_success() {
+        let root = std::env::temp_dir().join(format!("fbt-open-errors-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("movie.mkv");
+        std::fs::write(&target, b"fixture").unwrap();
+        let mut cfg = Config { open_command: root.join("missing-player").to_string_lossy().into(), ..Config::default() };
+        assert!(cfg.open_target(&target).is_err());
+        cfg.open_command = "python3 -c 'import sys; sys.exit(7)'".into();
+        assert!(cfg.open_target(&target).unwrap_err().to_string().contains("failed to open"));
+        assert!(cfg.open_target(root.join("missing.mkv")).is_err());
+        let launcher = root.join("malicious.desktop");
+        std::fs::write(&launcher, "[Desktop Entry]\nExec=touch escaped\n").unwrap();
+        assert!(cfg.open_target(&launcher).unwrap_err().to_string().contains("refusing"));
+        cfg.open_command = "mpv 'unterminated".into();
+        assert!(cfg.validate().is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn folders_always_use_file_manager_with_one_literal_path() {
+        // Run the launcher in a child test process: PATH/XDG changes never race
+        // other tests or reach the user's desktop session.
+        const CHILD: &str = "FBT_TEST_FOLDER_OPEN_ROOT";
+        if let Some(root) = std::env::var_os(CHILD) {
+            let root = PathBuf::from(root);
+            let cfg = Config { open_command: "missing-player --invalid".into(), ..Config::default() };
+            assert!(cfg.open_folder(root.join("folder ; $(touch escaped)")).unwrap().wait().unwrap().success());
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("fbt-folder-open-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("folder ; $(touch escaped)")).unwrap();
+        let output = root.join("arguments.json");
+        let opener = root.join("xdg-open");
+        std::fs::write(&opener, format!("#!/usr/bin/python3\nimport json,sys\nopen({:?}, 'w').write(json.dumps(sys.argv[1:]))\n", output.to_string_lossy())).unwrap();
+        std::fs::set_permissions(&opener, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "config::tests::folders_always_use_file_manager_with_one_literal_path", "--nocapture"])
+            .env(CHILD, &root).env("PATH", &root).env("HOME", &root)
+            .env("XDG_CONFIG_HOME", root.join("config")).env("XDG_DATA_HOME", root.join("data"))
+            .env("XDG_STATE_HOME", root.join("state")).env("XDG_CACHE_HOME", root.join("cache"))
+            .env("XDG_RUNTIME_DIR", root.join("runtime")).status().unwrap();
+        assert!(status.success());
+        let observed: Vec<String> = serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+        assert_eq!(observed, [root.join("folder ; $(touch escaped)").to_string_lossy()]);
+        assert!(!root.join("escaped").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -145,6 +145,11 @@ def run(binary, systemd):
                 target = call("torrents.open_target", dict(hash=digest, file=0))
                 exact(target, dict(kind="file", path=str(save / item["fixture"].files[0].name)),
                       "open_target resolves the actual owned file")
+                folder = call("torrents.open_target", dict(hash=digest, folder=True))
+                case.check(folder.get("kind") == "folder" and Path(folder["path"]).is_dir()
+                           and Path(target["path"]).is_relative_to(Path(folder["path"]))
+                           and "stream_url" not in folder,
+                           "explicit folder target contains the selected file and creates no media stream", json.dumps(folder))
                 call("torrents.stop", dict(hashes=[digest]))
 
                 stalled = fixture("Stalled", [4096], .5, piece=1024)

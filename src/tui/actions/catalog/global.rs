@@ -4,9 +4,6 @@ pub(super) const ACTIONS: &[Action] = &[
         |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
     action!("clipboard.dismiss_offer",Scope::Modal(ModalKind::Clipboard),&[KeyChord::plain(KeyCode::Escape)],"Dismiss offered magnet",90,
         |_|true,None,&[Surface::Dashboard,Surface::Popup],None,None,None),
-    action!("limits.toggle",Scope::Global,&[KeyChord::plain(KeyCode::Char('z'))],"Turtle limits",90,
-        |a|a.turtle_on().is_some()&&!a.alt_busy&&a.online&&a.store.hello.as_ref().is_some_and(|h|h.caps.iter().any(|cap|cap=="limits")),
-        Some(TuiApp::toggle_alt),TDP,None,None,None),
     action!(
         "screen.torrents",
         Scope::Global,

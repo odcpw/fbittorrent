@@ -394,7 +394,7 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
             let c = connect(cfg, write, no_start, json_mode)?;
             let rows = list(&c)?;
             let selectors = match cmd {
-                Cmd::Open { selector } => vec![selector.clone()],
+                Cmd::Open { selector, .. } => vec![selector.clone()],
                 Cmd::Start { selectors }
                 | Cmd::Reannounce { selectors }
                 | Cmd::Upload { selectors }
@@ -412,9 +412,24 @@ pub(crate) fn run(cfg: &Config, cmd: &Cmd, json_mode: bool, no_start: bool) -> R
                 Cmd::Wait {
                     timeout, interval, until, ..
                 } => return wait_for(c, hashes, *timeout, *interval, *until, json_mode),
-                Cmd::Open { .. } => {
-                    let target = c.call("torrents.open_target", json!({"hash":hashes[0]}))?;
-                    cfg.open_target(target["stream_url"].as_str().or_else(|| target["path"].as_str()).context("open target omitted path")?)?;
+                Cmd::Open { folder, file, .. } => {
+                    anyhow::ensure!(hashes.len() == 1, AppError::new(Code::Usage, "open requires exactly one torrent"));
+                    let mut args = json!({"hash":hashes[0]});
+                    if *folder { args["folder"] = json!(true); }
+                    if let Some(file) = file { args["file"] = json!(file); }
+                    let target = c.call("torrents.open_target", args)?;
+                    let path = target["path"].as_str().context("open target omitted path")?;
+                    if *folder || target["kind"] == "folder" { cfg.open_folder(path)?; }
+                    else {
+                        if target["stream_url"].as_str().is_none() {
+                            let entries: api::FilesResult = serde_json::from_value(c.call("torrents.files", json!({"hash":hashes[0]}))?)?;
+                            let row = rows.iter().find(|row| row.hash.as_str() == hashes[0]).context("torrent disappeared")?;
+                            let entry = entries.files.iter().find(|entry| std::path::Path::new(&row.save_path).join(&entry.path) == std::path::Path::new(path))
+                                .context("open target omitted its file")?;
+                            anyhow::ensure!(entry.progress >= 1.0, "file is incomplete and cannot be streamed");
+                        }
+                        cfg.open_target(target["stream_url"].as_str().unwrap_or(path))?;
+                    }
                     emit(
                         json_mode,
                         json!({"ok":true,"action":"open","hash":hashes[0],"target":target["path"]}),

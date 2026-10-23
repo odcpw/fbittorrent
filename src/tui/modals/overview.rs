@@ -36,7 +36,9 @@ impl TuiApp {
         }
     }
     pub(super) fn overview_cap_text(&self,row:&crate::api::Torrent)->String {
-        let global=self.store.settings.as_ref().and_then(|s|if self.turtle_on().unwrap_or(s.alt_limits_on){s.alt_download_limit_bps}else{s.download_limit_bps});
+        // Older clients can still enable alternate limits. Report the actual
+        // effective cap without exposing a second limits mode in this UI.
+        let global=self.store.settings.as_ref().and_then(|s|if self.store.summary.as_ref().map_or(s.alt_limits_on,|summary|summary.alt){s.alt_download_limit_bps}else{s.download_limit_bps});
         let effective=[row.download_limit_bps,global].into_iter().flatten().filter(|n|*n>0).min();
         let text=|n:Option<u64>|n.map(|n|format!("{} B/s",n)).unwrap_or_else(||"Unlimited".into());
         format!("{} · effective {}",text(row.download_limit_bps),text(effective))

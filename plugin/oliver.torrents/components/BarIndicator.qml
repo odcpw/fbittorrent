@@ -11,7 +11,7 @@ Ui.BarIconButton {
   property bool showRates: false
   readonly property var appearance: BarState.describe(service)
   text: appearance.glyph
-  labelText: (appearance.turtle ? Glyphs.turtle : "") + (showRates && appearance.rate ? (appearance.turtle ? " " : "") + appearance.rate : "")
+  labelText: showRates ? appearance.rate : ""
   tooltipText: appearance.tooltip
   FontMetrics { id:labelMetrics; font.family:root.fontFamily; font.pixelSize:root.fontSize }
   fixedWidth: vertical ? -1 : Math.max(slotSize,canvasSize+(labelText ? labelMetrics.advanceWidth(labelText)+Commons.Style.space(4) : 0))

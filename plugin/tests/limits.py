@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turtle controls and confirmed push state on real isolated shell surfaces."""
+"""Retired controls stay absent while legacy limit API state remains readable."""
 import argparse
 import datetime
 import json
@@ -39,7 +39,7 @@ def run(binary):
     if previous.exists():
         shutil.copytree(previous, ROOT / 'target/test-logs/fbt-p5-04-ipg/runs' /
                         datetime.datetime.now().strftime('%H%M%S'))
-    with Case('qs_limits', 'popup_turtle_toggle') as case, fixtures.Sandbox() as sandbox, \
+    with Case('qs_limits', 'popup_retired_limits') as case, fixtures.Sandbox() as sandbox, \
             daemon.Harness(case, binary, sandbox, False) as harness:
         process = start(harness)
         with daemon.ApiConn(harness) as client:
@@ -51,35 +51,34 @@ def run(binary):
                 q.wait(lambda: popup(q)['online'])
                 q.ipc('open')
                 q.wait(lambda: popup(q)['opened'])
-                press(q, 'z', lambda: popup(q)['turtle'] and popup(q)['popupTurtle'])
+                serial=json.loads(q.ipc('cursor'))['keySerial']
+                press(q, 'z', lambda: json.loads(q.ipc('cursor'))['keySerial']>serial)
                 state = popup(q)
                 settings = client.call('app.settings.get')['result']
-                case.check(state['bar']['turtle'] and 'turtle limits on' in state['bar']['tooltip']
-                           and settings['alt_limits_on'],
-                           'popup z persists turtle mode and the bar glyph and hero show its confirmed state',
+                case.check('turtle' not in state['bar'] and 'turtle' not in state['bar']['tooltip'].lower()
+                           and not settings['alt_limits_on'],
+                           'retired popup z does not mutate limits or add a bar indicator',
                            json.dumps(dict(ui=state, settings=settings)))
                 image = case.path.with_suffix('.png')
                 q.capture(image)
-                case.check(q.ipc('clickTurtle') == 'true', 'actual hero turtle button is clickable', str(image))
-                q.wait(lambda: not popup(q)['turtle'] and not popup(q)['popupTurtle']
-                       and not popup(q)['bar']['turtle'])
-                case.check(not client.call('app.settings.get')['result']['alt_limits_on'],
-                           'hero button clears the persisted limit mode', json.dumps(popup(q)))
+                case.check(q.ipc('clickTurtle') == 'false', 'retired hero button is absent', str(image))
                 client.call('transfer.set_alt', dict(on=True))
                 began = time.monotonic()
-                q.wait(lambda: popup(q)['turtle'] and popup(q)['bar']['turtle'])
+                q.wait(lambda: json.loads(q.ipc('activity'))['summary'].get('alt') is True)
                 elapsed = round((time.monotonic() - began) * 1000)
-                case.check(elapsed <= 1000, 'external turtle change reaches the bar and popup within one 1000 ms push interval',
+                case.check(elapsed <= 1000 and 'turtle' not in popup(q)['bar'], 'legacy API changes still arrive without restoring retired controls',
                            json.dumps(dict(ms=elapsed, ui=popup(q))))
                 harness.stop_serve(process)
                 harness.notify.close()
                 process = start(harness)
-                q.wait(lambda: popup(q)['online'] and popup(q)['turtle'] and popup(q)['bar']['turtle'])
+                q.wait(lambda: popup(q)['online'] and json.loads(q.ipc('activity'))['summary'].get('alt') is True)
+                case.check(q.ipc('clickTurtle')=='false' and 'turtle' not in popup(q)['bar'],
+                           'persisted legacy limits do not restore controls after reconnect',json.dumps(popup(q)))
             finally:
                 q.close()
         harness.stop_serve(process)
         harness.lock_free()
-    with Case('qs_limits', 'dashboard_turtle_toggle') as case, fixtures.Sandbox() as sandbox, \
+    with Case('qs_limits', 'dashboard_retired_limits') as case, fixtures.Sandbox() as sandbox, \
             daemon.Harness(case, binary, sandbox, False) as harness:
         process = start(harness)
         with daemon.ApiConn(harness) as client:
@@ -91,18 +90,19 @@ def run(binary):
                 q.wait(lambda: q.state().get('view'))
                 q.wait(lambda: q.compositor.ipc('[title="^fbittorrent$"] floating enable, border none'))
                 q.compositor.ipc('seat seat0 cursor set 1 1')
-                q.keys(['z'], lambda: q.state()['view']['turtle'])
-                case.check(client.call('app.settings.get')['result']['alt_limits_on'],
-                           'dashboard z updates the real daemon and global top-bar indicator', json.dumps(q.state()))
+                q.keys(['z'], lambda: q.state().get('view'))
+                case.check(not client.call('app.settings.get')['result']['alt_limits_on']
+                           and 'turtle' not in q.state()['view'],
+                           'dashboard z is inert and no mode indicator is published', json.dumps(q.state()))
                 image = case.path.with_suffix('.png')
                 q.ipc('grab', image)
                 q.wait(lambda: image.exists() and image.stat().st_size > 0)
-                client.call('transfer.set_alt', dict(on=False))
-                began = time.monotonic()
-                q.wait(lambda: not q.state()['view']['turtle'])
-                elapsed = round((time.monotonic() - began) * 1000)
-                case.check(elapsed <= 1000, 'external change clears the dashboard indicator within one 1000 ms push interval',
-                           json.dumps(dict(ms=elapsed, state=q.state())))
+                q.keys([','], lambda:q.state()['view']['window']['view']=='settings')
+                q.wait(lambda:q.state()['view'].get('settings',{}).get('loaded'))
+                case.check(q.ipc('focusSetting','alt_limits_on')=='false'
+                           and q.ipc('focusSetting','alt_download_limit_bps')=='false'
+                           and q.ipc('focusSetting','alt_upload_limit_bps')=='false',
+                           'Settings exposes ordinary caps and no retired alternate controls',json.dumps(q.state()))
             finally:
                 q.close()
         harness.stop_serve(process)

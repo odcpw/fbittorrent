@@ -4,7 +4,7 @@ import "../Model.js" as Model
 Row {
   spacing:Commons.Style.spacing.lg
   Repeater {
-    model:[{key:"a",label:"add"},{key:"/",label:"search"},{key:"w",label:"window"},{key:"t",label:"terminal"},{key:"z",label:"turtle"}]
+    model:[{key:"a",label:"add"},{key:"/",label:"search"},{key:"o",label:"file"},{key:"O",label:"folder"},{key:"w",label:"window"},{key:"t",label:"terminal"}]
     Row {
       required property var modelData
       spacing:Commons.Style.spacing.sm

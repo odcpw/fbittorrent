@@ -15,7 +15,6 @@ PanelKeyCatcher {
   readonly property color dim:owner.dim
   readonly property string fontFamily:owner.fontFamily
   readonly property var presentation:{var revision=svc.actionRevision,now=svc.now,status=svc.status;return PopupState.describe(svc)}
-  readonly property bool turtleOn:svc.turtleOn
   property bool cursorActive:false
   property bool hints:false
   property int keySerial:0
@@ -56,12 +55,18 @@ PanelKeyCatcher {
   function unregisterConfirm(hash,strip){if(confirms[hash]===strip)delete confirms[hash]}
   function currentStrip(){return stopping ? stopStrip : pendingRemoval ? confirms[pendingRemoval.hash] : null}
   function rebuild() {
+    var prior=selected(),priorGroup=sections[groupIndex] ? sections[groupIndex].key : ""
     var groups=[{name:"DOWNLOADING",key:"live",rows:[]},{name:"UPLOADING",key:"seeding",rows:[]},{name:"QUEUED",key:"queued",rows:[]},{name:"PAUSED",key:"paused",rows:[]},{name:"DONE",key:"done",rows:[]},{name:"REVIEWING",key:"reviewing",rows:[]},{name:"OTHER",key:"other",rows:[]}]
     var indexes={};groups.forEach(function(g,i){indexes[g.key]=i})
     if(svc.online)svc.torrents.forEach(function(t){groups[indexes[PopupState.group(t)]].rows.push(t)})
     var all=[],parts=[]
     groups.forEach(function(group){if(!group.rows.length)return;group.start=all.length;group.open=group.key==="live" || group.key==="seeding" || group.key==="other" || group.key==="reviewing" || expanded[group.key]===true;group.visibleRows=group.open ? group.rows.slice(0,10) : [];all=all.concat(group.visibleRows);parts.push(group)})
     var items=[];parts.forEach(function(g){items.push({header:true,group:g});g.visibleRows.forEach(function(t,i){items.push({header:false,torrent:t,index:g.start+i})})});syncEntries(items);sections=parts;rows=all;rowIndex=Math.max(0,Math.min(rowIndex,rows.length-1))
+    if(prior){var kept=rows.findIndex(function(t){return t.hash===prior.hash});if(kept>=0)rowIndex=kept}
+    var group=sections.findIndex(function(g){return g.key===priorGroup})
+    groupIndex=group>=0 ? group : Math.max(0,Math.min(groupIndex,sections.length-1))
+    if(focusSection==="rows" && !rows.length)focusSection=sections.length ? "groups" : "header"
+    if(focusSection==="groups" && !sections.length)focusSection="header"
     if(!cursorActive)focusSection=rows.length ? "rows" : "header"
     if(pendingRemoval && !svc.store.torrents[pendingRemoval.hash])cancelRemove()
   }
@@ -73,15 +78,15 @@ PanelKeyCatcher {
   function cancelRemove(){pendingRemoval=null;forceActiveFocus()}
   function confirmRemove(){var target=pendingRemoval;cancelRemove();if(target)svc.remove(target.hash,false)}
   function power(){pendingRemoval=null;if(!svc.online){stopping=false;svc.startDaemon();return}stopping=true;Qt.callLater(function(){stopStrip.reset()})}
-  function stop(){stopping=false;svc.quit();forceActiveFocus()}
+  function stop(){stopping=false;if(svc.quit())owner.close();else forceActiveFocus()}
   function dashboard(view){svc.openDashboard(view || "torrents");owner.close()}
   function toggleGroup(group){var next=Object.assign({},expanded);next[group.key]=!group.open;expanded=next;rebuild()}
-  function header(){if(headerIndex===0)svc.addFromClipboard();else if(headerIndex===1)dashboard();else if(headerIndex===2)svc.toggleTurtle();else power()}
+  function header(){if(headerIndex===0)svc.addFromClipboard();else if(headerIndex===1)dashboard();else power()}
   function move(dx,dy) {
     keySerial++;hints=true
     var strip=currentStrip();if(strip){strip.move(dx || dy);return}
     if(!cursorActive){cursorActive=true;return}
-    if(focusSection==="header"){if(dx)headerIndex=Math.max(0,Math.min(3,headerIndex+dx));if(dy>0){focusSection=rows.length ? "rows" : "groups";rowIndex=0;groupIndex=0}return}
+    if(focusSection==="header"){if(dx)headerIndex=Math.max(0,Math.min(2,headerIndex+dx));if(dy>0){focusSection=rows.length ? "rows" : sections.length ? "groups" : "header";rowIndex=0;groupIndex=0}return}
     if(focusSection==="groups"){if(dy<0 && groupIndex===0){focusSection=rows.length ? "rows" : "header";rowIndex=Math.max(0,rows.length-1)}else groupIndex=Math.max(0,Math.min(sections.length-1,groupIndex+dy));return}
     if(dy>0 && rowIndex===rows.length-1 && sections.length){focusSection="groups";groupIndex=0;return}
     if(dy<0 && rowIndex===0){focusSection="header";return}
@@ -112,9 +117,9 @@ PanelKeyCatcher {
     else if(t==="w"){if(focusSection==="groups" && sections[groupIndex])svc.openDashboardFilter(PopupState.dashboardFilter(sections[groupIndex].key));else svc.openDashboard();owner.close()}
     else if(t==="/")dashboard("search")
     else if(t==="t")owner.openTui()
-    else if(t==="z")svc.toggleTurtle()
     else if(t==="p")svc.toggleTorrent(selected())
     else if(t==="o")svc.openTorrent(selected())
+    else if(t==="O")svc.openTorrent(selected(),true)
     else if(t==="u"){svc.openTorrentDetails(selected());owner.close()}
     else if(t==="d" || t==="x")requestRemoval(selected())
   }
@@ -128,14 +133,13 @@ PanelKeyCatcher {
     Column {
       id:column;width:flick.width;spacing:Style.spacing.xxl
       PanelHero {
-        width:parent.width;title:"Torrents";meta:svc.online && svc.status.total===0 && svc.store.counts.reviewing>0 ? "Reviewing…" : Model.heroMeta(svc.status);detail:(svc.online && svc.status.active ? svc.status.active+" DOWNLOADING" : "")+(root.turtleOn ? " · Turtle on" : "");foreground:root.foreground;fontFamily:root.fontFamily
+        width:parent.width;title:"Torrents";meta:svc.online && svc.status.total===0 && svc.store.counts.reviewing>0 ? "Reviewing…" : Model.heroMeta(svc.status);detail:svc.online && svc.status.active ? svc.status.active+" DOWNLOADING" : "";foreground:root.foreground;fontFamily:root.fontFamily
         iconComponent:Component {Text {text:Glyphs.download;color:root.foreground;font.family:Style.font.family;font.pixelSize:Style.font.display}}
         trailingControl:Component {Row {
           spacing:Style.spacing.xxs
           HeaderAction {host:root;index:0;objectName:"popup-add";iconText:Glyphs.add;tooltipText:"Add from clipboard (a)";onClicked:svc.addFromClipboard()}
           HeaderAction {host:root;index:1;iconText:"▢";tooltipText:"Open window (w)";onClicked:root.dashboard()}
-          HeaderAction {host:root;index:2;objectName:"popup-turtle";iconText:Glyphs.turtle;tooltipText:"Turtle limits "+(root.turtleOn ? "on" : "off")+" (z)";enabled:svc.online && svc.client && svc.client.caps.indexOf("limits")>=0;onClicked:svc.toggleTurtle()}
-          HeaderAction {host:root;index:3;objectName:"popup-power";iconText:Glyphs.power;tooltipText:svc.online ? "Stop fbittorrent (Q)" : "Start fbittorrent";enabled:!svc.startupRequested;onClicked:root.power()}
+          HeaderAction {host:root;index:2;objectName:"popup-power";iconText:Glyphs.power;tooltipText:svc.online ? "Stop fbittorrent (Q)" : "Start fbittorrent";enabled:!svc.startupRequested && !svc.shutdownRequested;onClicked:root.power()}
         }}
       }
       Text {visible:text!=="";text:root.presentation.idle;textFormat:Text.PlainText;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.caption}
@@ -143,7 +147,7 @@ PanelKeyCatcher {
       ClipboardOffer {width:parent.width;service:svc}
       PanelSeparator {foreground:root.foreground}
       PopupBanner {width:parent.width;text:root.presentation.banner;urgent:root.presentation.urgent;showLog:svc.backendState==="error";onLogRequested:root.dashboard("log")}
-      Text {width:parent.width;visible:svc.actionStatus!=="" || svc.lastError!=="";text:svc.actionStatus || svc.lastError;textFormat:Text.PlainText;wrapMode:Text.Wrap;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.bodySmall}
+      Text {width:parent.width;visible:text!=="";text:svc.toast ? svc.toast.text : svc.actionStatus || svc.lastError;textFormat:Text.PlainText;wrapMode:Text.Wrap;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.bodySmall}
       Row {visible:svc.resultUnknown;spacing:Style.spacing.md
         Text {text:"Result unknown; the list will tell";textFormat:Text.PlainText;color:root.dim;font.family:Style.font.family;font.pixelSize:Style.font.caption}
         PanelActionButton {iconText:Glyphs.refresh;tooltipText:"Refresh";onClicked:svc.refresh()}
