@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Ui as Ui
 import qs.Commons as Commons
+import "../Palette.js" as Palette
 
 Ui.BorderSurface {
   id:root
@@ -13,16 +14,16 @@ Ui.BorderSurface {
   function progress(){for(var i=0;i<cells.count;i++){var cell=cells.itemAt(i);if(cell && cell.column.name==="progress")return cell.renderedProgress}return 0}
   function stateText(){for(var i=0;i<cells.count;i++){var cell=cells.itemAt(i);if(cell && cell.column.name==="state")return cell.renderedState}return ""}
   height:Commons.Style.spacing.popupRowHeight
-  color:hasCursor ? Commons.Style.selectedAccentFill : selected ? Commons.Style.selectionFill : "transparent"
+  color:hasCursor ? Palette.mix(Commons.Color.accent,Commons.Color.background,0.24) : selected ? Commons.Style.selectionFill : "transparent"
   borderSpec:Commons.Border.none()
-  radius:Commons.Style.cornerRadius
+  radius:0
   Rectangle {visible:root.hasCursor;anchors.left:parent.left;anchors.top:parent.top;anchors.bottom:parent.bottom;width:Commons.Style.space(3);color:Commons.Color.accent}
   Row {
     anchors.fill:parent
     Repeater {
       id:cells
       model:root.host.columns
-      TorrentCell {required property var modelData;width:modelData.width;height:root.height;visible:!modelData.hidden;column:modelData;torrent:root.torrent;pendingText:root.pendingText;failed:root.failed}
+      TorrentCell {required property var modelData;width:modelData.width;height:root.height;visible:!modelData.hidden;column:modelData;torrent:root.torrent;emphasized:root.hasCursor;pendingText:root.pendingText;failed:root.failed}
     }
   }
   MouseArea {

@@ -21,16 +21,30 @@ impl Tier {
 impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
-        let cols = Flex::horizontal().constraints([Constraint::Fill, Constraint::FitContent]).split(area);
+
         let shows_tab=if self.shows.shows.is_empty()&&self.store.shows.is_empty() {" 3 Shows ".to_string()}else{format!(" 3 Shows ({}) ",self.shows_unread())};
         let rss_tab=if self.store.rss_feeds.is_empty() {
             if self.feeds.is_empty() {" 4 RSS ".to_string()}else{format!(" 4 RSS ({}) ",self.feeds.iter().flat_map(|f|&f.articles).filter(|a|!a.is_read).count())}
         }else{format!(" 4 RSS ({}) ",self.store.rss_feeds.values().map(|f|f.unread).sum::<u64>())};
-        let labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab.clone(), rss_tab.clone()];
-        let mut x = area.x;
+        let mut labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab, rss_tab];
+        let status = self.header_status(area.width);
+        // Keep destinations stationary as the connection and transfer rates change.
+        let brand = if area.width >= 92 { "  ▥  FBITTORRENT  " } else if area.width >= 56 { " ▥  " } else { "" };
+        let brand_width = dw(brand) as u16;
+        frame.buffer.fill(area, ftui::Cell::from_char(' ').with_bg(th.panel));
+        Paragraph::new(brand).style(th.accented().bg(th.panel)).render(
+            Rect::new(area.x, area.y, brand_width, 1), frame
+        );
+        let nav = Rect::new(area.x + brand_width, area.y, area.width - brand_width, 1);
+        if labels.iter().map(|label| dw(label) + 2).sum::<usize>() > usize::from(nav.width) {
+            labels = ["1", "2", "3", "4"].map(str::to_owned);
+            labels[self.screen.index()] = format!("{} {}", self.screen.index() + 1,
+                ["Torrents", "Search", "Shows", "RSS"][self.screen.index()]);
+        }
+        let mut x = nav.x;
         let regions = labels.each_ref().map(|label| {
             // Tabs wraps each title with two visible bracket/space cells.
-            let width = (dw(&label).saturating_add(2) as u16).min(cols[0].right().saturating_sub(x));
+            let width = (dw(&label).saturating_add(2) as u16).min(nav.right().saturating_sub(x));
             let region = Rect::new(x, area.y, width, area.height);
             x = x.saturating_add(width);
             region
@@ -38,12 +52,11 @@ impl TuiApp {
         self.tab_rects.set(regions);
         self.rects.borrow_mut().tabs=regions;
         let tabs = Tabs::new(labels.each_ref().map(|label|Tab::new(label.as_str())))
-            .style(th.dimmed())
+            .style(th.dimmed().bg(th.panel))
             .active_style(th.selected())
             .separator("");
-        StatefulWidget::render(&tabs, cols[0], frame, &mut self.tabs.borrow_mut());
+        StatefulWidget::render(&tabs, nav, frame, &mut self.tabs.borrow_mut());
 
-        let status=self.header_status(area.width);
         let right=Line::styled(status,if self.online {th.text()}else{th.err()});
         let w = right.width() as u16;
         let tabs_right = regions.iter().map(Rect::right).max().unwrap_or(area.x);

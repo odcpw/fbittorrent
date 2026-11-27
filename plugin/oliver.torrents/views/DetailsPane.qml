@@ -24,6 +24,13 @@ ColumnLayout {
   function key(event){if(overview.item && overview.item.editing)return overview.item.key(event);if(root.tab==="overview" && event.text==="u" && root.torrent){root.service.toggleSeed(root.torrent.hash);return true}if(trackers.item && trackers.item.key(event))return true;if(files.item && files.item.key(event))return true;return false}
   spacing:Commons.Style.spacing.sm
   Rectangle {Layout.fillWidth:true;Layout.preferredHeight:Commons.Style.space(2);color:Commons.Color.accent;opacity:root.focused ? 1 : 0}
+  Text {
+    visible:!!root.torrent && root.tab!=="overview"
+    Layout.fillWidth:true;text:root.torrent ? root.torrent.name : ""
+    textFormat:Text.PlainText;elide:Text.ElideMiddle
+    color:Commons.Color.foreground;font.family:Commons.Style.font.family
+    font.pixelSize:Commons.Style.font.title;font.bold:true
+  }
   Flow {
     Layout.fillWidth:true;height:childrenRect.height
     spacing:Commons.Style.spacing.xs

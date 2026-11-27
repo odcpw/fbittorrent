@@ -5,6 +5,7 @@ import Quickshell
 import qs.Commons as Commons
 import qs.Ui as Ui
 import "Model.js" as Model
+import "Palette.js" as Palette
 import "PopupState.js" as PopupState
 import "Glyphs.js" as Glyphs
 import "AddSource.js" as Source
@@ -209,17 +210,36 @@ Item {
         anchors.fill:parent
         anchors.margins:Commons.Style.space(0)
         spacing:Commons.Style.spacing.panelGap
-        RowLayout {
+        Rectangle {
           Layout.fillWidth:true
-          Layout.margins:Commons.Style.spacing.panelPadding
-          Text {text:"fbittorrent";textFormat:Text.PlainText;color:Commons.Color.foreground;font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.heading;font.bold:true}
-          Item {Layout.fillWidth:true}
-          Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
-          Components.ViewTabs {badges:root.svc ? root.svc.badgeCounts : ({});onChosen:function(index){root.selectView(index)}}
+          implicitHeight:masthead.implicitHeight+Commons.Style.spacing.panelPadding*2
+          color:Palette.mix(Commons.Color.foreground,Commons.Color.background,0.06)
+          RowLayout {
+            id:masthead
+            anchors.fill:parent
+            anchors.margins:Commons.Style.spacing.panelPadding
+            spacing:Commons.Style.spacing.sm
+            Text {
+              text:"▥  FBITTORRENT";textFormat:Text.PlainText
+              color:Palette.accentText(Commons.Color.accent,parent.parent.color,Commons.Color.foreground).color
+              font.family:Commons.Style.font.family;font.pixelSize:Commons.Style.font.body;font.bold:true
+            }
+            Components.ViewTabs {
+              currentView:root.currentView
+              badges:root.svc ? root.svc.badgeCounts : ({})
+              onChosen:function(index){root.selectView(index)}
+            }
+            Item {Layout.fillWidth:true}
+            Ui.Button {text:"Add (a)";onClicked:root.svc.addClipboardSheet()}
+            Ui.Button {text:"? Keys";onClicked:root.helpOpen=true}
+          }
+          Rectangle {
+            anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom
+            height:Commons.Style.space(1);color:Palette.mix(Commons.Color.foreground,Commons.Color.background,0.27)
+          }
         }
         Components.ClipboardOffer {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;service:root.svc}
         Components.PopupBanner {Layout.fillWidth:true;Layout.leftMargin:Commons.Style.spacing.panelPadding;Layout.rightMargin:Commons.Style.spacing.panelPadding;text:{if(!root.svc)return "";var revision=root.svc.status;return PopupState.describe(root.svc).banner} urgent:true}
-        Ui.PanelSeparator {Layout.fillWidth:true}
         Item {
           Layout.fillWidth:true;Layout.fillHeight:true
           Column {

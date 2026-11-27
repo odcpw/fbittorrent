@@ -70,12 +70,19 @@ impl TuiApp {
         let cols = torrent_columns(area);
         let queued = self.torrents.iter().filter(|t| t.state == crate::api::TorrentState::Queued).count();
         let (network_ready,network_message) = self.network_banner();
-        let title = if !network_ready { format!(" {} ", network_message) }
-            else if queued > 0 { format!(" Torrents ({}) · {queued} queued ", self.torrents.len()) }
-            else { format!(" Torrents ({}) ", self.torrents.len()) };
-        let block = Block::bordered().padding(Sides::all(0)).border_type(BorderType::Rounded).border_style(th.border_focused()).title(&title);
-        let inner = block.inner(cols[0]);
-        block.render(cols[0], frame);
+        let title = if !network_ready { network_message.to_string() }
+            else if queued > 0 { format!("Torrents ({}) · {queued} queued", self.torrents.len()) }
+            else { format!("Torrents ({})", self.torrents.len()) };
+        let gutter = if cols[0].width >= 66 { 3 } else { 1 };
+        let page = cols[0].inner(Sides::horizontal(gutter));
+        let title_height = if area.height >= 18 { 2 } else { 1 };
+        let rows = Flex::vertical().constraints([Constraint::Fixed(title_height), Constraint::Fill]).split(page);
+        Paragraph::new(title).style(th.title()).render(rows[0], frame);
+        if rows[0].height >= 2 {
+            let rule = Rect::new(page.x, page.y + 1, page.width, 1);
+            frame.buffer.fill(rule, ftui::Cell::from_char('─').with_fg(th.rule).with_bg(th.bg));
+        }
+        let inner = rows[1];
 
         if !self.online && !(self.recovery.active && !self.torrents.is_empty()) {
             let msg = if self.daemon_stopped {"fbittorrent stopped\n\n(Enter) Start the daemon".into()} else if let Some(notice)=self.connection_banner() {notice.into_owned()} else {format!("Torrent engine is not reachable.\n{}\n\n(R)etry", self.backend_error)};
@@ -89,11 +96,17 @@ impl TuiApp {
             self.view_torrent_table(inner,frame);
         }
 
-        let block = Block::bordered().border_type(BorderType::Rounded).border_style(th.border()).title(" Details ");
-        let inner = block.inner(cols[1]);
-        block.render(cols[1], frame);
-        if let Some(t) = self.selected_torrent() {
-            self.view_torrent_details(t, pad(inner), frame);
+        let rail = cols[1];
+        if !rail.is_empty() {
+            frame.buffer.fill(rail, ftui::Cell::from_char(' ').with_bg(th.panel));
+            let rule = Rect::new(rail.x, rail.y, 1, rail.height);
+            frame.buffer.fill(rule, ftui::Cell::from_char('│').with_fg(th.rule).with_bg(th.panel));
+            let content = rail.inner(Sides::horizontal(3));
+            let rows = Flex::vertical().constraints([Constraint::Fixed(2), Constraint::Fill]).split(content);
+            Paragraph::new("DETAILS").style(th.accented()).render(rows[0], frame);
+            if let Some(t) = self.selected_torrent() {
+                self.view_torrent_details(t, rows[1], frame);
+            }
         }
     }
 

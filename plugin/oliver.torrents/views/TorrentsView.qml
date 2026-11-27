@@ -173,7 +173,7 @@ FocusScope {
       Layout.rightMargin:Layout.leftMargin
       spacing:Commons.Style.space(14)
       Components.PaneFrame {
-        id:sideFrame
+        id:sideFrame;rail:true
         visible:root.tier>0;Layout.preferredWidth:Commons.Style.space(200);Layout.fillHeight:true
         Components.TorrentFilters {id:sidebar;anchors.fill:parent;service:root.service;selected:root.filter;focused:root.focusPane==="sidebar";onChosen:function(key){root.filter=key};onRouted:function(view){root.routed(view)}}
       }

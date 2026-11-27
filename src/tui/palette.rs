@@ -23,7 +23,7 @@ pub(super) fn contrast(a: Color, b: Color) -> f64 {
     let (a, b) = (luminance(a), luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
-fn mix(fg: Color, bg: Color, weight: f64) -> Color {
+pub(super) fn mix(fg: Color, bg: Color, weight: f64) -> Color {
     let (a, b) = (channels(fg), channels(bg));
     let c = std::array::from_fn::<_, 3, _>(|i| {
         (weight * f64::from(a[i]) + (1.0 - weight) * f64::from(b[i])).round() as u8

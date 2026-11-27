@@ -133,7 +133,8 @@ impl TuiApp {
             return;
         }
         let th = &self.theme;
-        StatusLine::new().style(th.dimmed()).render(area, frame);
+        frame.buffer.fill(area, ftui::Cell::from_char(' ').with_bg(th.panel));
+        StatusLine::new().style(th.dimmed().bg(th.panel)).render(area, frame);
         let signature = self.footer_signature(area.width);
         let mut cache = self.footer_cache.borrow_mut();
         if cache.as_ref().is_none_or(|cached| cached.signature != signature) {

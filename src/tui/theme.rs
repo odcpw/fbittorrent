@@ -14,6 +14,9 @@ pub struct Theme {
     pub dim: PackedRgba,
     pub accent: PackedRgba,
     pub selection: PackedRgba,
+    pub panel: PackedRgba,
+    pub rule: PackedRgba,
+    monochrome: bool,
     pub muted: PackedRgba,
     pub red: PackedRgba,
     pub green: PackedRgba,
@@ -34,7 +37,10 @@ impl Default for Theme {
             fg: PackedRgba::rgb(0xca, 0xcc, 0xcc),
             dim: PackedRgba::rgb(0x70, 0x78, 0x80),
             accent: PackedRgba::rgb(0xca, 0xcc, 0xcc),
-            selection: PackedRgba::rgb(0x2a, 0x2e, 0x33),
+            selection: PackedRgba::default(),
+            panel: PackedRgba::default(),
+            rule: PackedRgba::default(),
+            monochrome: std::env::var_os("NO_COLOR").is_some(),
             muted: PackedRgba::rgb(0x70, 0x78, 0x80),
             red: PackedRgba::rgb(0xa5, 0x55, 0x55),
             green: PackedRgba::rgb(0x8a, 0xa8, 0x72),
@@ -76,6 +82,10 @@ pub fn parse_hex(s: &str) -> Option<PackedRgba> {
 
 impl Theme {
     fn roles(&mut self) {
+        use super::palette::mix;
+        self.panel = mix(self.fg, self.bg, 0.06);
+        self.rule = mix(self.fg, self.bg, 0.27);
+        self.selection = mix(self.accent, self.bg, 0.24);
         self.dim = super::palette::dim(self.fg, self.bg).0;
         self.accent_fallback = super::palette::accent_text(self.accent, self.fg, self.bg);
         self.accent_text = if self.accent_fallback {
@@ -108,9 +118,6 @@ impl Theme {
         }
         if let Some(c) = get("accent") {
             t.accent = c;
-        }
-        if let Some(c) = get("selection") {
-            t.selection = c;
         }
         if let Some(c) = get("muted") {
             t.muted = c;
@@ -147,7 +154,11 @@ impl Theme {
         Style::new().fg(self.accent_text).bold()
     }
     pub fn selected(&self) -> Style {
-        Style::new().bg(self.selection).fg(self.fg).bold()
+        if self.monochrome {
+            Style::new().bold().reverse()
+        } else {
+            Style::new().bg(self.selection).fg(self.fg).bold()
+        }
     }
     pub fn border(&self) -> Style {
         Style::new().fg(self.dim)

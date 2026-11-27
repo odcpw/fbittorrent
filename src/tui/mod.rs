@@ -367,7 +367,9 @@ impl Model for TuiApp {
 
     fn view(&self, frame: &mut Frame) {
         let th = &self.theme;
-        self.last_bounds.set(frame.bounds());
+        let bounds = frame.bounds();
+        frame.buffer.fill(bounds, ftui::Cell::from_char(' ').with_bg(th.bg).with_fg(th.fg));
+        self.last_bounds.set(bounds);
         self.rects.borrow_mut().begin();
         self.feedback.rects.set([None;2]);
         self.poster_drawn.set(false);

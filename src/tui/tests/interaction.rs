@@ -413,13 +413,13 @@
                 .map(|(i, name)| { let mut row = Torrent::fixture(&format!("{i:040x}"), name, crate::api::TorrentState::Paused); row.progress = Some(0.0); row.upload_limit_bps = Some(32768); row }).collect();
             app.tor_list.borrow_mut().select(Some(0));
             let text = render(&app, width, 24);
-            assert_eq!(text.contains("╭ Details "), width >= 140, "width {width}: {text}");
+            assert_eq!(text.contains("DETAILS"), width >= 140, "width {width}: {text}");
             assert!(text.contains("Short.txt"), "width {width}: {text}");
             let (y, row) = text.lines().enumerate().find(|(_, row)| row.contains("Episode.S01E02.1080p.mkv"))
                 .unwrap_or_else(|| panic!("filename truncated at width {width}: {text}"));
             let x = row.chars().position(|ch| ch == 'E').unwrap() as u16;
             assert_eq!(app.mouse_list_at(x, y as u16).unwrap().0, MouseList::Torrents);
-            assert_eq!(app.mouse_list_at(width - 3, y as u16).is_some(), width < 140,
+            assert_eq!(app.mouse_list_at(width - 4, y as u16).is_some(), width < 140,
                 "mouse region disagrees with rendered list at width {width}");
             assert!(matches!(app.on_mouse(MouseEvent::new(MouseEventKind::Down(MouseButton::Left), x, y as u16)), Cmd::None));
             assert_eq!(app.tor_list.borrow().selected(), Some(1));
@@ -439,7 +439,7 @@
                 let fresh = app();
                 let rendered = render(&fresh, width, 24);
                 let header = rendered.lines().next().unwrap();
-                let start = header.find(label).unwrap();
+                let start = dw(&header[..header.find(label).unwrap()]);
                 for offset in 0..label.len() {
                     let mut candidate = app();
                     render(&candidate, width, 24);
