@@ -62,8 +62,8 @@ def run(binary):
                 # Hello is counted before Attached/initial rows reach the model.
                 # Navigation starts when this terminal actually draws online data.
                 assert ui.observe('consume restored rows', 'fresh online rows are actionable after hello',
-                    lambda pane: 'Torrents (500)' in pane and '● offline' not in pane.splitlines()[0]
-                    and 'Connecting' not in pane.splitlines()[0], timeout=15)
+                    lambda pane: 'Torrents (500)' in pane and '● offline' not in '\n'.join(pane.splitlines()[:3])
+                    and 'Connecting' not in '\n'.join(pane.splitlines()[:3]), timeout=15)
                 assert ui.press('End', 'new pushed name reaches the existing terminal',
                                 lambda pane: 'Restored Café 日本語' in pane, literal=False)
                 assert len(fresh.call('torrents.list', {})['result']['torrents']) == 500

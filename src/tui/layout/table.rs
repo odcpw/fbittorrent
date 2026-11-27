@@ -52,6 +52,8 @@ pub(in crate::tui) struct Rects {
     pub rows: Vec<(String, Rect)>,
     pub headers: Vec<(Column, Rect)>,
     pub tabs: [Rect; 4],
+    pub help: Rect,
+    pub query: Option<Rect>,
     pub footer: Rect,
     pub table: Option<Rect>,
     pub details: Option<Rect>,
@@ -63,6 +65,9 @@ impl Rects {
     pub fn begin(&mut self) {
         self.headers.clear();
         self.table = None;
+        self.query = None;
+        self.help = Rect::default();
+        self.tabs = [Rect::default(); 4];
         self.details = None;
         self.poster = None;
         self.files = None;
@@ -210,6 +215,7 @@ impl TuiApp {
         (self.theme.low_chroma,self.theme.accent_text.0).hash(&mut signature);
         (self.torrent_sort, self.torrent_descending).hash(&mut signature);
         [
+            self.theme.bg.0,
             self.theme.fg.0,
             self.theme.dim.0,
             self.theme.accent.0,
@@ -311,6 +317,8 @@ impl TuiApp {
                         && pending.is_none()
                     {
                         self.theme.err().bold()
+                    } else if selected == Some(index) && !stale && pending.is_none() {
+                        self.theme.text().bold()
                     } else {
                         style
                     };
@@ -331,6 +339,7 @@ impl TuiApp {
             )
             .column_spacing(0)
             .header(header)
+            .theme(self.theme.table())
             .style(self.theme.text())
             .highlight_style(self.theme.selected())
             .data_hash(signature);

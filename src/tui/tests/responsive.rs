@@ -15,7 +15,9 @@ fn unicode_names_keep_their_accents_and_joined_emoji_in_the_real_table() {
     app.torrents[0].name = "Cafe\u{301} · 👩🏽‍💻 · 日本語.mkv".into();
     for width in [40, 80, 120, 160] {
         let text = super::golden::render(&app, width, 24);
-        let row = text.lines().find(|line| line.contains('▌')).unwrap();
+        let data_y = usize::from(app.rects.borrow().rows[0].1.y);
+        let row = text.lines().nth(data_y).unwrap();
+        assert!(row.contains('▌'), "selected torrent at {width} columns: {row}");
         assert!(row.contains("Caf"), "{width} columns: {row}");
         if width >= 80 {
             assert!(row.contains("Cafe\u{301}"), "{width} columns: {row}");

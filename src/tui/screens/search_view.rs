@@ -22,6 +22,7 @@ impl TuiApp {
             })
             .title(&title)
             .padding(Sides::horizontal(1));
+        self.rects.borrow_mut().query = Some(rows[0]);
         let inner = block.inner(rows[0]);
         block.render(rows[0], frame);
         self.search_input.render(inner, frame);

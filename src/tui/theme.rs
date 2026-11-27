@@ -160,6 +160,15 @@ impl Theme {
             Style::new().bg(self.selection).fg(self.fg).bold()
         }
     }
+    pub fn table(&self) -> ftui::style::TableTheme {
+        ftui::style::TableTheme::default()
+            .with_header(self.dimmed().bg(self.panel))
+            .with_row(self.text().bg(self.bg))
+            .with_row_alt(self.text().bg(self.bg))
+            .with_row_selected(self.selected())
+            .with_row_hover(self.text().bg(self.panel))
+            .with_divider(Style::new().fg(self.rule))
+    }
     pub fn border(&self) -> Style {
         Style::new().fg(self.dim)
     }

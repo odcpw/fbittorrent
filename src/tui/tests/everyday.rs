@@ -120,7 +120,7 @@ fn top_bar_uses_idle_vpn_unread_and_errors_without_retired_limits_mode() {
     state.daemon.idle_exit_in_s=Some(210);state.alt=false;
     app.store.summary=Some(state);app.sync_activity_label();
     for (width,height) in [(80,24),(120,30),(160,45)] {
-        let pane=super::golden::render(&app,width,height);let header=pane.lines().next().unwrap();
+        let pane=super::golden::render(&app,width,height);let header=pane.lines().take(3).collect::<Vec<_>>().join(" ");
         assert!(header.contains("Idle · UI open"),"{header}");
         assert!(header.contains("Shows (2)")&&header.contains("RSS (2)"),"{header}");
         assert!(!header.contains(&app.theme.name));
@@ -128,7 +128,7 @@ fn top_bar_uses_idle_vpn_unread_and_errors_without_retired_limits_mode() {
     app.store.summary.as_mut().unwrap().network.state=api::NetworkReadiness::Waiting;
     app.sync_activity_label();assert_eq!(app.activity_text.as_deref(),Some("Waiting for VPN"));
     app.store.summary.as_mut().unwrap().alt=true;
-    let pane=super::golden::render(&app,120,30);let header=pane.lines().next().unwrap();
+    let pane=super::golden::render(&app,120,30);let header=pane.lines().take(3).collect::<Vec<_>>().join(" ");
     assert!(header.contains("Waiting for VPN")&&!header.contains("Turtle"),"{header}");
     app.store.summary.as_mut().unwrap().network.state=api::NetworkReadiness::Ready;
     app.store.summary.as_mut().unwrap().daemon.idle_exit_in_s=None;
@@ -402,7 +402,7 @@ fn status_uses_confirmed_idle_vpn_and_rates_and_narrow_badges() {
     app.store.summary = Some(s);
     for (w, h) in [(80, 24), (120, 30), (160, 45)] {
         let text = crate::tui::golden::render(&app, w, h);
-        let bar = text.lines().next().unwrap();
+        let bar = text.lines().take(3).collect::<Vec<_>>().join(" ");
         assert!(bar.contains("Idle · stops in 4 min"), "{bar}");
         assert!(bar.contains("Shows"));
         assert!(bar.contains("RSS (2)"));

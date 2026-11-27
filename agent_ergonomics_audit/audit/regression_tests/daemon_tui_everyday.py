@@ -78,7 +78,7 @@ def tui_everyday(binary, systemd):
             ui.assert_pane(target,'Waiting for VPN')
             ui.tmux('resize-window','-t',target,'-x','80','-y','24')
             ui.assert_pane(target,'Waiting for VPN')
-            case.check('Waiting for VPN' in ui.capture(target).splitlines()[0],'VPN state remains useful at 80 columns',ui.capture(target))
+            case.check('Waiting for VPN' in '\n'.join(ui.capture(target).splitlines()[:3]),'VPN state remains useful at 80 columns',ui.capture(target))
             # Restore the owned binding before the common running-engine drain check.
             client.call('app.settings.set',dict(network_interface='lo'))
             assert h.wait_for(lambda:((info:=client.call('app.info')['result'])['state']=='running',json.dumps(info)),

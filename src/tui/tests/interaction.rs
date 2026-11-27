@@ -276,7 +276,7 @@
         for screen in [Screen::Torrents, Screen::Search, Screen::Rss] {
             app.set_screen(screen);
             let text = render(&app, 80, 24);
-            let header = text.lines().next().unwrap();
+            let header = text.lines().find(|line| line.contains("3 Shows")).unwrap();
             assert!(header.contains("3 Shows (3)"), "{header}");
             assert!(header.find("Shows").unwrap() < header.find("4 RSS").unwrap());
         }
@@ -434,22 +434,38 @@
     #[test]
     fn clicking_visible_tab_titles_selects_the_same_screen() {
         use ftui::{MouseButton, MouseEvent, MouseEventKind};
-        for width in [80, 120] {
+        for (width, height) in [(80, 14), (80, 24), (120, 30)] {
             for (label, target) in [("Torrents", Screen::Torrents), ("Search", Screen::Search), ("RSS", Screen::Rss), ("Shows", Screen::Shows)] {
                 let fresh = app();
-                let rendered = render(&fresh, width, 24);
-                let header = rendered.lines().next().unwrap();
+                let rendered = render(&fresh, width, height);
+                let (y, header) = rendered.lines().enumerate().find(|(_, line)| line.contains("▌")).unwrap();
                 let start = dw(&header[..header.find(label).unwrap()]);
                 for offset in 0..label.len() {
                     let mut candidate = app();
-                    render(&candidate, width, 24);
-                    candidate.on_mouse(MouseEvent::new(MouseEventKind::Down(MouseButton::Left), (start + offset) as u16, 0));
+                    render(&candidate, width, height);
+                    candidate.on_mouse(MouseEvent::new(MouseEventKind::Down(MouseButton::Left), (start + offset) as u16, y as u16));
                     assert_eq!(candidate.screen, target, "{label} cell {offset} at width {width}");
                 }
             }
         }
     }
 
+    #[test]
+    fn clicking_keys_opens_help_while_search_edits_text() {
+        use ftui::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = app();
+        app.set_screen(Screen::Search);
+        app.search_input.set_value("needle");
+        for (width, height) in [(64, 20), (120, 34), (40, 14)] {
+            let text = render(&app, width, height);
+            let (y, row) = text.lines().enumerate().find(|(_, line)| line.contains("▌")).unwrap();
+            let x = dw(&row[..row.rfind('?').unwrap()]) as u16;
+            app.on_mouse(MouseEvent::new(MouseEventKind::Down(MouseButton::Left), x, y as u16));
+            assert!(app.show_help);
+            assert_eq!(app.search_input.value(), "needle");
+            app.on_key(KeyEvent::new(KeyCode::Escape));
+        }
+    }
     #[test]
     fn rss_mouse_hover_keeps_target_and_click_selects_without_reading_or_adding() {
         use ftui::{MouseButton, MouseEvent, MouseEventKind};
@@ -483,7 +499,7 @@
         app.feeds = vec![feed(vec![article("original", "Original item")])];
         app.feed_list.borrow_mut().select(Some(0));
         render(&app, 120, 30);
-        let (_, area) = app.mouse_list_at(60, 3).unwrap();
+        let area = app.rects.borrow().lists[MouseList::Items as usize].unwrap();
         let click = MouseEvent::new(MouseEventKind::Down(MouseButton::Left), area.x + 2, area.y);
         assert!(matches!(app.on_mouse(click), Cmd::None));
         let first_click = app.last_click.clone().unwrap();

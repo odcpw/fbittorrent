@@ -380,7 +380,7 @@ impl Model for TuiApp {
         let banner=self.priority_banner();
         let strip=self.details.is_none() && self.screen==Screen::Torrents && layout::Tier::at(frame.bounds().width)==layout::Tier::Medium && self.selected_torrent().is_some();
         let root = Flex::vertical()
-            .constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(u16::from(strip)),Constraint::Fixed(u16::from(banner.is_some())),Constraint::Fixed(2)])
+            .constraints([Constraint::Fixed(layout::header_height(bounds.height)), Constraint::Fill, Constraint::Fixed(if self.prompt.is_some() { 3 } else { 0 }), Constraint::Fixed(u16::from(strip)),Constraint::Fixed(u16::from(banner.is_some())),Constraint::Fixed(2)])
             .split(frame.bounds());
         self.view_tabs(root[0], frame);
         match self.screen {

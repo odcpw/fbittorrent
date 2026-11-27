@@ -103,7 +103,6 @@ impl TuiApp {
     pub(super) fn set_screen(&mut self, s: Screen) -> Cmd<Msg> {
         self.clear_pointer_hover();
         self.screen = s;
-        self.tabs.borrow_mut().select(s.index(), 4);
         // Landing on Search with nothing to browse means the user wants to type.
         if s == Screen::Search && self.search_results.is_empty() { self.search_focus_input = true; }
         self.search_input.set_focused(s == Screen::Search && self.search_focus_input);

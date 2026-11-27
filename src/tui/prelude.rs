@@ -15,7 +15,7 @@ pub(super) use ftui::widgets::borders::BorderType;
 pub(super) use ftui::widgets::input::TextInput;
 pub(super) use ftui::widgets::list::ListState;
 pub(super) use ftui::widgets::paragraph::Paragraph;
-pub(super) use ftui::widgets::{StatefulWidget, StatusLine, Tab, Tabs, TabsState, Widget};
+pub(super) use ftui::widgets::{StatefulWidget, StatusLine, Widget};
 pub(super) use ftui::{Cmd, Event, Frame, KeyCode, KeyEvent, KeyEventKind, Model, Modifiers, Style};
 
 pub(super) use crate::config::Config;

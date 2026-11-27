@@ -18,55 +18,86 @@ impl Tier {
     pub fn extended(self) -> bool { self != Self::Narrow }
 }
 
+pub(super) fn header_height(height: u16) -> u16 {
+    if height >= 17 { 3 } else { 1 }
+}
+
 impl TuiApp {
     pub(super) fn view_tabs(&self, area: Rect, frame: &mut Frame) {
         let th = &self.theme;
-
-        let shows_tab=if self.shows.shows.is_empty()&&self.store.shows.is_empty() {" 3 Shows ".to_string()}else{format!(" 3 Shows ({}) ",self.shows_unread())};
-        let rss_tab=if self.store.rss_feeds.is_empty() {
-            if self.feeds.is_empty() {" 4 RSS ".to_string()}else{format!(" 4 RSS ({}) ",self.feeds.iter().flat_map(|f|&f.articles).filter(|a|!a.is_read).count())}
-        }else{format!(" 4 RSS ({}) ",self.store.rss_feeds.values().map(|f|f.unread).sum::<u64>())};
-        let mut labels = [" 1 Torrents ".to_string(), " 2 Search ".to_string(), shows_tab, rss_tab];
-        let status = self.header_status(area.width);
-        // Keep destinations stationary as the connection and transfer rates change.
-        let brand = if area.width >= 92 { "  ▥  FBITTORRENT  " } else if area.width >= 56 { " ▥  " } else { "" };
-        let brand_width = dw(brand) as u16;
         frame.buffer.fill(area, ftui::Cell::from_char(' ').with_bg(th.panel));
-        Paragraph::new(brand).style(th.accented().bg(th.panel)).render(
-            Rect::new(area.x, area.y, brand_width, 1), frame
-        );
-        let nav = Rect::new(area.x + brand_width, area.y, area.width - brand_width, 1);
-        if labels.iter().map(|label| dw(label) + 2).sum::<usize>() > usize::from(nav.width) {
-            labels = ["1", "2", "3", "4"].map(str::to_owned);
-            labels[self.screen.index()] = format!("{} {}", self.screen.index() + 1,
-                ["Torrents", "Search", "Shows", "RSS"][self.screen.index()]);
-        }
-        let mut x = nav.x;
-        let regions = labels.each_ref().map(|label| {
-            // Tabs wraps each title with two visible bracket/space cells.
-            let width = (dw(&label).saturating_add(2) as u16).min(nav.right().saturating_sub(x));
-            let region = Rect::new(x, area.y, width, area.height);
-            x = x.saturating_add(width);
-            region
-        });
-        self.tab_rects.set(regions);
-        self.rects.borrow_mut().tabs=regions;
-        let tabs = Tabs::new(labels.each_ref().map(|label|Tab::new(label.as_str())))
-            .style(th.dimmed().bg(th.panel))
-            .active_style(th.selected())
-            .separator("");
-        StatefulWidget::render(&tabs, nav, frame, &mut self.tabs.borrow_mut());
+        if area.is_empty() { return; }
 
-        let right=Line::styled(status,if self.online {th.text()}else{th.err()});
-        let w = right.width() as u16;
-        let tabs_right = regions.iter().map(Rect::right).max().unwrap_or(area.x);
-        let right_x = (area.x + area.width.saturating_sub(w + 1)).max(tabs_right).min(area.right());
-        let r = Rect::new(right_x, area.y, w.min(area.right().saturating_sub(right_x)), 1);
-        self.view_speed_history(Rect::new(tabs_right.saturating_add(1),area.y,right_x.saturating_sub(tabs_right+2),1),frame);
-        Paragraph::new(Text::from_line(right)).render(r, frame);
+        let gutter = if area.width >= 45 { 3 } else { 1 };
+        let bar = Rect::new(area.x, area.y + area.height / 2, area.width, 1)
+            .inner(Sides::horizontal(gutter));
+        let brand = if area.width >= 92 || (area.width >= 56 && area.height == 3) {
+            "▥  FBITTORRENT"
+        } else {
+            "▥"
+        };
+        Paragraph::new(brand).style(th.accented()).render(bar, frame);
+        let mut x = (bar.x + dw(brand) as u16 + 2).min(bar.right());
+
+        let help = if area.width >= 56 { "?  Keys" } else { "?" };
+        let help_width = (dw(help) as u16).min(bar.right() - x);
+        let help_rect = Rect::new(bar.right() - help_width, bar.y, help_width, 1);
+        Paragraph::new(help).style(th.key()).render(help_rect, frame);
+        self.rects.borrow_mut().help = help_rect;
+
+        let mut names = ["1 Torrents", "2 Search", "3 Shows", "4 RSS"].map(str::to_owned);
+        if !self.shows.shows.is_empty() || !self.store.shows.is_empty() {
+            names[2].push_str(&format!(" ({})", self.shows_unread()));
+        }
+        if !self.feeds.is_empty() || !self.store.rss_feeds.is_empty() {
+            let unread = if self.store.rss_feeds.is_empty() {
+                self.feeds.iter().flat_map(|f| &f.articles).filter(|a| !a.is_read).count() as u64
+            } else {
+                self.store.rss_feeds.values().map(|f| f.unread).sum()
+            };
+            names[3].push_str(&format!(" ({unread})"));
+        }
+
+        let nav_end = help_rect.x.saturating_sub(1).max(x);
+        let mut suffix = if area.width < 80 { "" } else { " " };
+        let all_width: usize = names.iter().map(|label| dw(label) + 1 + suffix.len()).sum();
+        let selected = self.screen.index();
+        if all_width > usize::from(nav_end - x) {
+            suffix = " ";
+            for (index, label) in names.iter_mut().enumerate() {
+                if index != selected { *label = (index + 1).to_string(); }
+            }
+        }
+        let mut regions = [Rect::default(); 4];
+        for (index, label) in names.iter().enumerate() {
+            let width = ((dw(label) + 1 + suffix.len()) as u16).min(nav_end - x);
+            let region = Rect::new(x, bar.y, width, 1);
+            let (mark, style) = if index == selected {
+                ("▌", th.selected())
+            } else {
+                (" ", th.dimmed())
+            };
+            Paragraph::new(format!("{mark}{label}{suffix}")).style(style).render(region, frame);
+            regions[index] = region;
+            x += width;
+        }
+        self.rects.borrow_mut().tabs = regions;
+
+        let status = self.header_status(area.width);
+        let width = dw(&status) as u16;
+        // A compact tile can use the masthead's bottom row for the daemon state.
+        let (left, right, y) = if area.height == 3 && width + 2 > nav_end - x {
+            (bar.x, bar.right(), area.bottom() - 1)
+        } else {
+            (x, nav_end, bar.y)
+        };
+        let status_x = right.saturating_sub(width).max(left);
+        self.view_speed_history(Rect::new(left, y, status_x.saturating_sub(left + 1), 1), frame);
+        let status_rect = Rect::new(status_x, y, right - status_x, 1);
+        Paragraph::new(status).style(if self.online { th.dimmed() } else { th.err() })
+            .render(status_rect, frame);
     }
 }
-
 
 pub(super) fn pad(r: Rect) -> Rect { r.inner(Sides::horizontal(1)) }
 

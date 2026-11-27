@@ -32,7 +32,7 @@ impl TuiApp {
                     .find_map(|list|geometry.lists[list as usize].filter(|a|a.contains(x,y)).map(|a|(list,a)));
             }
         }
-        let root = Flex::vertical().constraints([Constraint::Fixed(1), Constraint::Fill, Constraint::Fixed(0), Constraint::Fixed(2)]).split(b);
+        let root = Flex::vertical().constraints([Constraint::Fixed(layout::header_height(b.height)), Constraint::Fill, Constraint::Fixed(0), Constraint::Fixed(2)]).split(b);
         match self.screen {
             Screen::Torrents => {
                 if let Some(area)=self.rects.borrow().table {return area.contains(x,y).then_some((MouseList::Torrents,area));}
@@ -183,19 +183,25 @@ impl TuiApp {
             }
         }
         if self.details.is_some() && self.files.is_none() {return Cmd::none();}
-        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && m.y == 0
-            && self.details.is_none() && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() && !self.show_help {
-            let Some(index) = self.tab_rects.get().iter().position(|area| area.contains(m.x, m.y)) else { return Cmd::none() };
-            let s = Screen::from_index(index);
-            self.last_click = None;
-            return self.set_screen(s);
-        }
-        if self.screen == Screen::Search && self.details.is_none() && self.files.is_none() && self.providers.is_none()
-            && self.prompt.is_none() && !self.show_help
-            && matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) && (1..4).contains(&m.y) {
-            self.search_focus_input = true;
-            self.search_input.set_focused(true);
-            return Cmd::none();
+        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.details.is_none() && self.files.is_none() && self.providers.is_none() && self.prompt.is_none() {
+            let rects = self.rects.borrow();
+            let help = rects.help.contains(m.x, m.y);
+            let tab = rects.tabs.iter().position(|area| area.contains(m.x, m.y));
+            let query = rects.query.is_some_and(|area| area.contains(m.x, m.y));
+            drop(rects);
+            if help {
+                return actions::dispatch_scope(self, actions::Scope::Global, KeyEvent::new(KeyCode::Char('?')));
+            }
+            if let Some(index) = tab {
+                self.last_click = None;
+                return self.set_screen(Screen::from_index(index));
+            }
+            if self.screen == Screen::Search && query {
+                self.search_focus_input = true;
+                self.search_input.set_focused(true);
+                return Cmd::none();
+            }
         }
         if matches!(self.screen,Screen::Torrents|Screen::Search)&&self.files.is_none()&&self.providers.is_none()&&self.prompt.is_none()
             &&matches!(m.kind,MouseEventKind::Down(MouseButton::Left)) {

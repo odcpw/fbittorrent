@@ -22,7 +22,7 @@ fn retired_limits_mode_has_no_header_hint_or_key_at_three_sizes() {
             assert!(!pane.contains("Turtle") && !pane.contains("(z)"));
             println!(
                 "{w}x{h} confirmed alt={on}: {}",
-                pane.lines().next().unwrap()
+                pane.lines().nth(1).unwrap()
             );
         }
     }
