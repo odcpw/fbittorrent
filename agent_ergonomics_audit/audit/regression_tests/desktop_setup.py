@@ -1,4 +1,5 @@
 """Native desktop setup with only isolated prefixes, HOME/XDG and command shims."""
+import configparser
 import hashlib
 import json
 import os
@@ -24,7 +25,7 @@ def prepare(sandbox):
     sandbox.env['DBUS_SESSION_BUS_ADDRESS']='unix:path='+str(sandbox.root/'absent-bus')
     config=Path(sandbox.env['XDG_CONFIG_HOME'])
     extension=config/'omarchy/extensions/omarchy-menu.jsonc';extension.parent.mkdir(parents=True)
-    extension.write_text('{\n// retain this unrelated comment\n"other":{"label":"Kept","action":"echo keep"},\n"torrents.stop":{"when":"systemctl --user is-active qbittorrent-nox"},\n}\n')
+    extension.write_text('{\n// retain this unrelated comment\n"other":{"label":"Kept","action":"echo keep"},\n"torrents.stop":{"when":"systemctl --user is-active qbittorrent-nox","action":"fbittorrent down"},\n}\n')
     return config
 
 def call(case,binary,sandbox,*args,expected=0,cwd=None,prefix=()):
@@ -45,10 +46,14 @@ def snapshot(sandbox):
 
 def setup_dry_run_lists_actions(binary,systemd=False):
     with Case('daemon','setup_dry_run_lists_actions') as case,fixtures.Sandbox() as sandbox:
-        config=prepare(sandbox);before=snapshot(sandbox)
+        config=prepare(sandbox)
+        extension=config/'omarchy/extensions/omarchy-menu.jsonc'
+        extension.unlink()
+        before=snapshot(sandbox)
         dry=call(case,binary,sandbox,'--magnet','--plugin=link','--dry-run')
         case.check(snapshot(sandbox)==before,'dry-run writes nothing and invokes no integration process',json.dumps(dry))
         applied=call(case,binary,sandbox,'--magnet','--plugin=link')
+        case.check(not extension.exists(),'fresh setup publishes the dashboard through the desktop launcher only',str(extension))
         case.check(dry['actions']==applied['actions'] and len(dry['actions'])>=8,'dry-run lists the exact executed action plan',json.dumps(dry['actions']))
         case.check('start' not in (sandbox.root/'shims/systemctl.log').read_text(),'setup never starts or enables a login unit',(sandbox.root/'shims/systemctl.log').read_text())
 
@@ -76,9 +81,9 @@ def setup_idempotent(binary,systemd=False):
         case.check(second['actions']==[] and snapshot(sandbox)==before,'second setup has an empty plan and byte/mtime-identical tree',json.dumps(second))
         case.check(logs=={p.name:p.read_bytes() for p in (sandbox.root/'shims').glob('*.log')},'second setup invokes no commands',json.dumps(logs,default=lambda x:x.decode()))
         menu=(config/'omarchy/extensions/omarchy-menu.jsonc').read_text()
-        case.check('"when":"fbittorrent status --quiet"' in menu and 'qbittorrent-nox' not in menu and '// retain this unrelated comment' in menu,'Stop gates on native status and unrelated JSONC bytes survive',menu)
+        case.check('"torrents.stop"' not in menu and 'qbittorrent-nox' not in menu and '// retain this unrelated comment' in menu,'setup retires the old Stop row and keeps unrelated menu comments',menu)
         quiet=subprocess.run([str(binary),'status','--quiet'],env=sandbox.env,capture_output=True,timeout=5)
-        case.check(quiet.returncode==4,'menu Stop condition is false while stopped and never starts a daemon',f'exit={quiet.returncode}')
+        case.check(quiet.returncode==4,'status --quiet reports stopped without starting a daemon',f'exit={quiet.returncode}')
         link=config/'omarchy/plugins/oliver.torrents';case.check(link.is_symlink(),'development install is a plugin symlink',str(link))
         call(case,binary,sandbox,'--plugin=copy')
         case.check(link.is_dir() and not link.is_symlink() and (link/'Dashboard.qml').is_file(),'stable copy replaces the link and contains actual plugin code',str(link))
@@ -86,6 +91,16 @@ def setup_idempotent(binary,systemd=False):
         installed=sandbox.root/'prefix';command=['bash',str(ROOT/'scripts/install.sh'),'--prefix',str(installed),'--binary',str(binary),'--plugin','copy']
         result=subprocess.run(command,env=sandbox.env,capture_output=True,text=True,timeout=25)
         case.check(result.returncode==0 and (installed/'bin/fbittorrent').is_file(),'installer accepts an isolated prefix/prebuilt debug binary without a release build',result.stdout+result.stderr)
+        apps = Path(sandbox.env['XDG_DATA_HOME']) / 'applications'
+        visible = []
+        for path in apps.glob('fbittorrent*.desktop'):
+            entry = configparser.ConfigParser(interpolation=None)
+            entry.read(path)
+            if not entry.getboolean('Desktop Entry', 'NoDisplay', fallback=False):
+                visible.append(entry['Desktop Entry'])
+        case.check(len(visible) == 1 and visible[0]['Exec'] == str(installed/'bin/fbittorrent') + ' dashboard'
+                   and {'torrent', 'torrents', 'fbittorrent'} <= {visible[0]['Name'].lower(), *visible[0]['Keywords'].split(';')},
+                   'all torrent search terms lead to one visible dashboard launcher', str([dict(row) for row in visible]))
         case.check(not (installed/'bin/fbittorrent.tmp').exists(),'atomic installation leaves no temporary binary',str(installed))
 
 def setup_uninstall_keeps_data(binary,systemd=False):

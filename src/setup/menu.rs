@@ -1,30 +1,31 @@
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 
-pub(super) fn edit(text: &str, uninstall: bool) -> Result<String> {
-    let entries: Map<String, Value> = if uninstall {
-        Map::new()
-    } else {
-        serde_json::from_value(json!({
-            "torrents":{"icon":"󰇚","label":"Torrents","aliases":["torrent","fbittorrent"]},
-            "torrents.open":{"icon":"▢","label":"Open","action":"fbittorrent dashboard"},
-            "torrents.search":{"icon":"","label":"Search","action":"fbittorrent dashboard --view search"},
-            "torrents.add":{"icon":"󰐕","label":"Add from clipboard","action":"fbittorrent add-clipboard"},
-            "torrents.tui":{"icon":"󰆍","label":"Terminal","action":"omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui"},
-            "torrents.stop":{"icon":"󰐥","label":"Stop fbittorrent","when":"fbittorrent status --quiet","action":"fbittorrent down"}
-        }))?
-    };
+/// Older installs added a Torrents submenu alongside the desktop application.
+pub(super) fn remove_legacy_launchers(text: &str) -> Result<String> {
     let current = super::jsonc::parse(text)?;
-    let mut desired = current.as_object().cloned().unwrap_or_default();
-    desired.retain(|key, _| key != "torrents" && !key.starts_with("torrents."));
-    desired.extend(entries.clone());
-    if current == Value::Object(desired) {
-        return Ok(text.to_owned());
-    }
+    // These generic IDs can also be used for personal shortcuts.
     super::jsonc::edit(
         text,
-        |key| key == "torrents" || key.starts_with("torrents."),
-        &entries,
+        |key| {
+            let entry = &current[key];
+            let action = entry["action"].as_str().unwrap_or_default();
+            match key {
+                "torrent" => action == "fbittorrent dashboard",
+                "torrents" => {
+                    action.is_empty()
+                        && entry["aliases"].as_array().is_some_and(|aliases| {
+                            aliases.iter().any(|alias| alias == "fbittorrent")
+                        })
+                }
+                "torrents.open" | "torrents.add" | "torrents.search" | "torrents.stop"
+                | "torrents.tui" => action
+                    .split_ascii_whitespace()
+                    .any(|word| word == "fbittorrent"),
+                _ => false,
+            }
+        },
+        &Map::new(),
     )
 }
 
@@ -95,24 +96,25 @@ pub(super) fn bar(text: &str, uninstall: bool) -> Result<String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn menu_jsonc_edit_idempotent() {
-        let input = "{\n// kept comment\n\"other\":{\"label\":\"keep\"},\n\"torrents.stop\":{\"when\":\"systemctl qbittorrent\"},\n}";
-        let once = super::edit(input, false).unwrap();
-        assert_eq!(once, super::edit(&once, false).unwrap());
+    fn removes_old_menu_and_dashboard_shortcut_without_claiming_other_shortcuts() {
+        let old = r#"{
+          // owner's shortcuts
+          "other":{"label":"Keep"},
+          "torrent":{"action":"fbittorrent dashboard"},
+          "torrents":{"label":"Torrents","aliases":["torrent","fbittorrent"]},
+          "torrents.add":{"action":"fbittorrent add-clipboard"},
+          "torrents.stop":{"when":"systemctl qbittorrent","action":"fbittorrent down"},
+        }"#;
+        let cleaned = super::remove_legacy_launchers(old).unwrap();
         assert_eq!(
-            super::super::jsonc::parse(&once).unwrap()["torrents.stop"]["when"],
-            "fbittorrent status --quiet"
+            super::super::jsonc::parse(&cleaned).unwrap(),
+            serde_json::json!({"other":{"label":"Keep"}})
         );
-        assert!(once.contains("// kept comment"));
-        let removed = super::edit(&once, true).unwrap();
-        assert!(super::super::jsonc::parse(&removed)
-            .unwrap()
-            .get("torrents")
-            .is_none());
-        assert_eq!(
-            super::super::jsonc::parse(&removed).unwrap()["other"]["label"],
-            "keep"
-        );
+        assert!(cleaned.contains("// owner's shortcuts"));
+        assert_eq!(super::remove_legacy_launchers(&cleaned).unwrap(), cleaned);
+
+        let custom = r#"{"torrent":{"action":"my-torrent-app"},"torrents":{"label":"My tools"},"torrents.open":{"action":"open-something-else"}}"#;
+        assert_eq!(super::remove_legacy_launchers(custom).unwrap(), custom);
     }
     #[test]
     fn layout_keeps_existing_placement_and_others() {

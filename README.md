@@ -28,7 +28,9 @@ fbittorrent setup --magnet --plugin=copy
 The binary includes both plugins; copy installs need no source checkout.
 `--plugin=link` links a checkout found from the working directory or binary
 location, falling back to an embedded copy when neither is in a checkout. Setup installs
-the on-demand user service, magnet/`.torrent` handlers, icon, menu and bar entry.
+the on-demand user service, magnet/`.torrent` handlers and bar widget. In the
+**Super+Space** launcher, search for `torrent`, `torrents` or `fbittorrent` and
+press **Enter** on **Torrents** to open the dashboard.
 Changed plugin installs **restart the Omarchy shell**, recreating open windows
 with the new code. An unchanged repeat is a no-op. Nothing is enabled at login.
 `scripts/install.sh --binary /path/to/fbittorrent` installs an existing build.

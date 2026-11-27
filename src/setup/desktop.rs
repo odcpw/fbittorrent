@@ -182,13 +182,6 @@ fn run_inner(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action
         }
         remove(&mut actions, icon);
         remove(&mut actions, plugin);
-        if menu.exists() {
-            write(
-                &mut actions,
-                menu.clone(),
-                super::menu::edit(&existing(&menu)?, true)?.into_bytes(),
-            );
-        }
         if shell.exists() {
             write(
                 &mut actions,
@@ -284,49 +277,51 @@ fn run_inner(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action
                 "daemon-reload".into(),
             ];
         }
-        if options.magnet {
+        if options.magnet || options.plugin.is_some() {
             let exe = super::desktop_executable(&executable.to_string_lossy())?;
-            let entries=[
-                ("fbittorrent.desktop",format!("[Desktop Entry]\nType=Application\nName=fbittorrent\nComment=Open the torrent app\nExec={exe} dashboard\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n")),
-                ("fbittorrent-magnet.desktop",format!("[Desktop Entry]\nType=Application\nName=fbittorrent\nExec={exe} add --origin handler %u\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n")),
-                ("fbittorrent-tui.desktop", "[Desktop Entry]\nType=Application\nName=fbittorrent Terminal\nExec=omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n".into())];
-            let changed = entries.iter().any(|(name, text)| {
-                std::fs::read(apps.join(name)).ok().as_deref() != Some(text.as_bytes())
-            });
-            for (name, text) in entries {
-                write(&mut actions, apps.join(name), text.into_bytes());
-            }
+            write(&mut actions, apps.join("fbittorrent.desktop"), format!(
+                "[Desktop Entry]\nType=Application\nName=Torrents\nComment=Open the fbittorrent dashboard\nKeywords=torrent;fbittorrent;\nExec={exe} dashboard\nIcon=fbittorrent\nTerminal=false\nCategories=Network;P2P;\n"
+            ).into_bytes());
+            write(&mut actions, apps.join("fbittorrent-tui.desktop"),
+                b"[Desktop Entry]\nType=Application\nName=fbittorrent Terminal\nExec=omarchy-launch-or-focus-tui --app-id=org.omarchy.fbittorrent fbittorrent tui\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nCategories=Network;P2P;\n".to_vec());
             write(
                 &mut actions,
                 icon,
                 include_bytes!("../../assets/fbittorrent.svg").to_vec(),
             );
-            let mime = config.join("mimeapps.list");
-            let old = match std::fs::read_to_string(&mime) {
-                Ok(v) => v,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-                Err(e) => return Err(e.into()),
-            };
-            for kind in ["x-scheme-handler/magnet", "application/x-bittorrent"] {
-                if changed
-                    || !old.lines().any(|line| {
-                        line.trim() == format!("{kind}=fbittorrent-magnet.desktop")
-                            || line.trim() == format!("{kind}=fbittorrent-magnet.desktop;")
-                    })
-                {
+            if options.magnet {
+                let before = actions.len();
+                write(&mut actions, apps.join("fbittorrent-magnet.desktop"), format!(
+                    "[Desktop Entry]\nType=Application\nName=fbittorrent\nExec={exe} add --origin handler %u\nIcon=fbittorrent\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/magnet;application/x-bittorrent;\nCategories=Network;P2P;\n"
+                ).into_bytes());
+                let handler_changed = actions.len() != before;
+                let mime = config.join("mimeapps.list");
+                let old = match std::fs::read_to_string(&mime) {
+                    Ok(v) => v,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                    Err(e) => return Err(e.into()),
+                };
+                for kind in ["x-scheme-handler/magnet", "application/x-bittorrent"] {
+                    if handler_changed
+                        || !old.lines().any(|line| {
+                            line.trim() == format!("{kind}=fbittorrent-magnet.desktop")
+                                || line.trim() == format!("{kind}=fbittorrent-magnet.desktop;")
+                        })
+                    {
+                        command(
+                            &mut actions,
+                            "xdg-mime",
+                            &["default", "fbittorrent-magnet.desktop", kind],
+                        );
+                    }
+                }
+                if handler_changed {
                     command(
                         &mut actions,
-                        "xdg-mime",
-                        &["default", "fbittorrent-magnet.desktop", kind],
+                        "update-desktop-database",
+                        &[apps.to_str().context("applications path not UTF-8")?],
                     );
                 }
-            }
-            if changed {
-                command(
-                    &mut actions,
-                    "update-desktop-database",
-                    &[apps.to_str().context("applications path not UTF-8")?],
-                );
             }
         }
         if let Some(mode) = &options.plugin {
@@ -341,16 +336,15 @@ fn run_inner(cfg: &crate::config::Config, options: Options) -> Result<Vec<Action
                     &["plugin", "enable", "oliver.torrents"],
                 );
             }
-            write(
-                &mut actions,
-                menu.clone(),
-                super::menu::edit(&existing(&menu)?, false)?.into_bytes(),
-            );
         }
         if let Some(chord)=options.quick {
             anyhow::ensure!(options.plugin.is_some() || plugin.join("manifest.json").is_file(),"install the shared service first: fbittorrent setup --plugin copy --quick");
             plugin_sources.push(quick::install(&mut actions,&config,options.plugin.as_deref().unwrap_or("copy"),&chord)?);
         }
+    }
+    if (uninstall || options.magnet || options.plugin.is_some()) && menu.try_exists()? {
+        let cleaned = super::menu::remove_legacy_launchers(&existing(&menu)?)?;
+        write(&mut actions, menu, cleaned.into_bytes());
     }
     plugin_reload::plan(&mut actions,&config,&plugin_sources,uninstall)?;
     if !options.dry_run {
